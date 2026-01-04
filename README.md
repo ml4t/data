@@ -2,8 +2,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/ml4t-data)](https://pypi.org/project/ml4t-data/)
-[![Tests](https://github.com/quantlab/ml4t-data/actions/workflows/ml4t-data.yml/badge.svg)](https://github.com/quantlab/ml4t-data/actions)
-[![Coverage](https://codecov.io/gh/quantlab/ml4t-data/branch/main/graph/badge.svg)](https://codecov.io/gh/quantlab/ml4t-data)
+[![Tests](https://github.com/ml4t/data/actions/workflows/ml4t-data.yml/badge.svg)](https://github.com/ml4t/data/actions)
+[![Coverage](https://codecov.io/gh/ml4t/data/branch/main/graph/badge.svg)](https://codecov.io/gh/ml4t/data)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **ML4T Data** is a production-ready market data acquisition and management system providing unified access to **19 data providers** with enterprise-grade reliability and **automated incremental updates**. Get OHLCV data from crypto, equities, forex, futures, and factor data in 3 lines of code.
@@ -2766,7 +2766,7 @@ from ml4t.data import DataManager
 from ml4t-data import DataManager
 ```
 
-All APIs remain backward compatible. See the [Migration Guide](https://github.com/quantlab/migration-guide) for detailed instructions.
+All APIs remain backward compatible.
 
 ## Documentation
 
@@ -2785,8 +2785,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ```bash
 # Clone the repository
-git clone https://github.com/quantlab/ml4t-data.git
-cd ml4t-data
+git clone https://github.com/ml4t/data.git
+cd data
 
 # Create virtual environment
 python -m venv .venv
@@ -2802,9 +2802,9 @@ pytest tests/
 ## Support
 
 - **Documentation**: [https://ml4t-data.readthedocs.io](https://ml4t-data.readthedocs.io)
-- **Issues**: [GitHub Issues](https://github.com/quantlab/ml4t-data/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/quantlab/ml4t-data/discussions)
-- **Security**: Report vulnerabilities to security@quantlab.io
+- **Issues**: [GitHub Issues](https://github.com/ml4t/data/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/ml4t/data/discussions)
+- **Security**: Report vulnerabilities to security@ml4trading.io
 
 ## License
 
@@ -2817,8 +2817,8 @@ If you use ML4T Data in your research, please cite:
 ```bibtex
 @software{ml4t-data,
   title = {ML4T Data: High-Performance Market Data Management},
-  author = {QuantLab Team},
+  author = {ML4T Team},
   year = {2024},
-  url = {https://github.com/quantlab/ml4t-data}
+  url = {https://github.com/ml4t/data}
 }
 ```

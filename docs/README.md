@@ -271,7 +271,7 @@ Throughout the documentation, you'll find:
 
 ## 📞 Getting Help
 
-- **Questions**: Open a [GitHub Issue](https://github.com/quantlab/ml4t-data-python/issues)
+- **Questions**: Open a [GitHub Issue](https://github.com/ml4t/data/issues)
 - **Bugs**: See [CONTRIBUTING.md](../CONTRIBUTING.md) for bug reports
 - **Feature Requests**: Use GitHub Discussions
 - **Security**: See SECURITY.md for vulnerability reporting

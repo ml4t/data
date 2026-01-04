@@ -115,8 +115,8 @@ See [examples/](../../examples/) directory for runnable code:
 
 ## Getting Help
 
-- **Issues**: Report problems at [GitHub Issues](https://github.com/quantlab/ml4t-data-python/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/quantlab/ml4t-data-python/discussions)
+- **Issues**: Report problems at [GitHub Issues](https://github.com/ml4t/data/issues)
+- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/ml4t/data/discussions)
 - **Documentation**: Full docs at [User Guide](../user-guide/)
 
 ---

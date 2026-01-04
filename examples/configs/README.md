@@ -1,12 +1,12 @@
-# QLDM Configuration Examples
+# ML4T Data Configuration Examples
 
-This directory contains example configuration files for QLDM (QuantLab Data Manager). These examples demonstrate various use cases and configuration patterns.
+This directory contains example configuration files for the ml4t-data CLI. These examples demonstrate various use cases and configuration patterns.
 
 ## Configuration Files
 
 ### Basic Examples
 
-- **`basic.yaml`** - Minimal configuration to get started with QLDM
+- **`basic.yaml`** - Minimal configuration to get started with ml4t-data
   - Single provider (Yahoo Finance)
   - Simple daily stock data collection
   - Basic scheduling
@@ -48,19 +48,19 @@ The `modular/` directory demonstrates how to split configurations into reusable 
 
 1. Copy an example configuration to your project root:
 ```bash
-cp examples/configs/basic.yaml qldm.yaml
+cp examples/configs/basic.yaml ml4t-data.yaml
 ```
 
 2. Modify the configuration for your needs
 
 3. Validate the configuration:
 ```bash
-qldm validate-config
+ml4t-data validate-config
 ```
 
 4. Run a workflow:
 ```bash
-qldm run-workflow daily_update
+ml4t-data run-workflow daily_update
 ```
 
 ### Using Environment Variables
@@ -76,7 +76,7 @@ providers:
 
 You can also provide default values:
 ```yaml
-base_dir: ${QLDM_DATA_DIR:./data}  # Uses ./data if QLDM_DATA_DIR is not set
+base_dir: ${ML4T_DATA_DIR:./data}  # Uses ./data if ML4T_DATA_DIR is not set
 ```
 
 ### Loading Symbols from Files
@@ -194,7 +194,7 @@ workflows:
    - Add complexity as needed
 
 3. **Validate Before Production**
-   - Always run `qldm validate-config` before deploying
+   - Always run `ml4t-data validate-config` before deploying
    - Test workflows with `--dry-run` flag
 
 4. **Use Modular Configurations for Large Setups**
@@ -216,11 +216,11 @@ workflows:
 ## Troubleshooting
 
 ### Configuration Not Found
-- QLDM looks for configuration files in these locations:
-  - `./qldm.yaml`, `./qldm.yml`
-  - `./.qldm.yaml`, `./.qldm.yml`
-  - `./config/qldm.yaml`
-  - `~/.config/qldm/config.yaml`
+- ml4t-data looks for configuration files in these locations:
+  - `./ml4t-data.yaml`, `./ml4t-data.yml`
+  - `./.ml4t-data.yaml`, `./.ml4t-data.yml`
+  - `./config/ml4t-data.yaml`
+  - `~/.config/ml4t-data/config.yaml`
 
 ### Environment Variables Not Resolved
 - Ensure variables are exported: `export BINANCE_API_KEY=your_key`
@@ -228,7 +228,7 @@ workflows:
 - Use defaults: `${VAR_NAME:default_value}`
 
 ### Validation Errors
-- Run `qldm validate-config --show-warnings` for detailed output
+- Run `ml4t-data validate-config --show-warnings` for detailed output
 - Check that all referenced providers and datasets exist
 - Verify date formats are YYYY-MM-DD
 
@@ -236,8 +236,8 @@ workflows:
 - Check that workflow is enabled: `enabled: true`
 - Verify schedule configuration is valid
 - Check pre-hooks are not failing
-- Review logs: `tail -f logs/qldm.log`
+- Review logs: `tail -f logs/ml4t-data.log`
 
 ## Support
 
-For more information, see the main QLDM documentation or file an issue on GitHub.
+For more information, see the main ml4t-data documentation or file an issue on GitHub.

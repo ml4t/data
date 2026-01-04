@@ -31,10 +31,10 @@ description = "High-performance market data management library with unified mult
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "QuantLab Team", email = "info@quantlab.io" },
+    { name = "ML4T Team", email = "info@ml4trading.io" },
 ]
 maintainers = [
-    { name = "QuantLab Contributors", email = "dev@quantlab.io" },
+    { name = "ML4T Contributors", email = "dev@ml4trading.io" },
 ]
 keywords = [
     "finance",

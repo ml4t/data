@@ -4,8 +4,8 @@ try:
     from ml4t.data._version import __version__
 except ImportError:
     __version__ = "0.0.0.dev0"
-__author__ = "QuantLab Team"
-__email__ = "info@quantlab.io"
+__author__ = "ML4T Team"
+__email__ = "info@ml4trading.io"
 
 # Contract specifications (always available - no external dependencies)
 # Asset classes

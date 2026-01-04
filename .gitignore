@@ -33,3 +33,4 @@ htmlcov/
 /data/
 logs/
 site/
+src/ml4t/data/_version.py
