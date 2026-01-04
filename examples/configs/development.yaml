@@ -1,0 +1,102 @@
+# Development/Testing Configuration
+# Minimal setup for local development and testing
+
+version: "1.0"
+base_dir: ./test_data
+log_level: DEBUG  # Verbose logging for development
+
+# Mock provider for testing
+providers:
+  - name: mock
+    type: mock
+    rate_limit: 1000
+    extra:
+      seed: 42  # Deterministic data for testing
+      noise_level: 0.1
+
+  - name: yahoo_test
+    type: yahoo
+    rate_limit: 0.2  # Slower rate to avoid hitting limits
+    timeout: 60
+    retry_count: 1
+
+# Small test datasets
+datasets:
+  - name: test_stocks
+    symbols:
+      - AAPL
+      - MSFT
+      - GOOGL
+    provider: yahoo_test
+    frequency: daily
+    asset_class: equity
+    # Use specific date range for reproducible tests
+    start_date: "2023-01-01"
+    end_date: "2023-12-31"
+    update_mode: full
+
+  - name: mock_crypto
+    symbols:
+      - BTC-USD
+      - ETH-USD
+    provider: mock
+    frequency: hourly
+    asset_class: crypto
+
+  - name: mock_high_freq
+    symbols:
+      - TEST-USD
+    provider: mock
+    frequency: minute
+    asset_class: equity
+
+# Test workflows
+workflows:
+  - name: test_pipeline
+    description: Test the full data pipeline
+    datasets:
+      - test_stocks
+      - mock_crypto
+    enabled: true
+    on_error: continue  # Continue to test all components
+    pre_hooks:
+      - "echo 'Starting test pipeline at $(date)'"
+      - "rm -rf ./test_data/validation_reports/*"  # Clean old reports
+    post_hooks:
+      - "python tests/validate_pipeline.py"
+      - "echo 'Test pipeline completed at $(date)'"
+
+  - name: stress_test
+    description: Stress test with high-frequency mock data
+    datasets:
+      - mock_high_freq
+    enabled: false  # Disabled by default, enable for stress testing
+    schedule:
+      type: interval
+      interval: 10  # Every 10 seconds
+    on_error: continue
+
+# Development validation settings
+validation:
+  enabled: true
+  fail_on_critical: false  # Don't fail in development
+  save_reports: true
+  report_dir: ./test_data/validation_reports
+  # Relaxed rules for development
+  rules:
+    max_return_threshold: 10.0  # Allow extreme values in test data
+    check_weekends: false  # Don't check weekends in test data
+    check_market_hours: false
+
+# Simple storage for development
+storage:
+  backend: filesystem
+  compression: none  # No compression for easier debugging
+  cache:
+    enabled: false  # Disable cache in development
+
+# Development-only settings
+env:
+  QLDM_DEV_MODE: "true"
+  QLDM_SKIP_AUTH: "true"  # Skip authentication in dev
+  QLDM_MOCK_TIME: "2023-12-01T12:00:00Z"  # Fixed time for tests

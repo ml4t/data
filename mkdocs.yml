@@ -1,0 +1,187 @@
+# ML4T Data Documentation
+# MkDocs Material configuration with Picasso Blue palette
+# Template for all ml4t-* libraries
+
+site_name: ML4T Data
+site_description: High-performance market data acquisition for quantitative finance
+site_url: https://ml4t.io/docs/data/
+repo_url: https://github.com/stefan-jansen/ml4t-data
+repo_name: stefan-jansen/ml4t-data
+
+# Theme configuration - Picasso Blue Period palette
+theme:
+  name: material
+  custom_dir: docs/overrides
+
+  palette:
+    # Light mode (default)
+    - media: "(prefers-color-scheme: light)"
+      scheme: ml4t
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  font:
+    text: DM Sans
+    code: JetBrains Mono
+
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+  icon:
+    repo: fontawesome/brands/github
+
+  logo: assets/logo.svg
+  favicon: assets/favicon.ico
+
+# Custom CSS for Picasso palette
+extra_css:
+  - stylesheets/ml4t-theme.css
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Plugins
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            signature_crossrefs: true
+
+# Navigation structure
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - Provider Selection: getting-started/provider-selection.md
+
+  - User Guide:
+    - user-guide/index.md
+    - CLI Reference: user-guide/cli-reference.md
+    - Configuration: user-guide/configuration.md
+    - Incremental Updates: user-guide/incremental-updates.md
+    - Data Quality: user-guide/data-quality.md
+    - Storage: user-guide/storage.md
+
+  - Providers:
+    - providers/index.md
+    - Yahoo Finance: providers/yahoo.md
+    - EODHD: providers/eodhd.md
+    - Binance: providers/binance.md
+    - CoinGecko: providers/coingecko.md
+    - DataBento: providers/databento.md
+    - Tiingo: providers/tiingo.md
+    - TwelveData: providers/twelve_data.md
+    - CryptoCompare: providers/cryptocompare.md
+    - Finnhub: providers/finnhub.md
+    - Polygon: providers/polygon.md
+    - Oanda: providers/oanda.md
+    - Fama-French: providers/fama_french.md
+    - AQR: providers/aqr.md
+    - Wiki Prices: providers/wiki_prices.md
+
+  - Tutorials:
+    - tutorials/index.md
+    - Understanding OHLCV: tutorials/01_understanding_ohlcv.md
+    - Rate Limiting: tutorials/02_rate_limiting.md
+    - Incremental Updates: tutorials/03_incremental_updates.md
+    - Data Quality: tutorials/04_data_quality.md
+    - Multi-Provider: tutorials/05_multi_provider.md
+
+  - API Reference:
+    - api/index.md
+
+  - Contributing:
+    - contributing/index.md
+    - Creating a Provider: contributing/creating-a-provider.md
+    - Architecture: contributing/architecture.md
+    - Testing: contributing/testing.md
+
+# Extra configuration
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/stefan-jansen
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/mlaboratory
+
+  generator: false  # Hide "Made with Material for MkDocs"
+
+  # Analytics (configure when ready)
+  # analytics:
+  #   provider: google
+  #   property: G-XXXXXXXXXX
+
+# Copyright
+copyright: Copyright &copy; 2024-2026 Stefan Jansen

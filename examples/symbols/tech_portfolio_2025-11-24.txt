@@ -1,0 +1,20 @@
+# Tech Portfolio (5 stocks)
+# Source: Manual selection
+# Generated: 2025-11-24
+#
+# SURVIVORSHIP BIAS WARNING:
+# This list reflects CURRENT constituents as of the generation date.
+# Historical backtests will have survivorship bias (only includes survivors).
+# For production analysis, use as-of historical constituent data from
+# professional providers (DataBento, Bloomberg, etc.).
+#
+# NOTES:
+# - Small portfolio for quick examples
+# - Good for Chapters 1-5 (Tier 1 learning)
+# - Free tier friendly (no API limits)
+
+AAPL
+MSFT
+GOOGL
+NVDA
+META

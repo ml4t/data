@@ -1,0 +1,47 @@
+# ML4T Book - Starter Configuration
+# Get up and running in 3 commands:
+#   1. Copy this file: cp ml4t-starter.yaml ~/ml4t-config.yaml
+#   2. Edit API keys below (optional - Yahoo is free)
+#   3. Run: ml4t-data update-all -c ~/ml4t-config.yaml
+
+# Where to store data
+storage:
+  path: ~/ml4t-data
+
+# API keys (optional - Yahoo Finance is free and doesn't need a key)
+api_keys:
+  databento: ${DATABENTO_API_KEY}          # Get free trial at databento.com
+  cryptocompare: ${CRYPTOCOMPARE_API_KEY}  # Get free key at cryptocompare.com
+
+# Datasets for the book
+datasets:
+  # Chapter 1-5: Learn with a small demo dataset (5 stocks)
+  demo_stocks:
+    provider: yahoo
+    frequency: daily
+    symbols:
+      - AAPL   # Apple
+      - MSFT   # Microsoft
+      - GOOGL  # Google
+      - JPM    # JPMorgan
+      - XOM    # ExxonMobil
+
+  # Chapter 6-10: Expand to full S&P 500
+  # Uncomment when ready to download all 500+ stocks:
+  # sp500_full:
+  #   provider: yahoo
+  #   frequency: daily
+  #   symbols_file: sp500.txt  # See examples/symbols/sp500.txt
+
+  # Chapter 11+: Add crypto data (requires API key)
+  # crypto_demo:
+  #   provider: cryptocompare
+  #   frequency: hourly
+  #   symbols:
+  #     - BTC
+  #     - ETH
+
+# Validation settings
+validation:
+  enabled: true  # Check data quality
+  strict: false  # Warn but don't fail on issues

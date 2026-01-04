@@ -1,0 +1,198 @@
+# Crypto-Focused QLDM Configuration
+# Optimized for cryptocurrency data collection and analysis
+
+version: "1.0"
+base_dir: ./crypto_data
+log_level: INFO
+
+providers:
+  # Multiple crypto exchanges
+  - name: binance_spot
+    type: binance
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    rate_limit: 10
+    extra:
+      market: spot
+
+  - name: binance_futures
+    type: binance
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    rate_limit: 10
+    extra:
+      market: futures
+
+  - name: cryptocompare_api
+    type: cryptocompare
+    api_key: ${CRYPTOCOMPARE_API_KEY}
+    rate_limit: 2.0
+    timeout: 60
+
+  - name: yahoo_crypto
+    type: yahoo
+    rate_limit: 0.5
+
+# Crypto-specific defaults
+defaults:
+  asset_class: crypto
+  update_mode: incremental
+  validation:
+    enabled: true
+    # Crypto markets trade 24/7
+    check_weekends: false
+    check_market_hours: false
+    max_return_threshold: 1.0  # 100% moves possible in crypto
+
+datasets:
+  # Spot market data - high frequency
+  - name: spot_majors_1m
+    symbols:
+      - BTC-USDT
+      - ETH-USDT
+    provider: binance_spot
+    frequency: minute
+    storage:
+      compression: zstd
+      partition_by: day  # Daily partitions for minute data
+
+  - name: spot_majors_15m
+    symbols:
+      - BTC-USDT
+      - ETH-USDT
+      - BNB-USDT
+      - SOL-USDT
+      - ADA-USDT
+      - MATIC-USDT
+      - DOT-USDT
+      - AVAX-USDT
+    provider: binance_spot
+    frequency: 15minute
+
+  - name: spot_alts_hourly
+    symbols: "@symbols/altcoins.txt"
+    provider: binance_spot
+    frequency: hourly
+
+  # Futures data
+  - name: futures_perpetual
+    symbols:
+      - BTCUSDT_PERP
+      - ETHUSDT_PERP
+      - BNBUSDT_PERP
+    provider: binance_futures
+    frequency: hourly
+    extra:
+      contract_type: perpetual
+
+  # DeFi tokens from multiple sources
+  - name: defi_tokens_daily
+    symbols:
+      - UNI-USD
+      - AAVE-USD
+      - LINK-USD
+      - MKR-USD
+      - COMP-USD
+      - CRV-USD
+      - SNX-USD
+    provider: yahoo_crypto
+    frequency: daily
+
+  # Historical data for backtesting
+  - name: historical_hourly
+    symbols:
+      - BTC
+      - ETH
+      - LTC
+    provider: cryptocompare_api
+    frequency: hourly
+    start_date: "2021-01-01"
+    end_date: "2023-12-31"
+    update_mode: full
+
+workflows:
+  # High-frequency update for major pairs
+  - name: hf_update
+    description: Update minute data for major pairs
+    datasets:
+      - spot_majors_1m
+    schedule:
+      type: interval
+      interval: 60  # Every minute
+    enabled: true
+    on_error: continue
+
+  # Regular update for all crypto
+  - name: regular_update
+    description: Update all crypto datasets
+    datasets:
+      - spot_majors_15m
+      - spot_alts_hourly
+      - futures_perpetual
+    schedule:
+      type: interval
+      interval: 900  # Every 15 minutes
+    enabled: true
+    on_error: continue
+    pre_hooks:
+      - "python scripts/check_api_limits.py"
+
+  # Daily analysis workflow
+  - name: daily_analysis
+    description: Run daily crypto analysis
+    datasets:
+      - defi_tokens_daily
+      - spot_alts_hourly
+    schedule:
+      type: daily
+      time: "00:00:00"
+      timezone: "UTC"
+    enabled: true
+    post_hooks:
+      - "python scripts/calculate_correlations.py"
+      - "python scripts/detect_anomalies.py"
+      - "python scripts/generate_signals.py"
+
+  # Weekly rebalancing check
+  - name: rebalance_check
+    description: Check portfolio rebalancing signals
+    datasets:
+      - spot_majors_15m
+      - futures_perpetual
+    schedule:
+      type: weekly
+      weekday: 0  # Monday
+      time: "00:00:00"
+      timezone: "UTC"
+    enabled: true
+    post_hooks:
+      - "python scripts/rebalance_analysis.py --output reports/rebalance.json"
+
+# Crypto-specific validation
+validation:
+  enabled: true
+  fail_on_critical: false  # Don't fail on high volatility
+  rules:
+    # Crypto-specific thresholds
+    max_return_threshold: 2.0  # 200% moves possible
+    volume_spike_threshold: 100  # 100x volume spikes happen
+    price_gap_threshold: 0.5  # 50% gaps possible
+    staleness_threshold: 10  # 10 periods before considering stale
+    check_negative_prices: true
+    check_negative_volume: true
+    check_duplicate_timestamps: true
+
+# Optimized storage for high-frequency crypto data
+storage:
+  backend: filesystem
+  compression: zstd
+  partition_strategy: custom
+  partition_config:
+    minute: day      # Minute data partitioned by day
+    15minute: week   # 15-minute data by week
+    hourly: month    # Hourly data by month
+    daily: year      # Daily data by year
+  cache:
+    enabled: true
+    size_mb: 2000
+    ttl_seconds: 300  # 5 minute cache for real-time data

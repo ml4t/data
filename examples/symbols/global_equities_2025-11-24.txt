@@ -1,0 +1,25 @@
+# Global Equities Sample
+# Source: Manual selection (multi-market)
+# Generated: 2025-11-24
+#
+# SURVIVORSHIP BIAS WARNING:
+# This list reflects CURRENT constituents as of the generation date.
+# Historical backtests will have survivorship bias (only includes survivors).
+# For production analysis, use as-of historical constituent data from
+# professional providers (DataBento, Bloomberg, etc.).
+#
+# NOTES:
+# - Requires EODHD or similar global provider
+# - Uses SYMBOL.EXCHANGE format (e.g., VOD.L, BMW.DE)
+# - Good for Chapter 3 multi-market examples
+
+AAPL
+MSFT
+VOD.L
+BP.L
+BMW.DE
+SAP.DE
+7203.T
+6758.T
+0700.HK
+9988.HK

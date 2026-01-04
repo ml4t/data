@@ -1,0 +1,190 @@
+name: ml4t-data
+version: "1.0.0"
+description: Unified market data acquisition and storage for quantitative finance
+
+providers:
+  equity:
+    - name: YahooFinanceProvider
+      import: ml4t.data.providers.yahoo
+      free_tier: unlimited
+      best_for: Quick start, US equities
+
+    - name: EODHDProvider
+      import: ml4t.data.providers.eodhd
+      free_tier: 500/day
+      best_for: Global equities (60+ exchanges)
+
+    - name: DatabentoProvider
+      import: ml4t.data.providers.databento
+      free_tier: trial
+      best_for: Institutional-grade data
+
+    - name: PolygonProvider
+      import: ml4t.data.providers.polygon
+      free_tier: limited
+      best_for: US equities tick data
+
+    - name: TiingoProvider
+      import: ml4t.data.providers.tiingo
+      free_tier: 500/day
+      best_for: US equities alternative
+
+    - name: TwelveDataProvider
+      import: ml4t.data.providers.twelve_data
+      free_tier: 800/day
+      best_for: Multi-asset coverage
+
+    - name: FinnhubProvider
+      import: ml4t.data.providers.finnhub
+      free_tier: limited
+      best_for: Real-time quotes
+
+  crypto:
+    - name: BinanceProvider
+      import: ml4t.data.providers.binance
+      free_tier: generous
+      best_for: Spot and futures data
+
+    - name: CoinGeckoProvider
+      import: ml4t.data.providers.coingecko
+      free_tier: 50/min
+      best_for: Market overview
+
+    - name: CryptoCompareProvider
+      import: ml4t.data.providers.cryptocompare
+      free_tier: 250k/month
+      best_for: Historical crypto data
+
+    - name: OKXProvider
+      import: ml4t.data.providers.okx
+      free_tier: unlimited
+      best_for: Exchange data
+
+  forex:
+    - name: OandaProvider
+      import: ml4t.data.providers.oanda
+      free_tier: trial
+      best_for: Institutional forex
+
+  factors:
+    - name: FamaFrenchProvider
+      import: ml4t.data.providers.fama_french
+      free_tier: unlimited
+      datasets: 50+
+      best_for: Academic factors (FF3, FF5, Momentum)
+
+    - name: AQRFactorProvider
+      import: ml4t.data.providers.aqr
+      free_tier: unlimited
+      datasets: 16
+      best_for: Alternative factors (QMJ, BAB, TSMOM)
+
+    - name: FREDProvider
+      import: ml4t.data.providers.fred
+      free_tier: unlimited
+      best_for: Economic indicators
+
+  historical:
+    - name: WikiPricesProvider
+      import: ml4t.data.providers.wiki_prices
+      free_tier: local
+      coverage: US equities 1962-2018
+      best_for: Historical fallback
+
+storage:
+  classes:
+    - name: HiveStorage
+      import: ml4t.data.storage.hive
+      pattern: provider/frequency/year=YYYY/month=MM/symbol/data.parquet
+      best_for: Production use (recommended)
+
+    - name: FlatStorage
+      import: ml4t.data.storage.flat
+      pattern: symbol.parquet
+      best_for: Simple use cases
+
+    - name: MetadataTracker
+      import: ml4t.data.storage.metadata_tracker
+      purpose: Track update timestamps and row counts
+
+core:
+  models:
+    - OHLCVBar
+    - SymbolSpec
+    - Timeframe
+    - ProviderCapabilities
+
+  exceptions:
+    - ProviderError
+    - RateLimitError
+    - SymbolNotFoundError
+    - DataValidationError
+    - CircuitBreakerOpen
+
+utilities:
+  anomaly:
+    - name: AnomalyManager
+      import: ml4t.data.anomaly.manager
+      detectors:
+        - ReturnOutlierDetector
+        - VolumeSpikeDetector
+        - PriceStalenessDetector
+
+  validation:
+    - name: OHLCVValidator
+      import: ml4t.data.validation.ohlcv
+      checks:
+        - high >= low
+        - high >= open, close
+        - low <= open, close
+        - volume >= 0
+
+cli:
+  commands:
+    - name: fetch
+      description: Fetch data for a symbol
+      args: [--provider, --symbol, --start, --end, --frequency]
+
+    - name: update-all
+      description: Update all datasets from config
+      args: [-c/--config, --dataset, --dry-run]
+
+    - name: list
+      description: List stored data
+      args: [--storage, --provider, --symbol]
+
+    - name: status
+      description: Show data status
+      args: [--symbol, --provider]
+
+protocols:
+  - name: OHLCVProvider
+    methods:
+      - fetch_ohlcv(symbol, start, end, frequency) -> DataFrame
+      - capabilities() -> ProviderCapabilities
+
+  - name: AsyncOHLCVProvider
+    methods:
+      - fetch_ohlcv_async(symbol, start, end, frequency) -> DataFrame
+
+  - name: FactorProvider
+    methods:
+      - fetch(dataset, frequency) -> DataFrame
+      - list_datasets() -> list[str]
+
+examples:
+  basic_fetch: |
+    from ml4t.data.providers import YahooFinanceProvider
+    provider = YahooFinanceProvider()
+    df = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-12-31")
+
+  async_batch: |
+    from ml4t.data.managers.async_batch import async_batch_load
+    async with YahooFinanceProvider() as provider:
+        df = await async_batch_load(provider, ["AAPL", "MSFT"], "2024-01-01", "2024-12-31")
+
+  with_storage: |
+    from ml4t.data.storage import HiveStorage, StorageConfig
+    storage = HiveStorage(config=StorageConfig(base_path="~/ml4t-data"))
+    storage.write(df, symbol="AAPL", provider="yahoo", frequency="daily")
+    df = storage.read(symbol="AAPL")

@@ -1,0 +1,26 @@
+# Sector ETFs
+# Source: SPDR Select Sector ETFs
+# Generated: 2025-11-24
+#
+# SURVIVORSHIP BIAS WARNING:
+# This list reflects CURRENT constituents as of the generation date.
+# Historical backtests will have survivorship bias (only includes survivors).
+# For production analysis, use as-of historical constituent data from
+# professional providers (DataBento, Bloomberg, etc.).
+#
+# NOTES:
+# - 11 sector ETFs covering S&P 500 sectors
+# - Good for diversification and sector analysis
+# - Lower data volume than individual stocks
+
+SPY
+XLK
+XLF
+XLE
+XLV
+XLI
+XLP
+XLY
+XLU
+XLRE
+XLC

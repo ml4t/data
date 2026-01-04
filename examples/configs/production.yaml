@@ -1,0 +1,106 @@
+# Production Configuration for QLDM
+# This configuration is optimized for production deployment
+
+# Core settings
+core:
+  debug: false
+  log_level: "INFO"
+  data_dir: "/opt/qldm/data"
+  cache_dir: "/opt/qldm/cache"
+  config_dir: "/opt/qldm/config"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "json"
+  file: "/var/log/qldm/qldm.log"
+  max_size_mb: 100
+  backup_count: 5
+  structured: true
+
+# API server configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  cors_allowed_origins: "*"
+  cors_allowed_methods: "GET,POST,PUT,DELETE,OPTIONS"
+  cors_allowed_headers: "*"
+  rate_limit_per_minute: 100
+  api_key_required: true
+
+# Database/Storage configuration
+storage:
+  backend: "filesystem"
+  filesystem:
+    base_path: "/opt/qldm/data"
+    compression: "gzip"
+    chunk_size_mb: 64
+  retention_days: 365
+
+# Provider configurations
+providers:
+  yahoo:
+    enabled: true
+    max_requests_per_second: 5
+    timeout_seconds: 30
+    retry_attempts: 3
+
+  binance:
+    enabled: false
+    api_key: "${BINANCE_API_KEY}"
+    api_secret: "${BINANCE_API_SECRET}"
+
+  cryptocompare:
+    enabled: false
+    api_key: "${CRYPTOCOMPARE_API_KEY}"
+
+# Monitoring and observability
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_interval: 60
+  exporters:
+    - "prometheus"
+    - "json"
+
+  prometheus:
+    scrape_interval: 15
+    endpoint: "/metrics"
+
+  logging:
+    log_requests: true
+    log_responses: false
+    log_errors: true
+
+# Performance settings
+performance:
+  max_concurrent_requests: 50
+  request_timeout: 30
+  cache_enabled: true
+  cache_ttl_seconds: 3600
+  batch_size: 1000
+
+# Security settings
+security:
+  api_keys:
+    - "${QLDM_API_KEY}"
+  cors_enabled: true
+  request_size_limit_mb: 10
+
+# Asset validation
+validation:
+  strict_mode: true
+  auto_correct: false
+  fail_on_errors: true
+
+# Export settings
+export:
+  max_rows: 1000000
+  formats:
+    - "csv"
+    - "json"
+    - "excel"
+  compression:
+    - "gzip"
+    - "zip"

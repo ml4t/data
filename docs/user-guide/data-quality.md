@@ -1,0 +1,1 @@
+# Data Quality\n\nML4T Data includes comprehensive data quality features.\n\n## OHLC Validation\n\nAll data is validated against OHLC invariants:\n\n- High >= Low\n- High >= Open, Close\n- Low <= Open, Close\n- Volume >= 0\n\n## Anomaly Detection\n\nSee [anomaly detection guide](../tutorials/04_data_quality.md).

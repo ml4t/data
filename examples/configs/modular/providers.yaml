@@ -1,0 +1,62 @@
+# Provider configurations
+# Can be included by other configuration files
+
+providers:
+  # Free providers
+  - name: yahoo
+    type: yahoo
+    rate_limit: 0.5
+    timeout: 30
+    retry_count: 3
+
+  - name: yahoo_fast
+    type: yahoo
+    rate_limit: 1.0  # Faster rate for smaller datasets
+    timeout: 15
+    retry_count: 1
+
+  # Crypto providers
+  - name: binance_spot
+    type: binance
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    rate_limit: 10
+    timeout: 30
+    extra:
+      market: spot
+      test_net: ${BINANCE_TESTNET:false}
+
+  - name: binance_futures
+    type: binance
+    api_key: ${BINANCE_API_KEY}
+    api_secret: ${BINANCE_API_SECRET}
+    rate_limit: 10
+    timeout: 30
+    extra:
+      market: futures
+      test_net: ${BINANCE_TESTNET:false}
+
+  - name: cryptocompare
+    type: cryptocompare
+    api_key: ${CRYPTOCOMPARE_API_KEY}
+    rate_limit: 2.0
+    timeout: 60
+    retry_count: 5
+
+  # Premium providers (require API keys)
+  - name: polygon
+    type: polygon
+    api_key: ${POLYGON_API_KEY}
+    rate_limit: 5.0
+    timeout: 30
+    extra:
+      tier: ${POLYGON_TIER:basic}
+      use_websocket: false
+
+  # Development/testing
+  - name: mock
+    type: mock
+    rate_limit: 1000  # No real rate limit for mock
+    extra:
+      seed: 42
+      noise_level: 0.1

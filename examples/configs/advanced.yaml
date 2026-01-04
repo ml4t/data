@@ -1,0 +1,208 @@
+# Advanced QData Configuration Example
+# Demonstrates environment variables, multiple providers, and complex workflows
+
+# Storage with custom configuration
+storage:
+  strategy: hive
+  base_path: ${QDATA_STORAGE_PATH:~/qdata/storage}
+  compression: zstd
+  enable_locking: true
+  lock_timeout: 60  # Longer timeout for large operations
+  partition_cols: ["year", "month", "day"]  # More granular partitioning
+
+# Global settings
+log_level: ${QDATA_LOG_LEVEL:INFO}
+parallel_downloads: 4  # More parallel downloads for multiple providers
+
+# Multiple data providers with API keys from environment
+providers:
+  - name: yahoo
+    type: yahoo
+    enabled: true
+    rate_limit:
+      requests_per_second: ${QDATA_YAHOO_RATE_LIMIT:2.0}
+      retry_max_attempts: 3
+      circuit_breaker_threshold: 5
+    timeout: 30
+    cache_enabled: true
+    cache_ttl: 3600
+
+  - name: databento
+    type: databento
+    enabled: true
+    api_key: ${DATABENTO_API_KEY}
+    rate_limit:
+      requests_per_second: 100.0  # Databento allows high throughput
+      burst_size: 10
+    extra:
+      dataset: "XNAS.ITCH"
+      schema: "ohlcv-1m"
+
+  - name: oanda
+    type: oanda
+    enabled: true
+    api_key: ${OANDA_API_KEY}
+    extra:
+      account_id: ${OANDA_ACCOUNT_ID}
+      environment: "practice"
+    rate_limit:
+      requests_per_second: 120.0  # OANDA's limit
+      burst_size: 5
+
+  - name: cryptocompare
+    type: cryptocompare
+    enabled: true
+    api_key: ${CRYPTOCOMPARE_API_KEY}
+    rate_limit:
+      requests_per_second: ${QDATA_CRYPTO_RATE_LIMIT:10.0}
+      retry_backoff_factor: 3.0  # More aggressive backoff
+    extra:
+      default_market: "CCCAGG"
+
+# Symbol universes organized by asset class
+universes:
+  - name: sp500
+    file: examples/symbols/sp500.txt  # Load from file
+    asset_class: EQUITY
+    provider: yahoo
+
+  - name: nasdaq100
+    file: examples/symbols/nasdaq100.txt
+    asset_class: EQUITY
+    provider: databento
+
+  - name: futures
+    symbols:
+      - "ES.v.0"  # E-mini S&P continuous
+      - "NQ.v.0"  # E-mini Nasdaq continuous
+      - "CL.v.0"  # Crude Oil continuous
+    asset_class: FUTURES
+    provider: databento
+
+  - name: forex_majors
+    symbols:
+      - "EUR_USD"
+      - "GBP_USD"
+      - "USD_JPY"
+      - "USD_CHF"
+    asset_class: FX
+    provider: oanda
+
+  - name: crypto_top10
+    symbols:
+      - "BTC"
+      - "ETH"
+      - "BNB"
+      - "SOL"
+      - "XRP"
+    asset_class: CRYPTO
+    provider: cryptocompare
+
+# Dataset configurations linking universes to providers
+datasets:
+  # S&P 500 daily data
+  - name: sp500_daily
+    universe: sp500
+    provider: yahoo
+    frequency: DAILY
+    update_mode: incremental
+    validation_enabled: true
+    anomaly_detection: true  # Enable outlier detection
+
+  # High-frequency futures data
+  - name: futures_1min
+    universe: futures
+    provider: databento
+    frequency: MINUTE
+    update_mode: incremental
+    validation_enabled: true
+
+  # Forex tick data
+  - name: forex_ticks
+    universe: forex_majors
+    provider: oanda
+    frequency: TICK
+    update_mode: incremental
+    validation_enabled: true
+
+  # Crypto hourly data
+  - name: crypto_hourly
+    universe: crypto_top10
+    provider: cryptocompare
+    frequency: HOUR
+    update_mode: incremental
+    anomaly_detection: true
+
+# Automated workflows with various schedule types
+workflows:
+  # Market close daily update
+  - name: market_close_update
+    description: Update all equity data after market close
+    datasets:
+      - sp500_daily
+    schedule:
+      type: MARKET_HOURS
+      market_close_offset: 30  # 30 minutes after close
+      timezone: "US/Eastern"
+    enabled: true
+    on_error: retry
+    pre_hooks:
+      - "echo 'Starting market close update at $(date)'"
+    post_hooks:
+      - "python -m qdata.validation.run --dataset sp500_daily"
+
+  # High-frequency futures update
+  - name: futures_continuous
+    description: Update futures data every 5 minutes during market hours
+    datasets:
+      - futures_1min
+    schedule:
+      type: INTERVAL
+      interval: 300  # 5 minutes
+    enabled: true
+    on_error: continue
+
+  # Weekend crypto update
+  - name: weekend_crypto
+    description: Update crypto data throughout the weekend
+    datasets:
+      - crypto_hourly
+    schedule:
+      type: CRON
+      cron: "0 */4 * * SAT,SUN"  # Every 4 hours on weekends
+      timezone: "UTC"
+    enabled: true
+    on_error: continue
+
+  # Weekly comprehensive update
+  - name: weekly_all
+    description: Weekly update of all datasets
+    datasets:
+      - sp500_daily
+      - futures_1min
+      - forex_ticks
+      - crypto_hourly
+    schedule:
+      type: WEEKLY
+      weekday: 6  # Sunday
+      time: "18:00"
+      timezone: "UTC"
+    enabled: true
+    on_error: continue
+    post_hooks:
+      - "python -m qdata.reports.weekly --email admin@example.com"
+
+# Validation configuration
+validation:
+  ohlcv_checks:
+    enabled: true
+    strict: true  # Fail on any violation
+  missing_data:
+    max_gap_hours: 24
+    fill_method: "forward"  # forward, backward, or none
+  outlier_detection:
+    method: "zscore"
+    threshold: 4.0
+  cross_provider:
+    enabled: true
+    tolerance: 0.01  # 1% price difference tolerance

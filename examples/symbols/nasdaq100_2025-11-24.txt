@@ -1,0 +1,117 @@
+# NASDAQ 100 Constituents
+# Source: Wikipedia (NASDAQ-100)
+# Generated: 2025-11-24
+#
+# SURVIVORSHIP BIAS WARNING:
+# This list reflects CURRENT constituents as of the generation date.
+# Historical backtests will have survivorship bias (only includes survivors).
+# For production analysis, use as-of historical constituent data from
+# professional providers (DataBento, Bloomberg, etc.).
+#
+# NOTES:
+# - 100 largest non-financial stocks on NASDAQ
+# - Tech-heavy portfolio
+# - Good for sector-specific analysis
+
+AAPL
+ABNB
+ADBE
+ADI
+ADP
+ADSK
+AEP
+AMAT
+AMD
+AMGN
+AMZN
+APP
+ARM
+ASML
+AVGO
+AXON
+AZN
+BIIB
+BKNG
+BKR
+CCEP
+CDNS
+CDW
+CEG
+CHTR
+CMCSA
+COST
+CPRT
+CRWD
+CSCO
+CSGP
+CSX
+CTAS
+CTSH
+DASH
+DDOG
+DXCM
+EA
+EXC
+FANG
+FAST
+FTNT
+GEHC
+GFS
+GILD
+GOOG
+GOOGL
+HON
+IDXX
+INTC
+INTU
+ISRG
+KDP
+KHC
+KLAC
+LIN
+LRCX
+LULU
+MAR
+MCHP
+MDLZ
+MELI
+META
+MNST
+MRVL
+MSFT
+MSTR
+MU
+NFLX
+NVDA
+NXPI
+ODFL
+ON
+ORLY
+PANW
+PAYX
+PCAR
+PDD
+PEP
+PLTR
+PYPL
+QCOM
+REGN
+ROP
+ROST
+SBUX
+SHOP
+SNPS
+SOLS
+TEAM
+TMUS
+TRI
+TSLA
+TTD
+TTWO
+TXN
+VRSK
+VRTX
+WBD
+WDAY
+XEL
+ZS

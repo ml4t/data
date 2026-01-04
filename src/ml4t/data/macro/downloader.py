@@ -194,7 +194,7 @@ class MacroDataManager:
                 series_ids=symbols,
                 start=self.config.start,
                 end=self.config.end,
-                align_to="daily",
+                frequency="daily",
                 forward_fill=True,
             )
 

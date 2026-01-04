@@ -1,0 +1,82 @@
+# Production ETF List
+# Core ETFs for portfolio management
+
+# Broad Market ETFs
+SPY
+VOO
+IVV
+VTI
+QQQ
+DIA
+IWM
+
+# Sector ETFs
+XLK
+XLF
+XLV
+XLE
+XLI
+XLY
+XLP
+XLB
+XLU
+XLRE
+XLC
+
+# International ETFs
+EFA
+VEA
+IEMG
+VWO
+EEM
+FXI
+EWJ
+EWZ
+INDA
+
+# Fixed Income ETFs
+AGG
+BND
+TLT
+IEF
+SHY
+LQD
+HYG
+EMB
+TIP
+
+# Commodity ETFs
+GLD
+SLV
+USO
+UNG
+DBA
+PDBC
+
+# Specialty ETFs
+VNQ
+REET
+ARKK
+ARKG
+ARKQ
+ARKW
+ARKF
+ICLN
+TAN
+IBB
+XBI
+SOXX
+SMH
+HACK
+FINX
+
+# Volatility ETFs
+VXX
+UVXY
+SVXY
+
+# Leveraged ETFs (Use with caution)
+TQQQ
+SQQQ
+SPXL
+SPXS

@@ -1,0 +1,78 @@
+# Basic QData Configuration Example
+# This file demonstrates basic configuration for QData with the new unified system
+
+# Storage configuration - Uses Hive partitioning for 7x query performance
+storage:
+  strategy: hive  # 'hive' for partitioned or 'flat' for single file
+  base_path: ~/qdata/storage
+  compression: zstd  # Best compression/speed balance
+  enable_locking: true  # Safe concurrent access
+  metadata_tracking: true  # Track update timestamps
+
+# Data providers configuration
+providers:
+  - name: yahoo_main
+    type: yahoo
+    enabled: true
+    rate_limit:
+      requests_per_second: 2.0  # Conservative rate limit
+      burst_size: 1
+      retry_max_attempts: 3
+      retry_backoff_factor: 2.0
+    timeout: 30
+    cache_enabled: true
+    cache_ttl: 3600  # 1 hour cache
+
+# Symbol universes - define groups of symbols to track
+universes:
+  - name: tech_stocks
+    symbols:
+      - AAPL
+      - MSFT
+      - GOOGL
+      - META
+      - NVDA
+    asset_class: EQUITY
+    provider: yahoo_main
+
+  - name: etfs
+    symbols:
+      - SPY
+      - QQQ
+      - IWM
+    asset_class: ETF
+    provider: yahoo_main
+
+# Dataset configurations link universes to providers
+datasets:
+  - name: tech_daily
+    universe: tech_stocks
+    provider: yahoo_main
+    frequency: DAILY
+    update_mode: incremental
+    validation_enabled: true
+
+  - name: etf_daily
+    universe: etfs
+    provider: yahoo_main
+    frequency: DAILY
+    update_mode: incremental
+    validation_enabled: true
+
+# Workflow configurations for automated updates
+workflows:
+  - name: market_daily
+    description: Daily update after market close
+    datasets:
+      - tech_daily
+      - etf_daily
+    enabled: true
+    on_error: continue  # Continue with other datasets if one fails
+    schedule:
+      type: DAILY
+      time: "17:00"  # 5 PM
+      timezone: "US/Eastern"
+
+# Global settings
+log_level: INFO
+parallel_downloads: 2  # Conservative parallel downloads

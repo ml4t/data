@@ -1,0 +1,70 @@
+# S&P 500 Symbol List (Example subset)
+# This is a sample file demonstrating symbol file format
+# Lines starting with # are comments and blank lines are ignored
+
+# Technology
+AAPL
+MSFT
+GOOGL
+GOOG
+META
+NVDA
+AVGO
+ORCL
+CSCO
+ADBE
+CRM
+INTC
+AMD
+QCOM
+TXN
+
+# Financial
+JPM
+BAC
+WFC
+GS
+MS
+BLK
+C
+AXP
+SCHW
+USB
+
+# Healthcare
+JNJ
+UNH
+PFE
+ABBV
+TMO
+MRK
+ABT
+CVS
+LLY
+MDT
+
+# Consumer
+AMZN
+TSLA
+HD
+WMT
+DIS
+NKE
+MCD
+SBUX
+PG
+KO
+
+# Energy
+XOM
+CVX
+COP
+SLB
+EOG
+
+# Industrial
+BA
+CAT
+UPS
+HON
+RTX

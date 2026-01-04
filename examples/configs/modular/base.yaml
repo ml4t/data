@@ -1,0 +1,45 @@
+# Base configuration - shared settings
+# This file is included by other configurations
+
+version: "1.0"
+base_dir: ${QLDM_DATA_DIR:./data}
+log_level: ${QLDM_LOG_LEVEL:INFO}
+
+# Common environment variables
+env:
+  QLDM_DATA_DIR: /var/lib/qldm/data
+  QLDM_LOG_DIR: /var/log/qldm
+  QLDM_CACHE_DIR: /var/cache/qldm
+
+# Default settings for all datasets
+defaults:
+  update_mode: incremental
+  asset_class: equity
+  validation:
+    enabled: true
+    strict: false
+    save_reports: true
+
+# Global validation rules
+validation:
+  enabled: true
+  fail_on_critical: false
+  save_reports: true
+  report_dir: ${QLDM_LOG_DIR}/validation
+  rules:
+    check_nulls: true
+    check_duplicate_timestamps: true
+    check_chronological_order: true
+    check_negative_prices: true
+    check_negative_volume: true
+
+# Storage configuration
+storage:
+  backend: filesystem
+  base_path: ${QLDM_DATA_DIR}
+  compression: zstd
+  cache:
+    enabled: true
+    path: ${QLDM_CACHE_DIR}
+    size_mb: 1000
+    ttl_seconds: 3600

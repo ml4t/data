@@ -1,0 +1,106 @@
+# Production configuration using modular includes
+
+# Include base configuration and providers
+include:
+  - base.yaml
+  - providers.yaml
+
+# Override for production
+log_level: WARNING
+validation:
+  fail_on_critical: true  # Strict in production
+
+# Production datasets
+datasets:
+  - name: indices_daily
+    symbols:
+      - ^GSPC   # S&P 500
+      - ^DJI    # Dow Jones
+      - ^IXIC   # NASDAQ
+      - ^RUT    # Russell 2000
+    provider: yahoo
+    frequency: daily
+    asset_class: index
+
+  - name: etf_portfolio
+    symbols: "@symbols/etfs_production.txt"
+    provider: yahoo
+    frequency: daily
+    asset_class: equity
+    validation:
+      strict: true
+
+  - name: forex_majors
+    symbols:
+      - EURUSD=X
+      - GBPUSD=X
+      - USDJPY=X
+      - USDCHF=X
+      - AUDUSD=X
+      - USDCAD=X
+    provider: yahoo
+    frequency: daily
+    asset_class: forex
+
+# Production workflows with monitoring
+workflows:
+  - name: morning_update
+    description: Production morning data update
+    datasets:
+      - indices_daily
+      - etf_portfolio
+      - forex_majors
+    schedule:
+      type: daily
+      time: "06:00:00"
+      timezone: "America/New_York"
+    enabled: true
+    on_error: stop  # Stop on any error in production
+    pre_hooks:
+      - "python /opt/qldm/scripts/health_check.py"
+      - "python /opt/qldm/scripts/backup_data.py"
+    post_hooks:
+      - "python /opt/qldm/scripts/validate_all.py --strict"
+      - "python /opt/qldm/scripts/update_metrics.py"
+      - "python /opt/qldm/scripts/notify_slack.py --channel data-updates"
+    notifications:
+      slack:
+        webhook: ${SLACK_WEBHOOK_URL}
+        channel: "#data-alerts"
+        on_success: true
+        on_failure: true
+      email:
+        smtp_host: ${SMTP_HOST}
+        smtp_port: ${SMTP_PORT}
+        from: "qldm@example.com"
+        to: ["data-team@example.com", "ops@example.com"]
+        on_success: false
+        on_failure: true
+
+  - name: integrity_check
+    description: Hourly data integrity verification
+    datasets: []  # No data fetch, just validation
+    schedule:
+      type: interval
+      interval: 3600  # Every hour
+    enabled: true
+    on_error: continue
+    post_hooks:
+      - "python /opt/qldm/scripts/integrity_check.py --all"
+      - "python /opt/qldm/scripts/update_dashboard.py"
+
+# Production-specific settings
+storage:
+  backend: filesystem
+  base_path: /mnt/data/qldm
+  compression: zstd
+  partition_strategy: year_month
+  retention:
+    daily: 730    # Keep 2 years of daily data
+    hourly: 90    # Keep 90 days of hourly data
+    minute: 7     # Keep 7 days of minute data
+  backup:
+    enabled: true
+    path: /mnt/backup/qldm
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention_days: 30

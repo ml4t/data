@@ -1,0 +1,290 @@
+/*
+ * ML4T Theme - Picasso Blue Period Palette
+ * Matches the ml4t.io website design (Django/Wagtail + DaisyUI)
+ *
+ * Template for all ml4t-* library documentation
+ */
+
+/* ============================================
+   COLOR SCHEME: Picasso Blue Period
+   ============================================ */
+
+:root {
+  /* Primary: Picasso Deep Blue */
+  --md-primary-fg-color: #0a1628;
+  --md-primary-fg-color--light: #152238;
+  --md-primary-fg-color--dark: #050b14;
+
+  /* Accent: Picasso Amber */
+  --md-accent-fg-color: #D4A84B;
+  --md-accent-fg-color--transparent: rgba(212, 168, 75, 0.1);
+
+  /* Background: Warm Off-White */
+  --md-default-bg-color: #FAFAF9;
+  --md-default-bg-color--light: #FFFFFF;
+  --md-default-bg-color--lighter: #FFFFFF;
+  --md-default-bg-color--lightest: #FFFFFF;
+
+  /* Text: Slate Gray */
+  --md-default-fg-color: #334155;
+  --md-default-fg-color--light: #475569;
+  --md-default-fg-color--lighter: #64748b;
+  --md-default-fg-color--lightest: #94a3b8;
+
+  /* Borders: Muted Silver */
+  --md-default-border-color: #e8e8e6;
+
+  /* Code blocks */
+  --md-code-bg-color: #f8fafc;
+  --md-code-fg-color: #0a1628;
+  --md-code-hl-color: rgba(212, 168, 75, 0.2);
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #D4A84B;
+  --md-accent-fg-color: #E4B85B;
+  --md-default-bg-color: #0a1628;
+  --md-default-fg-color: #F8F8F6;
+  --md-code-bg-color: #152238;
+}
+
+/* ============================================
+   TYPOGRAPHY: Match ML4T Website Fonts
+   ============================================ */
+
+/* Headings: Source Serif 4 */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+}
+
+.md-typeset h1 {
+  font-size: 2.25rem;
+  line-height: 1.2;
+  margin-bottom: 1.5rem;
+}
+
+.md-typeset h2 {
+  font-size: 1.75rem;
+  border-bottom: 2px solid var(--md-default-border-color);
+  padding-bottom: 0.5rem;
+  margin-top: 2.5rem;
+}
+
+.md-typeset h3 {
+  font-size: 1.25rem;
+  margin-top: 2rem;
+}
+
+/* Body: DM Sans */
+.md-typeset {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+/* ============================================
+   NAVIGATION
+   ============================================ */
+
+/* Header */
+.md-header {
+  background-color: var(--md-primary-fg-color);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.md-header__title {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-weight: 600;
+}
+
+/* Tabs */
+.md-tabs {
+  background-color: var(--md-primary-fg-color--light);
+}
+
+.md-tabs__link--active,
+.md-tabs__link:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* Sidebar */
+.md-nav__title {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-weight: 600;
+}
+
+.md-nav__link--active {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* ============================================
+   CONTENT ELEMENTS
+   ============================================ */
+
+/* Links */
+.md-typeset a {
+  color: var(--md-primary-fg-color);
+  text-decoration: underline;
+  text-decoration-color: var(--md-accent-fg-color);
+  text-underline-offset: 2px;
+}
+
+.md-typeset a:hover {
+  color: var(--md-accent-fg-color);
+}
+
+/* Code blocks */
+.md-typeset code {
+  background-color: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-border-color);
+  border-radius: 4px;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.875em;
+}
+
+.md-typeset pre {
+  border-radius: 8px;
+  border: 1px solid var(--md-default-border-color);
+}
+
+.md-typeset pre code {
+  border: none;
+  padding: 0;
+}
+
+/* Tables */
+.md-typeset table:not([class]) {
+  border: 1px solid var(--md-default-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color);
+  color: #F8F8F6;
+  font-weight: 600;
+}
+
+.md-typeset table:not([class]) tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* ============================================
+   ADMONITIONS (Callouts)
+   ============================================ */
+
+/* Info - Cyan */
+.md-typeset .admonition.info,
+.md-typeset details.info {
+  border-color: #06b6d4;
+}
+
+.md-typeset .info > .admonition-title,
+.md-typeset .info > summary {
+  background-color: rgba(6, 182, 212, 0.1);
+}
+
+/* Tip - Amber (Picasso accent) */
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: var(--md-accent-fg-color);
+}
+
+.md-typeset .tip > .admonition-title,
+.md-typeset .tip > summary {
+  background-color: var(--md-accent-fg-color--transparent);
+}
+
+/* Warning - Amber */
+.md-typeset .admonition.warning,
+.md-typeset details.warning {
+  border-color: #D4A84B;
+}
+
+/* Error - Red */
+.md-typeset .admonition.danger,
+.md-typeset details.danger {
+  border-color: #ef4444;
+}
+
+/* ============================================
+   BUTTONS & INTERACTIVE
+   ============================================ */
+
+/* Buttons */
+.md-button {
+  background-color: var(--md-primary-fg-color);
+  color: #F8F8F6;
+  border-radius: 6px;
+  font-weight: 600;
+  transition: all 150ms ease;
+}
+
+.md-button:hover {
+  background-color: var(--md-accent-fg-color);
+  color: #FFFFFF;
+}
+
+.md-button--primary {
+  background-color: var(--md-accent-fg-color);
+  color: #FFFFFF;
+}
+
+.md-button--primary:hover {
+  background-color: #E4B85B;
+}
+
+/* Search */
+.md-search__input {
+  background-color: var(--md-primary-fg-color--light);
+  border-radius: 6px;
+}
+
+/* ============================================
+   FOOTER
+   ============================================ */
+
+.md-footer {
+  background-color: var(--md-primary-fg-color);
+}
+
+.md-footer-meta {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+
+@media screen and (max-width: 76.1875em) {
+  .md-typeset h1 {
+    font-size: 1.75rem;
+  }
+
+  .md-typeset h2 {
+    font-size: 1.5rem;
+  }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+
+@media print {
+  .md-typeset h1,
+  .md-typeset h2,
+  .md-typeset h3 {
+    color: #000000;
+  }
+
+  .md-typeset a {
+    color: #000000;
+    text-decoration: underline;
+  }
+}

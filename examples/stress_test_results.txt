@@ -1,0 +1,75 @@
+STRESS TEST RESULTS
+================================================================================
+
+Date: 2025-11-15 21:57:03.057775
+Tickers: 200
+Period: 2024-01-01 to 2024-12-31
+
+Direct yfinance:
+  approach: direct_yfinance
+  total: 200
+  successful: 117
+  failed: 83
+  empty: 83
+  errors: 0
+  start_time: 1763261384.81091
+  end_time: 1763261423.3149416
+  duration: 38.50403165817261
+  avg_per_ticker: 0.19252015829086302
+
+ML4T Data:
+  approach: ml4t-data
+  total: 200
+  successful: 106
+  failed: 76
+  data_unavailable: 76
+  rate_limited: 0
+  network_errors: 0
+  start_time: 1763261423.315043
+  end_time: 1763261823.057555
+  duration: 399.74251198768616
+  avg_per_ticker: 1.9987125599384308
+
+Failed tickers (yfinance):
+  AAMC: empty
+  AAN: empty
+  AAWW: empty
+  ABAX: empty
+  ABC: empty
+  ABCO: empty
+  ABFS: empty
+  ABMD: empty
+  ACAS: empty
+  ACC: empty
+  ACCL: empty
+  ACE: empty
+  ACHN: empty
+  ACO: empty
+  ACOR: empty
+  ACRX: empty
+  ACW: empty
+  ACXM: empty
+  ADES: empty
+  ADMS: empty
+
+Failed tickers (ML4T Data):
+  AAMC: data_unavailable
+  AAN: data_unavailable
+  AAWW: data_unavailable
+  ABAX: data_unavailable
+  ABC: data_unavailable
+  ABCO: data_unavailable
+  ABFS: data_unavailable
+  ABMD: data_unavailable
+  ACAS: data_unavailable
+  ACC: data_unavailable
+  ACCL: data_unavailable
+  ACE: data_unavailable
+  ACHN: data_unavailable
+  ACO: data_unavailable
+  ACOR: data_unavailable
+  ACRX: data_unavailable
+  ACW: data_unavailable
+  ACXM: data_unavailable
+  ADES: data_unavailable
+  ADMS: data_unavailable
