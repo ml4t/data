@@ -181,13 +181,14 @@ class ProviderManager:
         if cls._PROVIDER_CLASSES is not None:
             return cls._PROVIDER_CLASSES
 
-        # Import core providers (no external dependencies)
+        # Import core providers
         from ml4t.data.providers.binance import BinanceProvider
         from ml4t.data.providers.binance_public import BinancePublicProvider
         from ml4t.data.providers.cryptocompare import CryptoCompareProvider
         from ml4t.data.providers.mock import MockProvider
         from ml4t.data.providers.okx import OKXProvider
         from ml4t.data.providers.synthetic import SyntheticProvider
+        from ml4t.data.providers.yahoo import YahooFinanceProvider
 
         provider_classes: dict[str, type] = {
             "binance": BinanceProvider,
@@ -196,16 +197,10 @@ class ProviderManager:
             "mock": MockProvider,
             "okx": OKXProvider,
             "synthetic": SyntheticProvider,
+            "yahoo": YahooFinanceProvider,
         }
 
         # Optional providers with external dependencies
-        try:
-            from ml4t.data.providers.yahoo import YahooFinanceProvider
-
-            provider_classes["yahoo"] = YahooFinanceProvider
-        except ImportError:
-            pass
-
         try:
             from ml4t.data.providers.databento import DataBentoProvider
 

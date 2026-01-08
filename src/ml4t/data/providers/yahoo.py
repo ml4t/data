@@ -10,7 +10,15 @@ from typing import ClassVar
 import pandas as pd
 import polars as pl
 import structlog
-import yfinance as yf
+
+# yfinance is an optional dependency
+try:
+    import yfinance as yf
+
+    _YFINANCE_AVAILABLE = True
+except ImportError:
+    yf = None  # type: ignore[assignment]
+    _YFINANCE_AVAILABLE = False
 
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
@@ -82,7 +90,15 @@ class YahooFinanceProvider(BaseProvider):
 
         Args:
             enable_progress: Show progress bars for downloads (default False)
+
+        Raises:
+            ImportError: If yfinance is not installed
         """
+        if not _YFINANCE_AVAILABLE:
+            raise ImportError(
+                "YahooFinanceProvider requires yfinance. "
+                "Install with: pip install 'ml4t-data[yahoo]'"
+            )
         # Don't use BaseProvider's rate limiting - yfinance handles this
         super().__init__(rate_limit=None)
         self.enable_progress = enable_progress
