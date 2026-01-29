@@ -47,6 +47,12 @@ from ml4t.data.futures.continuous_downloader import (
     ContinuousDownloadProgress,
     load_continuous_config,
 )
+from ml4t.data.futures.individual_downloader import (
+    IndividualDownloadConfig,
+    IndividualDownloader,
+    IndividualProductConfig,
+    load_individual_config,
+)
 from ml4t.data.futures.downloader import (
     DEFAULT_PRODUCTS,
     DefinitionsConfig,
@@ -135,6 +141,11 @@ __all__ = [
     "ContinuousDownloadConfig",
     "ContinuousDownloadProgress",
     "load_continuous_config",
+    # Individual contract downloader
+    "IndividualDownloader",
+    "IndividualDownloadConfig",
+    "IndividualProductConfig",
+    "load_individual_config",
     # Definitions downloader
     "DefinitionsDownloader",
     "DefinitionsConfig",
