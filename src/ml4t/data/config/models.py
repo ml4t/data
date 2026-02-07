@@ -32,6 +32,22 @@ class CompressionType(str, Enum):
     NONE = "none"
 
 
+class PartitionGranularity(str, Enum):
+    """Partition granularity for Hive storage.
+
+    Choose based on data frequency:
+    - YEAR: Best for daily data (~252 rows/partition for stocks)
+    - MONTH: Best for hourly data (~720 rows/partition)
+    - DAY: Best for minute data (~1,440 rows/partition)
+    - HOUR: Best for second/tick data (~3,600 rows/partition)
+    """
+
+    YEAR = "year"
+    MONTH = "month"
+    DAY = "day"
+    HOUR = "hour"
+
+
 class ProviderType(str, Enum):
     """Provider type enumeration."""
 
@@ -71,8 +87,16 @@ class StorageConfig(BaseModel):
     )
     lock_timeout: int = Field(default=30, ge=1, description="File lock timeout in seconds")
     metadata_tracking: bool = Field(default=True, description="Track metadata in manifest files")
+    partition_granularity: PartitionGranularity = Field(
+        default=PartitionGranularity.MONTH,
+        description=(
+            "Partition granularity for Hive storage. "
+            "Use YEAR for daily, MONTH for hourly, DAY for minute, HOUR for second data."
+        ),
+    )
     partition_cols: list[str] = Field(
-        default_factory=lambda: ["year", "month"], description="Columns for Hive partitioning"
+        default_factory=lambda: ["year", "month"],
+        description="Deprecated: Use partition_granularity instead. Kept for backward compatibility.",
     )
 
     @field_validator("base_path")

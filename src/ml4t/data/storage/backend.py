@@ -10,28 +10,62 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
+
+# Type alias for partition granularity
+PartitionGranularityType = Literal["year", "month", "day", "hour"]
 
 
 @dataclass
 class StorageConfig:
-    """Configuration for storage backends."""
+    """Configuration for storage backends.
+
+    Attributes:
+        base_path: Base directory for storage.
+        strategy: Storage strategy ("hive" or "flat").
+        compression: Compression type for Parquet files.
+        partition_granularity: Time-based partition granularity for Hive storage.
+            - "year": Best for daily data (~252 rows/partition for stocks)
+            - "month": Best for hourly data (~720 rows/partition)
+            - "day": Best for minute data (~1,440 rows/partition)
+            - "hour": Best for second/tick data (~3,600 rows/partition)
+        partition_cols: Deprecated. Use partition_granularity instead.
+        atomic_writes: Use atomic writes with temp file rename.
+        enable_locking: Enable file locking for concurrent access.
+        metadata_tracking: Track metadata in manifest files.
+    """
 
     base_path: Path
     strategy: str = "hive"  # "hive" or "flat"
     compression: str | None = "zstd"  # "zstd", "lz4", "snappy", None
-    partition_cols: list[str] | None = None  # For Hive partitioning
+    partition_granularity: PartitionGranularityType = "month"
+    partition_cols: list[str] | None = None  # Deprecated, kept for backward compat
     atomic_writes: bool = True
     enable_locking: bool = True
     metadata_tracking: bool = True
+    generate_profile: bool = True  # Generate column-level statistics on write
 
     def __post_init__(self) -> None:
         """Validate and set defaults."""
         self.base_path = Path(self.base_path)
+        # Set partition_cols based on granularity for backward compatibility
         if self.partition_cols is None:
-            self.partition_cols = ["year", "month"] if self.strategy == "hive" else []
+            if self.strategy == "hive":
+                self.partition_cols = self._get_partition_cols_from_granularity()
+            else:
+                self.partition_cols = []
+
+    def _get_partition_cols_from_granularity(self) -> list[str]:
+        """Get partition columns based on granularity setting."""
+        granularity_to_cols = {
+            "year": ["year"],
+            "month": ["year", "month"],
+            "day": ["year", "month", "day"],
+            "hour": ["year", "month", "day", "hour"],
+        }
+        return granularity_to_cols.get(self.partition_granularity, ["year", "month"])
 
 
 class StorageBackend(ABC):

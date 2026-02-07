@@ -9,6 +9,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from .backend import StorageBackend, StorageConfig
+from .data_profile import (
+    ColumnProfile,
+    DatasetProfile,
+    generate_profile,
+    get_profile_path,
+    load_profile,
+    save_profile,
+)
 from .flat import FlatStorage
 from .hive import HiveStorage
 
@@ -38,9 +46,15 @@ def create_storage(base_path: str | Path, strategy: str = "hive", **kwargs) -> S
 
 
 __all__ = [
+    "ColumnProfile",
+    "DatasetProfile",
     "FlatStorage",
     "HiveStorage",
     "StorageBackend",
     "StorageConfig",
     "create_storage",
+    "generate_profile",
+    "get_profile_path",
+    "load_profile",
+    "save_profile",
 ]

@@ -40,6 +40,8 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.storage.data_profile import generate_profile, save_profile
+
 logger = structlog.get_logger(__name__)
 
 # Standard OHLCV schema for consistency across downloads and updates
@@ -80,6 +82,7 @@ class FuturesConfig:
     storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "futures")
     products: dict[str, list[str]] = field(default_factory=dict)
     definition_dates: list[str] = field(default_factory=list)
+    generate_profile: bool = True  # Generate column-level statistics per product
 
     def __post_init__(self):
         self.storage_path = Path(self.storage_path).expanduser()
@@ -176,6 +179,10 @@ class FuturesDataManager:
             self.config.storage_path / "definitions" / f"product={product}" / "definitions.parquet"
         )
 
+    def _get_profile_path(self, product: str) -> Path:
+        """Get path for product profile file."""
+        return self.config.storage_path / "ohlcv_1d" / f"product={product}" / "_profile.json"
+
     def download_product_ohlcv(
         self,
         product: str,
@@ -265,6 +272,23 @@ class FuturesDataManager:
                 total_rows += len(year_df)
 
             logger.info("Saved OHLCV", product=product, rows=total_rows, years=years_written)
+
+            # Generate profile if enabled
+            if self.config.generate_profile and total_rows > 0:
+                try:
+                    # Load all data for this product to generate profile
+                    all_data = self.load_ohlcv(product)
+                    profile = generate_profile(
+                        all_data,
+                        source="FuturesDataManager",
+                        timestamp_col="ts_event",
+                        symbol_col="symbol",
+                    )
+                    profile_path = self._get_profile_path(product)
+                    save_profile(profile, profile_path)
+                    logger.debug("Saved product profile", product=product, path=str(profile_path))
+                except Exception as e:
+                    logger.warning("Failed to generate profile", product=product, error=str(e))
 
             return {"product": product, "rows": total_rows, "years": years_written}
 

@@ -23,14 +23,28 @@ if TYPE_CHECKING:
 
 
 class HiveStorage(StorageBackend):
-    """Hive partitioned storage with year/month directory structure.
+    """Hive partitioned storage with configurable time-based partitioning.
 
     This implementation provides:
     - 7x query performance improvement for time-based queries
+    - Configurable partition granularity (year, month, day, hour)
     - Atomic writes with temp file pattern
     - Metadata tracking in JSON manifests
     - File locking for concurrent access safety
     - Polars lazy evaluation throughout
+
+    Partition Granularity:
+        Configure via StorageConfig.partition_granularity:
+        - "year": Best for daily data (~252 rows/partition)
+        - "month": Best for hourly data (~720 rows/partition) [default]
+        - "day": Best for minute data (~1,440 rows/partition)
+        - "hour": Best for second/tick data (~3,600 rows/partition)
+
+    Example:
+        >>> from ml4t.data.storage import HiveStorage, StorageConfig
+        >>> # For minute data, use day-level partitioning
+        >>> config = StorageConfig(base_path="./data", partition_granularity="day")
+        >>> storage = HiveStorage(config)
     """
 
     def __init__(self, config: StorageConfig):
@@ -42,6 +56,196 @@ class HiveStorage(StorageBackend):
         super().__init__(config)
         self.metadata_dir = self.base_path / ".metadata"
         self.metadata_dir.mkdir(exist_ok=True)
+
+    def _get_partition_columns(self) -> list[str]:
+        """Get partition column names based on configured granularity.
+
+        Returns:
+            List of partition column names (e.g., ["year", "month"])
+        """
+        granularity = getattr(self.config, "partition_granularity", "month")
+        granularity_to_cols = {
+            "year": ["year"],
+            "month": ["year", "month"],
+            "day": ["year", "month", "day"],
+            "hour": ["year", "month", "day", "hour"],
+        }
+        return granularity_to_cols.get(granularity, ["year", "month"])
+
+    def _add_partition_columns(self, df: pl.DataFrame, partition_cols: list[str]) -> pl.DataFrame:
+        """Add partition columns to DataFrame based on timestamp.
+
+        Args:
+            df: DataFrame with timestamp column
+            partition_cols: List of partition columns to add
+
+        Returns:
+            DataFrame with partition columns added
+        """
+        col_exprs = []
+        if "year" in partition_cols:
+            col_exprs.append(pl.col("timestamp").dt.year().alias("year"))
+        if "month" in partition_cols:
+            col_exprs.append(pl.col("timestamp").dt.month().alias("month"))
+        if "day" in partition_cols:
+            col_exprs.append(pl.col("timestamp").dt.day().alias("day"))
+        if "hour" in partition_cols:
+            col_exprs.append(pl.col("timestamp").dt.hour().alias("hour"))
+
+        if col_exprs:
+            return df.with_columns(col_exprs)
+        return df
+
+    def _build_partition_path(
+        self, base_path: Path, partition_cols: list[str], values: tuple
+    ) -> Path:
+        """Build partition directory path from column names and values.
+
+        Args:
+            base_path: Base directory for the key
+            partition_cols: List of partition column names
+            values: Tuple of partition values (from group_by)
+
+        Returns:
+            Path to partition directory
+        """
+        # Handle both tuple and single value from group_by
+        if not isinstance(values, tuple):
+            values = (values,)
+
+        path = base_path
+        for col, val in zip(partition_cols, values, strict=False):
+            path = path / f"{col}={val}"
+        return path
+
+    def _find_partition_paths(
+        self,
+        key_path: Path,
+        partition_cols: list[str],
+        start_date: datetime | None,
+        end_date: datetime | None,
+    ) -> list[Path]:
+        """Find partition paths with optional date pruning.
+
+        Args:
+            key_path: Base path for the key's data
+            partition_cols: List of partition column names
+            start_date: Optional start date for pruning
+            end_date: Optional end date for pruning
+
+        Returns:
+            List of paths to data.parquet files
+        """
+        # Build glob pattern based on partition columns
+        glob_pattern = "/".join(f"{col}=*" for col in partition_cols) + "/data.parquet"
+
+        if not (start_date or end_date):
+            # No filtering, return all partitions
+            return list(key_path.glob(glob_pattern))
+
+        # With date filtering, we need to prune partitions
+        partition_paths = []
+
+        for parquet_path in sorted(key_path.glob(glob_pattern)):
+            # Extract partition values from path
+            partition_values = self._extract_partition_values(parquet_path, partition_cols)
+
+            # Check if partition is within date range
+            if self._partition_in_range(partition_values, start_date, end_date):
+                partition_paths.append(parquet_path)
+
+        return partition_paths
+
+    def _extract_partition_values(self, path: Path, partition_cols: list[str]) -> dict[str, int]:
+        """Extract partition values from a partition path.
+
+        Args:
+            path: Path containing partition directories (e.g., .../year=2024/month=1/data.parquet)
+            partition_cols: Expected partition column names
+
+        Returns:
+            Dictionary mapping column names to their integer values
+        """
+        values = {}
+        for part in path.parts:
+            if "=" in part:
+                col, val = part.split("=", 1)
+                if col in partition_cols:
+                    values[col] = int(val)
+        return values
+
+    def _partition_in_range(
+        self,
+        partition_values: dict[str, int],
+        start_date: datetime | None,
+        end_date: datetime | None,
+    ) -> bool:
+        """Check if a partition is within the date range.
+
+        Args:
+            partition_values: Dictionary of partition column values
+            start_date: Optional start date
+            end_date: Optional end date
+
+        Returns:
+            True if partition may contain data in range
+        """
+        year = partition_values.get("year")
+        month = partition_values.get("month")
+        day = partition_values.get("day")
+        hour = partition_values.get("hour")
+
+        # Year-level pruning
+        if year is not None:
+            if start_date and year < start_date.year:
+                return False
+            if end_date and year > end_date.year:
+                return False
+
+        # Month-level pruning (only if year matches boundary)
+        if month is not None:
+            if start_date and year == start_date.year and month < start_date.month:
+                return False
+            if end_date and year == end_date.year and month > end_date.month:
+                return False
+
+        # Day-level pruning (only if year/month match boundary)
+        if day is not None:
+            if (
+                start_date
+                and year == start_date.year
+                and month == start_date.month
+                and day < start_date.day
+            ):
+                return False
+            if (
+                end_date
+                and year == end_date.year
+                and month == end_date.month
+                and day > end_date.day
+            ):
+                return False
+
+        # Hour-level pruning (only if year/month/day match boundary)
+        if hour is not None:
+            if (
+                start_date
+                and year == start_date.year
+                and month == start_date.month
+                and day == start_date.day
+                and hour < start_date.hour
+            ):
+                return False
+            if (
+                end_date
+                and year == end_date.year
+                and month == end_date.month
+                and day == end_date.day
+                and hour > end_date.hour
+            ):
+                return False
+
+        return True
 
     def write(
         self,
@@ -88,13 +292,11 @@ class HiveStorage(StorageBackend):
         if "timestamp" not in df.columns:
             raise ValueError("Data must have 'timestamp' column for Hive partitioning")
 
-        # Add year and month columns for partitioning
-        df = df.with_columns(
-            [
-                pl.col("timestamp").dt.year().alias("year"),
-                pl.col("timestamp").dt.month().alias("month"),
-            ]
-        )
+        # Get partition columns based on granularity
+        partition_cols = self._get_partition_columns()
+
+        # Add partition columns dynamically based on granularity
+        df = self._add_partition_columns(df, partition_cols)
 
         # Create key directory
         key_path = self.base_path / key.replace("/", "_")
@@ -103,13 +305,13 @@ class HiveStorage(StorageBackend):
         # Group by partitions and write
         partitions_written = []
 
-        for (year, month), partition_df in df.group_by(["year", "month"], maintain_order=True):
-            # Create partition path
-            partition_path = key_path / f"year={year}" / f"month={month}"
+        for partition_values, partition_df in df.group_by(partition_cols, maintain_order=True):
+            # Create partition path dynamically
+            partition_path = self._build_partition_path(key_path, partition_cols, partition_values)
             partition_path.mkdir(parents=True, exist_ok=True)
 
             # Remove partition columns from data
-            partition_df = partition_df.drop(["year", "month"])
+            partition_df = partition_df.drop(partition_cols)
 
             # Write with atomic pattern
             file_path = partition_path / "data.parquet"
@@ -154,33 +356,11 @@ class HiveStorage(StorageBackend):
         if not key_path.exists():
             raise KeyError(f"Key '{key}' not found in storage")
 
-        # Build list of partition paths to read
-        partition_paths = []
+        # Get partition columns based on granularity
+        partition_cols = self._get_partition_columns()
 
-        # If date filters provided, only read relevant partitions
-        if start_date or end_date:
-            for year_dir in sorted(key_path.glob("year=*")):
-                year = int(year_dir.name.split("=")[1])
-
-                # Check year bounds
-                if start_date and year < start_date.year:
-                    continue
-                if end_date and year > end_date.year:
-                    continue
-
-                for month_dir in sorted(year_dir.glob("month=*")):
-                    month = int(month_dir.name.split("=")[1])
-
-                    # Check month bounds
-                    if start_date and year == start_date.year and month < start_date.month:
-                        continue
-                    if end_date and year == end_date.year and month > end_date.month:
-                        continue
-
-                    partition_paths.append(month_dir / "data.parquet")
-        else:
-            # Read all partitions
-            partition_paths = list(key_path.glob("year=*/month=*/data.parquet"))
+        # Build list of partition paths to read with pruning
+        partition_paths = self._find_partition_paths(key_path, partition_cols, start_date, end_date)
 
         if not partition_paths:
             return pl.LazyFrame()

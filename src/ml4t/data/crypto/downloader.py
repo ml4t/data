@@ -37,6 +37,8 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.storage.data_profile import generate_profile, get_profile_path, save_profile
+
 logger = structlog.get_logger(__name__)
 
 
@@ -51,6 +53,7 @@ class CryptoConfig:
     interval: str = "8h"  # Funding rate settlement interval
     storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "crypto")
     symbols: dict[str, dict[str, Any]] = field(default_factory=dict)
+    generate_profile: bool = True  # Generate column-level statistics on save
 
     def __post_init__(self):
         self.storage_path = Path(self.storage_path).expanduser()
@@ -165,8 +168,8 @@ class CryptoDataManager:
             interval=self.config.interval,
         )
 
-        # Use multi-symbol download
-        df = self.provider.fetch_premium_index_multi(
+        # Use parallel multi-symbol download (3-10x faster)
+        df = self.provider.fetch_premium_index_multi_parallel(
             symbols=symbols,
             start=self.config.start,
             end=self.config.end,
@@ -196,6 +199,13 @@ class CryptoDataManager:
         output_file = self.config.storage_path / "premium_index.parquet"
         df.write_parquet(output_file)
         logger.info(f"Saved: {output_file}")
+
+        # Generate profile if enabled
+        if self.config.generate_profile:
+            profile = generate_profile(df, source="CryptoDataManager")
+            profile_path = get_profile_path(output_file)
+            save_profile(profile, profile_path)
+            logger.info(f"Saved data profile: {profile_path}")
 
     def _save_by_symbol(self, df: pl.DataFrame) -> None:
         """Save premium index data partitioned by symbol."""

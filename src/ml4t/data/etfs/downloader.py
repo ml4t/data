@@ -39,6 +39,8 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.storage.data_profile import generate_profile, get_profile_path, save_profile
+
 logger = structlog.get_logger(__name__)
 
 # Standard OHLCV schema for consistency
@@ -63,6 +65,7 @@ class ETFConfig:
     frequency: str = "daily"
     storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "etfs")
     tickers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    generate_profile: bool = True  # Generate column-level statistics on save
 
     def __post_init__(self):
         self.storage_path = Path(self.storage_path).expanduser()
@@ -321,6 +324,13 @@ class ETFDataManager:
         output_file = self.config.storage_path / "etf_universe.parquet"
         df.write_parquet(output_file)
         logger.info(f"Saved combined file: {output_file} ({len(df):,} rows)")
+
+        # Generate profile if enabled
+        if self.config.generate_profile:
+            profile = generate_profile(df, source="ETFDataManager")
+            profile_path = get_profile_path(output_file)
+            save_profile(profile, profile_path)
+            logger.info(f"Saved data profile: {profile_path}")
 
     def _regenerate_combined(self) -> None:
         """Regenerate combined file from individual ticker files."""
