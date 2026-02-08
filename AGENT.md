@@ -16,8 +16,10 @@ Market data acquisition and storage library for ML4T 3rd Edition.
 | Module        | Purpose                                        |
 | ------------- | ---------------------------------------------- |
 | `futures/`    | Databento futures downloaders and roll logic   |
+| `etfs/`       | ETFDataManager for Yahoo Finance ETF data      |
+| `crypto/`     | CryptoDataManager for Binance premium index    |
 | `providers/`  | 22 data source integrations                    |
-| `storage/`    | Hive-partitioned Parquet storage               |
+| `storage/`    | Hive-partitioned Parquet + ProfileMixin        |
 | `managers/`   | Data orchestration and updates                 |
 | `assets/`     | Asset universe definitions                     |
 | `cot/`        | Commitment of Traders data                     |
@@ -31,20 +33,30 @@ Market data acquisition and storage library for ML4T 3rd Edition.
 | `FuturesDownloader`    | All contracts via parent symbology ({PRODUCT}.FUT) |
 | `FuturesDataManager`   | High-level interface for book readers              |
 
+## Book Data Managers (with Profiling)
+
+| Manager | Asset Class | Source | Profiling |
+|---------|-------------|--------|-----------|
+| `ETFDataManager` | 50 ETFs | Yahoo Finance | `generate_profile()` |
+| `CryptoDataManager` | Crypto | Binance Public | `generate_profile()` |
+| `FuturesDataManager` | CME Futures | Databento | `generate_profile(product)` |
+
+All managers support on-demand data profiling via `ProfileMixin`.
+
 ## Entry Points
 
 ```python
-# Continuous contracts (pre-rolled)
-from ml4t.data.futures import ContinuousDownloader, ContinuousDownloadConfig
+# ETF data (Yahoo Finance)
+from ml4t.data.etfs import ETFDataManager
 
-# Individual contracts (for roll demonstration)
-from ml4t.data.futures import IndividualDownloader, IndividualDownloadConfig
+# Crypto premium index (Binance Public - no API key needed)
+from ml4t.data.crypto import CryptoDataManager
 
-# All contracts (parent symbology)
-from ml4t.data.futures import FuturesDownloader, FuturesDownloadConfig
-
-# High-level interface
+# Futures data (Databento)
 from ml4t.data.futures import FuturesDataManager
+
+# Data profiling
+from ml4t.data.storage import ProfileMixin, generate_profile
 ```
 
 ## Commands

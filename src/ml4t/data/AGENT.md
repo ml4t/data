@@ -14,8 +14,10 @@
 | Directory | Lines | Purpose |
 |-----------|-------|---------|
 | providers/ | 14k | 22 data source integrations |
-| storage/ | 4.4k | Hive-partitioned backends |
+| storage/ | 4.6k | Hive-partitioned backends + profiling |
 | futures/ | 4.6k | Databento futures downloader |
+| etfs/ | 600 | ETFDataManager (Yahoo Finance) |
+| crypto/ | 420 | CryptoDataManager (Binance Public) |
 | core/ | 1k | Models, schemas, config |
 | utils/ | 1.6k | Rate limiting, gaps, retry |
 | assets/ | 1.3k | Asset class definitions |
@@ -27,6 +29,18 @@
 | calendar/ | 359 | Trading calendars |
 | export/ | 231 | CSV/JSON/Excel export |
 
+## Book Data Managers
+
+Simplified managers for ML4T book readers with built-in profiling:
+
+| Manager | Asset | Source | Profiling |
+|---------|-------|--------|-----------|
+| `ETFDataManager` | ETFs | Yahoo Finance | `generate_profile()` |
+| `CryptoDataManager` | Crypto | Binance Public | `generate_profile()` |
+| `FuturesDataManager` | Futures | Databento | `generate_profile(product)` |
+
+All managers inherit from `ProfileMixin` for on-demand column statistics.
+
 ## Key
 
-`DataManager`, `UpdateManager`, `HiveStorage`, `get_provider()`
+`DataManager`, `UpdateManager`, `HiveStorage`, `ProfileMixin`, `get_provider()`
