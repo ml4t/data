@@ -910,4 +910,4 @@ class PolymarketProvider(BaseProvider):
         self._market_cache.clear()
         if hasattr(self, "session"):
             self.session.close()
-            self.logger.debug("Closed Polymarket API client")
+            self._log_close_event("Closed Polymarket API client")

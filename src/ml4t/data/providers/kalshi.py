@@ -814,7 +814,7 @@ class KalshiProvider(BaseProvider):
             if result is None:
                 result = df_wide
             else:
-                result = result.join(df_wide, on="timestamp", how="outer_coalesce")
+                result = result.join(df_wide, on="timestamp", how="full", coalesce=True)
 
         if result is None:
             return self._create_empty_dataframe()
@@ -825,4 +825,4 @@ class KalshiProvider(BaseProvider):
         """Close HTTP client."""
         if hasattr(self, "session"):
             self.session.close()
-            self.logger.debug("Closed Kalshi API client")
+            self._log_close_event("Closed Kalshi API client")
