@@ -1610,6 +1610,7 @@ dev = [
     { name = "ipdb" },
     { name = "ipython" },
     { name = "mypy" },
+    { name = "oandapyv20" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1636,6 +1637,7 @@ yahoo = [
 dev = [
     { name = "databento" },
     { name = "hypothesis" },
+    { name = "oandapyv20" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1682,6 +1684,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "oandapyv20", marker = "extra == 'all'", specifier = ">=0.7.0" },
     { name = "oandapyv20", marker = "extra == 'all-providers'", specifier = ">=0.7.0" },
+    { name = "oandapyv20", marker = "extra == 'dev'", specifier = ">=0.7.0" },
     { name = "oandapyv20", marker = "extra == 'oanda'", specifier = ">=0.7.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pandas-market-calendars", specifier = ">=4.3.0" },
@@ -1721,6 +1724,7 @@ provides-extras = ["all", "all-providers", "cot", "databento", "dev", "docs", "o
 dev = [
     { name = "databento", specifier = ">=0.38.0" },
     { name = "hypothesis", specifier = ">=6.80.0" },
+    { name = "oandapyv20", specifier = ">=0.7.0" },
     { name = "pre-commit", specifier = ">=3.3.0" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },

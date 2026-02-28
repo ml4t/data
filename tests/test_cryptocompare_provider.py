@@ -45,6 +45,8 @@ class TestCryptoCompareProvider:
         assert provider.FREQUENCY_MAP["hourly"] == "histohour"
         assert provider.FREQUENCY_MAP["daily"] == "histoday"
 
+    @pytest.mark.integration
+    @pytest.mark.requires_api_key
     @pytest.mark.skipif(
         not os.getenv("CRYPTOCOMPARE_API_KEY"), reason="CRYPTOCOMPARE_API_KEY not set"
     )
@@ -89,6 +91,8 @@ class TestCryptoCompareProvider:
             print("ℹ️  No data returned (might be weekend/holiday or data not yet settled)")
             assert df.columns == []  # Empty DataFrame has no columns
 
+    @pytest.mark.integration
+    @pytest.mark.requires_api_key
     @pytest.mark.skipif(
         not os.getenv("CRYPTOCOMPARE_API_KEY"), reason="CRYPTOCOMPARE_API_KEY not set"
     )
@@ -190,6 +194,8 @@ class TestCryptoCompareProvider:
 class TestCryptoCompareProviderIntegration:
     """Integration tests requiring real API calls."""
 
+    @pytest.mark.integration
+    @pytest.mark.requires_api_key
     @pytest.mark.skipif(
         not os.getenv("CRYPTOCOMPARE_API_KEY"),
         reason="CRYPTOCOMPARE_API_KEY not set - Set environment variable to run real API tests",
@@ -214,6 +220,8 @@ class TestCryptoCompareProviderIntegration:
         assert isinstance(df1, pl.DataFrame)
         assert isinstance(df2, pl.DataFrame)
 
+    @pytest.mark.integration
+    @pytest.mark.requires_api_key
     @pytest.mark.skipif(
         not os.getenv("CRYPTOCOMPARE_API_KEY"), reason="CRYPTOCOMPARE_API_KEY not set"
     )

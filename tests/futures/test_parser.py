@@ -101,6 +101,8 @@ class TestParseQuandlCHRIS:
         assert min_date.year >= 2014, f"Expected data to start >= 2014, got {min_date}"
         assert max_date.year <= 2021, f"Expected data to end <= 2021, got {max_date}"
 
+    @pytest.mark.integration
+    @pytest.mark.slow
     @pytest.mark.skip(reason="Requires specific Quandl CHRIS data format - skipped for CI")
     def test_realistic_price_ranges(self):
         """Test that prices are in realistic ranges (not obviously wrong units)."""
