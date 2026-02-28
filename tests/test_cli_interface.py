@@ -12,6 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from ml4t.data.cli_interface import cli
+from ml4t.data.storage.key_codec import encode_storage_key
 
 
 class TestCLIBasics:
@@ -216,7 +217,6 @@ class TestUpdateCommand:
     @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.IncrementalUpdater")
     @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_update_incremental(
         self, mock_dm_class, mock_updater_class, mock_tracker_class, mock_storage_class
     ):
@@ -247,6 +247,7 @@ class TestUpdateCommand:
         mock_result.success = True
         mock_result.rows_added = 5
         mock_result.rows_updated = 0
+        mock_result.gaps_filled = 0
         mock_updater.update_incremental.return_value = mock_result
 
         runner = CliRunner()
@@ -305,6 +306,49 @@ class TestUpdateCommand:
 
             assert result.exit_code == 0
             assert "Data already up to date" in result.output
+            mock_updater.determine_update_range.assert_called_once()
+            args = mock_updater.determine_update_range.call_args[0]
+            assert args[1] == "equities/daily/BTC"
+
+    @patch("ml4t.data.cli.core.HiveStorage")
+    @patch("ml4t.data.cli.core.MetadataTracker")
+    @patch("ml4t.data.cli.core.IncrementalUpdater")
+    def test_update_preserves_explicit_storage_key(
+        self, mock_updater_class, mock_tracker_class, mock_storage_class
+    ):
+        """Test update uses explicit key when canonical key is passed."""
+        mock_updater = MagicMock()
+        mock_updater_class.return_value = mock_updater
+        mock_storage = MagicMock()
+        mock_storage_class.return_value = mock_storage
+        mock_tracker = MagicMock()
+        mock_tracker_class.return_value = mock_tracker
+
+        mock_updater.determine_update_range.return_value = (
+            datetime(2024, 1, 10),
+            datetime(2024, 1, 10),
+            "none",
+        )
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(
+                cli,
+                [
+                    "update",
+                    "--symbol",
+                    "crypto/hourly/BTC",
+                    "--start",
+                    "2024-01-01",
+                    "--end",
+                    "2024-01-10",
+                ],
+            )
+
+            assert result.exit_code == 0
+            mock_updater.determine_update_range.assert_called_once()
+            args = mock_updater.determine_update_range.call_args[0]
+            assert args[1] == "crypto/hourly/BTC"
 
 
 class TestValidateCommand:
@@ -422,7 +466,6 @@ class TestStatusCommand:
 
     @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.HiveStorage")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_status_detailed(self, mock_storage_class, mock_tracker_class):
         """Test detailed status with --detailed flag."""
         mock_storage = MagicMock()
@@ -430,6 +473,15 @@ class TestStatusCommand:
         mock_tracker = MagicMock()
         mock_tracker_class.return_value = mock_tracker
 
+        mock_tracker.get_summary.return_value = {
+            "total_datasets": 1,
+            "healthy": 1,
+            "stale": 0,
+            "error": 0,
+            "total_rows": 10,
+            "total_updates": 1,
+            "by_asset_class": {"crypto": 1},
+        }
         mock_storage.list_keys.return_value = ["BTC"]
 
         # Mock detailed metadata
@@ -497,13 +549,12 @@ class TestBatchOperations:
             assert "Fetching 2 symbols from file" in result.output
 
     @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_fetch_with_config(self, mock_dm_class):
         """Test fetching with configuration file."""
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch.return_value = mock_df
+        mock_dm.fetch_batch.return_value = {"BTC": mock_df, "ETH": mock_df}
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -524,11 +575,18 @@ class TestBatchOperations:
                     "fetch",
                     "--config",
                     "config.json",
+                    "--start",
+                    "2020-01-01",
+                    "--end",
+                    "2020-01-31",
                 ],
             )
 
             assert result.exit_code == 0
             assert "Loading configuration from config.json" in result.output
+            mock_dm.fetch_batch.assert_called_once_with(
+                ["BTC", "ETH"], "2024-01-01", "2024-01-31", frequency="hourly"
+            )
 
 
 class TestProgressAndOutput:
@@ -573,37 +631,33 @@ class TestProgressAndOutput:
         # Progress indicators should be in output
         assert "Fetching 5 symbols" in result.output
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_quiet_mode(self):
         """Test quiet mode suppresses output."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["status", "--quiet"])
+        result = runner.invoke(cli, ["--quiet", "status"])
         assert result.exit_code == 0
         # Only essential output, no decorative elements
         assert "═" not in result.output  # No box drawing
 
-    @pytest.mark.skip(reason="Verbose output format is implementation-specific")
     def test_verbose_mode(self):
         """Test verbose mode shows detailed information."""
         runner = CliRunner()
         result = runner.invoke(cli, ["--verbose", "status"])
         assert result.exit_code == 0
-        # Should show debug information
-        assert "Configuration" in result.output or "Debug" in result.output
+        assert "Storage path:" in result.output
 
 
 class TestShellCompletion:
     """Test shell completion support."""
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_completion_installation(self):
         """Test shell completion installation command."""
         runner = CliRunner()
 
         # Test bash completion
-        result = runner.invoke(cli, ["--show-completion", "bash"])
+        result = runner.invoke(cli, ["show-completion", "bash"])
         assert result.exit_code == 0
-        assert "_QDATA_COMPLETE" in result.output
+        assert "_ML4T_DATA_COMPLETE" in result.output
 
     def test_completion_symbols(self):
         """Test symbol completion suggestions."""
@@ -1361,6 +1415,45 @@ datasets: {}
 
         # Should not crash
         assert result.exit_code == 0
+
+    def test_list_reads_top_level_manifest_fields(self):
+        """Test list command can parse manifests without custom payload."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage_path = Path("data")
+            metadata_dir = storage_path / ".metadata"
+            metadata_dir.mkdir(parents=True)
+
+            key = "futures/daily/ESZ4"
+            metadata_file = metadata_dir / f"{encode_storage_key(key)}.json"
+            metadata_file.write_text(
+                json.dumps(
+                    {
+                        "provider": "databento",
+                        "symbol": "ESZ4",
+                        "row_count": 15,
+                        "data_range": {
+                            "start": "2024-01-01T00:00:00",
+                            "end": "2024-01-15T00:00:00",
+                        },
+                        "last_update": "2024-01-15T12:00:00",
+                    }
+                )
+            )
+
+            Path("config.yaml").write_text(
+                """
+storage:
+  path: data
+datasets: {}
+"""
+            )
+
+            result = runner.invoke(cli, ["list", "-c", "config.yaml"])
+
+        assert result.exit_code == 0
+        assert "Futures (DataBento)" in result.output
+        assert "ESZ4" in result.output
 
 
 class TestDownloadFuturesCommand:

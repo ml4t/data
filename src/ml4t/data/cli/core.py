@@ -15,9 +15,12 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
+from ml4t.data.core.keys import is_storage_key, normalize_storage_key, parse_storage_key
 from ml4t.data.data_manager import DataManager
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage.key_codec import decode_storage_key
+from ml4t.data.storage.manifest import normalize_manifest_payload
 from ml4t.data.storage.metadata_tracker import MetadataTracker
 from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 
@@ -156,8 +159,15 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
 )
 @click.option("--provider", "-p", help="Provider to use for fetching")
 @click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--asset-class", default="equities", help="Asset class for storage key")
+@click.option(
+    "--frequency",
+    default="daily",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    help="Data frequency for storage key and fetching",
+)
 @click.pass_context
-def update(ctx, symbol, start, end, strategy, provider, storage_path):
+def update(ctx, symbol, start, end, strategy, provider, storage_path, asset_class, frequency):
     """Perform incremental data updates."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
@@ -169,6 +179,12 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
 
         update_strategy = UpdateStrategy[strategy.upper()]
         updater = IncrementalUpdater(strategy=update_strategy)
+        storage_key = normalize_storage_key(
+            symbol_or_key=symbol,
+            asset_class=asset_class,
+            frequency=frequency,
+        )
+        fetch_symbol = parse_storage_key(storage_key)[2] if is_storage_key(symbol) else symbol
 
         if not end:
             end = datetime.now().strftime("%Y-%m-%d")
@@ -177,14 +193,14 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
 
         actual_start, actual_end, update_type = updater.determine_update_range(
             storage,
-            symbol,
+            storage_key,
             datetime.strptime(start, "%Y-%m-%d"),
             datetime.strptime(end, "%Y-%m-%d"),
         )
 
         if update_type == "none":
             if not quiet:
-                print_success(f"Data already up to date for {symbol}")
+                print_success(f"Data already up to date for {fetch_symbol}")
             return
 
         if not quiet:
@@ -195,9 +211,10 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
 
         dm = DataManager()
         new_data = dm.fetch(
-            symbol,
+            fetch_symbol,
             actual_start.strftime("%Y-%m-%d"),
             actual_end.strftime("%Y-%m-%d"),
+            frequency=frequency,
             provider=provider,
         )
 
@@ -209,7 +226,7 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
         result = updater.update_incremental(
             storage,
             tracker,
-            symbol,
+            storage_key,
             new_data,
             provider=provider or "auto",
             strategy=update_strategy,
@@ -326,11 +343,20 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
                         ReturnOutlierDetector,
                         VolumeSpikeDetector,
                     )
+                    from ml4t.data.anomaly.config import (
+                        PriceStalenessConfig,
+                        ReturnOutlierConfig,
+                        VolumeSpikeConfig,
+                    )
 
                     manager = AnomalyManager()
-                    manager.detectors.append(PriceStalenessDetector(max_gap_days=3))
-                    manager.detectors.append(ReturnOutlierDetector(threshold=5.0))
-                    manager.detectors.append(VolumeSpikeDetector(threshold=10.0))
+                    manager.detectors.append(
+                        PriceStalenessDetector(PriceStalenessConfig(max_unchanged_days=3))
+                    )
+                    manager.detectors.append(
+                        ReturnOutlierDetector(ReturnOutlierConfig(threshold=5.0))
+                    )
+                    manager.detectors.append(VolumeSpikeDetector(VolumeSpikeConfig(threshold=10.0)))
 
                     report = manager.analyze(df, symbol=sym, asset_class="unknown")
 
@@ -568,18 +594,23 @@ def list_data(_ctx, config, storage_path):
             with open(meta_file) as f:
                 meta = json_module.load(f)
 
-            custom = meta.get("custom", {})
-            provider = custom.get("provider")
-            symbol = custom.get("symbol")
+            decoded_key = decode_storage_key(meta_file.stem)
+            normalized = normalize_manifest_payload(decoded_key, meta)
+            provider = normalized.get("provider")
+            symbol = normalized.get("symbol")
 
             if not symbol or not provider:
                 continue
 
+            data_range = normalized.get("data_range")
+            if not isinstance(data_range, dict):
+                data_range = {}
+
             data_info = {
-                "rows": meta.get("row_count", 0),
-                "start": custom.get("start_date", ""),
-                "end": custom.get("end_date", ""),
-                "updated": custom.get("last_updated", ""),
+                "rows": normalized.get("row_count", normalized.get("total_rows", 0)),
+                "start": data_range.get("start", ""),
+                "end": data_range.get("end", ""),
+                "updated": normalized.get("last_updated", ""),
             }
 
             if provider == "databento":

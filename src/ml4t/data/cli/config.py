@@ -140,7 +140,7 @@ def server(host, port, reload):
 
     except ImportError:
         console.print(
-            "[red]API dependencies not installed. Install with: pip install 'ml4t-data[api]'[/red]"
+            "[red]API dependencies not installed. Install with: uv add 'ml4t-data[all-providers]'[/red]"
         )
         raise click.Abort()
     except Exception as e:
@@ -150,7 +150,8 @@ def server(host, port, reload):
 
 @click.command("show-completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
-def show_completion(shell):
+@click.pass_context
+def show_completion(ctx, shell):
     """Show shell completion script.
 
     To enable completion:
@@ -164,17 +165,13 @@ def show_completion(shell):
     Fish:
         eval (env _ML4T_DATA_COMPLETE=fish_source ml4t-data)
     """
-    import os
-    import subprocess
+    from click.shell_completion import get_completion_class
 
-    env = os.environ.copy()
-    env["_QDATA_COMPLETE"] = f"{shell}_source"
+    completion_class = get_completion_class(shell)
+    if completion_class is None:
+        raise click.Abort()
 
-    result = subprocess.run(
-        [sys.executable, "-m", "mlquant.data.cli_interface"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    console.print(result.stdout)
+    root_command = ctx.find_root().command
+    complete_var = "_ML4T_DATA_COMPLETE"
+    completion = completion_class(root_command, {}, "ml4t-data", complete_var)
+    console.print(completion.source())
