@@ -251,6 +251,7 @@ class MacroDataManager:
                     end=self.config.end,
                     progress=False,
                     auto_adjust=True,
+                    threads=False,
                 )
 
                 if df.empty:
@@ -281,7 +282,7 @@ class MacroDataManager:
         # Join all series on timestamp
         result = dfs[0]
         for df in dfs[1:]:
-            result = result.join(df, on="timestamp", how="outer_coalesce")
+            result = result.join(df, on="timestamp", how="full", coalesce=True)
 
         return result.sort("timestamp")
 

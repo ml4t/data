@@ -290,7 +290,6 @@ class TestFetch:
             assert len(df) == 1
             assert df["Mkt-RF"][0] == 0.01
 
-    @pytest.mark.xfail(reason="Provider date filtering has type mismatch bug")
     def test_fetch_date_filtering(self):
         """Test fetch with start/end date filtering."""
         with tempfile.TemporaryDirectory() as tmpdir:
