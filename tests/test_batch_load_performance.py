@@ -52,6 +52,7 @@ def storage_with_data(tmp_path):
     return manager, symbols
 
 
+@pytest.mark.slow
 class TestBatchLoadFromStoragePerformance:
     """Performance tests for batch_load_from_storage()."""
 
@@ -320,6 +321,7 @@ class TestBatchLoadFromStorageFunctional:
             )
 
 
+@pytest.mark.slow
 class TestBatchLoadFromStorageBenchmarks:
     """Detailed benchmarks with performance reporting."""
 

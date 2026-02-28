@@ -100,6 +100,11 @@ def checkpoint_dir(tmp_path: Path, sample_3d_array: np.ndarray, mock_metadata: d
     with open(checkpoint_path / "metadata.json", "w") as f:
         json.dump(mock_metadata, f)
 
+    if HAS_TORCH:
+        import torch  # type: ignore[import-unresolved]
+
+        torch.save({"state_dict": {}, "generator": "timegan"}, checkpoint_path / "checkpoint.pt")
+
     return checkpoint_path
 
 

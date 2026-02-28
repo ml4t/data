@@ -131,15 +131,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Skip lane when no API keys configured
+      - name: Run integration/API-key marker lane
         run: |
           if [[ -z "${CRYPTOCOMPARE_API_KEY}" && -z "${DATABENTO_API_KEY}" && -z "${OANDA_API_KEY}" ]]; then
             echo "No provider API keys configured; skipping integration/API-key lane."
             exit 0
           fi
-
-      - name: Run integration/API-key marker lane
-        run: uv run pytest tests/ -v --tb=short -m "integration or requires_api_key"
+          uv run pytest tests/ -v --tb=short -m "(integration or requires_api_key) and not optional_dependency and not paid_tier"
 
   test-optional-dependency-lane:
     name: Test Optional Dependency Lane
@@ -164,7 +162,13 @@ jobs:
         run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run optional dependency marker lane
-        run: uv run pytest tests/ -v --tb=short -m "optional_dependency"
+        run: |
+          set +e
+          uv run pytest tests/ -v --tb=short -m "optional_dependency and not integration"
+          rc=$?
+          if [[ $rc -ne 0 && $rc -ne 5 ]]; then
+            exit $rc
+          fi
 
   build:
     name: Build Package

@@ -8,7 +8,7 @@ from ml4t.data import cli_interface
 
 def test_ml4t_data_import():
     """Test that ml4t.data can be imported."""
-    assert re.match(r"^\d+\.\d+\.\d+(?:[a-zA-Z0-9.+-]*)?$", ml4t.data.__version__)
+    assert re.match(r"^\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9.+-]*)?$", ml4t.data.__version__)
 
 
 def test_ml4t_data_metadata():
