@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from ml4t.data.storage.key_codec import encode_storage_key
 from ml4t.data.storage.metadata_tracker import (
     DatasetMetadata,
     MetadataTracker,
@@ -393,3 +394,64 @@ class TestMetadataTracker:
         status, message = tracker.check_health(key)
         assert status == "error"
         assert "errors in last 5 updates" in message
+
+    def test_get_metadata_from_storage_manifest(self, tmp_path: Path) -> None:
+        """Test manifest metadata is converted to DatasetMetadata."""
+        tracker = MetadataTracker(base_path=tmp_path)
+        key = "equities/daily/AAPL"
+        manifest_path = tracker.metadata_dir / f"{encode_storage_key(key)}.json"
+
+        manifest_path.write_text(
+            """{
+  "last_updated": "2024-01-15T00:00:00",
+  "row_count": 123,
+  "custom": {
+    "provider": "yahoo",
+    "symbol": "AAPL",
+    "asset_class": "equities",
+    "frequency": "daily",
+    "start_date": "2024-01-01T00:00:00",
+    "end_date": "2024-01-15T00:00:00"
+  }
+}"""
+        )
+
+        metadata = tracker.get_metadata(key)
+        assert metadata is not None
+        assert metadata.symbol == "AAPL"
+        assert metadata.provider == "yahoo"
+        assert metadata.asset_class == "equities"
+        assert metadata.frequency == "daily"
+        assert metadata.total_rows == 123
+
+    def test_summary_and_updates_include_manifest_metadata(self, tmp_path: Path) -> None:
+        """Test summary and list_updates include manifest-only datasets."""
+        tracker = MetadataTracker(base_path=tmp_path)
+        key = "futures/daily/ESZ4"
+        manifest_path = tracker.metadata_dir / f"{encode_storage_key(key)}.json"
+
+        manifest_path.write_text(
+            """{
+  "provider": "databento",
+  "symbol": "ESZ4",
+  "last_update": "2024-02-01T00:00:00",
+  "row_count": 42,
+  "data_range": {
+    "start": "2024-01-01T00:00:00",
+    "end": "2024-02-01T00:00:00"
+  }
+}"""
+        )
+
+        summary = tracker.get_summary()
+        assert summary["total_datasets"] == 1
+        assert summary["total_rows"] == 42
+        assert summary["unique_providers"] == 1
+        assert summary["unique_symbols"] == 1
+
+        updates = tracker.list_updates()
+        assert len(updates) == 1
+        assert updates[0].symbol == "ESZ4"
+        assert updates[0].provider == "databento"
+        assert updates[0].asset_class == "futures"
+        assert updates[0].frequency == "daily"

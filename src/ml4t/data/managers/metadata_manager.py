@@ -14,6 +14,9 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.storage.key_codec import encode_storage_key
+from ml4t.data.storage.manifest import normalize_manifest_payload
+
 logger = structlog.get_logger()
 
 
@@ -119,16 +122,25 @@ class MetadataManager:
         Returns:
             Metadata dict or None if not found
         """
-        if not hasattr(self.storage, "metadata_dir"):
-            return None
-
         try:
-            metadata_file = self.storage.metadata_dir / f"{key.replace('/', '_')}.json"
-            if not metadata_file.exists():
+            if hasattr(self.storage, "get_metadata"):
+                metadata = self.storage.get_metadata(key)
+                if metadata is not None:
+                    return normalize_manifest_payload(key, metadata)
+
+            if not hasattr(self.storage, "metadata_dir"):
                 return None
 
-            with open(metadata_file) as f:
-                return json.load(f)
+            metadata_files = [
+                self.storage.metadata_dir / f"{encode_storage_key(key)}.json",
+                self.storage.metadata_dir / f"{key.replace('/', '_')}.json",
+            ]
+
+            for metadata_file in metadata_files:
+                if metadata_file.exists():
+                    with open(metadata_file) as f:
+                        return normalize_manifest_payload(key, json.load(f))
+            return None
         except Exception as e:
             logger.warning(f"Failed to read metadata for {key}: {e}")
             return None

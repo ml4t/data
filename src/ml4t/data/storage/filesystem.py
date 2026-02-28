@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import time
-import warnings
 from pathlib import Path
 
 import filelock
@@ -54,12 +53,6 @@ class FileSystemBackend(StorageBackend):
             max_retries: Maximum number of lock acquisition retries
             retry_base_delay: Base delay for exponential backoff (seconds)
         """
-        warnings.warn(
-            "FileSystemBackend is deprecated and will be removed in v1.0. "
-            "Use HiveStorage instead for better performance.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self.data_root = Path(data_root)
         self.data_root.mkdir(parents=True, exist_ok=True)
 

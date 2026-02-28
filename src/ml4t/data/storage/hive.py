@@ -17,6 +17,13 @@ import polars as pl
 from filelock import FileLock
 
 from .backend import StorageBackend, StorageConfig
+from .key_codec import decode_storage_key, encode_storage_key
+from .manifest import (
+    manifest_from_write,
+    manifest_with_incremental_update,
+    normalize_manifest_payload,
+    upgrade_manifest_payload,
+)
 
 if TYPE_CHECKING:
     from ml4t.data.core.models import DataObject
@@ -56,6 +63,46 @@ class HiveStorage(StorageBackend):
         super().__init__(config)
         self.metadata_dir = self.base_path / ".metadata"
         self.metadata_dir.mkdir(exist_ok=True)
+
+    def _encoded_key_path(self, key: str) -> Path:
+        """Return encoded key directory path."""
+        return self.base_path / encode_storage_key(key)
+
+    def _legacy_key_path(self, key: str) -> Path:
+        """Return legacy slash-to-underscore key directory path."""
+        return self.base_path / key.replace("/", "_")
+
+    def _resolve_existing_key_path(self, key: str) -> Path | None:
+        """Resolve existing key path, preferring encoded format."""
+        encoded = self._encoded_key_path(key)
+        if encoded.exists():
+            return encoded
+
+        legacy = self._legacy_key_path(key)
+        if legacy.exists():
+            return legacy
+
+        return None
+
+    def _encoded_metadata_path(self, key: str) -> Path:
+        """Return encoded metadata file path."""
+        return self.metadata_dir / f"{encode_storage_key(key)}.json"
+
+    def _legacy_metadata_path(self, key: str) -> Path:
+        """Return legacy metadata file path."""
+        return self.metadata_dir / f"{key.replace('/', '_')}.json"
+
+    def _resolve_existing_metadata_path(self, key: str) -> Path | None:
+        """Resolve existing metadata file path, preferring encoded format."""
+        encoded = self._encoded_metadata_path(key)
+        if encoded.exists():
+            return encoded
+
+        legacy = self._legacy_metadata_path(key)
+        if legacy.exists():
+            return legacy
+
+        return None
 
     def _get_partition_columns(self) -> list[str]:
         """Get partition column names based on configured granularity.
@@ -299,7 +346,7 @@ class HiveStorage(StorageBackend):
         df = self._add_partition_columns(df, partition_cols)
 
         # Create key directory
-        key_path = self.base_path / key.replace("/", "_")
+        key_path = self._encoded_key_path(key)
         key_path.mkdir(exist_ok=True)
 
         # Group by partitions and write
@@ -322,13 +369,15 @@ class HiveStorage(StorageBackend):
         if self.config.metadata_tracking:
             self._update_metadata(
                 key,
-                {
-                    "last_updated": datetime.now().isoformat(),
-                    "partitions": partitions_written,
-                    "row_count": len(df),
-                    "schema": list(df.columns),
-                    "custom": metadata or {},
-                },
+                manifest_from_write(
+                    key,
+                    row_count=len(df),
+                    schema=list(df.columns),
+                    custom=metadata or {},
+                    range_start=df["timestamp"].min(),
+                    range_end=df["timestamp"].max(),
+                    partitions=partitions_written,
+                ),
             )
 
         return key_path
@@ -351,9 +400,8 @@ class HiveStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        key_path = self.base_path / key.replace("/", "_")
-
-        if not key_path.exists():
+        key_path = self._resolve_existing_key_path(key)
+        if key_path is None:
             raise KeyError(f"Key '{key}' not found in storage")
 
         # Get partition columns based on granularity
@@ -396,8 +444,7 @@ class HiveStorage(StorageBackend):
         keys = []
         for path in self.base_path.iterdir():
             if path.is_dir() and not path.name.startswith("."):
-                # Convert back from filesystem-safe name
-                keys.append(path.name.replace("_", "/"))
+                keys.append(decode_storage_key(path.name))
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -409,8 +456,7 @@ class HiveStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        key_path = self.base_path / key.replace("/", "_")
-        return key_path.exists()
+        return self._resolve_existing_key_path(key) is not None
 
     def delete(self, key: str) -> bool:
         """Delete all data for a key.
@@ -421,17 +467,19 @@ class HiveStorage(StorageBackend):
         Returns:
             True if successful
         """
-        key_path = self.base_path / key.replace("/", "_")
-        if key_path.exists():
+        key_path = self._resolve_existing_key_path(key)
+        deleted = False
+        if key_path is not None:
             shutil.rmtree(key_path)
+            deleted = True
 
-            # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        # Remove metadata in both new and legacy locations.
+        for metadata_file in (self._encoded_metadata_path(key), self._legacy_metadata_path(key)):
             if metadata_file.exists():
                 metadata_file.unlink()
+                deleted = True
 
-            return True
-        return False
+        return deleted
 
     def get_metadata(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a key.
@@ -442,11 +490,19 @@ class HiveStorage(StorageBackend):
         Returns:
             Metadata dict or None
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-        if metadata_file.exists():
-            with open(metadata_file) as f:
-                return json.load(f)
-        return None
+        metadata_file = self._resolve_existing_metadata_path(key)
+        if metadata_file is None:
+            return None
+        with open(metadata_file) as f:
+            raw = json.load(f)
+        upgraded, changed = upgrade_manifest_payload(
+            key,
+            raw,
+            emit_deprecation_warning=True,
+        )
+        if changed:
+            self._update_metadata(key, upgraded)
+        return normalize_manifest_payload(key, upgraded)
 
     def _atomic_write(self, df: pl.DataFrame, target_path: Path) -> None:
         """Write DataFrame atomically using temp file pattern.
@@ -456,16 +512,20 @@ class HiveStorage(StorageBackend):
             target_path: Target file path
         """
         # Write to temp file first
-        with tempfile.NamedTemporaryFile(
-            dir=target_path.parent, suffix=".parquet.tmp", delete=False
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=target_path.parent, suffix=".parquet.tmp", delete=False
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
 
-            # Write with compression
-            df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
-
-            # Atomic rename
-            tmp_path.replace(target_path)
+            if tmp_path is not None:
+                tmp_path.replace(target_path)
+        except Exception:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
         """Update metadata for a key.
@@ -474,10 +534,10 @@ class HiveStorage(StorageBackend):
             key: Storage key
             metadata: Metadata to store
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = self._encoded_metadata_path(key)
 
         if self.config.enable_locking:
-            lock_file = self.metadata_dir / f"{key.replace('/', '_')}.lock"
+            lock_file = self.metadata_dir / f"{encode_storage_key(key)}.lock"
             lock = FileLock(lock_file, timeout=10)
 
             with lock:
@@ -492,12 +552,20 @@ class HiveStorage(StorageBackend):
             path: Metadata file path
             metadata: Metadata to write
         """
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, mode="w", suffix=".json.tmp", delete=False
-        ) as tmp_file:
-            json.dump(metadata, tmp_file, indent=2, default=str)
-            tmp_path = Path(tmp_file.name)
-            tmp_path.replace(path)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, mode="w", suffix=".json.tmp", delete=False
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                json.dump(metadata, tmp_file, indent=2, default=str)
+
+            if tmp_path is not None:
+                tmp_path.replace(path)
+        except Exception:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     # Incremental update methods for IncrementalStorageBackend protocol
 
@@ -578,21 +646,23 @@ class HiveStorage(StorageBackend):
         key = f"{provider}/{symbol}"
 
         # Read existing data
+        existing_rows = 0
         if self.exists(key):
             existing_df = self.read(key).collect()
+            existing_rows = len(existing_df)
             combined = pl.concat([existing_df, data])
         else:
             combined = data
 
         # Deduplicate by timestamp, keeping latest
-        rows_before = len(combined)
         combined = combined.unique(subset=["timestamp"], keep="last").sort("timestamp")
         rows_after = len(combined)
+        rows_added = max(0, rows_after - existing_rows)
 
         # Write back to storage (correct parameter order: data, key, metadata)
         self.write(combined, key)
 
-        return rows_after - rows_before
+        return rows_added
 
     def get_combined_file_path(self, symbol: str, provider: str) -> Path:
         """Get path to the main combined data directory.
@@ -605,7 +675,7 @@ class HiveStorage(StorageBackend):
             Path to combined data directory
         """
         key = f"{provider}/{symbol}"
-        return self.base_path / key.replace("/", "_")
+        return self._encoded_key_path(key)
 
     def read_data(
         self,
@@ -650,38 +720,24 @@ class HiveStorage(StorageBackend):
             chunk_file: Name of the chunk file saved
         """
         key = f"{provider}/{symbol}"
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = self._encoded_metadata_path(key)
 
         # Load existing metadata or create new
+        existing: dict[str, Any] | None = None
         if metadata_file.exists():
             with open(metadata_file) as f:
-                metadata = json.load(f)
-        else:
-            metadata = {
-                "symbol": symbol,
-                "provider": provider,
-                "first_update": last_update.isoformat(),
-                "update_history": [],
-            }
-
-        # Update metadata
-        metadata["last_update"] = last_update.isoformat()
-
-        # Ensure update_history exists
-        if "update_history" not in metadata:
-            metadata["update_history"] = []
-
-        metadata["update_history"].append(
-            {
-                "timestamp": last_update.isoformat(),
-                "records_added": records_added,
-                "chunk_file": chunk_file,
-            }
-        )
-
-        # Keep only last 100 updates in history
-        if len(metadata["update_history"]) > 100:
-            metadata["update_history"] = metadata["update_history"][-100:]
+                existing = json.load(f)
 
         # Write metadata
+        metadata = manifest_with_incremental_update(
+            key,
+            existing
+            or {
+                "provider": provider,
+                "symbol": symbol,
+            },
+            last_update=last_update,
+            records_added=records_added,
+            chunk_file=chunk_file,
+        )
         self._update_metadata(key, metadata)

@@ -264,57 +264,53 @@ class TestMultiAssetWorkflows:
 class TestPerformanceIntegration:
     """Test performance characteristics across integrated features."""
 
-    @pytest.mark.skip(reason="Performance targets not finalized")
-    def test_batch_load_universe_performance_target(self):
-        """Validate loading 10 symbols completes in reasonable time.
-
-        This tests real-world performance with network fetching and rate limiting.
-        Yahoo Finance has rate limiting (~2s between requests with max_workers=4),
-        so 10 symbols will take ~20-30s. This is expected and acceptable.
-
-        The key validation is that:
-        1. All symbols fetch successfully
-        2. Multi-asset schema is correct
-        3. Parallel fetching works (not sequential)
-        """
+    def test_batch_load_universe_performance_target(self, monkeypatch):
+        """Validate mocked universe batch-load completes within deterministic budget."""
         # Create small custom universe
         test_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"]
         Universe.add_custom("test_perf_10", test_symbols)
 
         try:
             manager = DataManager(output_format="polars")
+            base_time = datetime(2024, 1, 1, tzinfo=UTC)
+
+            def mock_fetch(symbol, start, end, frequency="daily", provider=None, **kwargs):
+                _ = (start, end, frequency, provider, kwargs)
+                return pl.DataFrame(
+                    {
+                        "timestamp": [base_time, base_time + timedelta(days=1)],
+                        "open": [100.0, 101.0],
+                        "high": [101.0, 102.0],
+                        "low": [99.0, 100.0],
+                        "close": [100.5, 101.5],
+                        "volume": [1_000_000.0, 1_100_000.0],
+                    }
+                )
+
+            monkeypatch.setattr(manager._batch_manager.fetch_manager, "fetch", mock_fetch)
 
             # Time the operation
             start_time = time.perf_counter()
 
-            # This fetches from Yahoo Finance with rate limiting
-            # We test with a very small date range to be respectful to providers
             df = manager.batch_load_universe(
                 universe="test_perf_10",
                 start="2024-01-01",
-                end="2024-01-05",  # Just 5 days
+                end="2024-01-05",
                 provider="yahoo",
-                fail_on_partial=False,  # Graceful degradation
+                fail_on_partial=False,
             )
 
             elapsed = time.perf_counter() - start_time
 
-            # Verify we got data for all symbols
+            # Verify all symbols are present and schema is valid
             assert len(df) > 0
             assert "symbol" in df.columns
             assert MultiAssetSchema.validate(df, strict=True)
-
-            # Should get data for most/all symbols
             unique_symbols = df["symbol"].n_unique()
-            assert unique_symbols >= 8, f"Expected at least 8 symbols, got {unique_symbols}"
+            assert unique_symbols == 10, f"Expected 10 symbols, got {unique_symbols}"
 
-            # Performance expectation: with rate limiting, this will take 20-30s
-            # This is acceptable for network fetching with proper rate limiting
-            print(f"\n✓ Loaded {unique_symbols} symbols in {elapsed:.3f}s")
-            print(f"  (Rate-limited network fetch: ~{elapsed / unique_symbols:.1f}s per symbol)")
-
-            # Sanity check: should complete in < 60s (very conservative)
-            assert elapsed < 60.0, f"Expected <60s, got {elapsed:.3f}s"
+            # Deterministic budget for mocked I/O path in CI
+            assert elapsed < 2.0, f"Expected <2s, got {elapsed:.3f}s"
 
         finally:
             Universe.remove_custom("test_perf_10")
@@ -596,15 +592,32 @@ class TestErrorHandling:
                 fetch_missing=False,
             )
 
-    @pytest.mark.skip(reason="Error handling not implemented")
-    def test_partial_failures_with_graceful_degradation(self):
-        """Test that partial failures can be handled gracefully."""
+    def test_partial_failures_with_graceful_degradation(self, monkeypatch):
+        """Test graceful handling when some symbols fail in batch fetch."""
         manager = DataManager(output_format="polars")
+        base_time = datetime(2024, 1, 1, tzinfo=UTC)
+
+        def mock_fetch(symbol, start, end, frequency="daily", provider=None, **kwargs):
+            _ = (start, end, frequency, provider, kwargs)
+            if symbol == "INVALID_SYMBOL_123":
+                raise ValueError("symbol not found")
+            return pl.DataFrame(
+                {
+                    "timestamp": [base_time, base_time + timedelta(days=1)],
+                    "open": [100.0, 101.0],
+                    "high": [101.0, 102.0],
+                    "low": [99.0, 100.0],
+                    "close": [100.5, 101.5],
+                    "volume": [1_000_000.0, 1_100_000.0],
+                }
+            )
+
+        monkeypatch.setattr(manager._batch_manager.fetch_manager, "fetch", mock_fetch)
 
         # Mix of valid and invalid symbols
         symbols = ["AAPL", "INVALID_SYMBOL_123", "MSFT"]
 
-        # With fail_on_partial=False, should get data for valid symbols
+        # With fail_on_partial=False, only valid symbols should be returned
         df = manager.batch_load(
             symbols=symbols,
             start="2024-01-01",
@@ -613,13 +626,24 @@ class TestErrorHandling:
             fail_on_partial=False,
         )
 
-        # Should have data for at least one valid symbol
+        # Verify partial success behavior
         unique_symbols = df["symbol"].unique().to_list()
-        assert "AAPL" in unique_symbols or "MSFT" in unique_symbols
+        assert "AAPL" in unique_symbols
+        assert "MSFT" in unique_symbols
         assert "INVALID_SYMBOL_123" not in unique_symbols
 
-        # Should still be valid multi-asset format
+        # Should still satisfy multi-asset invariants
         assert MultiAssetSchema.validate(df, strict=True)
+
+        # fail_on_partial=True should raise on same input
+        with pytest.raises(ValueError, match="Batch load failed for 1 symbols"):
+            manager.batch_load(
+                symbols=symbols,
+                start="2024-01-01",
+                end="2024-01-05",
+                provider="yahoo",
+                fail_on_partial=True,
+            )
 
     def test_format_conversion_with_missing_data(self):
         """Test format conversion handles missing data gracefully."""

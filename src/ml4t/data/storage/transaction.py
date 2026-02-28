@@ -9,11 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import structlog
 
 from ml4t.data.core.models import DataObject
-from ml4t.data.storage.base import StorageBackend
 
 logger = structlog.get_logger()
 
@@ -34,12 +34,22 @@ class TransactionOperation:
     operation_type: str  # "write", "update", "delete"
     key: str
     data: DataObject | None = None
-    backup_data: DataObject | None = None
+    backup_data: BackupSnapshot | None = None
+    result_key: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
 class TransactionError(Exception):
     """Raised when a transaction operation fails."""
+
+
+@dataclass
+class BackupSnapshot:
+    """Snapshot of existing data and metadata for rollback."""
+
+    key: str
+    data: Any
+    metadata: dict[str, Any] | None = None
 
 
 class Transaction:
@@ -52,7 +62,7 @@ class Transaction:
 
     def __init__(
         self,
-        storage: StorageBackend,
+        storage: Any,
         transaction_id: str | None = None,
         backup_dir: Path | None = None,
     ):
@@ -73,7 +83,7 @@ class Transaction:
 
         logger.info("Transaction started", transaction_id=self.transaction_id)
 
-    def _create_backup(self, key: str) -> DataObject | None:
+    def _create_backup(self, key: str) -> BackupSnapshot | None:
         """
         Create a backup of existing data.
 
@@ -86,8 +96,14 @@ class Transaction:
         try:
             if self.storage.exists(key):
                 data = self.storage.read(key)
+                metadata = None
+                if hasattr(self.storage, "get_metadata"):
+                    try:
+                        metadata = self.storage.get_metadata(key)
+                    except Exception:
+                        metadata = None
                 logger.debug("Created backup", key=key, transaction_id=self.transaction_id)
-                return data
+                return BackupSnapshot(key=key, data=data, metadata=metadata)
         except Exception as e:
             logger.warning(
                 "Failed to create backup",
@@ -96,6 +112,25 @@ class Transaction:
                 transaction_id=self.transaction_id,
             )
         return None
+
+    def _write_snapshot(self, snapshot: BackupSnapshot) -> None:
+        """Write a backup snapshot back to storage."""
+        if isinstance(snapshot.data, DataObject):
+            self.storage.write(snapshot.data)
+            return
+
+        custom_metadata: dict[str, Any] | None = None
+        if snapshot.metadata:
+            if isinstance(snapshot.metadata.get("custom"), dict):
+                custom_metadata = snapshot.metadata["custom"]
+            else:
+                custom_metadata = snapshot.metadata
+
+        try:
+            self.storage.write(snapshot.data, snapshot.key, custom_metadata)
+        except TypeError:
+            # Fallback for backends that only accept (data, key)
+            self.storage.write(snapshot.data, snapshot.key)
 
     def write(self, data: DataObject) -> str:
         """
@@ -132,6 +167,7 @@ class Transaction:
         try:
             # Write the DataObject directly (new API)
             result_key = self.storage.write(data)
+            operation.result_key = result_key
             logger.info(
                 "Transaction write completed",
                 key=result_key,
@@ -184,6 +220,7 @@ class Transaction:
             self.storage.delete(key)
             # Write the DataObject directly (new API)
             result_key = self.storage.write(data)
+            operation.result_key = result_key
             logger.info(
                 "Transaction update completed",
                 key=result_key,
@@ -295,10 +332,21 @@ class Transaction:
         for operation in reversed(self.operations):
             try:
                 if operation.operation_type in ("write", "update"):
+                    current_key = operation.result_key or operation.key
+
+                    # If update wrote to a different key, clean up the new key first.
+                    if (
+                        operation.operation_type == "update"
+                        and operation.result_key
+                        and operation.result_key != operation.key
+                        and self.storage.exists(operation.result_key)
+                    ):
+                        self.storage.delete(operation.result_key)
+
                     # Restore backup or delete if no backup
                     if operation.backup_data:
                         # Restore previous data
-                        self.storage.write(operation.backup_data)
+                        self._write_snapshot(operation.backup_data)
                         logger.debug(
                             "Restored backup",
                             key=operation.key,
@@ -306,17 +354,17 @@ class Transaction:
                         )
                     else:
                         # No backup means it was new, so delete it
-                        if self.storage.exists(operation.key):
-                            self.storage.delete(operation.key)
+                        if self.storage.exists(current_key):
+                            self.storage.delete(current_key)
                             logger.debug(
                                 "Deleted new data",
-                                key=operation.key,
+                                key=current_key,
                                 transaction_id=self.transaction_id,
                             )
 
                 elif operation.operation_type == "delete" and operation.backup_data:
                     # Restore deleted data
-                    self.storage.write(operation.backup_data)
+                    self._write_snapshot(operation.backup_data)
                     logger.debug(
                         "Restored deleted data",
                         key=operation.key,
@@ -368,7 +416,7 @@ class Transaction:
             logger.info(
                 "Exception in transaction, rolling back",
                 transaction_id=self.transaction_id,
-                exception=str(exc_val),
+                exception_message=str(exc_val),
             )
             try:
                 self.rollback()
@@ -387,7 +435,7 @@ class TransactionalStorage:
     Wrapper for storage backend that provides transaction support.
     """
 
-    def __init__(self, storage: StorageBackend):
+    def __init__(self, storage: Any):
         """
         Initialize transactional storage.
 
@@ -472,9 +520,9 @@ class TransactionalStorage:
             return self._current_transaction.delete(key)
         return self.storage.delete(key)
 
-    def read(self, key: str) -> DataObject:
+    def read(self, key: str, *args, **kwargs):
         """Read data from storage."""
-        return self.storage.read(key)
+        return self.storage.read(key, *args, **kwargs)
 
     def exists(self, key: str) -> bool:
         """Check if data exists."""
@@ -482,4 +530,10 @@ class TransactionalStorage:
 
     def list_keys(self, prefix: str = "") -> list[str]:
         """List storage keys."""
-        return self.storage.list_keys(prefix)
+        try:
+            return self.storage.list_keys(prefix)
+        except TypeError:
+            keys = self.storage.list_keys()
+            if prefix:
+                return [key for key in keys if key.startswith(prefix)]
+            return keys

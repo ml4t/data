@@ -220,15 +220,21 @@ class AsyncStorageAdapter:
         """
         self.async_backend = async_backend
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._owns_loop = False
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         """Get or create event loop."""
         if self._loop is None or self._loop.is_closed():
             try:
-                self._loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
                 self._loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self._loop)
+                self._owns_loop = True
+            else:
+                raise RuntimeError(
+                    "AsyncStorageAdapter sync methods cannot run inside an active event loop; "
+                    "use the async backend directly."
+                )
         return self._loop
 
     def write(self, data):
@@ -255,6 +261,29 @@ class AsyncStorageAdapter:
         """Sync wrapper for async list_keys."""
         loop = self._get_loop()
         return loop.run_until_complete(self.async_backend.list_keys(prefix))
+
+    def close(self) -> None:
+        """Close the private event loop created by this adapter."""
+        if self._owns_loop and self._loop is not None and not self._loop.is_closed():
+            self._loop.close()
+        self._loop = None
+        self._owns_loop = False
+
+    def __enter__(self) -> AsyncStorageAdapter:
+        """Support context manager usage for deterministic loop cleanup."""
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback) -> bool:
+        """Close owned loop on context exit."""
+        self.close()
+        return False
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for owned event loops."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def create_async_backend(data_root: Path, **kwargs) -> AsyncFileSystemBackend:

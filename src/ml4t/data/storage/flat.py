@@ -16,6 +16,8 @@ import polars as pl
 from filelock import FileLock
 
 from .backend import StorageBackend, StorageConfig
+from .key_codec import decode_storage_key, encode_storage_key
+from .manifest import manifest_from_write, normalize_manifest_payload, upgrade_manifest_payload
 
 
 class FlatStorage(StorageBackend):
@@ -39,6 +41,46 @@ class FlatStorage(StorageBackend):
         self.metadata_dir = self.base_path / ".metadata"
         self.metadata_dir.mkdir(exist_ok=True)
 
+    def _encoded_data_path(self, key: str) -> Path:
+        """Return encoded data file path."""
+        return self.base_path / f"{encode_storage_key(key)}.parquet"
+
+    def _legacy_data_path(self, key: str) -> Path:
+        """Return legacy data file path."""
+        return self.base_path / f"{key.replace('/', '_')}.parquet"
+
+    def _resolve_existing_data_path(self, key: str) -> Path | None:
+        """Resolve existing data file path, preferring encoded format."""
+        encoded = self._encoded_data_path(key)
+        if encoded.exists():
+            return encoded
+
+        legacy = self._legacy_data_path(key)
+        if legacy.exists():
+            return legacy
+
+        return None
+
+    def _encoded_metadata_path(self, key: str) -> Path:
+        """Return encoded metadata file path."""
+        return self.metadata_dir / f"{encode_storage_key(key)}.json"
+
+    def _legacy_metadata_path(self, key: str) -> Path:
+        """Return legacy metadata file path."""
+        return self.metadata_dir / f"{key.replace('/', '_')}.json"
+
+    def _resolve_existing_metadata_path(self, key: str) -> Path | None:
+        """Resolve existing metadata file path, preferring encoded format."""
+        encoded = self._encoded_metadata_path(key)
+        if encoded.exists():
+            return encoded
+
+        legacy = self._legacy_metadata_path(key)
+        if legacy.exists():
+            return legacy
+
+        return None
+
     def write(
         self, data: pl.LazyFrame | pl.DataFrame, key: str, metadata: dict[str, Any] | None = None
     ) -> Path:
@@ -56,7 +98,7 @@ class FlatStorage(StorageBackend):
         lazy_data = self._ensure_lazy(data)
 
         # Create file path
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
+        file_path = self._encoded_data_path(key)
 
         # Collect and write atomically
         df = lazy_data.collect()
@@ -66,14 +108,16 @@ class FlatStorage(StorageBackend):
         if self.config.metadata_tracking:
             self._update_metadata(
                 key,
-                {
-                    "last_updated": datetime.now().isoformat(),
-                    "file_path": str(file_path.relative_to(self.base_path)),
-                    "row_count": len(df),
-                    "schema": list(df.columns),
-                    "file_size_mb": file_path.stat().st_size / (1024 * 1024),
-                    "custom": metadata or {},
-                },
+                manifest_from_write(
+                    key,
+                    row_count=len(df),
+                    schema=list(df.columns),
+                    custom=metadata or {},
+                    range_start=df["timestamp"].min() if "timestamp" in df.columns else None,
+                    range_end=df["timestamp"].max() if "timestamp" in df.columns else None,
+                    file_path=str(file_path.relative_to(self.base_path)),
+                    file_size_mb=file_path.stat().st_size / (1024 * 1024),
+                ),
             )
 
         return file_path
@@ -96,9 +140,8 @@ class FlatStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-
-        if not file_path.exists():
+        file_path = self._resolve_existing_data_path(key)
+        if file_path is None:
             raise KeyError(f"Key '{key}' not found in storage")
 
         # Use lazy reading
@@ -109,7 +152,7 @@ class FlatStorage(StorageBackend):
             lf = lf.select(columns)
 
         # Apply date filters if timestamp column exists
-        schema = lf.schema
+        schema = lf.collect_schema()
         if "timestamp" in schema:
             if start_date:
                 lf = lf.filter(pl.col("timestamp") >= start_date)
@@ -126,9 +169,7 @@ class FlatStorage(StorageBackend):
         """
         keys = []
         for path in self.base_path.glob("*.parquet"):
-            # Convert from filesystem-safe name
-            key = path.stem.replace("_", "/")
-            keys.append(key)
+            keys.append(decode_storage_key(path.stem))
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -140,8 +181,7 @@ class FlatStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-        return file_path.exists()
+        return self._resolve_existing_data_path(key) is not None
 
     def delete(self, key: str) -> bool:
         """Delete data for a key.
@@ -152,17 +192,18 @@ class FlatStorage(StorageBackend):
         Returns:
             True if successful
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-        if file_path.exists():
+        deleted = False
+        file_path = self._resolve_existing_data_path(key)
+        if file_path is not None:
             file_path.unlink()
+            deleted = True
 
-            # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        for metadata_file in (self._encoded_metadata_path(key), self._legacy_metadata_path(key)):
             if metadata_file.exists():
                 metadata_file.unlink()
+                deleted = True
 
-            return True
-        return False
+        return deleted
 
     def get_metadata(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a key.
@@ -173,11 +214,19 @@ class FlatStorage(StorageBackend):
         Returns:
             Metadata dict or None
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-        if metadata_file.exists():
-            with open(metadata_file) as f:
-                return json.load(f)
-        return None
+        metadata_file = self._resolve_existing_metadata_path(key)
+        if metadata_file is None:
+            return None
+        with open(metadata_file) as f:
+            raw = json.load(f)
+        upgraded, changed = upgrade_manifest_payload(
+            key,
+            raw,
+            emit_deprecation_warning=True,
+        )
+        if changed:
+            self._update_metadata(key, upgraded)
+        return normalize_manifest_payload(key, upgraded)
 
     def _atomic_write(self, df: pl.DataFrame, target_path: Path) -> None:
         """Write DataFrame atomically using temp file pattern.
@@ -187,16 +236,20 @@ class FlatStorage(StorageBackend):
             target_path: Target file path
         """
         # Write to temp file first
-        with tempfile.NamedTemporaryFile(
-            dir=target_path.parent, suffix=".parquet.tmp", delete=False
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=target_path.parent, suffix=".parquet.tmp", delete=False
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
 
-            # Write with compression
-            df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
-
-            # Atomic rename
-            tmp_path.replace(target_path)
+            if tmp_path is not None:
+                tmp_path.replace(target_path)
+        except Exception:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
         """Update metadata for a key.
@@ -205,10 +258,10 @@ class FlatStorage(StorageBackend):
             key: Storage key
             metadata: Metadata to store
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = self._encoded_metadata_path(key)
 
         if self.config.enable_locking:
-            lock_file = self.metadata_dir / f"{key.replace('/', '_')}.lock"
+            lock_file = self.metadata_dir / f"{encode_storage_key(key)}.lock"
             lock = FileLock(lock_file, timeout=10)
 
             with lock:
@@ -223,9 +276,17 @@ class FlatStorage(StorageBackend):
             path: Metadata file path
             metadata: Metadata to write
         """
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, mode="w", suffix=".json.tmp", delete=False
-        ) as tmp_file:
-            json.dump(metadata, tmp_file, indent=2, default=str)
-            tmp_path = Path(tmp_file.name)
-            tmp_path.replace(path)
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, mode="w", suffix=".json.tmp", delete=False
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                json.dump(metadata, tmp_file, indent=2, default=str)
+
+            if tmp_path is not None:
+                tmp_path.replace(path)
+        except Exception:
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink()
+            raise

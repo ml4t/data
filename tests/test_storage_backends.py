@@ -1,5 +1,6 @@
 """Tests for ML4T Data Hive and Flat storage backends."""
 
+import json
 import shutil
 import tempfile
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from ml4t.data.storage import (
     StorageConfig,
     create_storage,
 )
+from ml4t.data.storage.key_codec import encode_storage_key
 
 
 @pytest.fixture
@@ -106,6 +108,38 @@ class TestStorageBackends:
         assert metadata["custom"]["source"] == "test"
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_get_metadata_auto_upgrades_legacy_manifest(self, temp_dir, strategy):
+        """Reading legacy manifests should upgrade and persist manifest_version=1.0."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        key = "equities/daily/AAPL"
+        metadata_file = storage.metadata_dir / f"{encode_storage_key(key)}.json"
+        metadata_file.write_text(
+            json.dumps(
+                {
+                    "row_count": 3,
+                    "custom": {"provider": "yahoo"},
+                    "data_range": {
+                        "start": "2024-01-01T00:00:00",
+                        "end": "2024-01-03T00:00:00",
+                    },
+                }
+            )
+        )
+
+        with pytest.deprecated_call(match="without 'manifest_version'"):
+            metadata = storage.get_metadata(key)
+
+        assert metadata is not None
+        assert metadata["manifest_version"] == "1.0"
+        assert metadata["provider"] == "yahoo"
+        assert metadata["symbol"] == "AAPL"
+        assert metadata["asset_class"] == "equities"
+        assert metadata["frequency"] == "daily"
+
+        persisted = json.loads(metadata_file.read_text())
+        assert persisted["manifest_version"] == "1.0"
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_list_keys(self, temp_dir, sample_data, strategy):
         """Test listing stored keys."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -152,7 +186,7 @@ class TestStorageBackends:
         storage.write(sample_data.lazy(), "test_key")
 
         # Check partition structure
-        key_path = temp_dir / "test_key"
+        key_path = temp_dir / encode_storage_key("test_key")
         assert key_path.exists()
 
         # Should have year directories
@@ -175,6 +209,50 @@ class TestStorageBackends:
         # No temp files should remain
         temp_files = list(temp_dir.glob("*.tmp"))
         assert len(temp_files) == 0
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_atomic_write_cleans_temp_file_on_failure(
+        self, temp_dir, sample_data, strategy, monkeypatch
+    ):
+        """Atomic write should clean parquet temp files when write fails."""
+        storage = create_storage(temp_dir, strategy=strategy)
+
+        def raise_write_error(_self, *_args, **_kwargs):
+            raise RuntimeError("simulated parquet write failure")
+
+        monkeypatch.setattr(pl.DataFrame, "write_parquet", raise_write_error)
+
+        with pytest.raises(RuntimeError, match="simulated parquet write failure"):
+            storage.write(sample_data.lazy(), "test_key")
+
+        assert list(temp_dir.rglob("*.parquet.tmp")) == []
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_metadata_write_preserves_existing_file_on_failure(
+        self, temp_dir, sample_data, strategy, monkeypatch
+    ):
+        """Metadata writes should be crash-safe and not corrupt existing manifest."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        storage.write(sample_data.lazy(), "test_key")
+        original = storage.get_metadata("test_key")
+        assert original is not None
+
+        if strategy == "hive":
+            import ml4t.data.storage.hive as storage_module
+        else:
+            import ml4t.data.storage.flat as storage_module
+
+        def raise_json_error(*_args, **_kwargs):
+            raise RuntimeError("simulated metadata write failure")
+
+        monkeypatch.setattr(storage_module.json, "dump", raise_json_error)
+
+        with pytest.raises(RuntimeError, match="simulated metadata write failure"):
+            storage._update_metadata("test_key", {"row_count": 999})
+
+        restored = storage.get_metadata("test_key")
+        assert restored == original
+        assert list((temp_dir / ".metadata").glob("*.json.tmp")) == []
 
     def test_lazy_evaluation(self, temp_dir, sample_data):
         """Test that lazy evaluation is preserved."""

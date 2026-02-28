@@ -432,50 +432,68 @@ class TestAsyncStorageAdapter:
         with tempfile.TemporaryDirectory() as tmpdir:
             async_backend = AsyncFileSystemBackend(data_root=Path(tmpdir))
             adapter = AsyncStorageAdapter(async_backend)
+            try:
+                # Write data (sync)
+                key = adapter.write(sample_data)
+                assert key == "equities/daily/TEST"
 
-            # Write data (sync)
-            key = adapter.write(sample_data)
-            assert key == "equities/daily/TEST"
-
-            # Read data (sync)
-            loaded_data = adapter.read(key)
-            assert loaded_data.metadata.symbol == "TEST"
-            assert len(loaded_data.data) == 3
+                # Read data (sync)
+                loaded_data = adapter.read(key)
+                assert loaded_data.metadata.symbol == "TEST"
+                assert len(loaded_data.data) == 3
+            finally:
+                adapter.close()
 
     def test_adapter_exists_delete(self, sample_data):
         """Test adapter exists and delete in sync context."""
         with tempfile.TemporaryDirectory() as tmpdir:
             async_backend = AsyncFileSystemBackend(data_root=Path(tmpdir))
             adapter = AsyncStorageAdapter(async_backend)
+            try:
+                key = "equities/daily/TEST"
 
-            key = "equities/daily/TEST"
+                # Check exists
+                assert not adapter.exists(key)
 
-            # Check exists
-            assert not adapter.exists(key)
+                # Write data
+                adapter.write(sample_data)
+                assert adapter.exists(key)
 
-            # Write data
-            adapter.write(sample_data)
-            assert adapter.exists(key)
-
-            # Delete data
-            adapter.delete(key)
-            assert not adapter.exists(key)
+                # Delete data
+                adapter.delete(key)
+                assert not adapter.exists(key)
+            finally:
+                adapter.close()
 
     def test_adapter_list_keys(self, sample_data, sample_data_2):
         """Test adapter list_keys in sync context."""
         with tempfile.TemporaryDirectory() as tmpdir:
             async_backend = AsyncFileSystemBackend(data_root=Path(tmpdir))
             adapter = AsyncStorageAdapter(async_backend)
+            try:
+                # Write data
+                adapter.write(sample_data)
+                adapter.write(sample_data_2)
 
-            # Write data
-            adapter.write(sample_data)
-            adapter.write(sample_data_2)
+                # List keys
+                keys = adapter.list_keys()
+                assert len(keys) == 2
+                assert "equities/daily/TEST" in keys
+                assert "equities/daily/TEST2" in keys
+            finally:
+                adapter.close()
 
-            # List keys
-            keys = adapter.list_keys()
-            assert len(keys) == 2
-            assert "equities/daily/TEST" in keys
-            assert "equities/daily/TEST2" in keys
+    @pytest.mark.asyncio
+    async def test_adapter_raises_inside_running_loop(self, sample_data):
+        """Sync adapter should not be used from inside an active event loop."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            async_backend = AsyncFileSystemBackend(data_root=Path(tmpdir))
+            adapter = AsyncStorageAdapter(async_backend)
+            try:
+                with pytest.raises(RuntimeError, match="cannot run inside an active event loop"):
+                    adapter.write(sample_data)
+            finally:
+                adapter.close()
 
 
 class TestFactoryFunctions:
@@ -505,6 +523,9 @@ class TestFactoryFunctions:
 
             assert isinstance(adapter, AsyncStorageAdapter)
 
-            # Test it works
-            key = adapter.write(sample_data)
-            assert adapter.exists(key)
+            try:
+                # Test it works
+                key = adapter.write(sample_data)
+                assert adapter.exists(key)
+            finally:
+                adapter.close()

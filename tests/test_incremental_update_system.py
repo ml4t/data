@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import polars as pl
-import pytest
 
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
@@ -366,6 +365,60 @@ class TestIncrementalUpdater:
             final_metadata = tracker.get_metadata("test_symbol")
             assert final_metadata == initial_metadata
 
+    def test_incremental_update_idempotent_on_repeated_input(self):
+        """Applying the same incremental payload twice should not duplicate rows."""
+        updater = IncrementalUpdater()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = HiveStorage(StorageConfig(base_path=Path(tmpdir)))
+            tracker = MetadataTracker(Path(tmpdir))
+            key = "equities/daily/AAPL"
+
+            initial_dates = pl.date_range(
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 10),
+                interval="1d",
+                eager=True,
+            )
+            initial = pl.DataFrame(
+                {
+                    "timestamp": initial_dates,
+                    "open": [100.0] * len(initial_dates),
+                    "close": [101.0] * len(initial_dates),
+                }
+            )
+            storage.write(initial, key)
+
+            incoming_dates = pl.date_range(
+                datetime(2024, 1, 8),
+                datetime(2024, 1, 15),
+                interval="1d",
+                eager=True,
+            )
+            incoming = pl.DataFrame(
+                {
+                    "timestamp": incoming_dates,
+                    "open": [102.0] * len(incoming_dates),
+                    "close": [103.0] * len(incoming_dates),
+                }
+            )
+
+            first = updater.update_incremental(storage, tracker, key, incoming, provider="test")
+            second = updater.update_incremental(storage, tracker, key, incoming, provider="test")
+
+            assert first.success is True
+            assert second.success is True
+            assert second.rows_added == 0
+
+            final_df = storage.read(key).collect()
+            assert len(final_df) == 15
+            assert len(final_df["timestamp"].unique()) == 15
+
+            metadata = tracker.get_metadata(key)
+            assert metadata is not None
+            assert metadata.total_rows == 15
+            assert metadata.update_count == 2
+
 
 class TestUpdateStrategy:
     """Tests for different update strategies."""
@@ -523,7 +576,6 @@ class TestUpdateStrategy:
 class TestBackfillManager:
     """Tests for backfill operations."""
 
-    @pytest.mark.skip(reason="Weekend exclusion logic makes gap detection complex for testing")
     def test_identify_backfill_candidates(self):
         """Test identification of datasets needing backfill."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -558,7 +610,7 @@ class TestBackfillManager:
             storage.write(df3, "no_gap")
 
             # Identify candidates
-            candidates = backfill_mgr.identify_candidates(min_gap_days=3)
+            candidates = backfill_mgr.identify_candidates(min_gap_days=3, max_age_days=5000)
 
             assert len(candidates) == 1
             assert candidates[0]["symbol"] == "large_gap"
@@ -657,9 +709,8 @@ class TestBackfillManager:
 class TestPerformanceOptimization:
     """Tests for performance optimization and validation."""
 
-    @pytest.mark.skip(reason="Timing-based performance tests are flaky - use benchmarks instead")
     def test_incremental_update_performance(self):
-        """Test that incremental updates are faster than full refresh."""
+        """Test incremental and full refresh update behavior."""
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = HiveStorage(StorageConfig(base_path=Path(tmpdir)))
             tracker = MetadataTracker(Path(tmpdir))
@@ -694,10 +745,6 @@ class TestPerformanceOptimization:
                 }
             )
 
-            # Time incremental update
-            import time
-
-            start_time = time.time()
             result_incremental = updater.update_incremental(
                 storage,
                 tracker,
@@ -706,10 +753,7 @@ class TestPerformanceOptimization:
                 provider="test",
                 strategy=UpdateStrategy.INCREMENTAL,
             )
-            incremental_time = time.time() - start_time
 
-            # Time full refresh
-            start_time = time.time()
             result_full = updater.update_incremental(
                 storage,
                 tracker,
@@ -718,13 +762,12 @@ class TestPerformanceOptimization:
                 provider="test",
                 strategy=UpdateStrategy.FULL_REFRESH,
             )
-            full_refresh_time = time.time() - start_time
 
-            # Incremental should generally be faster (or at least not significantly slower)
-            # With small datasets, the timing can be variable due to system overhead
-            assert incremental_time <= full_refresh_time * 1.5  # Allow some variance for small data
             assert result_incremental.success is True
             assert result_full.success is True
+            assert result_incremental.rows_added == len(df_new)
+            assert result_incremental.rows_updated == 0
+            assert result_full.rows_after == len(df_initial) + len(df_new)
 
     def test_download_reduction_metric(self):
         """Test that incremental updates reduce download size by 80%."""

@@ -10,6 +10,8 @@ from typing import Any
 
 import structlog
 
+from ml4t.data.storage.key_codec import decode_storage_key, encode_storage_key
+from ml4t.data.storage.manifest import normalize_manifest_payload
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -131,6 +133,17 @@ class DatasetMetadata:
         )
 
 
+@dataclass
+class DatasetUpdate:
+    """Latest update snapshot for CLI health/info views."""
+
+    symbol: str
+    provider: str
+    frequency: str
+    timestamp: datetime
+    asset_class: str = ""
+
+
 class MetadataTracker:
     """Track metadata and update history for datasets."""
 
@@ -155,6 +168,114 @@ class MetadataTracker:
         safe_key = key.replace("/", "_")
         return self.metadata_dir / f"{safe_key}_history.json"
 
+    def _manifest_metadata_paths(self, key: str) -> list[Path]:
+        """Get possible storage manifest paths for a dataset key."""
+        return [
+            self.metadata_dir / f"{encode_storage_key(key)}.json",
+            self.metadata_dir / f"{key.replace('/', '_')}.json",
+        ]
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        """Parse datetime values from metadata payloads."""
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def _metadata_from_manifest(
+        self,
+        key: str,
+        payload: dict[str, Any],
+    ) -> DatasetMetadata | None:
+        """Convert storage manifest metadata into DatasetMetadata shape."""
+        normalized = normalize_manifest_payload(key, payload)
+        last_update = self._parse_datetime(normalized.get("last_updated"))
+        first_update = self._parse_datetime(normalized.get("first_update")) or last_update
+
+        data_range = normalized.get("data_range")
+        if not isinstance(data_range, dict):
+            data_range = {}
+
+        range_start = self._parse_datetime(data_range.get("start")) or first_update
+        range_end = self._parse_datetime(data_range.get("end")) or last_update
+
+        if not last_update or not first_update or not range_start or not range_end:
+            return None
+
+        update_count = normalized.get("update_count")
+        if not isinstance(update_count, int):
+            update_count = 1
+
+        row_count = normalized.get("total_rows", normalized.get("row_count", 0))
+        if not isinstance(row_count, int):
+            row_count = 0
+
+        return DatasetMetadata(
+            symbol=str(normalized.get("symbol", "")),
+            asset_class=str(normalized.get("asset_class", "")),
+            frequency=str(normalized.get("frequency", "")),
+            provider=str(normalized.get("provider", "")),
+            first_update=first_update,
+            last_update=last_update,
+            total_rows=row_count,
+            date_range_start=range_start,
+            date_range_end=range_end,
+            update_count=update_count,
+            last_check=self._parse_datetime(normalized.get("last_check")),
+            health_status=str(normalized.get("health_status", "healthy")),
+            health_message=str(normalized.get("health_message", "")),
+        )
+
+    def _load_metadata_file(self, metadata_file: Path) -> tuple[str, DatasetMetadata] | None:
+        """Load one metadata file and return canonical key plus metadata."""
+        if metadata_file.name.endswith("_history.json"):
+            return None
+
+        with open(metadata_file) as f:
+            payload = json.load(f)
+
+        if metadata_file.name.endswith("_metadata.json"):
+            metadata = DatasetMetadata.from_dict(payload)
+            if metadata.asset_class and metadata.frequency and metadata.symbol:
+                key = f"{metadata.asset_class}/{metadata.frequency}/{metadata.symbol}"
+            else:
+                key = metadata.symbol
+            return key, metadata
+
+        decoded_key = decode_storage_key(metadata_file.stem)
+        metadata = self._metadata_from_manifest(decoded_key, payload)
+        if metadata is None:
+            return None
+
+        if metadata.asset_class and metadata.frequency and metadata.symbol:
+            key = f"{metadata.asset_class}/{metadata.frequency}/{metadata.symbol}"
+        else:
+            key = decoded_key
+        return key, metadata
+
+    def _collect_all_metadata(self) -> list[DatasetMetadata]:
+        """Collect metadata from tracker and storage manifest files."""
+        by_key: dict[str, tuple[int, DatasetMetadata]] = {}
+
+        for metadata_file in self.metadata_dir.glob("*.json"):
+            try:
+                loaded = self._load_metadata_file(metadata_file)
+                if loaded is None:
+                    continue
+                key, metadata = loaded
+                priority = 2 if metadata_file.name.endswith("_metadata.json") else 1
+                existing = by_key.get(key)
+                if existing is None or priority >= existing[0]:
+                    by_key[key] = (priority, metadata)
+            except Exception as e:
+                logger.warning(f"Failed to load metadata from {metadata_file}: {e}")
+
+        return [value[1] for _, value in sorted(by_key.items(), key=lambda item: item[0])]
+
     def get_metadata(self, key: str) -> DatasetMetadata | None:
         """
         Get metadata for a dataset.
@@ -166,14 +287,21 @@ class MetadataTracker:
             DatasetMetadata if exists, None otherwise
         """
         metadata_path = self._get_metadata_path(key)
+        if metadata_path.exists():
+            with file_lock(metadata_path), open(metadata_path) as f:
+                data = json.load(f)
+            return DatasetMetadata.from_dict(data)
 
-        if not metadata_path.exists():
-            return None
+        for manifest_path in self._manifest_metadata_paths(key):
+            if not manifest_path.exists():
+                continue
+            with file_lock(manifest_path), open(manifest_path) as f:
+                manifest = json.load(f)
+            metadata = self._metadata_from_manifest(key, manifest)
+            if metadata is not None:
+                return metadata
 
-        with file_lock(metadata_path), open(metadata_path) as f:
-            data = json.load(f)
-
-        return DatasetMetadata.from_dict(data)
+        return None
 
     def update_metadata(
         self,
@@ -360,22 +488,15 @@ class MetadataTracker:
         Returns:
             Dictionary with summary statistics
         """
-        all_metadata = []
-
-        # Load all metadata files
-        for metadata_file in self.metadata_dir.glob("*_metadata.json"):
-            try:
-                with open(metadata_file) as f:
-                    data = json.load(f)
-                all_metadata.append(DatasetMetadata.from_dict(data))
-            except Exception as e:
-                logger.warning(f"Failed to load metadata from {metadata_file}: {e}")
+        all_metadata = self._collect_all_metadata()
 
         # Calculate summary
         total_datasets = len(all_metadata)
         healthy = sum(1 for m in all_metadata if m.health_status == "healthy")
         stale = sum(1 for m in all_metadata if m.health_status == "stale")
         error = sum(1 for m in all_metadata if m.health_status == "error")
+        unique_providers = len({m.provider for m in all_metadata if m.provider})
+        unique_symbols = len({m.symbol for m in all_metadata if m.symbol})
 
         total_rows = sum(m.total_rows for m in all_metadata)
         total_updates = sum(m.update_count for m in all_metadata)
@@ -394,6 +515,23 @@ class MetadataTracker:
             "error": error,
             "total_rows": total_rows,
             "total_updates": total_updates,
+            "unique_providers": unique_providers,
+            "unique_symbols": unique_symbols,
             "by_asset_class": by_asset_class,
             "last_updated": datetime.now().isoformat(),
         }
+
+    def list_updates(self) -> list[DatasetUpdate]:
+        """List latest updates for all tracked datasets (most recent first)."""
+        all_metadata = self._collect_all_metadata()
+        updates = [
+            DatasetUpdate(
+                symbol=metadata.symbol,
+                provider=metadata.provider,
+                frequency=metadata.frequency,
+                timestamp=metadata.last_update,
+                asset_class=metadata.asset_class,
+            )
+            for metadata in all_metadata
+        ]
+        return sorted(updates, key=lambda x: x.timestamp, reverse=True)

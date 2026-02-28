@@ -771,9 +771,9 @@ class TestDataManagerListSymbols:
         mock_fetch.return_value = sample_data
 
         # Load multiple symbols
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("MSFT", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("GOOGL", "2024-01-01", "2024-01-05", provider="yahoo")
+        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="mock")
+        manager.load("MSFT", "2024-01-01", "2024-01-05", provider="mock")
+        manager.load("GOOGL", "2024-01-01", "2024-01-05", provider="mock")
 
         symbols = manager.list_symbols()
 
@@ -787,10 +787,10 @@ class TestDataManagerListSymbols:
         mock_fetch.return_value = sample_data
 
         # Load from different providers
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
+        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="mock")
 
         # Filter by provider
-        symbols = manager.list_symbols(provider="yahoo")
+        symbols = manager.list_symbols(provider="mock")
 
         assert isinstance(symbols, list)
 
