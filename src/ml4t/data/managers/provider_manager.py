@@ -87,24 +87,37 @@ class ProviderRouter:
         """Setup default routing patterns if none configured.
 
         Default patterns:
-        - Forex: EURUSD or EUR_USD format → oanda
-        - Crypto: BTC/ETH/SOL prefixes → cryptocompare
         - Futures: Continuous (.v.) or contracts (ESZ4) → databento
+        - Crypto: Known symbols and quote pairs (BTCUSD/BTC-USD) → cryptocompare
+        - Forex: Known fiat pairs (EURUSD, EUR_USD, EUR/USD) → oanda
+        - Equities: Generic ticker fallback (AAPL, BRK.B) → yahoo
         """
         if self.patterns:
             return  # Don't override existing patterns
 
-        # Forex patterns
-        self.add_pattern(r"^[A-Z]{6}$", "oanda")  # EURUSD format
-        self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")  # EUR_USD format
-
-        # Crypto patterns
-        self.add_pattern(r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC)", "cryptocompare")
-        self.add_pattern(r"^[A-Z]{3,5}(-USD)?$", "cryptocompare")
-
         # Futures patterns
         self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")  # Continuous
-        self.add_pattern(r"^[A-Z]{2,3}[FGHJKMNQUVXZ][0-9]$", "databento")  # Contracts
+        self.add_pattern(r"^[A-Z]{1,4}[FGHJKMNQUVXZ][0-9]{1,2}$", "databento")  # Contracts
+
+        # Crypto patterns (known symbols + quote variants)
+        self.add_pattern(
+            r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC|XRP|LTC|DOGE|BNB)$",
+            "cryptocompare",
+        )
+        self.add_pattern(
+            r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC|XRP|LTC|DOGE|BNB)[-_/]?"
+            r"(USD|USDT|USDC|BTC|ETH)$",
+            "cryptocompare",
+        )
+
+        # Forex patterns (known fiat-only pairs)
+        fiat = r"(USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD)"
+        self.add_pattern(rf"^{fiat}{fiat}$", "oanda")  # EURUSD format
+        self.add_pattern(rf"^{fiat}_{fiat}$", "oanda")  # EUR_USD format
+        self.add_pattern(rf"^{fiat}/{fiat}$", "oanda")  # EUR/USD format
+
+        # Equity fallback
+        self.add_pattern(r"^[A-Z][A-Z0-9.-]{0,9}$", "yahoo")
 
 
 class ProviderManager:
@@ -330,7 +343,7 @@ class ProviderManager:
             "config": {k: v for k, v in config.items() if k != "api_key"},
         }
 
-    def close_all(self) -> None:
+    def close_all(self, *, log: bool = True) -> None:
         """Close all provider connections and clear cache."""
         for provider in self.providers.values():
             if hasattr(provider, "close"):
@@ -340,7 +353,8 @@ class ProviderManager:
                     logger.warning(f"Error closing provider: {e}")
 
         self.providers.clear()
-        logger.info("Closed all provider connections")
+        if log:
+            logger.info("Closed all provider connections")
 
     def register_provider(self, name: str, provider_class: type) -> None:
         """Register a custom provider class.

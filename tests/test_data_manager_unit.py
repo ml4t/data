@@ -64,6 +64,35 @@ class TestProviderRouterCache:
         assert result == "provider1"
 
 
+class TestProviderRouterDefaults:
+    """Tests for default symbol routing behavior."""
+
+    def test_default_equity_symbol_routes_to_yahoo(self):
+        router = ProviderRouter()
+        router.setup_default_patterns()
+        assert router.get_provider("AAPL") == "yahoo"
+
+    def test_default_crypto_symbol_routes_to_cryptocompare(self):
+        router = ProviderRouter()
+        router.setup_default_patterns()
+        assert router.get_provider("BTC") == "cryptocompare"
+        assert router.get_provider("BTCUSD") == "cryptocompare"
+        assert router.get_provider("BTC-USD") == "cryptocompare"
+
+    def test_default_forex_symbol_routes_to_oanda(self):
+        router = ProviderRouter()
+        router.setup_default_patterns()
+        assert router.get_provider("EURUSD") == "oanda"
+        assert router.get_provider("EUR_USD") == "oanda"
+        assert router.get_provider("EUR/USD") == "oanda"
+
+    def test_default_futures_symbol_routes_to_databento(self):
+        router = ProviderRouter()
+        router.setup_default_patterns()
+        assert router.get_provider("ES.v.0") == "databento"
+        assert router.get_provider("ESZ4") == "databento"
+
+
 class TestDataManagerMergeConfigs:
     """Tests for _merge_configs method (now in ConfigManager)."""
 
@@ -256,6 +285,26 @@ class TestDataManagerClearCache:
         dm.clear_cache()
 
         assert dm.router._cache == {}
+
+    def test_close_aliases_clear_cache(self):
+        """Test close() delegates to cache/provider cleanup."""
+        dm = DataManager()
+        dm.router._cache["TEST"] = "provider"
+
+        dm.close()
+
+        assert dm.router._cache == {}
+
+    def test_del_calls_close_best_effort(self):
+        """Test __del__ triggers cleanup path without raising."""
+        dm = DataManager()
+        dm._router.clear_cache = MagicMock()
+        dm._provider_manager.close_all = MagicMock()
+
+        dm.__del__()
+
+        dm._router.clear_cache.assert_called_once()
+        dm._provider_manager.close_all.assert_called_once_with(log=False)
 
 
 class TestDataManagerContextManager:

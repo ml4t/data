@@ -78,7 +78,6 @@ class SessionMixin:
         """Close HTTP session and release resources."""
         if hasattr(self, "session"):
             self.session.close()
-            logger.debug("HTTP session closed")
 
     def __enter__(self):
         """Context manager entry."""

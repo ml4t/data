@@ -51,6 +51,7 @@ class TestYahooFinanceProvider:
             progress=False,
             auto_adjust=True,
             actions=False,
+            threads=False,
         )
 
         # Check DataFrame structure
@@ -97,6 +98,7 @@ class TestYahooFinanceProvider:
             progress=False,
             auto_adjust=True,
             actions=False,
+            threads=False,
         )
 
         assert len(df) == 2

@@ -12,52 +12,38 @@ from ml4t.data.data_manager import DataManager
 class TestBatchLoad:
     """Test suite for DataManager.batch_load() method."""
 
-    @pytest.fixture(autouse=True)
-    def cleanup_yfinance(self):
-        """Clean up yfinance global state before each test.
-
-        yfinance uses global dictionaries (shared._DFS, _ERRORS, etc.) that persist
-        across calls, causing cross-contamination between tests.
-        See: https://github.com/ranaroussi/yfinance/issues/2557
-        """
-        try:
-            from yfinance import shared
-
-            shared._DFS.clear()
-            shared._ERRORS.clear()
-            shared._TRACEBACKS.clear()
-        except (ImportError, AttributeError):
-            pass  # yfinance not available or structure changed
-        yield
-        # Cleanup after test too
-        try:
-            from yfinance import shared
-
-            shared._DFS.clear()
-            shared._ERRORS.clear()
-            shared._TRACEBACKS.clear()
-        except (ImportError, AttributeError):
-            pass
-
     @pytest.fixture
     def manager(self):
         """Create DataManager instance for testing."""
-        return DataManager(output_format="polars")
+        manager = DataManager(output_format="polars")
+        yield manager
+        manager.clear_cache()
+
+    @pytest.fixture
+    def inject_invalid_symbol_failures(self, manager, monkeypatch):
+        """Force deterministic failures for INVALID* symbols in batch-load tests."""
+        original_fetch = manager._fetch_manager.fetch
+
+        def fetch_with_invalid_failure(symbol, *args, **kwargs):
+            if symbol.startswith("INVALID"):
+                raise ValueError("Invalid symbol (test injection)")
+            return original_fetch(symbol, *args, **kwargs)
+
+        monkeypatch.setattr(manager._fetch_manager, "fetch", fetch_with_invalid_failure)
 
     def test_batch_load_basic(self, manager):
         """Test basic batch loading of multiple symbols.
 
-        Note: Uses max_workers=1 to avoid yfinance thread-safety bug
-        (https://github.com/ranaroussi/yfinance/issues/2557)
+        Uses synthetic provider to keep test deterministic/offline.
         """
-        symbols = ["AAPL", "MSFT", "GOOG"]
+        symbols = ["SYNTH_A", "SYNTH_B", "SYNTH_C"]
         df = manager.batch_load(
             symbols=symbols,
             start="2024-01-01",
             end="2024-01-31",
             frequency="daily",
-            provider="yahoo",
-            max_workers=1,  # Serial execution to avoid yfinance threading bugs
+            provider="synthetic",
+            max_workers=1,
         )
 
         # Check schema compliance
@@ -87,37 +73,35 @@ class TestBatchLoad:
                 end="2024-01-31",
             )
 
-    def test_batch_load_partial_failure_graceful(self, manager):
+    def test_batch_load_partial_failure_graceful(self, manager, inject_invalid_symbol_failures):
         """Test graceful handling of partial failures.
 
-        Note: Uses max_workers=1 to avoid yfinance thread-safety bug
-        (https://github.com/ranaroussi/yfinance/issues/2557)
+        Uses injected failures to keep test deterministic/offline.
         """
-        symbols = ["AAPL", "INVALID_SYMBOL_XYZ", "MSFT"]
+        symbols = ["SYNTH_A", "INVALID_SYMBOL_XYZ", "SYNTH_B"]
         df = manager.batch_load(
             symbols=symbols,
             start="2024-01-01",
             end="2024-01-31",
             fail_on_partial=False,  # Graceful degradation
-            provider="yahoo",
-            max_workers=1,  # Serial execution to avoid yfinance threading bugs
+            provider="synthetic",
+            max_workers=1,
         )
 
         # Should get data for valid symbols only
         unique_symbols = df["symbol"].unique().to_list()
-        assert "AAPL" in unique_symbols or "MSFT" in unique_symbols
+        assert "SYNTH_A" in unique_symbols or "SYNTH_B" in unique_symbols
         assert "INVALID_SYMBOL_XYZ" not in unique_symbols
 
         # Should still be valid multi-asset format
         assert MultiAssetSchema.validate(df, strict=True)
 
-    def test_batch_load_partial_failure_strict(self, manager):
+    def test_batch_load_partial_failure_strict(self, manager, inject_invalid_symbol_failures):
         """Test strict error handling when fail_on_partial=True.
 
-        Note: Uses max_workers=1 to avoid yfinance thread-safety bug
-        (https://github.com/ranaroussi/yfinance/issues/2557)
+        Uses injected failures to keep test deterministic/offline.
         """
-        symbols = ["AAPL", "INVALID_SYMBOL_XYZ", "MSFT"]
+        symbols = ["SYNTH_A", "INVALID_SYMBOL_XYZ", "SYNTH_B"]
 
         with pytest.raises(ValueError, match="Batch load failed"):
             manager.batch_load(
@@ -125,11 +109,11 @@ class TestBatchLoad:
                 start="2024-01-01",
                 end="2024-01-31",
                 fail_on_partial=True,  # Strict mode
-                provider="yahoo",
-                max_workers=1,  # Serial execution to avoid yfinance threading bugs
+                provider="synthetic",
+                max_workers=1,
             )
 
-    def test_batch_load_all_failures(self, manager):
+    def test_batch_load_all_failures(self, manager, inject_invalid_symbol_failures):
         """Test that all failures raises error even with fail_on_partial=False."""
         symbols = ["INVALID1", "INVALID2", "INVALID3"]
 
@@ -139,18 +123,17 @@ class TestBatchLoad:
                 start="2024-01-01",
                 end="2024-01-31",
                 fail_on_partial=False,
-                provider="yahoo",
+                provider="synthetic",
             )
 
     def test_batch_load_performance(self, manager):
         """Test that batch loading is reasonably fast.
 
-        Note: Uses max_workers=1 to avoid yfinance thread-safety bug
-        (https://github.com/ranaroussi/yfinance/issues/2557)
+        Uses synthetic provider to keep test deterministic/offline.
         """
         import time
 
-        symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+        symbols = ["SYNTH_A", "SYNTH_B", "SYNTH_C", "SYNTH_D", "SYNTH_E"]
 
         start_time = time.time()
         df = manager.batch_load(
@@ -158,7 +141,7 @@ class TestBatchLoad:
             start="2024-01-01",
             end="2024-01-31",
             max_workers=1,  # Serial execution to avoid yfinance threading bugs
-            provider="yahoo",
+            provider="synthetic",
         )
         elapsed = time.time() - start_time
 
@@ -186,12 +169,12 @@ class TestBatchLoad:
 
     def test_batch_load_data_quality(self, manager):
         """Test that returned data has expected quality."""
-        symbols = ["AAPL", "MSFT"]
+        symbols = ["SYNTH_A", "SYNTH_B"]
         df = manager.batch_load(
             symbols=symbols,
             start="2024-01-01",
             end="2024-01-31",
-            provider="yahoo",
+            provider="synthetic",
         )
 
         # No nulls in required columns

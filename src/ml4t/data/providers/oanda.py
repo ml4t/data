@@ -12,11 +12,8 @@ import os
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-import oandapyV20  # type: ignore
-import oandapyV20.endpoints.instruments as instruments  # type: ignore
 import polars as pl
 import structlog
-from oandapyV20.exceptions import V20Error  # type: ignore
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,
@@ -29,6 +26,15 @@ from ml4t.data.core.exceptions import (
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
+
+try:
+    import oandapyV20  # type: ignore
+    import oandapyV20.endpoints.instruments as instruments  # type: ignore
+    from oandapyV20.exceptions import V20Error  # type: ignore
+except ImportError:
+    oandapyV20 = None  # type: ignore
+    instruments = None  # type: ignore
+    V20Error = Exception  # type: ignore
 
 
 class OandaProvider(BaseProvider):
@@ -89,6 +95,12 @@ class OandaProvider(BaseProvider):
                 message="OANDA API key required. Set OANDA_API_KEY "
                 "environment variable or pass api_key parameter. "
                 "Get API key at: https://www.oanda.com/",
+            )
+
+        if oandapyV20 is None:
+            raise ImportError(
+                "OANDA provider requires optional dependency 'oandapyV20'. "
+                "Install with: uv add 'ml4t-data[oanda]'"
             )
 
         self.practice = practice

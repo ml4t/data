@@ -251,21 +251,17 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match="invalid OHLC relationships"):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    @pytest.mark.skip(reason="Circuit breaker state pollution in parallel execution")
     def test_circuit_breaker_integration(self):
         """Test circuit breaker integration with provider."""
         provider = MockProvider(circuit_breaker_config={"failure_threshold": 2})
         provider._should_fail = True
 
-        # First failure
-        with pytest.raises(NetworkError):
+        # Retries happen inside fetch_ohlcv; breaker should open during first call.
+        with pytest.raises((NetworkError, CircuitBreakerOpenError)):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert provider.circuit_breaker.is_open
 
-        # Second failure should open circuit
-        with pytest.raises(NetworkError):
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
-
-        # Third call should be prevented by circuit breaker
+        # Once open, subsequent calls should be blocked immediately.
         with pytest.raises(CircuitBreakerOpenError):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
@@ -290,20 +286,13 @@ class TestBaseProvider:
         assert isinstance(df, pl.DataFrame)
         assert call_count == 3
 
-    @pytest.mark.skip(
-        reason="Limiter class doesn't exist - test needs rewrite for global_rate_limit_manager"
-    )
-    @patch("ml4t.data.providers.base.Limiter")
-    def test_rate_limiting(self, mock_limiter_class):
+    def test_rate_limiting(self):
         """Test rate limiting integration."""
-        mock_limiter = Mock()
-        mock_limiter_class.return_value = mock_limiter
-
         provider = MockProvider()
-        provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        with patch.object(provider, "_acquire_rate_limit") as mock_acquire_rate_limit:
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        # Verify rate limiter was called
-        mock_limiter.try_acquire.assert_called_with("api_call")
+        mock_acquire_rate_limit.assert_called_once()
 
     def test_duplicate_timestamp_removal(self):
         """Test that duplicate timestamps are removed."""
@@ -342,25 +331,22 @@ class TestBaseProvider:
 class TestProviderLogging:
     """Test provider logging functionality."""
 
-    @pytest.mark.skip(reason="Structlog logger initialized at import time - mock timing issue")
     def test_structured_logging(self):
         """Test that providers use structured logging."""
         provider = MockProvider()
+        mock_logger = Mock()
+        provider.logger = mock_logger
 
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = Mock()
-            mock_get_logger.return_value = mock_logger
+        provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        # Verify info logs were called
+        assert mock_logger.info.call_count >= 2
 
-            # Verify info logs were called
-            assert mock_logger.info.call_count >= 2
-
-            # Check log structure
-            start_call = mock_logger.info.call_args_list[0]
-            assert "Fetching OHLCV data" in start_call[0]
-            assert "symbol" in start_call[1]
-            assert "provider" in start_call[1]
+        # Check log structure
+        start_call = mock_logger.info.call_args_list[0]
+        assert "Fetching OHLCV data" in start_call[0]
+        assert "symbol" in start_call[1]
+        assert "provider" in start_call[1]
 
 
 if __name__ == "__main__":

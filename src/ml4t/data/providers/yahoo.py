@@ -84,12 +84,17 @@ class YahooFinanceProvider(BaseProvider):
         "1month": "1mo",
     }
 
-    def __init__(self, enable_progress: bool = False) -> None:
+    def __init__(
+        self,
+        enable_progress: bool = False,
+        rate_limit: tuple[int, float] | None = None,
+    ) -> None:
         """
         Initialize Yahoo Finance provider.
 
         Args:
             enable_progress: Show progress bars for downloads (default False)
+            rate_limit: Optional global rate limit override (calls, period_seconds)
 
         Raises:
             ImportError: If yfinance is not installed
@@ -99,8 +104,8 @@ class YahooFinanceProvider(BaseProvider):
                 "YahooFinanceProvider requires yfinance. "
                 "Install with: pip install 'ml4t-data[yahoo]'"
             )
-        # Don't use BaseProvider's rate limiting - yfinance handles this
-        super().__init__(rate_limit=None)
+        # Allow config-driven overrides while preserving default provider behavior.
+        super().__init__(rate_limit=rate_limit)
         self.enable_progress = enable_progress
 
     @property
@@ -150,6 +155,7 @@ class YahooFinanceProvider(BaseProvider):
                 progress=self.enable_progress,
                 auto_adjust=True,
                 actions=False,
+                threads=False,
             )
 
             if df_pandas.empty:
@@ -266,6 +272,24 @@ class YahooFinanceProvider(BaseProvider):
             ]
         )
 
+    def close(self) -> None:
+        """Close provider resources, including yfinance sqlite caches."""
+        super().close()
+
+        if not _YFINANCE_AVAILABLE:
+            return
+
+        try:
+            import yfinance.cache as yf_cache
+        except ImportError:
+            return
+
+        for manager_name in ("_TzDBManager", "_CookieDBManager", "_ISINDBManager"):
+            manager = getattr(yf_cache, manager_name, None)
+            close_db = getattr(manager, "close_db", None) if manager is not None else None
+            if callable(close_db):
+                close_db()
+
     def fetch_batch_ohlcv(
         self,
         symbols: list[str],
@@ -352,7 +376,7 @@ class YahooFinanceProvider(BaseProvider):
                     progress=self.enable_progress,
                     auto_adjust=True,
                     actions=False,
-                    threads=True,
+                    threads=False,
                 )
 
                 if df_pandas.empty:

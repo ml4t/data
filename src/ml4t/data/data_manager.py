@@ -510,8 +510,12 @@ class DataManager:
     def clear_cache(self) -> None:
         """Clear routing cache and close provider connections."""
         self._router.clear_cache()
-        self._provider_manager.close_all()
+        self._provider_manager.close_all(log=True)
         logger.info("Cleared provider cache and connections")
+
+    def close(self) -> None:
+        """Close provider sessions and clear routing cache."""
+        self.clear_cache()
 
     # ========================================================================
     # Internal methods (for backward compatibility)
@@ -556,7 +560,15 @@ class DataManager:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - cleanup connections."""
-        self.clear_cache()
+        self.close()
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for non-context-managed usage."""
+        try:
+            self._router.clear_cache()
+            self._provider_manager.close_all(log=False)
+        except Exception:
+            pass
 
 
 # Set class-level PROVIDER_CLASSES attribute for backwards compatibility

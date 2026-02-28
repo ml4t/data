@@ -25,7 +25,6 @@ class TestDataManagerInitialization:
         assert dm.config is not None
         assert dm.providers == {}  # No providers loaded by default
 
-    @pytest.mark.skip(reason="Config initialization not implemented in PRE-RELEASE")
     def test_init_with_env_vars(self):
         """Test DataManager initialization from environment variables."""
         with patch.dict(
@@ -38,8 +37,10 @@ class TestDataManagerInitialization:
         ):
             dm = DataManager()
             assert "CRYPTOCOMPARE_API_KEY" in os.environ
-            # Provider instances are created lazily
-            assert dm._available_providers == ["cryptocompare", "databento", "oanda"]
+            assert {"cryptocompare", "databento", "oanda"}.issubset(set(dm._available_providers))
+            assert dm.config["providers"]["cryptocompare"]["api_key"] == "test_key"
+            assert dm.config["providers"]["databento"]["api_key"] == "db-test"
+            assert dm.config["providers"]["oanda"]["api_key"] == "oanda_test"
 
     def test_init_with_yaml_config(self):
         """Test DataManager initialization from YAML config file."""
@@ -306,6 +307,7 @@ class TestOutputFormats:
         mock_provider.fetch_ohlcv.return_value = test_df
 
         dm = DataManager(output_format="pandas")
+        dm.router.patterns.clear()
         dm._provider_manager._provider_classes["mock_crypto"] = lambda **kwargs: mock_provider
         dm._provider_manager._available_providers.append("mock_crypto")
         dm.router.add_pattern(r"^BTC", "mock_crypto")
@@ -334,6 +336,7 @@ class TestOutputFormats:
         mock_provider.fetch_ohlcv.return_value = test_df
 
         dm = DataManager(output_format="lazy")
+        dm.router.patterns.clear()
         dm._provider_manager._provider_classes["mock_crypto"] = lambda **kwargs: mock_provider
         dm._provider_manager._available_providers.append("mock_crypto")
         dm.router.add_pattern(r"^BTC", "mock_crypto")
