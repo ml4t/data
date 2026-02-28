@@ -18,6 +18,20 @@ from ml4t.data.providers.coingecko import CoinGeckoProvider
 
 logger = get_logger(__name__)
 
+# Deterministic gate:
+# - With COINGECKO_API_KEY, tests use stable authenticated tier
+# - Without key, tests are skipped unless explicitly enabled for local experiments
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
+RUN_PUBLIC = os.getenv("RUN_PUBLIC_COINGECKO_TESTS", "0") == "1"
+
+if not COINGECKO_API_KEY and not RUN_PUBLIC:
+    pytestmark = pytest.mark.skip(
+        reason=(
+            "CoinGecko integration tests require COINGECKO_API_KEY for deterministic runs. "
+            "Set RUN_PUBLIC_COINGECKO_TESTS=1 to opt in to flaky public-API testing."
+        )
+    )
+
 # Cost optimization: use minimal test data
 TEST_DAYS = 7  # Fetch 7 days of data for tests
 CONCURRENT_SYMBOLS = ["BTC", "ETH", "ADA"]  # Limited to 3 symbols

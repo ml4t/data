@@ -269,6 +269,8 @@ class TestLearnedSyntheticFromSamples:
 class TestLearnedSyntheticFromCheckpoint:
     """Test from_checkpoint class method."""
 
+    @pytest.mark.integration
+    @pytest.mark.optional_dependency
     @requires_torch
     def test_from_checkpoint_with_samples(self, checkpoint_dir: Path):
         """Test loading from checkpoint with pre-generated samples."""
@@ -276,6 +278,8 @@ class TestLearnedSyntheticFromCheckpoint:
         assert provider.n_samples == 100
         assert provider.generator_name == "timegan"
 
+    @pytest.mark.integration
+    @pytest.mark.optional_dependency
     @requires_torch
     def test_from_checkpoint_string_path(self, checkpoint_dir: Path):
         """Test loading from string path."""
@@ -296,6 +300,8 @@ class TestLearnedSyntheticFromCheckpoint:
         with pytest.raises(FileNotFoundError, match="Metadata file not found"):
             LearnedSyntheticProvider.from_checkpoint(checkpoint_path)
 
+    @pytest.mark.integration
+    @pytest.mark.optional_dependency
     @requires_torch
     def test_from_checkpoint_with_seed(self, checkpoint_dir: Path):
         """Test from_checkpoint with seed parameter."""
@@ -551,15 +557,12 @@ class TestLearnedSyntheticReproducibility:
             samples=sample_3d_array, metadata=mock_metadata, seed=123
         )
 
-        df1 = provider1.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-31", "daily")
-        df2 = provider2.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-31", "daily")
+        # Compare shuffled sample draws directly to avoid flaky collisions when
+        # fetch_ohlcv only needs a single sampled sequence.
+        samples1 = provider1.get_samples(n_samples=10, shuffle=True)
+        samples2 = provider2.get_samples(n_samples=10, shuffle=True)
 
-        if len(df1) > 0 and len(df2) > 0:
-            # Prices should differ
-            assert not np.allclose(
-                df1["close"].to_numpy(),
-                df2["close"].to_numpy(),
-            )
+        assert not np.array_equal(samples1, samples2)
 
     def test_different_symbols_produce_different_data(self, provider: LearnedSyntheticProvider):
         """Test different symbols produce different data (symbol affects RNG)."""
@@ -681,6 +684,8 @@ class TestLearnedSyntheticIntegration:
         assert (df["high"] >= df["low"]).all()
         assert (df["close"] > 0).all()
 
+    @pytest.mark.integration
+    @pytest.mark.optional_dependency
     @requires_torch
     def test_full_workflow_from_checkpoint(self, checkpoint_dir: Path):
         """Test complete workflow from checkpoint directory."""

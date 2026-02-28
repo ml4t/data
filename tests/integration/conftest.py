@@ -31,16 +31,19 @@ def pytest_collection_modifyitems(config, items):
     }
 
     skip_expensive = pytest.mark.skip(reason="Skipping expensive tests in CI")
-    pytest.mark.skip(reason="Required API key not available")
+
+    integration_prefix = "tests/integration/"
 
     for item in items:
-        # Skip expensive tests in CI
-        if is_ci and "expensive" in item.keywords:
-            item.add_marker(skip_expensive)
+        is_integration_item = item.nodeid.startswith(integration_prefix)
 
-        # Log which tests are being run
-        if "integration" in item.keywords:
-            logger.debug(f"Integration test collected: {item.name}")
+        # Ensure all tests under tests/integration/ are correctly classed as integration.
+        if is_integration_item:
+            item.add_marker(pytest.mark.integration)
+
+        # Skip expensive tests in CI
+        if is_integration_item and is_ci and "expensive" in item.keywords:
+            item.add_marker(skip_expensive)
 
 
 @pytest.fixture(scope="session", autouse=True)
