@@ -31,6 +31,7 @@ Example (composing mixins):
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
@@ -139,6 +140,7 @@ class BaseProvider(
             circuit_breaker_config: Circuit breaker configuration
         """
         self.logger = structlog.get_logger(name=self.__class__.__name__)
+        self._log_close_events = os.getenv("ML4T_LOG_PROVIDER_CLOSE", "0") == "1"
 
         # Initialize mixins
         self.init_rate_limit(self.name, rate_limit)
@@ -148,6 +150,18 @@ class BaseProvider(
     def close(self):
         """Clean up resources."""
         self.close_session()
+
+    def _log_close_event(self, message: str) -> None:
+        """Log noisy provider close events only when explicitly enabled."""
+        if self._log_close_events:
+            self.logger.debug(message)
+
+    def __del__(self) -> None:
+        """Best-effort session cleanup for leaked provider instances."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def capabilities(self) -> ProviderCapabilities:
         """Return provider capabilities (default implementation).

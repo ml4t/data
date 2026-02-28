@@ -576,7 +576,7 @@ class FREDProvider(BaseProvider):
         # Join all series on timestamp
         result = dataframes[0]
         for df in dataframes[1:]:
-            result = result.join(df, on="timestamp", how="outer_coalesce")
+            result = result.join(df, on="timestamp", how="full", coalesce=True)
 
         # Sort by timestamp
         result = result.sort("timestamp")
@@ -595,4 +595,4 @@ class FREDProvider(BaseProvider):
         """Close HTTP client."""
         if hasattr(self, "session"):
             self.session.close()
-            self.logger.debug("Closed FRED API client")
+            self._log_close_event("Closed FRED API client")

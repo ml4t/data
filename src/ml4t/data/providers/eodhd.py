@@ -461,4 +461,4 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
         """Close HTTP client."""
         if hasattr(self, "session"):
             self.session.close()
-            self.logger.debug("Closed EODHD API client")
+            self._log_close_event("Closed EODHD API client")
