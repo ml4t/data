@@ -21,6 +21,7 @@ IMPORTANT:
     so be mindful if running repeatedly.
 """
 
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -29,6 +30,25 @@ import pytest
 
 from ml4t.data.core.exceptions import SymbolNotFoundError
 from ml4t.data.providers.kalshi import KalshiProvider
+
+# Deterministic gate:
+# - Kalshi integration tests use live public API calls and can fail on restricted/offline networks
+# - Require explicit opt-in for local runs to keep default test runs deterministic
+RUN_PUBLIC = os.getenv("RUN_PUBLIC_KALSHI_TESTS", "0") == "1"
+
+pytestmark: pytest.MarkDecorator | list[pytest.MarkDecorator]
+if RUN_PUBLIC:
+    pytestmark = pytest.mark.integration
+else:
+    pytestmark = [
+        pytest.mark.integration,
+        pytest.mark.skip(
+            reason=(
+                "Kalshi integration tests require live network access. "
+                "Set RUN_PUBLIC_KALSHI_TESTS=1 to opt in."
+            )
+        ),
+    ]
 
 
 @pytest.fixture

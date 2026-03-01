@@ -53,8 +53,8 @@ jobs:
       - name: Run ty check
         run: uv run ty check
 
-  test:
-    name: Test (Python ${{ matrix.python-version }})
+  test-core:
+    name: Test Core (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -75,22 +75,105 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run tests
+      - name: Run deterministic core lane
+        run: uv run pytest tests/ -v --tb=short -W error::ResourceWarning
+
+  test-package-smoke:
+    name: Test Package Smoke (Wheel + CLI)
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Create isolated smoke environment
+        run: uv venv .smoke-venv --python ${{ env.PYTHON_VERSION }}
+
+      - name: Install built wheel
+        run: uv pip install --python .smoke-venv/bin/python dist/*.whl
+
+      - name: Verify import and CLI entrypoint
         run: |
-          uv run pytest tests/ -v --tb=short -m "not slow and not paid_tier and not integration" \
-            --ignore=tests/integration \
-            --ignore=tests/test_oanda_provider.py \
-            --ignore=tests/test_provider_registration.py \
-            --ignore=tests/futures \
-            --ignore=tests/test_async_providers_extended.py \
-            --ignore=tests/test_import.py \
-            --ignore=tests/test_batch_load.py \
-            --ignore=tests/synthetic
+          .smoke-venv/bin/python -c "import ml4t.data as m; print(m.__version__)"
+          .smoke-venv/bin/ml4t-data --help
+
+  test-integration-lane:
+    name: Test Integration/API-Key Lane
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    env:
+      CRYPTOCOMPARE_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
+      DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+      OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run integration/API-key marker lane
+        run: |
+          if [[ -z "${CRYPTOCOMPARE_API_KEY}" && -z "${DATABENTO_API_KEY}" && -z "${OANDA_API_KEY}" ]]; then
+            echo "No provider API keys configured; skipping integration/API-key lane."
+            exit 0
+          fi
+          uv run pytest tests/ -v --tb=short -m "(integration or requires_api_key) and not optional_dependency and not paid_tier"
+
+  test-optional-dependency-lane:
+    name: Test Optional Dependency Lane
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Install torch (CPU)
+        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run optional dependency marker lane
+        run: |
+          set +e
+          uv run pytest tests/ -v --tb=short -m "optional_dependency and not integration"
+          rc=$?
+          if [[ $rc -ne 0 && $rc -ne 5 ]]; then
+            exit $rc
+          fi
 
   build:
     name: Build Package
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, test-core, test-package-smoke]
     steps:
       - uses: actions/checkout@v4
         with:

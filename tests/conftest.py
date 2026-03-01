@@ -1,5 +1,7 @@
 """Pytest configuration and fixtures."""
 
+import asyncio
+import gc
 import os
 
 import pytest
@@ -33,6 +35,20 @@ structlog.configure(
     logger_factory=structlog.PrintLoggerFactory(),
     cache_logger_on_first_use=False,
 )
+
+
+def _close_yfinance_caches() -> None:
+    """Close yfinance sqlite caches if available."""
+    try:
+        import yfinance.cache as yf_cache
+    except ImportError:
+        return
+
+    for manager_name in ("_TzDBManager", "_CookieDBManager", "_ISINDBManager"):
+        manager = getattr(yf_cache, manager_name, None)
+        close_db = getattr(manager, "close_db", None) if manager is not None else None
+        if callable(close_db):
+            close_db()
 
 
 # ===== Rate Limiter Reset Fixtures =====
@@ -85,3 +101,28 @@ def reset_provider_cache():
         ProviderManager._PROVIDER_CLASSES = None
     except (ImportError, AttributeError):
         pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def close_default_event_loop():
+    """Close any leaked event loops at session end to avoid ResourceWarning on Python 3.13."""
+    yield
+
+    for obj in gc.get_objects():
+        if not isinstance(obj, asyncio.AbstractEventLoop):
+            continue
+        if obj.is_running() or obj.is_closed():
+            continue
+        try:
+            obj.close()
+        except (RuntimeError, ValueError):
+            # Best-effort cleanup: ignore already-invalid loop internals at teardown.
+            continue
+
+
+@pytest.fixture(autouse=True)
+def close_yfinance_caches():
+    """Close yfinance sqlite caches around each test to prevent leaked sqlite handles."""
+    _close_yfinance_caches()
+    yield
+    _close_yfinance_caches()

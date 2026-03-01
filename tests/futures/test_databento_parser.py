@@ -273,6 +273,8 @@ def databento_path():
     return DATABENTO_DATA_PATH
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestLoadDatabentoOHLCV:
     """Tests for loading OHLCV data."""
 
@@ -323,6 +325,8 @@ class TestLoadDatabentoOHLCV:
         assert "ts_event" in df.columns or "timestamp" in df.columns
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestLoadDatabentoDefinitions:
     """Tests for loading definition data."""
 
@@ -356,6 +360,8 @@ class TestLoadDatabentoDefinitions:
         assert df.filter(pl.col("expiration").is_not_null()).height > 0
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestGetExpirationDates:
     """Tests for get_expiration_dates function."""
 
@@ -389,6 +395,8 @@ class TestGetExpirationDates:
                 pass
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestParseDatabentoRaw:
     """Tests for parse_databento_raw function."""
 
@@ -439,6 +447,8 @@ class TestParseDatabentoRaw:
         assert dates == sorted(dates)
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestParseDatabento:
     """Tests for parse_databento function (front month only)."""
 
@@ -470,6 +480,8 @@ class TestParseDatabento:
         assert dates == sorted(dates)
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestGetContractChain:
     """Tests for get_contract_chain function."""
 
@@ -496,6 +508,8 @@ class TestGetContractChain:
             assert contract.product == "ZM"
 
 
+@pytest.mark.integration
+@pytest.mark.paid_tier
 class TestGetFrontBackContracts:
     """Tests for get_front_back_contracts function."""
 

@@ -5,114 +5,93 @@ from datetime import date
 import polars as pl
 import pytest
 
-from ml4t.data.futures.parser import parse_quandl_chris
+from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
+
+
+@pytest.fixture
+def chris_data_path(tmp_path):
+    data = pl.DataFrame(
+        {
+            "ticker": ["ES", "ES", "CL", "CL", "CL"],
+            "date": [
+                date(2020, 1, 2),
+                date(2020, 1, 3),
+                date(2014, 3, 3),
+                date(2014, 3, 3),
+                date(2014, 3, 4),
+            ],
+            "open": [3200.0, None, 6387.0, 103.0, 104.0],
+            "high": [3210.0, None, 6400.0, 104.0, 105.0],
+            "low": [3190.0, None, 6300.0, 102.0, 103.0],
+            "close": [3205.0, None, 6390.0, 103.5, 104.5],
+            "last": [3205.0, None, 6390.0, 103.5, 104.5],
+            "settle": [3204.0, 3214.0, None, None, None],
+            "volume": [100_000.0, 90_000.0, 74_457.0, 282_447.0, 200_000.0],
+            "open_interest": [1000.0, 1100.0, 2000.0, 2100.0, 2200.0],
+        }
+    )
+    path = tmp_path / "chris_futures.parquet"
+    data.write_parquet(path)
+    return path
 
 
 class TestParseQuandlCHRIS:
     """Tests for parse_quandl_chris function."""
 
-    def test_parse_es_continuous_data(self):
-        """Test parsing ES - should return continuous data with no duplicates."""
-        data = parse_quandl_chris("ES")
+    def test_parse_es_continuous_data(self, chris_data_path):
+        data = parse_quandl_chris("ES", data_path=chris_data_path)
 
-        # Check no duplicates
-        total_rows = len(data)
-        unique_dates = data.select("date").unique().count().item()
-        assert total_rows == unique_dates, "ES should have no duplicate dates"
-
-        # Check columns
-        expected_columns = {"date", "open", "high", "low", "close", "volume", "open_interest"}
-        assert set(data.columns) == expected_columns
-
-        # Check data types
+        assert len(data) == 2
+        assert data.select("date").n_unique() == 2
+        assert set(data.columns) == {
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "open_interest",
+        }
         assert data["date"].dtype == pl.Date
-        assert data["open"].dtype == pl.Float64
-        assert data["volume"].dtype == pl.Float64
 
-    def test_parse_cl_mixed_data(self):
-        """Test parsing CL - should deduplicate mixed contracts to front month only."""
-        data = parse_quandl_chris("CL")
+    def test_parse_cl_mixed_data_deduplicates_to_front_month(self, chris_data_path):
+        data = parse_quandl_chris("CL", data_path=chris_data_path)
 
-        # Check no duplicates after parsing
-        total_rows = len(data)
-        unique_dates = data.select("date").unique().count().item()
-        assert total_rows == unique_dates, "CL should be deduplicated to single row per date"
+        assert len(data) == 2
+        assert data.select("date").n_unique() == 2
 
-        # Check columns
-        expected_columns = {"date", "open", "high", "low", "close", "volume", "open_interest"}
-        assert set(data.columns) == expected_columns
+    def test_front_month_selection_by_volume(self, chris_data_path):
+        data = parse_quandl_chris("CL", data_path=chris_data_path)
+        row = data.filter(pl.col("date") == date(2014, 3, 3))
 
-    def test_front_month_selection_by_volume(self):
-        """Test that front month is selected by highest volume on duplicate dates."""
-        # For CL on 2014-03-03, we know there were two rows:
-        # - Row 1: open=6387¢, volume=74,457 (back month)
-        # - Row 2: open=103$, volume=282,447 (front month)
-        # Parser should select Row 2 (higher volume)
+        assert len(row) == 1
+        assert row["volume"].item() == 282_447.0
+        assert row["open"].item() == 103.0
 
-        data = parse_quandl_chris("CL")
-        row_2014_03_03 = data.filter(pl.col("date") == date(2014, 3, 3))
+    def test_parse_raw_keeps_duplicate_dates(self, chris_data_path):
+        data = parse_quandl_chris_raw("CL", data_path=chris_data_path)
 
-        assert len(row_2014_03_03) == 1, "Should have exactly one row for 2014-03-03"
+        assert len(data) == 3
+        assert data.filter(pl.col("date") == date(2014, 3, 3)).height == 2
 
-        # Check that front month was selected (higher volume, price in dollars ~$103)
-        open_price = row_2014_03_03["open"].item()
-        volume = row_2014_03_03["volume"].item()
-
-        # Front month should have volume ~282,447 and price ~$103 (not 6387¢)
-        assert volume > 200_000, f"Expected front month volume >200k, got {volume}"
-        assert 100 < open_price < 110, f"Expected front month price ~$103, got ${open_price}"
-
-    def test_invalid_ticker(self):
-        """Test that invalid ticker raises ValueError."""
+    def test_invalid_ticker(self, chris_data_path):
         with pytest.raises(ValueError, match="Ticker.*not found"):
-            parse_quandl_chris("INVALID_TICKER_12345")
+            parse_quandl_chris("INVALID_TICKER_12345", data_path=chris_data_path)
 
-    def test_data_sorted_by_date(self):
-        """Test that returned data is sorted by date."""
-        data = parse_quandl_chris("ES")
+    def test_data_sorted_by_date(self, chris_data_path):
+        data = parse_quandl_chris("ES", data_path=chris_data_path)
+        assert data["date"].to_list() == sorted(data["date"].to_list())
 
-        dates = data["date"].to_list()
-        assert dates == sorted(dates), "Data should be sorted by date"
+    def test_no_null_ohlc_values_after_standardization(self, chris_data_path):
+        data = parse_quandl_chris("ES", data_path=chris_data_path)
 
-    def test_no_null_ohlc_values(self):
-        """Test that OHLC columns have no null values after parsing."""
-        data = parse_quandl_chris("ES")
+        assert data["open"].null_count() == 0
+        assert data["high"].null_count() == 0
+        assert data["low"].null_count() == 0
+        assert data["close"].null_count() == 0
+        assert data["volume"].null_count() == 0
 
-        # OHLC should never be null (fallback logic fills them)
-        assert data["open"].null_count() == 0, "open should have no nulls"
-        assert data["high"].null_count() == 0, "high should have no nulls"
-        assert data["low"].null_count() == 0, "low should have no nulls"
-        assert data["close"].null_count() == 0, "close should have no nulls"
-
-        # volume should have no nulls
-        assert data["volume"].null_count() == 0, "volume should have no nulls"
-
-        # open_interest CAN be null (acceptable)
-        # No assertion for open_interest
-
-    def test_date_range_coverage(self):
-        """Test that parsed data covers expected date range."""
-        data = parse_quandl_chris("ES")
-
-        min_date = data["date"].min()
-        max_date = data["date"].max()
-
-        # ES data in Quandl CHRIS should span ~2014-2021
-        assert min_date.year >= 2014, f"Expected data to start >= 2014, got {min_date}"
-        assert max_date.year <= 2021, f"Expected data to end <= 2021, got {max_date}"
-
-    @pytest.mark.skip(reason="Requires specific Quandl CHRIS data format - skipped for CI")
-    def test_realistic_price_ranges(self):
-        """Test that prices are in realistic ranges (not obviously wrong units)."""
-        # Get ES data for 2020 (known range ~2000-4000)
-        data = parse_quandl_chris("ES")
-        data_2020 = data.filter(pl.col("date").dt.year() == 2020)
-
-        if len(data_2020) > 0:
-            mean_close = data_2020["close"].mean()
-
-            # E-mini S&P 500 in 2020 should be ~2000-4000 points
-            assert 2000 < mean_close < 4000, (
-                f"Expected ES 2020 mean price ~2000-4000, got {mean_close}. "
-                "Might indicate price unit issue."
-            )
+    def test_missing_data_path_raises_actionable_error(self, tmp_path):
+        missing = tmp_path / "missing.parquet"
+        with pytest.raises(FileNotFoundError, match="legacy CHRIS dataset is no longer available"):
+            parse_quandl_chris("ES", data_path=missing)

@@ -4,16 +4,37 @@ Futures data parser for Quandl CHRIS and other formats.
 This module handles parsing and cleaning raw futures data from various sources.
 """
 
+import os
 from pathlib import Path
 
 import polars as pl
 
 from ml4t.data.futures.schema import ContractSpec
 
+DEFAULT_CHRIS_ENV_VAR = "ML4T_QUANDL_CHRIS_PATH"
+DEFAULT_CHRIS_PATH = Path("~/ml4t-data/futures/quandl/chris_futures.parquet").expanduser()
+
+
+def _resolve_chris_data_path(data_path: str | Path | None) -> Path:
+    if data_path is None:
+        env_path = os.getenv(DEFAULT_CHRIS_ENV_VAR)
+        resolved = Path(env_path).expanduser() if env_path else DEFAULT_CHRIS_PATH
+    else:
+        resolved = Path(data_path).expanduser()
+
+    if resolved.exists():
+        return resolved
+
+    raise FileNotFoundError(
+        f"Quandl CHRIS data file not found: {resolved}. "
+        "The legacy CHRIS dataset is no longer available from NASDAQ Data Link. "
+        f"Provide a local parquet via `data_path` or set {DEFAULT_CHRIS_ENV_VAR}."
+    )
+
 
 def parse_quandl_chris_raw(
     ticker: str,
-    data_path: str | Path = "/home/stefan/ml3t/data/futures/quandl/chris_futures.parquet",
+    data_path: str | Path | None = None,
     _contract_spec: ContractSpec | None = None,
 ) -> pl.DataFrame:
     """
@@ -36,10 +57,7 @@ def parse_quandl_chris_raw(
     Note:
         Use this function for roll detection. For continuous series, use parse_quandl_chris().
     """
-    # Validate data path
-    data_path = Path(data_path)
-    if not data_path.exists():
-        raise FileNotFoundError(f"Data file not found: {data_path}")
+    data_path = _resolve_chris_data_path(data_path)
 
     # Load data for ticker
     data = pl.read_parquet(data_path)
@@ -73,7 +91,7 @@ def parse_quandl_chris_raw(
 
 def parse_quandl_chris(
     ticker: str,
-    data_path: str | Path = "/home/stefan/ml3t/data/futures/quandl/chris_futures.parquet",
+    data_path: str | Path | None = None,
     _contract_spec: ContractSpec | None = None,
 ) -> pl.DataFrame:
     """
@@ -112,10 +130,7 @@ def parse_quandl_chris(
         >>> cl_data = parse_quandl_chris("CL")
         >>> # Returns front month only (highest volume on duplicate dates)
     """
-    # Validate data path
-    data_path = Path(data_path)
-    if not data_path.exists():
-        raise FileNotFoundError(f"Data file not found: {data_path}")
+    data_path = _resolve_chris_data_path(data_path)
 
     # Load data for ticker
     data = pl.read_parquet(data_path)
