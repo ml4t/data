@@ -43,7 +43,15 @@ class TestParseQuandlCHRIS:
 
         assert len(data) == 2
         assert data.select("date").n_unique() == 2
-        assert set(data.columns) == {"date", "open", "high", "low", "close", "volume", "open_interest"}
+        assert set(data.columns) == {
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "open_interest",
+        }
         assert data["date"].dtype == pl.Date
 
     def test_parse_cl_mixed_data_deduplicates_to_front_month(self, chris_data_path):

@@ -113,7 +113,11 @@ def close_default_event_loop():
             continue
         if obj.is_running() or obj.is_closed():
             continue
-        obj.close()
+        try:
+            obj.close()
+        except (RuntimeError, ValueError):
+            # Best-effort cleanup: ignore already-invalid loop internals at teardown.
+            continue
 
 
 @pytest.fixture(autouse=True)
