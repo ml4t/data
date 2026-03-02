@@ -137,19 +137,25 @@ nav:
   - Providers:
     - providers/index.md
     - Yahoo Finance: providers/yahoo.md
-    - EODHD: providers/eodhd.md
-    - Binance: providers/binance.md
     - CoinGecko: providers/coingecko.md
-    - DataBento: providers/databento.md
-    - Tiingo: providers/tiingo.md
-    - TwelveData: providers/twelve_data.md
-    - CryptoCompare: providers/cryptocompare.md
-    - Finnhub: providers/finnhub.md
-    - Polygon: providers/polygon.md
-    - Oanda: providers/oanda.md
+    - FRED: providers/fred.md
     - Fama-French: providers/fama_french.md
     - AQR: providers/aqr.md
     - Wiki Prices: providers/wiki_prices.md
+    - Kalshi: providers/kalshi.md
+    - Polymarket: providers/polymarket.md
+    - Binance Public: providers/binance_public.md
+    - NASDAQ ITCH: providers/nasdaq_itch.md
+    - EODHD: providers/eodhd.md
+    - Tiingo: providers/tiingo.md
+    - TwelveData: providers/twelve_data.md
+    - DataBento: providers/databento.md
+    - Polygon: providers/polygon.md
+    - Finnhub: providers/finnhub.md
+    - Binance: providers/binance.md
+    - OKX: providers/okx.md
+    - CryptoCompare: providers/cryptocompare.md
+    - Oanda: providers/oanda.md
 
   - Tutorials:
     - tutorials/index.md

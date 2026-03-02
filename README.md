@@ -83,6 +83,8 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Polygon | US equities, options, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | Binance | Crypto exchange data |
+| OKX | Crypto perpetuals and funding rates |
+| CryptoCompare | Crypto market data |
 | OANDA | Forex broker data |
 
 ## CLI for Automated Updates

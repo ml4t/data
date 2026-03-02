@@ -2,7 +2,7 @@
 
 This module provides unified access to multiple financial data providers.
 
-Available Providers:
+Available Providers (20 live + 3 synthetic/testing):
     - BaseProvider: Abstract base class for all providers
     - YahooFinanceProvider: Yahoo Finance (free, no API key)
     - TiingoProvider: Tiingo stocks (free tier: 1000 req/day, 500 symbols/month)
@@ -12,17 +12,20 @@ Available Providers:
     - AQRFactorProvider: AQR research factors (QMJ, BAB, VME)
     - FamaFrenchProvider: Fama-French factors (3-factor, 5-factor, momentum)
     - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
+    - PolymarketProvider: Polymarket prediction market history/order book snapshots
     - CoinGeckoProvider: CoinGecko crypto data (free, no API key)
-    - TwelveDataProvider: Twelve Data multi-asset (stocks, forex, crypto)
-    - PolygonProvider: Polygon multi-asset (stocks, options, crypto, forex)
     - BinanceProvider: Binance cryptocurrency exchange (live API, may have geo-restrictions)
     - BinancePublicProvider: Binance public data (bulk downloads, no geo-restrictions)
-    - OandaProvider: Oanda forex and CFDs
+    - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
     - CryptoCompareProvider: CryptoCompare crypto data
+    - TwelveDataProvider: Twelve Data multi-asset (stocks, forex, crypto)
+    - PolygonProvider: Polygon multi-asset (stocks, options, crypto, forex)
+    - OandaProvider: Oanda forex and CFDs
     - DataBentoProvider: DataBento market data
     - ITCHSampleProvider: NASDAQ TotalView-ITCH sample data (tick-level, free)
     - WikiPricesProvider: Quandl Wiki Prices (US equities 1962-2018, free)
     - SyntheticProvider: Synthetic data generator (no network required)
+    - LearnedSyntheticProvider: ML-based synthetic data generator (no network required)
     - MockProvider: Mock provider for testing
 
 Note: Updater classes have been removed to simplify the library.
