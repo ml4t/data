@@ -1,10 +1,10 @@
-# providers/ - 22 Data Sources
+# providers/ - Provider Adapters
 
 ## Base Classes
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| base.py | 290 | BaseDataProvider abstract |
+| base.py | 290 | `BaseProvider` abstract base |
 | async_base.py | 256 | AsyncBaseProvider |
 | protocols.py | 249 | Provider protocols |
 
@@ -51,4 +51,4 @@
 
 ## Key
 
-`get_provider()`, `BaseDataProvider`, `fetch_ohlcv()`
+`BaseProvider`, `Provider`, `fetch_ohlcv()`, `fetch_series()`, `fetch()`

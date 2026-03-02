@@ -18,7 +18,7 @@ Each library addresses a distinct stage: data infrastructure, feature engineerin
 
 Quantitative research requires consistent, reproducible access to market data from multiple sources. ml4t-data provides:
 
-- A unified interface across 19 data providers (equities, crypto, forex, futures, economic data)
+- A unified interface across 20 live provider adapters (plus synthetic/testing providers)
 - Automated storage in Hive-partitioned Parquet format with metadata tracking
 - Incremental updates, gap detection, and backfill capabilities via CLI
 - Built-in data validation (OHLC invariants, deduplication, anomaly detection)
@@ -57,7 +57,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 
 ## Data Providers
 
-### Free (No API Key)
+### No API Key Required
 
 | Provider | Coverage |
 |----------|----------|
@@ -65,16 +65,20 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | CoinGecko | 10,000+ cryptocurrencies |
 | FRED | 850,000 economic series |
 | Fama-French | Academic factor data |
-| AQR | Alternative factors (QMJ, BAB, TSMOM) |
+| AQR | Research factors (QMJ, BAB, HML Devil, VME, more) |
+| Wiki Prices | Frozen US equities history (1962-2018) |
+| Kalshi | Prediction market contracts |
+| Polymarket | Prediction market history/order book snapshots |
+| Binance Public | Bulk crypto data downloads |
+| NASDAQ ITCH Sample | Tick-level sample data |
 
-### API Key Required
+### Authenticated or Metered APIs
 
 | Provider | Coverage |
 |----------|----------|
 | EODHD | 60+ global exchanges |
 | Tiingo | US equities with quality focus |
 | Twelve Data | Multi-asset coverage |
-| Alpha Vantage | Equities, forex, crypto |
 | Databento | CME, CBOE, ICE futures/options |
 | Polygon | US equities, options, forex, crypto |
 | Finnhub | 70+ global exchanges |

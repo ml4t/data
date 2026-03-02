@@ -18,7 +18,7 @@ Market data acquisition and storage library for ML4T 3rd Edition.
 | `futures/`    | Databento futures downloaders and roll logic   |
 | `etfs/`       | ETFDataManager for Yahoo Finance ETF data      |
 | `crypto/`     | CryptoDataManager for Binance premium index    |
-| `providers/`  | 22 data source integrations                    |
+| `providers/`  | 20 live provider adapters + synthetic/testing providers |
 | `storage/`    | Hive-partitioned Parquet + ProfileMixin        |
 | `managers/`   | Data orchestration and updates                 |
 | `assets/`     | Asset universe definitions                     |
