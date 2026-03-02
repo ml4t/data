@@ -4,18 +4,26 @@
 class TestCoreExceptions:
     """Test core exception functionality."""
 
-    def test_qldm_error_basic(self):
-        """Test basic QldmError functionality."""
-        from ml4t.data.core.exceptions import QldmError
+    def test_ml4t_data_error_basic(self):
+        """Test basic ML4TDataError functionality."""
+        from ml4t.data.core.exceptions import ML4TDataError
 
         # Test basic exception
-        exc = QldmError("Test error")
+        exc = ML4TDataError("Test error")
         assert str(exc) == "Test error"
         assert exc.message == "Test error"
 
         # Test with details
-        exc_with_details = QldmError("Test error", details={"key": "value"})
+        exc_with_details = ML4TDataError("Test error", details={"key": "value"})
         assert exc_with_details.details == {"key": "value"}
+
+    def test_qldm_error_backward_compat(self):
+        """Test QldmError backward compatibility alias."""
+        from ml4t.data.core.exceptions import ML4TDataError, QldmError
+
+        assert QldmError is ML4TDataError
+        exc = QldmError("Test error")
+        assert isinstance(exc, ML4TDataError)
 
     def test_data_validation_error(self):
         """Test DataValidationError functionality."""
@@ -113,21 +121,21 @@ class TestCoreExceptions:
             AuthenticationError,
             ConfigurationError,
             DataValidationError,
+            ML4TDataError,
             NetworkError,
             ProviderError,
-            QldmError,
             RateLimitError,
             StorageError,
         )
 
-        # All should inherit from QldmError
-        assert issubclass(DataValidationError, QldmError)
-        assert issubclass(ProviderError, QldmError)
-        assert issubclass(StorageError, QldmError)
-        assert issubclass(ConfigurationError, QldmError)
-        assert issubclass(NetworkError, ProviderError)  # NetworkError inherits from ProviderError
+        # All should inherit from ML4TDataError
+        assert issubclass(DataValidationError, ML4TDataError)
+        assert issubclass(ProviderError, ML4TDataError)
+        assert issubclass(StorageError, ML4TDataError)
+        assert issubclass(ConfigurationError, ML4TDataError)
+        assert issubclass(NetworkError, ProviderError)
         assert issubclass(RateLimitError, ProviderError)
         assert issubclass(AuthenticationError, ProviderError)
 
         # All should inherit from Exception
-        assert issubclass(QldmError, Exception)
+        assert issubclass(ML4TDataError, Exception)

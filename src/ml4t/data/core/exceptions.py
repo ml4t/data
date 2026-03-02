@@ -1,16 +1,16 @@
-"""Custom exceptions for QLDM."""
+"""Custom exceptions for ml4t-data."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-class QldmError(Exception):
-    """Base exception for all QLDM errors."""
+class ML4TDataError(Exception):
+    """Base exception for all ml4t-data errors."""
 
     def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
         """
-        Initialize QLDM error.
+        Initialize ml4t-data error.
 
         Args:
             message: Error message
@@ -21,7 +21,11 @@ class QldmError(Exception):
         self.details = details or {}
 
 
-class ProviderError(QldmError):
+# Backward compatibility alias
+QldmError = ML4TDataError
+
+
+class ProviderError(ML4TDataError):
     """Base exception for provider-related errors."""
 
     def __init__(self, provider: str, message: str, details: dict[str, Any] | None = None) -> None:
@@ -206,7 +210,7 @@ class DataNotAvailableError(ProviderError):
         self.frequency = frequency
 
 
-class StorageError(QldmError):
+class StorageError(ML4TDataError):
     """Storage-related errors."""
 
     def __init__(
@@ -250,7 +254,7 @@ class LockError(StorageError):
         self.timeout = timeout
 
 
-class ConfigurationError(QldmError):
+class ConfigurationError(ML4TDataError):
     """Configuration-related errors."""
 
     def __init__(
@@ -276,7 +280,7 @@ class ConfigurationError(QldmError):
         self.parameter = parameter
 
 
-class CircuitBreakerOpenError(QldmError):
+class CircuitBreakerOpenError(ML4TDataError):
     """Circuit breaker is open and preventing calls."""
 
     def __init__(
