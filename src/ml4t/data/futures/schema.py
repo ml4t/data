@@ -17,8 +17,12 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class AssetClass(str, Enum):
-    """Asset class classification for futures contracts."""
+class FuturesAssetClass(str, Enum):
+    """Asset class classification for futures contracts.
+
+    This is a futures-specific taxonomy, distinct from the general
+    AssetClass enum in ml4t.data.assets.asset_class.
+    """
 
     EQUITY_INDEX = "equity_index"
     ENERGY = "energy"
@@ -27,6 +31,10 @@ class AssetClass(str, Enum):
     CURRENCY = "currency"
     FIXED_INCOME = "fixed_income"
     VOLATILITY = "volatility"
+
+
+# Backward compatibility alias
+AssetClass = FuturesAssetClass
 
 
 class SettlementType(str, Enum):
@@ -94,7 +102,7 @@ class ContractSpec:
     ticker: str
     name: str
     exchange: str
-    asset_class: AssetClass
+    asset_class: FuturesAssetClass
     multiplier: float
     tick_size: float
     tick_value: float

@@ -82,12 +82,14 @@ from ml4t.data.futures.schema import (
     AssetClass,
     ContractSpec,
     ExchangeInfo,
+    FuturesAssetClass,
     SettlementType,
 )
 
 __all__ = [
     # Schema
-    "AssetClass",
+    "AssetClass",  # Backward compat alias for FuturesAssetClass
+    "FuturesAssetClass",
     "ContractSpec",
     "ExchangeInfo",
     "MAJOR_CONTRACTS",

@@ -9,13 +9,9 @@ import structlog
 import yaml
 from pydantic import BaseModel, Field
 
-# Import consolidated enums from core.models
-from ml4t.data.core.models import AssetClass
+from ml4t.data.assets.asset_class import AssetClass
 
 logger = structlog.get_logger()
-
-
-# AssetClass enum imported from core.models
 
 
 class ValidationRuleConfig(BaseModel):

@@ -1,4 +1,4 @@
-"""Core data models for QLDM."""
+"""Core data models for ml4t-data."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from typing import Any
 import polars as pl
 from pydantic import BaseModel, Field, model_validator
 
+from ml4t.data.assets.asset_class import AssetClass  # noqa: F401 — re-exported
+
 
 class SchemaVersion(str, Enum):
     """Schema version for data storage."""
@@ -16,35 +18,8 @@ class SchemaVersion(str, Enum):
     V1_0 = "1.0"
 
 
-class AssetClass(str, Enum):
-    """Supported asset classes.
-
-    Consolidated from multiple definitions across the codebase.
-    Uses 'equities' as canonical since it's more widely used in the codebase.
-    """
-
-    # Primary values (widely used in codebase)
-    EQUITIES = "equities"  # Most widely used in current codebase
-    CRYPTO = "crypto"
-    FOREX = "forex"
-    COMMODITY = "commodity"
-    FIXED_INCOME = "fixed_income"
-    INDEX = "index"
-    ETF = "etf"
-    FUTURES = "futures"
-    OPTIONS = "options"
-
-    # Aliases for backward compatibility
-    EQUITY = "equity"  # Alias for EQUITIES
-    OPTION = "option"  # Alias for OPTIONS
-    FUTURE = "future"  # Alias for FUTURES
-
-
 class Frequency(str, Enum):
-    """Data frequency.
-
-    Consolidated from multiple definitions across the codebase.
-    """
+    """Data frequency."""
 
     # High-frequency data
     TICK = "tick"

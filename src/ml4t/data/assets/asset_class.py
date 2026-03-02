@@ -8,7 +8,12 @@ from typing import Any, ClassVar
 
 
 class AssetClass(str, Enum):
-    """Supported asset classes."""
+    """Supported asset classes.
+
+    Canonical enum for all asset class references across ml4t-data.
+    Plural aliases (EQUITIES, FUTURES, OPTIONS) are provided for backward
+    compatibility with config files and serialized data.
+    """
 
     EQUITY = "equity"
     CRYPTO = "crypto"
@@ -19,6 +24,11 @@ class AssetClass(str, Enum):
     ETF = "etf"
     OPTION = "option"
     FUTURE = "future"
+
+    # Plural aliases for backward compatibility
+    EQUITIES = "equities"
+    FUTURES = "futures"
+    OPTIONS = "options"
 
 
 @dataclass
