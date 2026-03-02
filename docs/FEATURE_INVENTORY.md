@@ -1,7 +1,7 @@
 # ML4T-Data: Comprehensive Feature Inventory
 
 **Library**: ml4t-data
-**Location**: `/home/stefan/ml4t/software/data/`
+**Location**: `src/ml4t/data/`
 **Version**: 0.1.0 (pre-release)
 **Status**: 🚧 Active Development (breaking changes acceptable)
 **Python**: 3.9+
@@ -13,7 +13,7 @@
 
 ML4T-Data is a production-ready market data acquisition library providing:
 
-- **13 Data Providers** (12 active + 1 historical fallback)
+- **20 Live Data Providers** (plus 3 synthetic/testing providers)
 - **Unified API** across crypto, equities, forex, and futures
 - **Incremental Update Infrastructure** with gap detection and resume capability
 - **7x Performance** improvement with Hive-partitioned Parquet storage
@@ -28,31 +28,42 @@ ML4T-Data is a production-ready market data acquisition library providing:
 
 ## Feature Category Inventory
 
-### 1. DATA PROVIDERS (15 Total: 13 Active + 1 Historical + 1 Mock)
+### 1. DATA PROVIDERS (23 Total: 20 Live + 3 Synthetic/Testing)
 
-#### Actively Maintained Providers
+#### Live Providers (No API Key Required)
 
 | # | Provider | File | Asset Classes | Free Tier | Status | Key Features |
 |---|----------|------|----------------|-----------|--------|--------------|
-| 1 | **Yahoo Finance** | `yahoo.py` | Equities, Crypto | Unlimited | ✅ Complete | US stocks, ETFs, indices |
-| 2 | **EODHD** | `eodhd.py` | Equities, Forex, Crypto | 500 calls/day | ✅ Complete | 60+ exchanges, global coverage |
-| 3 | **CoinGecko** | `coingecko.py` | Crypto | Free (50 req/min) | ✅ Complete | 10,000+ cryptocurrencies |
-| 4 | **Tiingo** | `tiingo.py` | Equities | 1000 req/day | ✅ Complete | US stocks alternative |
-| 5 | **Finnhub** | `finnhub.py` | Equities, Forex, Crypto | 60 req/min | ✅ Complete | Global market data (paid OHLCV) |
-| 6 | **Twelve Data** | `twelve_data.py` | Equities, Forex, Crypto | 800 calls/day | ✅ Complete | Multi-asset coverage |
-| 7 | **Polygon.io** | `polygon.py` | Equities, Options, Crypto, Forex | Limited | ✅ Complete | US market data (paid tier) |
-| 8 | **Binance** | `binance.py` | Crypto | Generous | ✅ Complete | Spot + futures, high-frequency |
-| 9 | **CryptoCompare** | `cryptocompare.py` | Crypto | 250k calls/mo | ✅ Complete | Historical crypto data |
-| 10 | **Oanda** | `oanda.py` | Forex | Trial | ✅ Complete | Institutional forex data |
-| 11 | **DataBento** | `databento.py` | Futures, Equities | Trial ($10 credits) | ✅ Complete | Institutional market data |
-| 12 | **Wiki Prices** | `wiki_prices.py` | Equities | Local file only | ✅ Complete | Historical US equities (1962-2018) |
+| 1 | **Yahoo Finance** | `yahoo.py` | Equities, Crypto | Unlimited | Complete | US stocks, ETFs, indices |
+| 2 | **CoinGecko** | `coingecko.py` | Crypto | Free (50 req/min) | Complete | 10,000+ cryptocurrencies |
+| 3 | **FRED** | `fred.py` | Economic Data | 120 req/min | Complete | 850,000 economic series |
+| 4 | **Fama-French** | `fama_french.py` | Factors | Unlimited | Complete | Academic factor data |
+| 5 | **AQR** | `aqr.py` | Factors | Unlimited | Complete | Research factors (QMJ, BAB, VME) |
+| 6 | **Wiki Prices** | `wiki_prices.py` | Equities | Local file only | Complete | Historical US equities (1962-2018) |
+| 7 | **Kalshi** | `kalshi.py` | Prediction Markets | Public data | Complete | Prediction market contracts |
+| 8 | **Polymarket** | `polymarket.py` | Prediction Markets | Public data | Complete | Prediction market history |
+| 9 | **Binance Public** | `binance_public.py` | Crypto | Bulk downloads | Complete | No geo-restrictions |
+| 10 | **NASDAQ ITCH** | `nasdaq_itch.py` | Tick Data | Sample data | Complete | Tick-level market data |
+
+#### Live Providers (Authenticated or Metered)
+
+| # | Provider | File | Asset Classes | Free Tier | Status | Key Features |
+|---|----------|------|----------------|-----------|--------|--------------|
+| 11 | **EODHD** | `eodhd.py` | Equities, Forex, Crypto | 500 calls/day | Complete | 60+ exchanges, global coverage |
+| 12 | **Tiingo** | `tiingo.py` | Equities | 1000 req/day | Complete | US stocks alternative |
+| 13 | **Twelve Data** | `twelve_data.py` | Equities, Forex, Crypto | 800 calls/day | Complete | Multi-asset coverage |
+| 14 | **DataBento** | `databento.py` | Futures, Equities | Trial ($10 credits) | Complete | Institutional market data |
+| 15 | **Polygon.io** | `polygon.py` | Equities, Options, Crypto, Forex | Limited | Complete | US market data (paid tier) |
+| 16 | **Finnhub** | `finnhub.py` | Equities, Forex, Crypto | 60 req/min | Complete | Global market data |
+| 17 | **Binance** | `binance.py` | Crypto | Generous | Complete | Spot + futures, high-frequency |
+| 18 | **OKX** | `okx.py` | Crypto | No geo-limits | Complete | Perpetuals, funding rates |
+| 19 | **CryptoCompare** | `cryptocompare.py` | Crypto | 250k calls/mo | Complete | Historical crypto data |
+| 20 | **Oanda** | `oanda.py` | Forex | Trial | Complete | Institutional forex data |
 
 **Provider Summary**:
-- **12 Live Providers**: Real-time API access
-- **1 Historical Provider**: Wiki Prices fallback (1962-2018 survivorship-bias-free)
-- **1 Mock Provider**: Testing and offline development
-- **12 Integration Tests**: Real API validation (10 providers with positive results)
-- **Coverage**: Crypto (4), Equities (8), Forex (3), Futures (1)
+- **20 Live Providers**: 10 free + 10 authenticated/metered
+- **3 Synthetic/Testing**: SyntheticProvider, LearnedSyntheticProvider, MockProvider
+- **Coverage**: Crypto (7), Equities (7), Forex (3), Futures (1), Economic (1), Factors (2), Prediction Markets (2), Tick Data (1)
 
 #### Base Provider Infrastructure
 

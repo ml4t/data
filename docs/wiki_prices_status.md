@@ -44,7 +44,7 @@ The **Wiki Prices dataset is DEPRECATED and no longer maintained** as of April 1
 ### 3. Local ML4T Copy
 
 **Status**: 🟢 Available (production-ready)
-**Location**: `/home/stefan/ml4t/software/projects/daily_us_equities/wiki_prices.parquet`
+**Location**: User-configured path (e.g., `~/ml4t-data/wiki_prices.parquet`)
 **File Size**: 631.7 MB
 **Format**: Polars-compatible Parquet
 
@@ -286,7 +286,7 @@ import polars as pl
 from pathlib import Path
 
 # Load from local archive
-wiki_file = Path("/home/stefan/ml4t/software/projects/daily_us_equities/wiki_prices.parquet")
+wiki_file = Path("~/ml4t-data/wiki_prices.parquet").expanduser()
 df = pl.read_parquet(wiki_file)
 
 # Filter by symbol and date
@@ -322,8 +322,8 @@ class WikiPricesProvider(BaseProvider):
     def __init__(self, parquet_path: str = None):
         super().__init__(rate_limit=None)  # Local file, no rate limit
         self.parquet_path = parquet_path or Path(
-            "/home/stefan/ml4t/software/projects/daily_us_equities/wiki_prices.parquet"
-        )
+            "~/ml4t-data/wiki_prices.parquet"
+        ).expanduser()
         # Load once and cache in memory (632MB is acceptable)
         self._data = pl.read_parquet(self.parquet_path)
 

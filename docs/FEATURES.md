@@ -238,8 +238,8 @@ for symbol in symbols:
 - `ml4t-book` (third edition) - 6 example notebooks
 
 ### Coordinate Breaking Changes With
-- `/home/stefan/ml4t/software/.claude/`
-- Parent-level context for multi-library workflows
+- Parent-level context in the `ml4t/libraries/` workspace
+- Multi-library workflows coordinated at the workspace level
 
 ---
 
@@ -350,9 +350,9 @@ ml4t-data export -s AAPL --output data.xlsx
 ## Documentation Links
 
 - **Full Inventory**: See comprehensive feature list above
-- **README**: `/home/stefan/ml4t/software/data/README.md` (8000+ lines)
-- **Project Map**: `/home/stefan/ml4t/software/data/.claude/PROJECT_MAP.md`
-- **Book Integration**: 6 example notebooks in `/home/stefan/ml4t/third_edition/`
+- **README**: `../README.md`
+- **Project Map**: See AGENT.md files at each package level
+- **Book Integration**: 6 example notebooks (ML4T third edition)
 - **Performance Analysis**: `PERFORMANCE_BENCHMARKS.md` and `PERFORMANCE_ANALYSIS.md`
 
 ---
