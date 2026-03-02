@@ -11,8 +11,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Import consolidated enums from core.models
-from ml4t.data.core.models import AssetClass, Frequency
+from ml4t.data.assets.asset_class import AssetClass
+from ml4t.data.core.models import Frequency
 
 
 # Storage configuration enums
