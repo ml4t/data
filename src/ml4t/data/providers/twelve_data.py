@@ -175,30 +175,6 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
 
         return df
 
-    def _create_empty_dataframe(self) -> pl.DataFrame:
-        """Create an empty DataFrame with the correct schema."""
-        return pl.DataFrame(
-            {
-                "timestamp": [],
-                "symbol": [],
-                "open": [],
-                "high": [],
-                "low": [],
-                "close": [],
-                "volume": [],
-            }
-        ).with_columns(
-            [
-                pl.col("timestamp").cast(pl.Datetime),
-                pl.col("symbol").cast(pl.String),
-                pl.col("open").cast(pl.Float64),
-                pl.col("high").cast(pl.Float64),
-                pl.col("low").cast(pl.Float64),
-                pl.col("close").cast(pl.Float64),
-                pl.col("volume").cast(pl.Float64),
-            ]
-        )
-
     async def _fetch_raw_data_async(
         self,
         symbol: str,

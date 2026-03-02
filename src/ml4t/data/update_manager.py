@@ -18,6 +18,13 @@ from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
 logger = structlog.get_logger()
 
 
+def _ensure_datetime(dt: date | datetime) -> datetime:
+    """Ensure we have a datetime object."""
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        return datetime.combine(dt, datetime.min.time())
+    return dt
+
+
 class UpdateStrategy(Enum):
     """Update strategy types."""
 
@@ -59,12 +66,6 @@ class GapDetector:
         """
         self.exclude_weekends = exclude_weekends
 
-    def _ensure_datetime(self, dt: date | datetime) -> datetime:
-        """Ensure we have a datetime object."""
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            return datetime.combine(dt, datetime.min.time())
-        return dt
-
     def detect_gaps(
         self,
         df: pl.DataFrame,
@@ -88,7 +89,7 @@ class GapDetector:
         # Sort by timestamp
         df = df.sort("timestamp")
         # Ensure we have datetime objects, not date objects
-        timestamps = [self._ensure_datetime(ts) for ts in df["timestamp"].to_list()]
+        timestamps = [_ensure_datetime(ts) for ts in df["timestamp"].to_list()]
 
         gaps = []
         expected_delta = self._get_expected_delta(frequency)
@@ -177,9 +178,9 @@ class GapDetector:
             gaps = self.detect_gaps(df, frequency)
 
             # Check for gap at the beginning
-            first_timestamp = self._ensure_datetime(df["timestamp"].min())
-            start_date = self._ensure_datetime(start_date)
-            end_date = self._ensure_datetime(end_date)
+            first_timestamp = _ensure_datetime(df["timestamp"].min())
+            start_date = _ensure_datetime(start_date)
+            end_date = _ensure_datetime(end_date)
 
             if first_timestamp > start_date:
                 gaps.insert(
@@ -192,7 +193,7 @@ class GapDetector:
                 )
 
             # Check for gap at the end
-            last_timestamp = self._ensure_datetime(df["timestamp"].max())
+            last_timestamp = _ensure_datetime(df["timestamp"].max())
             if last_timestamp < end_date:
                 gaps.append(
                     {
@@ -242,12 +243,6 @@ class IncrementalUpdater:
         self.strategy = strategy
         self.gap_detector = GapDetector(exclude_weekends=True)
 
-    def _ensure_datetime(self, dt: date | datetime) -> datetime:
-        """Ensure we have a datetime object."""
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            return datetime.combine(dt, datetime.min.time())
-        return dt
-
     def determine_update_range(
         self,
         storage: HiveStorage,
@@ -278,9 +273,9 @@ class IncrementalUpdater:
             if df.is_empty():
                 return requested_start, requested_end, "full"
 
-            last_timestamp = self._ensure_datetime(df["timestamp"].max())
-            requested_end = self._ensure_datetime(requested_end)
-            requested_start = self._ensure_datetime(requested_start)
+            last_timestamp = _ensure_datetime(df["timestamp"].max())
+            requested_end = _ensure_datetime(requested_end)
+            requested_start = _ensure_datetime(requested_start)
 
             # If requested end is before last data, no update needed
             if requested_end <= last_timestamp:
@@ -625,12 +620,6 @@ class BackfillManager:
         self.tracker = tracker
         self.gap_detector = GapDetector(exclude_weekends=True)
 
-    def _ensure_datetime(self, dt: date | datetime) -> datetime:
-        """Ensure we have a datetime object."""
-        if isinstance(dt, date) and not isinstance(dt, datetime):
-            return datetime.combine(dt, datetime.min.time())
-        return dt
-
     def identify_candidates(
         self,
         min_gap_days: int = 5,
@@ -659,7 +648,7 @@ class BackfillManager:
                     continue
 
                 # Check data age
-                last_update = self._ensure_datetime(df["timestamp"].max())
+                last_update = _ensure_datetime(df["timestamp"].max())
                 age_days = (datetime.now() - last_update).days
 
                 if age_days > max_age_days:

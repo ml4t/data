@@ -212,10 +212,10 @@ class TestTransformData:
         assert df["symbol"][0] == "AAPL"
 
     def test_transform_data_empty(self, provider):
-        """Test empty data raises AttributeError (missing method)."""
-        # Provider's _transform_data calls _create_empty_dataframe which doesn't exist
-        with pytest.raises(AttributeError):
-            provider._transform_data([], "AAPL")
+        """Test empty data returns empty DataFrame."""
+        result = provider._transform_data([], "AAPL")
+        assert result.is_empty()
+        assert "timestamp" in result.columns
 
     def test_transform_data_renames_adj_columns(self, provider):
         """Test adjusted columns are renamed correctly."""

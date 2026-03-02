@@ -399,32 +399,3 @@ class DataBentoProvider(BaseProvider):
         except Exception as e:
             self.logger.error("Failed to list schemas", dataset=dataset, error=str(e))
             return []
-
-    async def fetch_ohlcv_async(
-        self, symbol: str, start: str, end: str, frequency: str = "daily"
-    ) -> pl.DataFrame:
-        """Async fetch OHLCV data using thread pool.
-
-        Since the Databento SDK is synchronous, this wraps the sync call
-        in asyncio.to_thread() to avoid blocking the event loop.
-
-        This is useful when fetching multiple symbols concurrently.
-
-        Args:
-            symbol: Symbol to fetch
-            start: Start date (YYYY-MM-DD)
-            end: End date (YYYY-MM-DD)
-            frequency: Data frequency
-
-        Returns:
-            Polars DataFrame with OHLCV data
-
-        Example:
-            async def fetch_many():
-                provider = DataBentoProvider()
-                tasks = [provider.fetch_ohlcv_async(s, start, end) for s in symbols]
-                return await asyncio.gather(*tasks)
-        """
-        import asyncio
-
-        return await asyncio.to_thread(self.fetch_ohlcv, symbol, start, end, frequency)

@@ -6,6 +6,8 @@ implementations for Hive partitioned and flat file storage strategies.
 
 from __future__ import annotations
 
+import json
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
+from filelock import FileLock
 
 # Type alias for partition granularity
 PartitionGranularityType = Literal["year", "month", "day", "hour"]
@@ -80,6 +83,8 @@ class StorageBackend(ABC):
         self.config = config
         self.base_path = config.base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
+        self.metadata_dir = self.base_path / ".metadata"
+        self.metadata_dir.mkdir(exist_ok=True)
 
     @abstractmethod
     def write(self, data: pl.LazyFrame, key: str, metadata: dict[str, Any] | None = None) -> Path:
@@ -144,7 +149,6 @@ class StorageBackend(ABC):
             True if deletion was successful
         """
 
-    @abstractmethod
     def get_metadata(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a key.
 
@@ -152,8 +156,64 @@ class StorageBackend(ABC):
             key: Storage key
 
         Returns:
-            Metadata dictionary if exists, None otherwise
+            Metadata dict or None
         """
+        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                return json.load(f)
+        return None
+
+    def _atomic_write(self, df: pl.DataFrame, target_path: Path) -> None:
+        """Write DataFrame atomically using temp file pattern.
+
+        Args:
+            df: DataFrame to write
+            target_path: Target file path
+        """
+        # Write to temp file first
+        with tempfile.NamedTemporaryFile(
+            dir=target_path.parent, suffix=".parquet.tmp", delete=False
+        ) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+            # Write with compression
+            df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
+
+            # Atomic rename
+            tmp_path.replace(target_path)
+
+    def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
+        """Update metadata for a key.
+
+        Args:
+            key: Storage key
+            metadata: Metadata to store
+        """
+        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+
+        if self.config.enable_locking:
+            lock_file = self.metadata_dir / f"{key.replace('/', '_')}.lock"
+            lock = FileLock(lock_file, timeout=10)
+
+            with lock:
+                self._write_metadata_file(metadata_file, metadata)
+        else:
+            self._write_metadata_file(metadata_file, metadata)
+
+    def _write_metadata_file(self, path: Path, metadata: dict[str, Any]) -> None:
+        """Write metadata to file.
+
+        Args:
+            path: Metadata file path
+            metadata: Metadata to write
+        """
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, mode="w", suffix=".json.tmp", delete=False
+        ) as tmp_file:
+            json.dump(metadata, tmp_file, indent=2, default=str)
+            tmp_path = Path(tmp_file.name)
+            tmp_path.replace(path)
 
     def _ensure_lazy(self, data: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
         """Ensure data is a LazyFrame for efficient processing.

@@ -175,5 +175,3 @@ class TestPathValidator:
         assert not PathValidator.is_safe_filename("..")  # Special name
         assert not PathValidator.is_safe_filename("CON")  # Windows reserved
         assert not PathValidator.is_safe_filename("PRN")  # Windows reserved
-
-
