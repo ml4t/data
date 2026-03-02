@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 
 import polars as pl
@@ -10,7 +11,6 @@ import pytest
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.export.formats import CSVExporter, ExcelExporter, ExportConfig, JSONExporter
 from ml4t.data.export.manager import ExportManager
-from ml4t.data.storage.filesystem import FileSystemBackend
 
 
 class TestCSVExporter:
@@ -304,64 +304,85 @@ class TestExcelExporter:
             assert result.output_path.exists()
 
 
+class _InMemoryStorage:
+    """Minimal in-memory storage for export tests."""
+
+    def __init__(self):
+        self._store: dict[str, DataObject] = {}
+
+    def write(self, data: DataObject) -> str:
+        key = f"{data.metadata.asset_class}/{data.metadata.frequency}/{data.metadata.symbol}"
+        self._store[key] = deepcopy(data)
+        return key
+
+    def read(self, key: str) -> DataObject:
+        if key not in self._store:
+            raise KeyError(key)
+        return deepcopy(self._store[key])
+
+    def exists(self, key: str) -> bool:
+        return key in self._store
+
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        return sorted(k for k in self._store if k.startswith(prefix))
+
+
 class TestExportManager:
     """Test export manager functionality."""
 
     @pytest.fixture
-    def sample_storage(self) -> FileSystemBackend:
+    def sample_storage(self):
         """Create storage with sample data."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = FileSystemBackend(data_root=Path(tmpdir))
+        from datetime import datetime
 
-            # Create sample data
-            from datetime import datetime
+        storage = _InMemoryStorage()
 
-            df = pl.DataFrame(
-                {
-                    "timestamp": [
-                        datetime(2024, 1, 1),
-                        datetime(2024, 1, 2),
-                        datetime(2024, 1, 3),
-                    ],
-                    "open": [100.0, 101.0, 102.0],
-                    "high": [105.0, 106.0, 107.0],
-                    "low": [99.0, 100.0, 101.0],
-                    "close": [104.0, 105.0, 106.0],
-                    "volume": [1000000, 1100000, 1200000],
-                }
-            )
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1),
+                    datetime(2024, 1, 2),
+                    datetime(2024, 1, 3),
+                ],
+                "open": [100.0, 101.0, 102.0],
+                "high": [105.0, 106.0, 107.0],
+                "low": [99.0, 100.0, 101.0],
+                "close": [104.0, 105.0, 106.0],
+                "volume": [1000000, 1100000, 1200000],
+            }
+        )
 
-            metadata = Metadata(
-                provider="test",
-                symbol="AAPL",
-                bar_type="time",
-                bar_params={"frequency": "daily"},
-                asset_class="equities",
-                start="2024-01-01",
-                end="2024-01-03",
-            )
+        metadata = Metadata(
+            provider="test",
+            symbol="AAPL",
+            bar_type="time",
+            bar_params={"frequency": "daily"},
+            asset_class="equities",
+            start="2024-01-01",
+            end="2024-01-03",
+        )
 
-            data_obj = DataObject(data=df, metadata=metadata)
+        data_obj = DataObject(data=df, metadata=metadata)
+        storage.write(data_obj)
 
-            # Write AAPL
-            storage.write(data_obj)
+        metadata_googl = Metadata(
+            provider="test",
+            symbol="GOOGL",
+            bar_type="time",
+            bar_params={"frequency": "daily"},
+            asset_class="equities",
+            start="2024-01-01",
+            end="2024-01-03",
+        )
+        data_obj_googl = DataObject(data=df, metadata=metadata_googl)
+        storage.write(data_obj_googl)
 
-            # Write GOOGL with different symbol
-            metadata_googl = Metadata(
-                provider="test",
-                symbol="GOOGL",
-                bar_type="time",
-                bar_params={"frequency": "daily"},
-                asset_class="equities",
-                start="2024-01-01",
-                end="2024-01-03",
-            )
-            data_obj_googl = DataObject(data=df, metadata=metadata_googl)
-            storage.write(data_obj_googl)
+        return storage
 
-            yield storage
-
-    def test_export_single_dataset(self, sample_storage: FileSystemBackend) -> None:
+    def test_export_single_dataset(self, sample_storage) -> None:
         """Test exporting a single dataset."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = ExportManager(storage=sample_storage)
@@ -376,7 +397,7 @@ class TestExportManager:
             assert result.rows_exported == 3
             assert (Path(tmpdir) / "AAPL.csv").exists()
 
-    def test_export_batch_datasets(self, sample_storage: FileSystemBackend) -> None:
+    def test_export_batch_datasets(self, sample_storage) -> None:
         """Test exporting multiple datasets."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = ExportManager(storage=sample_storage)
@@ -390,7 +411,7 @@ class TestExportManager:
             assert len(results) == 1  # Single JSON file
             assert results[0].success
 
-    def test_export_pattern(self, sample_storage: FileSystemBackend) -> None:
+    def test_export_pattern(self, sample_storage) -> None:
         """Test exporting datasets matching a pattern."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = ExportManager(storage=sample_storage)

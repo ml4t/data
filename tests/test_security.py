@@ -1,12 +1,10 @@
 """Tests for security features including path traversal protection."""
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from ml4t.data.security import PathTraversalError, PathValidator
-from ml4t.data.storage.filesystem import FileSystemBackend
 
 
 class TestPathValidator:
@@ -179,110 +177,3 @@ class TestPathValidator:
         assert not PathValidator.is_safe_filename("PRN")  # Windows reserved
 
 
-class TestFileSystemBackendSecurity:
-    """Test filesystem backend with security features."""
-
-    def test_storage_rejects_traversal_keys(self):
-        """Test that storage operations reject path traversal attempts."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = FileSystemBackend(data_root=Path(tmpdir))
-
-            # Test exists with dangerous keys
-            dangerous_keys = [
-                "../../../etc/passwd",
-                "equities/../../../etc/passwd",
-                "equities/daily/../../etc/passwd",
-            ]
-
-            for key in dangerous_keys:
-                # exists should return False for invalid keys
-                assert not storage.exists(key)
-
-                # read should raise error
-                with pytest.raises((PathTraversalError, ValueError)):
-                    storage.read(key)
-
-                # delete should raise error
-                with pytest.raises((PathTraversalError, ValueError)):
-                    storage.delete(key)
-
-    def test_metadata_validation_on_write(self):
-        """Test that write operations validate metadata for path traversal."""
-        from datetime import datetime
-
-        import polars as pl
-
-        from ml4t.data.core.models import DataObject, Metadata
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage = FileSystemBackend(data_root=Path(tmpdir))
-
-            # Create test data
-            df = pl.DataFrame(
-                {
-                    "timestamp": [datetime(2024, 1, 1)],
-                    "open": [100.0],
-                    "high": [105.0],
-                    "low": [99.0],
-                    "close": [104.0],
-                    "volume": [1000000],
-                }
-            )
-
-            # Try to write with dangerous metadata
-            # Note: frequency is now a property derived from bar_params, not a field
-            dangerous_metadata = [
-                ("../../../etc", "passwd"),  # Dangerous asset_class
-                ("equities", "../../../etc/passwd"),  # Dangerous symbol
-                ("equities", "AAPL/../../../etc/passwd"),  # Dangerous symbol with prefix
-            ]
-
-            for asset_class, symbol in dangerous_metadata:
-                metadata = Metadata(
-                    provider="test",
-                    symbol=symbol,
-                    asset_class=asset_class,
-                    bar_type="time",
-                    bar_params={"frequency": "daily"},
-                    schema_version="1.0",
-                )
-
-                data = DataObject(data=df, metadata=metadata)
-
-                with pytest.raises(PathTraversalError):
-                    storage.write(data)
-
-    def test_no_escape_from_data_root(self):
-        """Test that all operations stay within data_root."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            data_root = Path(tmpdir) / "data"
-            data_root.mkdir()
-
-            # Create a file outside data_root
-            secret_file = Path(tmpdir) / "secret.txt"
-            secret_file.write_text("secret content")
-
-            storage = FileSystemBackend(data_root=data_root)
-
-            # Try various attempts to access the secret file
-            attempts = [
-                "../secret.txt",
-                "equities/daily/../../secret.txt",
-                "equities/../secret.txt",
-            ]
-
-            for attempt in attempts:
-                # Should not be able to check existence
-                assert not storage.exists(attempt)
-
-                # Should not be able to read
-                with pytest.raises((PathTraversalError, ValueError)):
-                    storage.read(attempt)
-
-                # Should not be able to delete
-                with pytest.raises((PathTraversalError, ValueError)):
-                    storage.delete(attempt)
-
-            # Verify secret file is still there
-            assert secret_file.exists()
-            assert secret_file.read_text() == "secret content"

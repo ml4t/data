@@ -10,7 +10,6 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
-from ml4t.data.storage.base import StorageBackend
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -33,7 +32,7 @@ class ChunkInfo:
         return f"{self.start_date.date()} to {self.end_date.date()}"
 
 
-class ChunkedStorage(StorageBackend):
+class ChunkedStorage:
     """
     Storage backend that splits data into time-based chunks.
 

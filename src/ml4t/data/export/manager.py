@@ -15,7 +15,6 @@ from ml4t.data.export.formats import (
     JSONExporter,
 )
 from ml4t.data.export.formats.base import ExportResult
-from ml4t.data.storage.base import StorageBackend
 
 logger = structlog.get_logger()
 
@@ -32,7 +31,7 @@ class ExportManager:
 
     def __init__(
         self,
-        storage: StorageBackend,
+        storage: Any,
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> None:
         """

@@ -9,11 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import structlog
 
 from ml4t.data.core.models import DataObject
-from ml4t.data.storage.base import StorageBackend
 
 logger = structlog.get_logger()
 
@@ -52,7 +52,7 @@ class Transaction:
 
     def __init__(
         self,
-        storage: StorageBackend,
+        storage: Any,
         transaction_id: str | None = None,
         backup_dir: Path | None = None,
     ):
@@ -387,7 +387,7 @@ class TransactionalStorage:
     Wrapper for storage backend that provides transaction support.
     """
 
-    def __init__(self, storage: StorageBackend):
+    def __init__(self, storage: Any):
         """
         Initialize transactional storage.
 
