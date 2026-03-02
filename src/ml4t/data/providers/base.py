@@ -247,6 +247,38 @@ class BaseProvider(
 
         return validated_data
 
+    def _create_empty_dataframe(self) -> pl.DataFrame:
+        """Create an empty DataFrame with canonical OHLCV schema.
+
+        Override in subclasses that need a different schema (e.g. no symbol column).
+        """
+        return pl.DataFrame(
+            schema={
+                "timestamp": pl.Datetime,
+                "symbol": pl.Utf8,
+                "open": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "close": pl.Float64,
+                "volume": pl.Float64,
+            }
+        )
+
+    async def fetch_ohlcv_async(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+    ) -> pl.DataFrame:
+        """Async wrapper around fetch_ohlcv using a thread pool.
+
+        Providers with native async support should override this method.
+        """
+        import asyncio
+
+        return await asyncio.to_thread(self.fetch_ohlcv, symbol, start, end, frequency)
+
     # Abstract methods - must be implemented by concrete providers
     @property
     @abstractmethod

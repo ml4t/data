@@ -242,30 +242,6 @@ class YahooFinanceProvider(BaseProvider):
             .select(["timestamp", "symbol", "open", "high", "low", "close", "volume"])
         )
 
-    def _create_empty_dataframe(self) -> pl.DataFrame:
-        """Create an empty DataFrame with the correct schema."""
-        return pl.DataFrame(
-            {
-                "timestamp": [],
-                "symbol": [],
-                "open": [],
-                "high": [],
-                "low": [],
-                "close": [],
-                "volume": [],
-            }
-        ).with_columns(
-            [
-                pl.col("timestamp").cast(pl.Datetime),
-                pl.col("symbol").cast(pl.Utf8),
-                pl.col("open").cast(pl.Float64),
-                pl.col("high").cast(pl.Float64),
-                pl.col("low").cast(pl.Float64),
-                pl.col("close").cast(pl.Float64),
-                pl.col("volume").cast(pl.Float64),
-            ]
-        )
-
     def fetch_batch_ohlcv(
         self,
         symbols: list[str],
@@ -521,39 +497,7 @@ class YahooFinanceProvider(BaseProvider):
     # ===== Async Support =====
     # Note: yfinance is sync-only, so we use asyncio.to_thread()
     # for non-blocking async operations.
-
-    async def fetch_ohlcv_async(
-        self,
-        symbol: str,
-        start: str,
-        end: str,
-        frequency: str = "daily",
-    ) -> pl.DataFrame:
-        """Async fetch OHLCV data for a symbol.
-
-        Since yfinance is synchronous, this wraps the sync call in
-        asyncio.to_thread() to avoid blocking the event loop.
-
-        This is useful when fetching multiple symbols concurrently:
-
-            async def fetch_many(symbols):
-                provider = YahooFinanceProvider()
-                tasks = [
-                    provider.fetch_ohlcv_async(s, start, end)
-                    for s in symbols
-                ]
-                return await asyncio.gather(*tasks)
-
-        Args:
-            symbol: Symbol to fetch (e.g., "AAPL")
-            start: Start date (YYYY-MM-DD)
-            end: End date (YYYY-MM-DD)
-            frequency: Data frequency
-
-        Returns:
-            DataFrame with OHLCV data
-        """
-        return await asyncio.to_thread(self.fetch_ohlcv, symbol, start, end, frequency)
+    # fetch_ohlcv_async() inherited from BaseProvider (asyncio.to_thread wrapper)
 
     async def fetch_batch_ohlcv_async(
         self,

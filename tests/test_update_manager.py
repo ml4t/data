@@ -25,6 +25,7 @@ from ml4t.data.update_manager import (
     IncrementalUpdater,
     UpdateResult,
     UpdateStrategy,
+    _ensure_datetime,
 )
 
 
@@ -215,20 +216,20 @@ class TestGapDetector:
         gaps = detector.detect_gaps(df, frequency="hourly")
         assert len(gaps) >= 1
 
-    def test_ensure_datetime_with_date(self, detector: GapDetector):
+    def test_ensure_datetime_with_date(self):
         """Ensure date objects are converted to datetime."""
         d = date(2024, 1, 15)
-        result = detector._ensure_datetime(d)
+        result = _ensure_datetime(d)
 
         assert isinstance(result, datetime)
         assert result.year == 2024
         assert result.month == 1
         assert result.day == 15
 
-    def test_ensure_datetime_with_datetime(self, detector: GapDetector):
+    def test_ensure_datetime_with_datetime(self):
         """Ensure datetime objects pass through unchanged."""
         dt = datetime(2024, 1, 15, 10, 30, 0)
-        result = detector._ensure_datetime(dt)
+        result = _ensure_datetime(dt)
 
         assert result == dt
 

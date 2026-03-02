@@ -322,12 +322,10 @@ class TestTransformData:
         assert df["close"][0] == 171.0
 
     def test_transform_data_empty(self, provider):
-        """Test empty data attempts to return empty DataFrame."""
-        # Provider tries to call _create_empty_dataframe which doesn't exist
-        # So it raises AttributeError - this is a bug in the provider
-        # We test the actual behavior
-        with pytest.raises(AttributeError):
-            provider._transform_data([], "AAPL")
+        """Test empty data returns empty DataFrame."""
+        result = provider._transform_data([], "AAPL")
+        assert result.is_empty()
+        assert "timestamp" in result.columns
 
     def test_transform_data_uses_adjusted_close(self, provider):
         """Test adjusted_close is used for close column."""

@@ -304,20 +304,6 @@ class FREDProvider(BaseProvider):
                 message=f"Failed to transform data for {symbol}",
             ) from err
 
-    def _create_empty_dataframe(self) -> pl.DataFrame:
-        """Create an empty DataFrame with the correct schema."""
-        return pl.DataFrame(
-            schema={
-                "timestamp": pl.Datetime,
-                "symbol": pl.Utf8,
-                "open": pl.Float64,
-                "high": pl.Float64,
-                "low": pl.Float64,
-                "close": pl.Float64,
-                "volume": pl.Float64,
-            }
-        )
-
     def _validate_response(self, df: pl.DataFrame) -> pl.DataFrame:
         """Override base validation to skip OHLC invariant checks.
 

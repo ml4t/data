@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import json
 import shutil
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
-from filelock import FileLock
 
 from .backend import StorageBackend, StorageConfig
 
@@ -54,8 +52,6 @@ class HiveStorage(StorageBackend):
             config: Storage configuration
         """
         super().__init__(config)
-        self.metadata_dir = self.base_path / ".metadata"
-        self.metadata_dir.mkdir(exist_ok=True)
 
     def _get_partition_columns(self) -> list[str]:
         """Get partition column names based on configured granularity.
@@ -432,72 +428,6 @@ class HiveStorage(StorageBackend):
 
             return True
         return False
-
-    def get_metadata(self, key: str) -> dict[str, Any] | None:
-        """Get metadata for a key.
-
-        Args:
-            key: Storage key
-
-        Returns:
-            Metadata dict or None
-        """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-        if metadata_file.exists():
-            with open(metadata_file) as f:
-                return json.load(f)
-        return None
-
-    def _atomic_write(self, df: pl.DataFrame, target_path: Path) -> None:
-        """Write DataFrame atomically using temp file pattern.
-
-        Args:
-            df: DataFrame to write
-            target_path: Target file path
-        """
-        # Write to temp file first
-        with tempfile.NamedTemporaryFile(
-            dir=target_path.parent, suffix=".parquet.tmp", delete=False
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
-
-            # Write with compression
-            df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
-
-            # Atomic rename
-            tmp_path.replace(target_path)
-
-    def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
-        """Update metadata for a key.
-
-        Args:
-            key: Storage key
-            metadata: Metadata to store
-        """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-
-        if self.config.enable_locking:
-            lock_file = self.metadata_dir / f"{key.replace('/', '_')}.lock"
-            lock = FileLock(lock_file, timeout=10)
-
-            with lock:
-                self._write_metadata_file(metadata_file, metadata)
-        else:
-            self._write_metadata_file(metadata_file, metadata)
-
-    def _write_metadata_file(self, path: Path, metadata: dict[str, Any]) -> None:
-        """Write metadata to file.
-
-        Args:
-            path: Metadata file path
-            metadata: Metadata to write
-        """
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, mode="w", suffix=".json.tmp", delete=False
-        ) as tmp_file:
-            json.dump(metadata, tmp_file, indent=2, default=str)
-            tmp_path = Path(tmp_file.name)
-            tmp_path.replace(path)
 
     # Incremental update methods for IncrementalStorageBackend protocol
 
