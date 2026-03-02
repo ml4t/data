@@ -13,7 +13,7 @@
 
 | Directory | Lines | Purpose |
 |-----------|-------|---------|
-| providers/ | 14k | 22 data source integrations |
+| providers/ | 14k | 20 live provider adapters + synthetic/testing providers |
 | storage/ | 4.6k | Hive-partitioned backends + profiling |
 | futures/ | 4.6k | Databento futures downloader |
 | etfs/ | 600 | ETFDataManager (Yahoo Finance) |
