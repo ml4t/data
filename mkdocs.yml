@@ -168,6 +168,9 @@ nav:
   - API Reference:
     - api/index.md
 
+  - Book Guide:
+    - book-guide/index.md
+
   - Contributing:
     - contributing/index.md
     - Creating a Provider: contributing/creating-a-provider.md
