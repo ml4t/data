@@ -119,22 +119,28 @@ print(f"Fetched {len(df)} rows for {df['symbol'].n_unique()} symbols")
 ## For ML4T Book Readers
 
 This library is the reference implementation for **Machine Learning for Trading (Third Edition)**.
+The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 providers.
 
 <div class="grid cards" markdown>
 
--   :material-book-open-variant:{ .lg .middle } __Three-Tier Learning__
+-   :material-book-open-variant:{ .lg .middle } __Chapter-Feature Mapping__
 
     ---
 
-    - **Tier 1 (Ch 1-5)**: Free data with Yahoo + CoinGecko
-    - **Tier 2 (Ch 6-10)**: Educational with EODHD + AlgoSeek
-    - **Tier 3 (Ch 11+)**: Professional with DataBento + Polygon
+    - **Ch 2**: DataManager, Universe, HiveStorage, gap detection, data quality
+    - **Ch 4**: FRED, CoinGecko, Kalshi, Polymarket, COT data
+    - **Ch 16-19**: Binance, Fama-French, AQR for backtesting and risk
+
+    [:octicons-arrow-right-24: Full book guide](book-guide/index.md)
 
 -   :material-rocket-launch:{ .lg .middle } __Production Ready__
 
     ---
 
-    Graduate from notebooks to automated pipelines with incremental updates and CLI automation.
+    Graduate from notebooks to automated pipelines with `download_all.py --update`,
+    incremental updates, and CLI automation.
+
+    [:octicons-arrow-right-24: Incremental updates](user-guide/incremental-updates.md)
 
 </div>
 

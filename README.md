@@ -18,10 +18,14 @@ Each library addresses a distinct stage: data infrastructure, feature engineerin
 
 Quantitative research requires consistent, reproducible access to market data from multiple sources. ml4t-data provides:
 
-- A unified interface across 20 live provider adapters (plus synthetic/testing providers)
+- `DataManager` as the unified interface: fetch, store, update, and query across all providers
+- 23 live provider adapters covering equities, crypto, futures, forex, and economic data
 - Automated storage in Hive-partitioned Parquet format with metadata tracking
-- Incremental updates, gap detection, and backfill capabilities via CLI
+- Incremental updates, gap detection, and backfill via CLI
 - Built-in data validation (OHLC invariants, deduplication, anomaly detection)
+- Futures module for CME/ICE bulk downloads with continuous contract construction
+- COT module for CFTC Commitment of Traders weekly reports
+- Resilience: rate limiting, retry with exponential backoff, gap detection
 
 The goal is to support an ongoing research workflow rather than one-off downloads. Data is stored locally, tracked for freshness, and queryable with tools like DuckDB or Polars.
 
@@ -35,18 +39,40 @@ pip install ml4t-data
 
 ## Quick Start
 
-```python
-from ml4t.data.providers import YahooFinanceProvider
+### DataManager (Unified Interface)
 
-provider = YahooFinanceProvider()
-data = provider.fetch_ohlcv("AAPL", "2020-01-01", "2024-12-31")
-print(data.head())
+```python
+from ml4t.data import DataManager
+
+dm = DataManager()
+
+# Fetch and store
+dm.fetch("AAPL", "2020-01-01", "2024-12-31", provider="yahoo")
+
+# Load from local storage
+data = dm.load("AAPL", "2020-01-01", "2024-12-31")
+
+# Batch load multiple symbols
+prices = dm.batch_load(["AAPL", "MSFT", "GOOGL"], "2020-01-01", "2024-12-31")
+
+# Incremental update
+dm.update("AAPL")
+
+# List what's stored
+symbols = dm.list_symbols()
+metadata = dm.get_metadata("AAPL")
 ```
+
+### Direct Provider Access
 
 All providers implement the same interface:
 
 ```python
-from ml4t.data.providers import CoinGeckoProvider, FREDProvider
+from ml4t.data.providers import YahooFinanceProvider, CoinGeckoProvider, FREDProvider
+
+# Equities
+provider = YahooFinanceProvider()
+data = provider.fetch_ohlcv("AAPL", "2020-01-01", "2024-12-31")
 
 # Crypto
 crypto = CoinGeckoProvider().fetch_ohlcv("bitcoin", "2024-01-01", "2024-12-31")
@@ -87,20 +113,96 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | CryptoCompare | Crypto market data |
 | OANDA | Forex broker data |
 
+## Specialized Modules
+
+### Futures
+
+Bulk download and continuous contract construction for CME/ICE products:
+
+```python
+from ml4t.data.futures import FuturesDownloader, ContinuousContractBuilder
+
+# Bulk download via Databento (parent symbology)
+downloader = FuturesDownloader(config)
+downloader.download()  # Downloads ES, NQ, CL, GC, etc.
+
+# Build continuous contracts with configurable roll logic
+builder = ContinuousContractBuilder()
+continuous = builder.build(contracts_df, roll_method="volume")
+```
+
+Book-focused interface with profiling:
+
+```python
+from ml4t.data.futures import FuturesDataManager
+
+fm = FuturesDataManager.from_config("config.yaml")
+fm.download_all()
+data = fm.load_ohlcv("ES")
+profile = fm.generate_profile("ES")
+```
+
+### COT (Commitment of Traders)
+
+CFTC weekly positioning data for futures markets:
+
+```python
+from ml4t.data.cot import COTFetcher, create_cot_features, combine_cot_ohlcv_pit
+
+fetcher = COTFetcher(config)
+cot_data = fetcher.fetch_product("ES", start_year=2015, end_year=2024)
+
+# Point-in-time combination with OHLCV (no look-ahead)
+combined = combine_cot_ohlcv_pit(cot_data, ohlcv_data)
+
+# Generate features from COT data
+features = create_cot_features(cot_data)
+```
+
+### Book Data Managers
+
+Simplified interfaces for the ML4T book workflow:
+
+```python
+from ml4t.data.etfs import ETFDataManager
+from ml4t.data.crypto import CryptoDataManager
+
+# 50 diversified ETFs via Yahoo Finance
+etf_dm = ETFDataManager.from_config("config.yaml")
+etf_dm.download_all()
+aapl = etf_dm.load_ohlcv("AAPL")
+
+# Crypto premium index via Binance Public
+crypto_dm = CryptoDataManager.from_config("config.yaml")
+crypto_dm.download_premium_index()
+```
+
 ## CLI for Automated Updates
 
 ```bash
 # Fetch specific symbols
-ml4t-data fetch AAPL MSFT GOOGL --provider yahoo --start 2020-01-01
+ml4t-data fetch -s AAPL -s MSFT -s GOOGL --provider yahoo --start 2020-01-01
 
-# Configuration-driven batch updates
-ml4t-data update-all -c config.yaml
+# Incremental update
+ml4t-data update --symbol AAPL
 
-# Detect and fill gaps
-ml4t-data update-all -c config.yaml --detect-gaps
+# Validate data quality
+ml4t-data validate --symbol AAPL --anomalies
+
+# Check storage status
+ml4t-data status --detailed
+
+# List available data
+ml4t-data list-data
+
+# Export to CSV/JSON/Excel
+ml4t-data export --symbol AAPL --format-type csv --output aapl.csv
+
+# Get symbol info
+ml4t-data info --symbol AAPL
 ```
 
-Configuration example:
+Configuration-driven batch updates:
 
 ```yaml
 storage:
@@ -146,18 +248,46 @@ result = duckdb.execute("""
 ## Data Validation
 
 ```python
-from ml4t.data.validation import validate_ohlcv
+from ml4t.data.validation import OHLCVValidator, ValidationReport
 
-issues = validate_ohlcv(data)
+validator = OHLCVValidator()
+report = validator.validate(data)
 # Checks: high >= low, high >= open/close, low <= open/close
 # Detects: duplicates, gaps, anomalies
 ```
+
+Anomaly detection:
+
+```python
+from ml4t.data.anomaly import AnomalyManager, ReturnOutlierDetector, VolumeSpikeDetector
+
+manager = AnomalyManager([
+    ReturnOutlierDetector(),
+    VolumeSpikeDetector(),
+])
+report = manager.detect(data)
+```
+
+## Documentation
+
+- [Getting Started](docs/user-guide/getting-started.md) — quick start guide
+- [Configuration](docs/user-guide/configuration.md) — YAML config reference
+- [Storage](docs/user-guide/storage.md) — Hive partitioning and backends
+- [Incremental Updates](docs/user-guide/incremental-updates.md) — update strategies and gap detection
+- [Data Quality](docs/user-guide/data-quality.md) — validation and anomaly detection
+- [CLI Reference](docs/user-guide/cli-reference.md) — command-line interface
+- [Provider Selection Guide](docs/provider-selection-guide.md) — choosing providers
+- [Creating a Provider](docs/creating_a_provider.md) — extending with new sources
 
 ## Technical Characteristics
 
 - **Polars-based**: Native Polars DataFrames throughout
 - **Consistent schema**: All providers return the same column structure
+- **Async support**: Async providers and batch operations for parallel downloads
 - **Metadata tracking**: Last update timestamps, row counts, date ranges
+- **Resilience**: Rate limiting, retry with exponential backoff, gap detection
+- **Multiple backends**: File system, S3, and in-memory storage
+- **Type-safe**: Full type annotations throughout
 
 ## Related Libraries
 
@@ -169,7 +299,7 @@ issues = validate_ohlcv(data)
 ## Development
 
 ```bash
-git clone https://github.com/applied-ai/ml4t-data.git
+git clone https://github.com/ml4t/ml4t-data.git
 cd ml4t-data
 uv sync
 uv run pytest tests/ -q
