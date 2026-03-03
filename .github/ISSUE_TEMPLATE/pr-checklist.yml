@@ -1,0 +1,90 @@
+name: PR Checklist - 1.0 Readiness Slice
+description: Actionable checklist for a scoped readiness PR (S/M/L) with acceptance criteria.
+title: "PR Slice: <S1/M1/L1> - <short title>"
+labels:
+  - enhancement
+  - quality
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to execute one incremental readiness slice with clear scope, validation, and rollback safety.
+  - type: input
+    id: slice_id
+    attributes:
+      label: Slice ID
+      description: Use roadmap IDs like S1, S2, M1, L1.
+      placeholder: S1
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What this PR changes and why.
+      placeholder: Fix default provider routing and enforce canonical storage key normalization in CLI update path.
+    validations:
+      required: true
+  - type: textarea
+    id: in_scope
+    attributes:
+      label: In Scope
+      description: Explicitly list files/modules that this PR is allowed to modify.
+      value: |
+        - src/ml4t/data/...
+        - tests/...
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out Of Scope
+      description: Prevent scope creep.
+      value: |
+        - No unrelated refactors
+        - No dependency upgrades unless required
+    validations:
+      required: true
+  - type: checkboxes
+    id: implementation_checklist
+    attributes:
+      label: Implementation Checklist
+      options:
+        - label: Add/adjust core logic for this slice
+        - label: Keep behavior backward-compatible or add explicit migration handling
+        - label: Add/adjust tests covering happy path + edge path + regression path
+        - label: Update CLI/API contract where affected
+        - label: Keep changes minimal and focused
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Measurable completion conditions.
+      value: |
+        - [ ] Targeted tests for modified behavior pass locally
+        - [ ] No regressions in relevant existing tests
+        - [ ] Lint/type checks pass for touched code
+        - [ ] Behavior is deterministic and offline-testable
+    validations:
+      required: true
+  - type: textarea
+    id: validation_plan
+    attributes:
+      label: Validation Plan
+      description: Commands to run before merge.
+      value: |
+        uv run ruff check src/ tests/
+        uv run ty check
+        uv run pytest tests/<target_file_or_subset> -q
+    validations:
+      required: true
+  - type: textarea
+    id: risk_and_rollback
+    attributes:
+      label: Risk and Rollback
+      description: Main risks and rollback strategy if needed.
+      placeholder: |
+        Risk: routing logic changes provider defaults for ambiguous symbols.
+        Rollback: revert router default logic and keep key normalization utility isolated.
+    validations:
+      required: true
