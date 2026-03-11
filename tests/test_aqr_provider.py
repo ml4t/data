@@ -1,5 +1,6 @@
 """Tests for AQR factor provider module."""
 
+import warnings
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -295,6 +296,18 @@ class TestDownload:
 
 class TestExcelParsing:
     """Tests for dataset-specific AQR Excel parsing."""
+
+    def test_parse_dates_handles_mixed_strings_without_warning(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            parsed = AQRFactorProvider._parse_dates(
+                pl.Series(["2024-01-31", "02/29/2024"]).to_pandas()
+            )
+
+        assert parsed.dt.strftime("%Y-%m-%d").tolist() == ["2024-01-31", "2024-02-29"]
+        assert not [
+            warning for warning in caught if "Could not infer format" in str(warning.message)
+        ]
 
     def test_parse_qmj_10_portfolios_preserves_us_and_global_blocks(self):
         rows = [[f"skip {idx}"] for idx in range(18)]

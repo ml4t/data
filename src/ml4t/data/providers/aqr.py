@@ -960,7 +960,7 @@ class AQRFactorProvider(BaseProvider):
         df_pd.columns = ["date"] + list(df_pd.columns[1:])
 
         # Parse dates (various formats)
-        df_pd["date"] = pd.to_datetime(df_pd["date"], errors="coerce")
+        df_pd["date"] = cls._parse_dates(df_pd["date"])
 
         # Drop rows with invalid dates
         df_pd = df_pd.dropna(subset=["date"])
@@ -979,6 +979,14 @@ class AQRFactorProvider(BaseProvider):
         text = " ".join(str(value).replace("\n", " ").split())
         return re.sub(r"\s+", " ", text).strip()
 
+    @staticmethod
+    def _parse_dates(series: pd.Series) -> pd.Series:
+        """Parse mixed date values without pandas format inference warnings."""
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return series
+
+        return pd.to_datetime(series, errors="coerce", format="mixed")
+
     @classmethod
     def _finalize_aqr_dataframe(cls, dataset: str, df_pd: pd.DataFrame) -> pl.DataFrame:
         """Convert a parsed pandas frame to normalized Polars output."""
@@ -989,7 +997,7 @@ class AQRFactorProvider(BaseProvider):
             for idx, col in enumerate(df_pd.columns)
         ]
 
-        df_pd["date"] = pd.to_datetime(df_pd["date"], errors="coerce")
+        df_pd["date"] = cls._parse_dates(df_pd["date"])
         df_pd = df_pd.dropna(subset=["date"]).reset_index(drop=True)
 
         for col in df_pd.columns[1:]:
