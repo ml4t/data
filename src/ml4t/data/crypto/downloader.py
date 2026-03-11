@@ -58,6 +58,7 @@ class CryptoConfig:
     interval: str = "8h"  # Funding rate settlement interval
     storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "crypto")
     symbols: dict[str, dict[str, Any]] = field(default_factory=dict)
+    perps: dict[str, Any] = field(default_factory=dict)
     generate_profile: bool = True  # Generate column-level statistics on save
 
     def __post_init__(self):
@@ -104,6 +105,7 @@ class CryptoDataManager(ProfileMixin):
         """
         self.config = config
         self._provider = None
+        self._providers: dict[str, Any] = {}
 
         # Ensure storage directory exists
         self.config.storage_path.mkdir(parents=True, exist_ok=True)
@@ -132,6 +134,7 @@ class CryptoDataManager(ProfileMixin):
             interval=crypto_config.get("interval", "8h"),
             storage_path=Path(crypto_config.get("storage_path", "~/ml4t-data/crypto")).expanduser(),
             symbols=crypto_config.get("symbols", {}),
+            perps=crypto_config.get("perps", {}),
         )
 
         return cls(config)
@@ -139,12 +142,57 @@ class CryptoDataManager(ProfileMixin):
     @property
     def provider(self):
         """Lazily initialize Binance Public provider."""
-        if self._provider is None:
+        return self._get_provider(self.config.market)
+
+    def _get_provider(self, market: str):
+        """Get a provider instance for the requested market."""
+        normalized_market = market.lower()
+        default_market = self.config.market.lower()
+
+        if normalized_market == default_market:
+            if self._provider is None:
+                from ml4t.data.providers.binance_public import BinancePublicProvider
+
+                self._provider = BinancePublicProvider(market=normalized_market)
+            return self._provider
+
+        if normalized_market not in self._providers:
             from ml4t.data.providers.binance_public import BinancePublicProvider
 
-            self._provider = BinancePublicProvider(market=self.config.market)
+            self._providers[normalized_market] = BinancePublicProvider(market=normalized_market)
 
-        return self._provider
+        return self._providers[normalized_market]
+
+    def _resolve_symbols(self, symbols: list[str] | None) -> list[str]:
+        """Resolve symbols from config or fallback defaults."""
+        if symbols is not None:
+            return symbols
+
+        config_symbols = self.config.get_all_symbols()
+        if config_symbols:
+            return config_symbols
+
+        logger.warning("No symbols in config, using defaults: BTCUSDT, ETHUSDT")
+        return ["BTCUSDT", "ETHUSDT"]
+
+    def _get_section_config(self, section: str | None = None) -> dict[str, Any]:
+        """Return dataset-specific config with top-level fallback."""
+        if section == "perps":
+            return self.config.perps
+        return {}
+
+    def _get_date_range(self, section: str | None = None) -> tuple[str, str]:
+        """Get start/end dates for a dataset section."""
+        section_config = self._get_section_config(section)
+        return (
+            section_config.get("start", self.config.start),
+            section_config.get("end", self.config.end),
+        )
+
+    def _get_market(self, section: str | None = None) -> str:
+        """Get market for a dataset section."""
+        section_config = self._get_section_config(section)
+        return section_config.get("market", self.config.market)
 
     def download_premium_index(self, symbols: list[str] | None = None) -> pl.DataFrame:
         """Download premium index data for perpetual futures.
@@ -162,26 +210,21 @@ class CryptoDataManager(ProfileMixin):
         Returns:
             DataFrame with premium index data
         """
-        if symbols is None:
-            symbols = self.config.get_all_symbols()
-
-        if not symbols:
-            symbols = ["BTCUSDT", "ETHUSDT"]  # Default if no config
-            logger.warning("No symbols in config, using defaults: BTCUSDT, ETHUSDT")
+        symbols = self._resolve_symbols(symbols)
+        start, end = self._get_date_range()
 
         logger.info(
             "Downloading premium index data",
             symbols=len(symbols),
-            start=self.config.start,
-            end=self.config.end,
+            start=start,
+            end=end,
             interval=self.config.interval,
         )
 
-        # Use parallel multi-symbol download (3-10x faster)
         df = self.provider.fetch_premium_index_multi_parallel(
             symbols=symbols,
-            start=self.config.start,
-            end=self.config.end,
+            start=start,
+            end=end,
             interval=self.config.interval,
         )
 
@@ -189,10 +232,7 @@ class CryptoDataManager(ProfileMixin):
             logger.warning("No premium index data downloaded")
             return df
 
-        # Save combined file
         self._save_premium_index(df)
-
-        # Save by symbol (partitioned)
         self._save_by_symbol(df)
 
         logger.info(
@@ -203,22 +243,75 @@ class CryptoDataManager(ProfileMixin):
 
         return df
 
+    def download_perps(self, symbols: list[str] | None = None) -> pl.DataFrame:
+        """Download perpetual futures OHLCV data using parallel multi-symbol fetch."""
+        symbols = self._resolve_symbols(symbols)
+        start, end = self._get_date_range("perps")
+        market = self._get_market("perps")
+        frequency = self.config.perps.get("frequency", "hourly")
+
+        logger.info(
+            "Downloading perpetual OHLCV data",
+            symbols=len(symbols),
+            start=start,
+            end=end,
+            frequency=frequency,
+            market=market,
+        )
+
+        provider = self._get_provider(market)
+        df = provider.fetch_ohlcv_multi_parallel(
+            symbols=symbols,
+            start=start,
+            end=end,
+            frequency=frequency,
+        )
+
+        if df.is_empty():
+            logger.warning("No perpetual OHLCV data downloaded")
+            return df
+
+        self._save_dataset(df, "perps")
+        self._save_by_symbol_dataset(df, "perps")
+
+        logger.info(
+            "Perpetual OHLCV download complete",
+            symbols=df["symbol"].n_unique(),
+            rows=len(df),
+        )
+
+        return df
+
+    def download_all(self, symbols: list[str] | None = None) -> dict[str, pl.DataFrame]:
+        """Download premium index and perpetual OHLCV data."""
+        return {
+            "premium_index": self.download_premium_index(symbols=symbols),
+            "perps": self.download_perps(symbols=symbols),
+        }
+
     def _save_premium_index(self, df: pl.DataFrame) -> None:
         """Save combined premium index data."""
-        output_file = self.config.storage_path / "premium_index.parquet"
+        self._save_dataset(df, "premium_index")
+
+    def _save_by_symbol(self, df: pl.DataFrame) -> None:
+        """Save premium index data partitioned by symbol."""
+        self._save_by_symbol_dataset(df, "premium_index")
+
+    def _save_dataset(self, df: pl.DataFrame, dataset_name: str) -> None:
+        """Save a combined dataset file and optional profile."""
+        output_file = self.config.storage_path / f"{dataset_name}.parquet"
         df.write_parquet(output_file)
         logger.info(f"Saved: {output_file}")
 
-        # Generate profile if enabled
         if self.config.generate_profile:
             profile = generate_profile(df, source="CryptoDataManager")
             profile_path = get_profile_path(output_file)
             save_profile(profile, profile_path)
             logger.info(f"Saved data profile: {profile_path}")
 
-    def _save_by_symbol(self, df: pl.DataFrame) -> None:
-        """Save premium index data partitioned by symbol."""
-        partition_dir = self.config.storage_path / "premium_index"
+    def _save_by_symbol_dataset(self, df: pl.DataFrame, dataset_name: str) -> None:
+        """Save a dataset partitioned by symbol."""
+        partition_dir = self.config.storage_path / dataset_name
         partition_dir.mkdir(exist_ok=True)
 
         for symbol in df["symbol"].unique().to_list():
@@ -237,8 +330,15 @@ class CryptoDataManager(ProfileMixin):
         Returns:
             DataFrame with premium index data
         """
-        # Try combined file first
-        combined_file = self.config.storage_path / "premium_index.parquet"
+        return self._load_dataset("premium_index", symbols=symbols)
+
+    def load_perps(self, symbols: list[str] | None = None) -> pl.DataFrame:
+        """Load perpetual futures OHLCV data."""
+        return self._load_dataset("perps", symbols=symbols)
+
+    def _load_dataset(self, dataset_name: str, symbols: list[str] | None = None) -> pl.DataFrame:
+        """Load a combined or partitioned dataset."""
+        combined_file = self.config.storage_path / f"{dataset_name}.parquet"
 
         if combined_file.exists():
             df = pl.read_parquet(combined_file)
@@ -248,11 +348,10 @@ class CryptoDataManager(ProfileMixin):
 
             return df.sort(["symbol", "timestamp"])
 
-        # Fall back to partitioned files
-        partition_dir = self.config.storage_path / "premium_index"
+        partition_dir = self.config.storage_path / dataset_name
 
         if not partition_dir.exists():
-            logger.warning("No premium index data found. Run download_premium_index() first.")
+            logger.warning(f"No {dataset_name} data found.")
             return pl.DataFrame()
 
         dfs = []

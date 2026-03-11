@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import zipfile
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
@@ -82,6 +83,7 @@ class BinancePublicProvider(BaseProvider):
     # Very permissive rate limit since it's public S3
     # S3 has no real rate limits - 1000/min is plenty fast without overwhelming
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 60.0)
+    LISTING_PROBE_DAYS: ClassVar[int] = 7
 
     def __init__(
         self,
@@ -385,6 +387,52 @@ class BinancePublicProvider(BaseProvider):
 
         return df
 
+    def _find_first_available_date(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        build_url: Callable[[datetime], str],
+        download: Callable[[str], pl.DataFrame | None],
+    ) -> tuple[datetime, pl.DataFrame] | None:
+        """Find the first available date using a short probe then binary search."""
+        probe_end = min(end_dt, start_dt + timedelta(days=self.LISTING_PROBE_DAYS - 1))
+        current = start_dt
+
+        while current <= probe_end:
+            df = download(build_url(current))
+            if df is not None and not df.is_empty():
+                return current, df
+
+            if current < probe_end:
+                self._acquire_rate_limit()
+            current += timedelta(days=1)
+
+        low = probe_end + timedelta(days=1)
+        high = end_dt
+        first_available: tuple[datetime, pl.DataFrame] | None = None
+
+        while low <= high:
+            mid = low + timedelta(days=(high - low).days // 2)
+            df = download(build_url(mid))
+
+            if df is not None and not df.is_empty():
+                first_available = (mid, df)
+                high = mid - timedelta(days=1)
+            else:
+                low = mid + timedelta(days=1)
+
+            if low <= high:
+                self._acquire_rate_limit()
+
+        if first_available is not None and first_available[0] > start_dt:
+            logger.info(
+                "Resolved listing date window",
+                requested_start=start_dt.strftime("%Y-%m-%d"),
+                first_available=first_available[0].strftime("%Y-%m-%d"),
+            )
+
+        return first_available
+
     def _fetch_daily_data(
         self, symbol: str, interval: str, start_dt: datetime, end_dt: datetime
     ) -> list[pl.DataFrame]:
@@ -399,8 +447,19 @@ class BinancePublicProvider(BaseProvider):
         Returns:
             List of DataFrames
         """
-        all_data: list[pl.DataFrame] = []
-        current_date = start_dt
+        first_available = self._find_first_available_date(
+            start_dt=start_dt,
+            end_dt=end_dt,
+            build_url=lambda date: self._build_url(symbol, interval, date),
+            download=self._download_and_parse_zip,
+        )
+
+        if first_available is None:
+            return []
+
+        first_date, first_df = first_available
+        all_data: list[pl.DataFrame] = [first_df]
+        current_date = first_date + timedelta(days=1)
         not_found_count = 0
 
         while current_date <= end_dt:
@@ -413,10 +472,7 @@ class BinancePublicProvider(BaseProvider):
                     not_found_count = 0
                 else:
                     not_found_count += 1
-                    # If too many consecutive not found, symbol may not exist
                     if not_found_count > 7:
-                        if not all_data:
-                            raise SymbolNotFoundError(self.name, symbol)
                         break
 
             except Exception as e:
@@ -957,8 +1013,19 @@ class BinancePublicProvider(BaseProvider):
         Returns:
             List of DataFrames
         """
-        all_data: list[pl.DataFrame] = []
-        current_date = start_dt
+        first_available = self._find_first_available_date(
+            start_dt=start_dt,
+            end_dt=end_dt,
+            build_url=lambda date: self._build_premium_index_url(symbol, interval, date),
+            download=lambda url: self._download_and_parse_premium_index_zip(url, symbol),
+        )
+
+        if first_available is None:
+            return []
+
+        first_date, first_df = first_available
+        all_data: list[pl.DataFrame] = [first_df]
+        current_date = first_date + timedelta(days=1)
         not_found_count = 0
 
         while current_date <= end_dt:
@@ -971,7 +1038,6 @@ class BinancePublicProvider(BaseProvider):
                     not_found_count = 0
                 else:
                     not_found_count += 1
-                    # If too many consecutive not found, stop
                     if not_found_count > 7:
                         break
 
@@ -1268,6 +1334,46 @@ class BinancePublicProvider(BaseProvider):
                 return None
             raise
 
+    async def _find_first_available_date_async(
+        self,
+        start_dt: datetime,
+        end_dt: datetime,
+        build_url: Callable[[datetime], str],
+        download: Callable[[str], Awaitable[pl.DataFrame | None]],
+    ) -> tuple[datetime, pl.DataFrame] | None:
+        """Async version: find the first available date with probe and binary search."""
+        probe_end = min(end_dt, start_dt + timedelta(days=self.LISTING_PROBE_DAYS - 1))
+        current = start_dt
+
+        while current <= probe_end:
+            df = await download(build_url(current))
+            if df is not None and not df.is_empty():
+                return current, df
+            current += timedelta(days=1)
+
+        low = probe_end + timedelta(days=1)
+        high = end_dt
+        first_available: tuple[datetime, pl.DataFrame] | None = None
+
+        while low <= high:
+            mid = low + timedelta(days=(high - low).days // 2)
+            df = await download(build_url(mid))
+
+            if df is not None and not df.is_empty():
+                first_available = (mid, df)
+                high = mid - timedelta(days=1)
+            else:
+                low = mid + timedelta(days=1)
+
+        if first_available is not None and first_available[0] > start_dt:
+            logger.info(
+                "Resolved listing date window (async)",
+                requested_start=start_dt.strftime("%Y-%m-%d"),
+                first_available=first_available[0].strftime("%Y-%m-%d"),
+            )
+
+        return first_available
+
     async def _fetch_daily_data_async(
         self, symbol: str, interval: str, start_dt: datetime, end_dt: datetime
     ) -> list[pl.DataFrame]:
@@ -1282,9 +1388,19 @@ class BinancePublicProvider(BaseProvider):
         Returns:
             List of DataFrames
         """
-        # Generate all URLs
+        first_available = await self._find_first_available_date_async(
+            start_dt=start_dt,
+            end_dt=end_dt,
+            build_url=lambda date: self._build_url(symbol, interval, date),
+            download=self._download_and_parse_zip_async,
+        )
+
+        if first_available is None:
+            return []
+
+        first_date, first_df = first_available
         urls: list[tuple[datetime, str]] = []
-        current_date = start_dt
+        current_date = first_date + timedelta(days=1)
         while current_date <= end_dt:
             url = self._build_url(symbol, interval, current_date)
             urls.append((current_date, url))
@@ -1302,7 +1418,7 @@ class BinancePublicProvider(BaseProvider):
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Collect successful results in order
-        all_data: list[pl.DataFrame] = []
+        all_data: list[pl.DataFrame] = [first_df]
         for result in results:
             if isinstance(result, Exception):
                 logger.warning(f"Failed to download: {result}")
@@ -1414,6 +1530,94 @@ class BinancePublicProvider(BaseProvider):
         )
 
         return validated
+
+    async def fetch_ohlcv_multi_async(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        max_concurrent: int = 5,
+    ) -> pl.DataFrame:
+        """Fetch OHLCV data for multiple symbols in parallel.
+
+        Args:
+            symbols: List of symbols to fetch
+            start: Start date (YYYY-MM-DD)
+            end: End date (YYYY-MM-DD)
+            frequency: Data frequency
+            max_concurrent: Maximum concurrent symbol downloads
+
+        Returns:
+            Combined DataFrame with all successfully fetched symbols
+        """
+        if not symbols:
+            raise DataValidationError(
+                provider=self.name,
+                message="symbols list cannot be empty",
+                field="symbols",
+            )
+
+        logger.info(
+            f"Fetching OHLCV async for {len(symbols)} symbols",
+            symbols=symbols[:5],
+            start=start,
+            end=end,
+            frequency=frequency,
+        )
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def fetch_symbol(symbol: str) -> pl.DataFrame | None:
+            async with semaphore:
+                try:
+                    df = await self.fetch_ohlcv_async(symbol, start, end, frequency)
+                    if not df.is_empty():
+                        return df
+                except Exception as e:
+                    logger.warning(f"Failed to fetch OHLCV for {symbol}: {e}")
+                return None
+
+        tasks = [fetch_symbol(symbol) for symbol in symbols]
+        results = await asyncio.gather(*tasks)
+
+        all_data = [df for df in results if df is not None and not df.is_empty()]
+
+        if not all_data:
+            logger.info("No OHLCV data found for any symbol")
+            return self._create_empty_dataframe()
+
+        df = pl.concat(all_data)
+        df = df.sort(["timestamp", "symbol"])
+
+        logger.info(f"Fetched OHLCV for {df['symbol'].n_unique()} symbols, {len(df)} total rows")
+
+        return df
+
+    def fetch_ohlcv_multi_parallel(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        max_concurrent: int = 5,
+    ) -> pl.DataFrame:
+        """Sync wrapper for parallel multi-symbol OHLCV download."""
+
+        async def _run() -> pl.DataFrame:
+            _ = self._async_session
+            try:
+                return await self.fetch_ohlcv_multi_async(
+                    symbols=symbols,
+                    start=start,
+                    end=end,
+                    frequency=frequency,
+                    max_concurrent=max_concurrent,
+                )
+            finally:
+                await self.close_async()
+
+        return asyncio.run(_run())
 
     async def close_async(self) -> None:
         """Close async HTTP client."""

@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import polars as pl
 import pytest
 
+from ml4t.data.core.exceptions import DataValidationError
 from ml4t.data.managers.async_batch import AsyncBatchManager, async_batch_load
 from ml4t.data.providers.binance_public import BinancePublicProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
@@ -134,6 +135,59 @@ class TestBinancePublicProviderAsync:
                 assert time_spread < 0.1  # All started within 100ms
 
         await provider.close_async()
+
+    @pytest.mark.asyncio
+    async def test_fetch_daily_data_async_skips_pre_listing_gap(self, sample_ohlcv_data):
+        """Test async daily fetch avoids downloading every pre-listing day."""
+        provider = BinancePublicProvider()
+        start_dt = datetime(2024, 1, 1)
+        end_dt = datetime(2024, 3, 31)
+        listing_date = datetime(2024, 3, 1)
+        call_count = 0
+
+        async def mock_download(url: str):
+            nonlocal call_count
+            call_count += 1
+            date_str = url.removesuffix(".zip").rsplit("-", 3)[-3:]
+            file_date = datetime.strptime("-".join(date_str), "%Y-%m-%d")
+            if file_date >= listing_date:
+                return sample_ohlcv_data
+            return None
+
+        with patch.object(provider, "_download_and_parse_zip_async", side_effect=mock_download):
+            results = await provider._fetch_daily_data_async("APTUSDT", "1d", start_dt, end_dt)
+
+        assert len(results) == 31
+        assert call_count < 60
+        await provider.close_async()
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlcv_multi_async_combines_symbols(self, sample_ohlcv_data):
+        """Test multi-symbol OHLCV fetch combines successful results."""
+        provider = BinancePublicProvider()
+        btc_data = sample_ohlcv_data.with_columns(pl.lit("BTCUSDT").alias("symbol"))
+        eth_data = sample_ohlcv_data.with_columns(pl.lit("ETHUSDT").alias("symbol"))
+
+        with patch.object(provider, "fetch_ohlcv_async", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = [btc_data, eth_data]
+
+            result = await provider.fetch_ohlcv_multi_async(
+                ["BTCUSDT", "ETHUSDT"],
+                "2024-01-01",
+                "2024-01-31",
+                frequency="hourly",
+            )
+
+        assert len(result) == 6
+        assert set(result["symbol"].to_list()) == {"BTCUSDT", "ETHUSDT"}
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlcv_multi_async_empty_symbols_raises_error(self):
+        """Test multi-symbol OHLCV fetch validates non-empty symbols."""
+        provider = BinancePublicProvider()
+
+        with pytest.raises(DataValidationError, match="symbols list cannot be empty"):
+            await provider.fetch_ohlcv_multi_async([], "2024-01-01", "2024-01-31")
 
 
 # ===== YahooFinanceProvider Async Tests =====

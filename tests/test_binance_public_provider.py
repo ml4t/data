@@ -3,7 +3,7 @@
 import io
 import zipfile
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import polars as pl
@@ -395,6 +395,38 @@ class TestFetchDailyData:
                 result = provider._fetch_daily_data("INVALID", "1d", start_dt, end_dt)
                 assert result == []  # Empty list after consecutive 404s
 
+    def test_skips_pre_listing_gap_with_binary_search(self, provider):
+        """Test leading 404s are skipped without probing every day."""
+        start_dt = datetime(2024, 1, 1, tzinfo=UTC)
+        end_dt = datetime(2024, 3, 31, tzinfo=UTC)
+        listing_date = datetime(2024, 3, 1, tzinfo=UTC)
+        call_count = 0
+
+        def mock_download(url: str):
+            nonlocal call_count
+            call_count += 1
+            date_str = url.removesuffix(".zip").rsplit("-", 3)[-3:]
+            file_date = datetime.strptime("-".join(date_str), "%Y-%m-%d").replace(tzinfo=UTC)
+            if file_date >= listing_date:
+                return pl.DataFrame(
+                    {
+                        "timestamp": [file_date],
+                        "open": [42000.0],
+                        "high": [42500.0],
+                        "low": [41800.0],
+                        "close": [42300.0],
+                        "volume": [100.0],
+                    }
+                )
+            return None
+
+        with patch.object(provider, "_download_and_parse_zip", side_effect=mock_download):
+            with patch.object(provider, "_acquire_rate_limit"):
+                result = provider._fetch_daily_data("APTUSDT", "1d", start_dt, end_dt)
+
+        assert len(result) == 31
+        assert call_count < 50
+
 
 class TestFetchMonthlyData:
     """Tests for _fetch_monthly_data method."""
@@ -541,6 +573,49 @@ class TestFetchPremiumIndex:
 
         assert len(df) == 2
         assert set(df["symbol"].to_list()) == {"BTCUSDT", "ETHUSDT"}
+
+
+class TestFetchOhlcvMultiParallel:
+    """Tests for parallel multi-symbol OHLCV fetch."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider instance."""
+        return BinancePublicProvider(market="futures")
+
+    def test_fetch_ohlcv_multi_parallel_returns_combined(self, provider):
+        """Test sync wrapper returns combined multi-symbol OHLCV data."""
+        mock_df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                ],
+                "symbol": ["BTCUSDT", "ETHUSDT"],
+                "open": [42000.0, 2200.0],
+                "high": [42500.0, 2250.0],
+                "low": [41800.0, 2180.0],
+                "close": [42300.0, 2225.0],
+                "volume": [100.0, 200.0],
+            }
+        )
+
+        with (
+            patch.object(provider, "fetch_ohlcv_multi_async", new_callable=AsyncMock) as mock_fetch,
+            patch.object(provider, "close_async", new_callable=AsyncMock) as mock_close,
+        ):
+            mock_fetch.return_value = mock_df
+            df = provider.fetch_ohlcv_multi_parallel(
+                ["BTCUSDT", "ETHUSDT"],
+                "2024-01-01",
+                "2024-01-31",
+                frequency="hourly",
+            )
+
+        assert len(df) == 2
+        assert set(df["symbol"].to_list()) == {"BTCUSDT", "ETHUSDT"}
+        mock_fetch.assert_awaited_once()
+        mock_close.assert_awaited_once()
 
 
 class TestGetAvailableSymbols:

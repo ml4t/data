@@ -24,6 +24,7 @@ class TestCryptoConfig:
         assert config.end == "2025-12-31"
         assert config.interval == "8h"
         assert config.symbols == {}
+        assert config.perps == {}
 
     def test_storage_path_expanded(self):
         """Test that storage path is expanded."""
@@ -136,6 +137,10 @@ crypto:
   end: "2024-12-31"
   interval: 8h
   storage_path: {temp_storage}
+  perps:
+    start: "2022-01-01"
+    end: "2024-06-30"
+    market: futures
   symbols:
     major:
       symbols: ["BTCUSDT", "ETHUSDT"]
@@ -147,6 +152,7 @@ crypto:
 
         assert manager.config.provider == "binance_public"
         assert manager.config.start == "2023-01-01"
+        assert manager.config.perps["start"] == "2022-01-01"
         assert "BTCUSDT" in manager.config.get_all_symbols()
 
     def test_provider_lazy_initialization(self, manager):
@@ -162,7 +168,7 @@ crypto:
     def test_download_premium_index_empty_result(self, manager):
         """Test download_premium_index with empty result."""
         mock_provider = MagicMock()
-        mock_provider.fetch_premium_index_multi.return_value = pl.DataFrame()
+        mock_provider.fetch_premium_index_multi_parallel.return_value = pl.DataFrame()
 
         with patch.object(manager, "_provider", mock_provider):
             manager._provider = mock_provider
@@ -220,6 +226,60 @@ crypto:
             assert "BTCUSDT" in call_args.kwargs.get("symbols", []) or "BTCUSDT" in call_args[
                 1
             ].get("symbols", [])
+
+    def test_download_perps_with_data(self, manager, temp_storage):
+        """Test download_perps saves combined and partitioned OHLCV data."""
+        manager.config.perps = {
+            "start": "2024-02-01",
+            "end": "2024-02-29",
+            "market": "futures",
+        }
+        mock_data = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 2, 1), datetime(2024, 2, 1)],
+                "symbol": ["BTCUSDT", "ETHUSDT"],
+                "open": [42000.0, 2200.0],
+                "high": [42500.0, 2250.0],
+                "low": [41800.0, 2180.0],
+                "close": [42300.0, 2225.0],
+                "volume": [1000.0, 500.0],
+            }
+        )
+
+        mock_provider = MagicMock()
+        mock_provider.fetch_ohlcv_multi_parallel.return_value = mock_data
+
+        with patch.object(
+            manager, "_get_provider", return_value=mock_provider
+        ) as mock_get_provider:
+            df = manager.download_perps()
+
+        assert len(df) == 2
+        assert (temp_storage / "perps.parquet").exists()
+        assert (temp_storage / "perps" / "symbol=BTCUSDT" / "data.parquet").exists()
+        assert (temp_storage / "perps" / "symbol=ETHUSDT" / "data.parquet").exists()
+        mock_get_provider.assert_called_once_with("futures")
+        call_args = mock_provider.fetch_ohlcv_multi_parallel.call_args.kwargs
+        assert call_args["start"] == "2024-02-01"
+        assert call_args["end"] == "2024-02-29"
+        assert call_args["frequency"] == "hourly"
+
+    def test_download_all_returns_both_datasets(self, manager):
+        """Test download_all invokes both crypto dataset downloads."""
+        premium = pl.DataFrame({"symbol": ["BTCUSDT"]})
+        perps = pl.DataFrame({"symbol": ["BTCUSDT"]})
+
+        with (
+            patch.object(manager, "download_premium_index", return_value=premium) as mock_premium,
+            patch.object(manager, "download_perps", return_value=perps) as mock_perps,
+        ):
+            result = manager.download_all()
+
+        assert set(result) == {"premium_index", "perps"}
+        assert result["premium_index"] is premium
+        assert result["perps"] is perps
+        mock_premium.assert_called_once_with(symbols=None)
+        mock_perps.assert_called_once_with(symbols=None)
 
     def test_save_premium_index(self, manager, temp_storage):
         """Test _save_premium_index creates combined file."""
@@ -300,6 +360,26 @@ crypto:
         loaded = manager.load_premium_index()
 
         assert len(loaded) == 2
+
+    def test_load_perps_from_combined(self, manager, temp_storage):
+        """Test load_perps uses combined dataset file."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "symbol": ["BTCUSDT", "ETHUSDT"],
+                "open": [42000.0, 2200.0],
+                "high": [42500.0, 2250.0],
+                "low": [41800.0, 2180.0],
+                "close": [42300.0, 2225.0],
+                "volume": [1000.0, 500.0],
+            }
+        )
+        df.write_parquet(temp_storage / "perps.parquet")
+
+        loaded = manager.load_perps()
+
+        assert len(loaded) == 2
+        assert set(loaded["symbol"].to_list()) == {"BTCUSDT", "ETHUSDT"}
 
     def test_load_premium_index_no_data(self, manager):
         """Test load_premium_index when no data exists."""
