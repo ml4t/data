@@ -1,14 +1,36 @@
 """Tests for AQR factor provider module."""
 
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+from openpyxl import Workbook
 
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.aqr import AQR_CATEGORIES, AQRFactorProvider
+
+
+def _workbook_bytes(sheets: dict[str, list[list[object]]]) -> BytesIO:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    first = True
+
+    for sheet_name, rows in sheets.items():
+        sheet = default_sheet if first else workbook.create_sheet(title=sheet_name)
+        sheet.title = sheet_name
+        first = False
+
+        for row_idx, row in enumerate(rows, start=1):
+            for col_idx, value in enumerate(row, start=1):
+                sheet.cell(row=row_idx, column=col_idx, value=value)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 class TestAQRFactorProviderInit:
@@ -269,6 +291,125 @@ class TestDownload:
 
         # Directory should be created regardless
         assert output_dir.exists()
+
+
+class TestExcelParsing:
+    """Tests for dataset-specific AQR Excel parsing."""
+
+    def test_parse_qmj_10_portfolios_preserves_us_and_global_blocks(self):
+        rows = [[f"skip {idx}"] for idx in range(18)]
+        rows.append([f"col_{idx}" for idx in range(23)])
+        rows.extend(
+            [
+                [datetime(2024, 1, 31), *range(1, 12), *range(21, 32)],
+                [datetime(2024, 2, 29), *range(101, 112), *range(121, 132)],
+            ]
+        )
+
+        df = AQRFactorProvider._parse_aqr_excel(
+            "qmj_10_portfolios",
+            _workbook_bytes({"Sheet1": rows}),
+        )
+
+        assert df.columns[:4] == ["timestamp", "US P1", "US P2", "US P3"]
+        assert "US P10-P1" in df.columns
+        assert "Global P1" in df.columns
+        assert "Global P10-P1" in df.columns
+        assert df["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+        assert df["US P1"].to_list() == [1.0, 101.0]
+        assert df["Global P1"].to_list() == [21.0, 121.0]
+
+    def test_parse_momentum_indices_uses_returns_sheet(self):
+        disclosures_rows = [
+            ["Disclosures"],
+            ["Month", "Ignore", "Ignore", "Ignore"],
+            [datetime(2024, 1, 31), 9.0, 9.1, 9.2],
+        ]
+        returns_rows = [
+            ["metadata"],
+            ["Month", "U.S. Large Cap", "U.S. Small Cap", "International"],
+            [datetime(2024, 1, 31), 0.1, 0.2, 0.3],
+            [datetime(2024, 2, 29), 0.4, 0.5, 0.6],
+        ]
+
+        df = AQRFactorProvider._parse_aqr_excel(
+            "momentum_indices",
+            _workbook_bytes({"Disclosures": disclosures_rows, "Returns": returns_rows}),
+        )
+
+        assert df.columns == ["timestamp", "U.S. Large Cap", "U.S. Small Cap", "International"]
+        assert df["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+        assert df["U.S. Small Cap"].to_list() == [0.2, 0.5]
+
+    def test_parse_commodities_preserves_state_columns(self):
+        rows = [[f"skip {idx}"] for idx in range(10)]
+        rows.append(
+            [
+                "Date",
+                "Equal Weight",
+                "Long-Short (Backwardation)",
+                "State of backwardation/contango",
+                "State of inflation",
+            ]
+        )
+        rows.extend(
+            [
+                [datetime(2024, 1, 31), 0.1, 0.2, "Backwardation", "High"],
+                [datetime(2024, 2, 29), 0.3, 0.4, "Contango", "Low"],
+            ]
+        )
+
+        df = AQRFactorProvider._parse_aqr_excel(
+            "commodities",
+            _workbook_bytes({"Commodities for the Long Run": rows}),
+        )
+
+        assert df["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+        assert df["Equal Weight"].to_list() == [0.1, 0.3]
+        assert df["State of backwardation/contango"].to_list() == ["Backwardation", "Contango"]
+        assert df["State of inflation"].to_list() == ["High", "Low"]
+
+    def test_parse_esg_frontier_merges_side_by_side_panels(self):
+        rows = [[None] * 6 for _ in range(13)]
+        rows.append([datetime(2024, 1, 31), 0.1, 0.2, datetime(2024, 1, 31), 1.1, 1.2])
+        rows.append([datetime(2024, 2, 29), 0.3, 0.4, datetime(2024, 2, 29), 1.3, 1.4])
+        rows[11] = [
+            "E (Low CO2)",
+            "E (Low CO2)",
+            "E (Low CO2)",
+            "S (Sin vs. Non-Sin Stocks)",
+            "S (Sin vs. Non-Sin Stocks)",
+            "S (Sin vs. Non-Sin Stocks)",
+        ]
+        rows[12] = ["Date", "Low", "High", "Date", "Low", "High"]
+
+        df = AQRFactorProvider._parse_aqr_excel(
+            "esg_frontier",
+            _workbook_bytes({"Value-weighted excess returns": rows}),
+        )
+
+        assert df.columns == ["timestamp", "E Low", "E High", "S Low", "S High"]
+        assert df["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+        assert df["S High"].to_list() == [1.2, 1.4]
+
+    def test_parse_credit_premium_uses_late_header_row(self):
+        rows = [[f"skip {idx}"] for idx in range(10)]
+        rows.append(["Date", "CORP_XS", "GOVT_XS", "SP500_XS"])
+        rows.extend(
+            [
+                [datetime(2024, 1, 31), 0.01, 0.02, 0.03],
+                [datetime(2024, 2, 29), 0.04, 0.05, 0.06],
+            ]
+        )
+
+        df = AQRFactorProvider._parse_aqr_excel(
+            "credit_premium",
+            _workbook_bytes({"Sheet1": rows}),
+        )
+
+        assert df.columns == ["timestamp", "CORP_XS", "GOVT_XS", "SP500_XS"]
+        assert df["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 2, 1)]
+        assert df["SP500_XS"].to_list() == [0.03, 0.06]
 
 
 class TestAQRCategories:

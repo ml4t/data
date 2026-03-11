@@ -39,6 +39,7 @@ All data from AQR's public research library: https://www.aqr.com/Insights/Datase
 from __future__ import annotations
 
 import json
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -218,7 +219,7 @@ class AQRFactorProvider(BaseProvider):
         "hml_devil_daily": "The-Devil-in-HMLs-Details-Factors-Daily.xlsx",
         # Equity portfolios
         "qmj_6_portfolios": "Quality-Minus-Junk-Six-Portfolios-Formed-on-Size-and-Quality-Monthly.xlsx",
-        "qmj_10_portfolios": "Quality-Minus-Junk-10-Quality-Sorted-Portfolios-Monthly.xlsx",
+        "qmj_10_portfolios": "Quality-Minus-Junk-10-QualitySorted-Portfolios-Monthly.xlsx",
         # Cross-asset
         "vme_factors": "Value-and-Momentum-Everywhere-Factors-Monthly.xlsx",
         "vme_portfolios": "Value-and-Momentum-Everywhere-Portfolios-Monthly.xlsx",
@@ -228,7 +229,7 @@ class AQRFactorProvider(BaseProvider):
         "century_premia": "Century-of-Factor-Premia-Monthly.xlsx",
         "commodities": "Commodities-for-the-Long-Run-Index-Level-Data-Monthly.xlsx",
         # Optional (static)
-        "esg_frontier": "Responsible-Investing-ESG-Efficient-Frontier.xlsx",
+        "esg_frontier": "ESG_efficient_frontier_portfolios_vF.xlsx?sc_lang=en",
         "credit_premium": "Credit-Risk-Premium-Preliminary-Paper-Data.xlsx",
     }
 
@@ -914,11 +915,21 @@ class AQRFactorProvider(BaseProvider):
         AQR Excel files have complex headers that need special handling.
         Returns are already in decimal format (0.01 = 1%).
         """
+        if dataset == "qmj_10_portfolios":
+            return cls._parse_qmj_10_portfolios_excel(file)
+        if dataset == "momentum_indices":
+            return cls._parse_momentum_indices_excel(file)
+        if dataset == "commodities":
+            return cls._parse_commodities_excel(file)
+        if dataset == "esg_frontier":
+            return cls._parse_esg_frontier_excel(file)
+        if dataset == "credit_premium":
+            return cls._parse_credit_premium_excel(file)
+
         info = cls.DATASETS[dataset]
         skiprows = info.get("skiprows", 18)
 
-        # Read with pandas (better Excel support), then convert to Polars
-        df_pd = pd.read_excel(file, sheet_name=0, skiprows=skiprows, engine="openpyxl")
+        df_pd = cls._read_excel(file, sheet_name=0, skiprows=skiprows)
 
         # Some files (VME, Century) have column names in the data rows
         # Check if first column name looks like a placeholder
@@ -954,17 +965,138 @@ class AQRFactorProvider(BaseProvider):
         # Drop rows with invalid dates
         df_pd = df_pd.dropna(subset=["date"])
 
-        # Convert to Polars and rename
-        df = pl.from_pandas(df_pd)
-        df = df.rename({"date": "timestamp"})
+        return cls._finalize_aqr_dataframe(dataset, df_pd)
 
-        # Cast numeric columns to float (data is already in decimal format)
-        numeric_cols = [c for c in df.columns if c != "timestamp"]
-        df = df.with_columns([pl.col(c).cast(pl.Float64) for c in numeric_cols])
+    @staticmethod
+    def _read_excel(file: BytesIO, **kwargs) -> pd.DataFrame:
+        """Read an AQR workbook sheet with openpyxl support."""
+        file.seek(0)
+        return pd.read_excel(file, engine="openpyxl", **kwargs)
 
-        # Normalize month-end dates to month-start for consistency
-        # (AQR uses month-end, French uses month-start)
+    @staticmethod
+    def _clean_column_name(value: object) -> str:
+        """Normalize whitespace and line breaks in Excel-derived column names."""
+        text = " ".join(str(value).replace("\n", " ").split())
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _finalize_aqr_dataframe(cls, dataset: str, df_pd: pd.DataFrame) -> pl.DataFrame:
+        """Convert a parsed pandas frame to normalized Polars output."""
+        info = cls.DATASETS[dataset]
+        df_pd = df_pd.copy()
+        df_pd.columns = [
+            "date" if idx == 0 else cls._clean_column_name(col)
+            for idx, col in enumerate(df_pd.columns)
+        ]
+
+        df_pd["date"] = pd.to_datetime(df_pd["date"], errors="coerce")
+        df_pd = df_pd.dropna(subset=["date"]).reset_index(drop=True)
+
+        for col in df_pd.columns[1:]:
+            if pd.api.types.is_numeric_dtype(df_pd[col]):
+                df_pd[col] = df_pd[col].astype(float)
+                continue
+
+            converted = pd.to_numeric(df_pd[col], errors="coerce")
+            if converted.notna().sum() == df_pd[col].notna().sum():
+                df_pd[col] = converted.astype(float)
+
+        df = pl.from_pandas(df_pd).rename({"date": "timestamp"})
+
         if info.get("frequency") == "monthly":
             df = df.with_columns(pl.col("timestamp").dt.month_start().alias("timestamp"))
 
         return df.drop_nulls(subset=["timestamp"]).sort("timestamp")
+
+    @classmethod
+    def _parse_qmj_10_portfolios_excel(cls, file: BytesIO) -> pl.DataFrame:
+        """Parse the QMJ 10-portfolio workbook with US and Global sections."""
+        df_pd = cls._read_excel(file, sheet_name=0, skiprows=18)
+        portfolio_labels = cls.DATASETS["qmj_10_portfolios"]["portfolios"]
+        df_pd.columns = [
+            "date",
+            *[f"US {label}" for label in portfolio_labels],
+            "US P10-P1",
+            *[f"Global {label}" for label in portfolio_labels],
+            "Global P10-P1",
+        ]
+        return cls._finalize_aqr_dataframe("qmj_10_portfolios", df_pd)
+
+    @classmethod
+    def _parse_momentum_indices_excel(cls, file: BytesIO) -> pl.DataFrame:
+        """Parse the momentum index workbook from the Returns sheet only."""
+        df_pd = cls._read_excel(file, sheet_name="Returns", skiprows=1, usecols=[0, 1, 2, 3])
+        return cls._finalize_aqr_dataframe("momentum_indices", df_pd)
+
+    @classmethod
+    def _parse_commodities_excel(cls, file: BytesIO) -> pl.DataFrame:
+        """Parse the commodities workbook with mixed numeric and state columns."""
+        df_pd = cls._read_excel(file, sheet_name="Commodities for the Long Run", skiprows=10)
+        return cls._finalize_aqr_dataframe("commodities", df_pd)
+
+    @classmethod
+    def _panel_prefix(cls, label: object) -> str:
+        """Extract a compact panel prefix from a section label."""
+        text = cls._clean_column_name(label)
+        match = re.match(r"([A-Za-z0-9]+)", text)
+        return match.group(1) if match else "Panel"
+
+    @classmethod
+    def _parse_multi_panel_sheet(
+        cls,
+        dataset: str,
+        raw: pd.DataFrame,
+        group_row: int,
+        header_row: int,
+        data_row: int,
+    ) -> pl.DataFrame:
+        """Parse sheets that contain multiple side-by-side date panels."""
+        header = raw.iloc[header_row]
+        groups = raw.iloc[group_row]
+        date_positions = [
+            idx
+            for idx, value in enumerate(header)
+            if cls._clean_column_name(value).lower() == "date"
+        ]
+
+        panel_frames: list[pd.DataFrame] = []
+        for panel_idx, start in enumerate(date_positions):
+            stop = (
+                date_positions[panel_idx + 1]
+                if panel_idx + 1 < len(date_positions)
+                else len(header)
+            )
+            cols = [col for col in range(start, stop) if pd.notna(header.iloc[col])]
+            block = raw.iloc[data_row:, cols].copy()
+            if block.empty:
+                continue
+
+            prefix = cls._panel_prefix(groups.iloc[start])
+            block.columns = [
+                "date",
+                *[f"{prefix} {cls._clean_column_name(header.iloc[col])}" for col in cols[1:]],
+            ]
+            panel_frames.append(block.reset_index(drop=True))
+
+        if not panel_frames:
+            return cls._finalize_aqr_dataframe(dataset, pd.DataFrame(columns=["date"]))
+
+        merged = panel_frames[0]
+        for block in panel_frames[1:]:
+            merged = merged.merge(block, on="date", how="outer")
+
+        return cls._finalize_aqr_dataframe(dataset, merged)
+
+    @classmethod
+    def _parse_esg_frontier_excel(cls, file: BytesIO) -> pl.DataFrame:
+        """Parse the ESG efficient frontier workbook from the value-weighted sheet."""
+        raw = cls._read_excel(file, sheet_name="Value-weighted excess returns", header=None)
+        return cls._parse_multi_panel_sheet(
+            "esg_frontier", raw, group_row=11, header_row=12, data_row=13
+        )
+
+    @classmethod
+    def _parse_credit_premium_excel(cls, file: BytesIO) -> pl.DataFrame:
+        """Parse the credit premium workbook with its later header row."""
+        df_pd = cls._read_excel(file, sheet_name=0, skiprows=10, usecols=[0, 1, 2, 3])
+        return cls._finalize_aqr_dataframe("credit_premium", df_pd)
