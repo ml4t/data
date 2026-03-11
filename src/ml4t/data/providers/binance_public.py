@@ -1573,7 +1573,8 @@ class BinancePublicProvider(BaseProvider):
                 try:
                     df = await self.fetch_ohlcv_async(symbol, start, end, frequency)
                     if not df.is_empty():
-                        return df
+                        normalized_symbol = self._normalize_symbol(symbol)
+                        return df.with_columns(pl.lit(normalized_symbol).alias("symbol"))
                 except Exception as e:
                     logger.warning(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None

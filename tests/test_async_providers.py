@@ -165,11 +165,9 @@ class TestBinancePublicProviderAsync:
     async def test_fetch_ohlcv_multi_async_combines_symbols(self, sample_ohlcv_data):
         """Test multi-symbol OHLCV fetch combines successful results."""
         provider = BinancePublicProvider()
-        btc_data = sample_ohlcv_data.with_columns(pl.lit("BTCUSDT").alias("symbol"))
-        eth_data = sample_ohlcv_data.with_columns(pl.lit("ETHUSDT").alias("symbol"))
 
         with patch.object(provider, "fetch_ohlcv_async", new_callable=AsyncMock) as mock_fetch:
-            mock_fetch.side_effect = [btc_data, eth_data]
+            mock_fetch.side_effect = [sample_ohlcv_data, sample_ohlcv_data]
 
             result = await provider.fetch_ohlcv_multi_async(
                 ["BTCUSDT", "ETHUSDT"],
