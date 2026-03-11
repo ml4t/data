@@ -425,7 +425,17 @@ class COTFetcher:
             )
 
         logger.info(f"Downloading COT {report_type} for {year}")
-        df_pandas = cot.cot_year(year=year, cot_report_type=report_type)
+        # cot_reports downloads intermediate text files to CWD; isolate in tempdir
+        import os
+        import tempfile
+
+        original_dir = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+            try:
+                df_pandas = cot.cot_year(year=year, cot_report_type=report_type)
+            finally:
+                os.chdir(original_dir)
 
         # Convert to Polars
         df = pl.from_pandas(df_pandas)
