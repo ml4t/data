@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 import polars as pl
 import structlog
@@ -11,12 +12,23 @@ from ml4t.data.core.exceptions import DataValidationError
 
 logger = structlog.get_logger()
 
+# OHLC validation modes
+OhlcMode = Literal["strict", "drop", "warn"]
+
 
 class ValidationMixin:
     """Mixin providing OHLCV data validation.
 
     Validates that data conforms to the canonical OHLCV schema
     and enforces OHLC invariants (high >= low, etc.).
+
+    The ``ohlc_mode`` attribute controls how OHLC violations are handled:
+
+    - ``"strict"`` (default): raise ``DataValidationError``
+    - ``"drop"``: silently drop invalid rows and continue
+    - ``"warn"``: log a warning but keep all rows
+
+    Set ``ohlc_mode`` on the provider instance or override in subclass.
 
     Example:
         class MyProvider(ValidationMixin):
@@ -27,6 +39,9 @@ class ValidationMixin:
 
     # Required columns for OHLCV data
     REQUIRED_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
+
+    # OHLC validation mode: "strict" | "drop" | "warn"
+    ohlc_mode: OhlcMode = "drop"
 
     def _validate_inputs(
         self,
@@ -85,8 +100,8 @@ class ValidationMixin:
         if missing:
             raise DataValidationError(provider_name, f"Missing required columns: {missing}")
 
-        # Validate OHLC invariants
-        self._validate_ohlc_invariants(df, provider_name)
+        # Validate OHLC invariants (may drop rows depending on ohlc_mode)
+        df = self._validate_ohlc_invariants(df, provider_name)
 
         # Sort and deduplicate
         df = df.sort("timestamp").unique(subset=["timestamp"], maintain_order=True)
@@ -97,7 +112,7 @@ class ValidationMixin:
         self,
         df: pl.DataFrame,
         provider_name: str,
-    ) -> None:
+    ) -> pl.DataFrame:
         """Validate OHLC price invariants.
 
         Checks:
@@ -107,12 +122,21 @@ class ValidationMixin:
             - low <= open
             - low <= close
 
+        Behaviour depends on ``self.ohlc_mode``:
+
+        - ``"strict"``: raise on any violation
+        - ``"drop"``: remove violating rows, return cleaned frame
+        - ``"warn"``: log but keep all rows
+
         Args:
             df: DataFrame to validate
             provider_name: Provider name for error messages
 
+        Returns:
+            DataFrame (potentially with rows removed in ``"drop"`` mode)
+
         Raises:
-            DataValidationError: If invariants violated
+            DataValidationError: Only in ``"strict"`` mode
         """
         invalid_ohlc = (
             (df["high"] < df["low"])
@@ -122,11 +146,34 @@ class ValidationMixin:
             | (df["low"] > df["close"])
         )
 
-        if invalid_ohlc.any():
-            n_invalid = invalid_ohlc.sum()
+        if not invalid_ohlc.any():
+            return df
+
+        n_invalid = int(invalid_ohlc.sum())
+        mode: OhlcMode = getattr(self, "ohlc_mode", "drop")
+
+        if mode == "strict":
             raise DataValidationError(
                 provider_name, f"Found {n_invalid} rows with invalid OHLC relationships"
             )
+
+        if mode == "drop":
+            logger.info(
+                "Dropped rows with invalid OHLC",
+                provider=provider_name,
+                n_dropped=n_invalid,
+                n_total=len(df),
+            )
+            return df.filter(~invalid_ohlc)
+
+        # mode == "warn"
+        logger.warning(
+            "Rows with invalid OHLC relationships (kept)",
+            provider=provider_name,
+            n_invalid=n_invalid,
+            n_total=len(df),
+        )
+        return df
 
     def _validate_no_nulls(
         self,
