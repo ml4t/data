@@ -228,8 +228,8 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match="Missing required column"):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    def test_data_validation_ohlc_invariants(self):
-        """Test OHLC invariant validation."""
+    def test_data_validation_ohlc_invariants_drop_mode(self):
+        """Test default OHLC invariant handling drops invalid rows."""
         provider = MockProvider()
 
         def bad_transform(raw_data, symbol):
@@ -239,6 +239,31 @@ class TestBaseProvider:
                         "timestamp": datetime.now(),
                         "open": 100.0,
                         "high": 90.0,  # High < open (invalid)
+                        "low": 85.0,
+                        "close": 95.0,
+                        "volume": 1000,
+                    }
+                ]
+            )
+
+        provider._transform_data = bad_transform
+
+        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        assert df.is_empty()
+
+    def test_data_validation_ohlc_invariants_strict_mode(self):
+        """Test strict OHLC invariant handling raises validation errors."""
+        provider = MockProvider()
+        provider.ohlc_mode = "strict"
+
+        def bad_transform(raw_data, symbol):
+            return pl.DataFrame(
+                [
+                    {
+                        "timestamp": datetime.now(),
+                        "open": 100.0,
+                        "high": 90.0,
                         "low": 85.0,
                         "close": 95.0,
                         "volume": 1000,
