@@ -286,6 +286,40 @@ class TestKalshiDataTransform:
         timestamps = df["timestamp"].to_list()
         assert timestamps == sorted(timestamps)
 
+    def test_transform_nested_bid_ask_dollar_ohlc(self, provider):
+        """Test transformation of live nested bid/ask dollar candlesticks."""
+        ts = int(datetime(2025, 10, 20, 12, 0).timestamp())
+        raw_data = [
+            {
+                "end_period_ts": ts,
+                "open_interest_fp": "0.00",
+                "price": {},
+                "volume_fp": "12.50",
+                "yes_ask": {
+                    "close_dollars": "0.0900",
+                    "high_dollars": "1.0000",
+                    "low_dollars": "0.0900",
+                    "open_dollars": "1.0000",
+                },
+                "yes_bid": {
+                    "close_dollars": "0.0100",
+                    "high_dollars": "0.4600",
+                    "low_dollars": "0.0000",
+                    "open_dollars": "0.4300",
+                },
+            }
+        ]
+
+        df = provider._transform_data(raw_data, "KXFED-27APR-T4.25")
+
+        assert len(df) == 1
+        assert df["symbol"].to_list() == ["KXFED-27APR-T4.25"]
+        assert df["open"].to_list() == [0.43]
+        assert df["high"].to_list() == [0.46]
+        assert df["low"].to_list() == [0.0]
+        assert df["close"].to_list() == [0.01]
+        assert df["volume"].to_list() == [12.5]
+
 
 class TestKalshiValidation:
     """Test validation logic."""

@@ -30,7 +30,7 @@ Example:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -67,6 +67,9 @@ class PolymarketProvider(BaseProvider):
 
     # Conservative rate limit: 30 req/min
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (30, 60.0)
+    HISTORY_CHUNK_DAYS: ClassVar[int] = 14
+    MARKET_PAGE_SIZE: ClassVar[int] = 500
+    MAX_MARKET_SCAN: ClassVar[int] = 5000
 
     # API base URLs
     CLOB_URL: ClassVar[str] = "https://clob.polymarket.com"
@@ -223,33 +226,35 @@ class PolymarketProvider(BaseProvider):
         if cache_key in self._market_cache:
             return self._market_cache[cache_key]
 
-        endpoint = f"{self.GAMMA_URL}/markets/{condition_id}"
-
-        self._acquire_rate_limit()
-
         try:
-            response = self.session.get(endpoint)
+            for active, closed in ((True, False), (None, None)):
+                offset = 0
+                while offset < self.MAX_MARKET_SCAN:
+                    markets = self.list_markets(
+                        active=active,
+                        closed=closed,
+                        limit=self.MARKET_PAGE_SIZE,
+                        offset=offset,
+                    )
+                    if not markets:
+                        break
 
-            if response.status_code == 429:
-                raise RateLimitError(provider="polymarket", retry_after=60.0)
-            if response.status_code == 404:
-                raise SymbolNotFoundError(
-                    provider="polymarket",
-                    symbol=condition_id,
-                    details={"type": "condition_id"},
-                )
-            if response.status_code != 200:
-                raise NetworkError(
-                    provider="polymarket",
-                    message=f"HTTP {response.status_code}: {response.text[:200]}",
-                )
+                    for market in markets:
+                        market_condition = market.get("conditionId") or market.get("condition_id")
+                        if market_condition == condition_id:
+                            self._market_cache[cache_key] = market
+                            return market
 
-            market = response.json()
+                    if len(markets) < self.MARKET_PAGE_SIZE:
+                        break
 
-            # Cache the result
-            self._market_cache[cache_key] = market
+                    offset += len(markets)
 
-            return market
+            raise SymbolNotFoundError(
+                provider="polymarket",
+                symbol=condition_id,
+                details={"type": "condition_id"},
+            )
 
         except (RateLimitError, NetworkError, SymbolNotFoundError):
             raise
@@ -347,15 +352,49 @@ class PolymarketProvider(BaseProvider):
         Returns:
             List of price points [{t: timestamp, p: price}, ...]
         """
-        # Convert dates to unix timestamps
-        start_dt = datetime.strptime(start, "%Y-%m-%d")
-        end_dt = datetime.strptime(end, "%Y-%m-%d")
-        # Set end to end of day
-        end_dt = end_dt.replace(hour=23, minute=59, second=59)
+        try:
+            start_dt = datetime.strptime(start, "%Y-%m-%d")
+            end_dt = datetime.strptime(end, "%Y-%m-%d")
 
-        start_ts = int(start_dt.timestamp())
-        end_ts = int(end_dt.timestamp())
+            history: list[dict[str, Any]] = []
+            chunk_days = self.HISTORY_CHUNK_DAYS if interval != "max" else self.MAX_MARKET_SCAN
+            chunk_start = start_dt
 
+            while chunk_start <= end_dt:
+                chunk_end = min(chunk_start + timedelta(days=chunk_days - 1), end_dt)
+                chunk_end = chunk_end.replace(hour=23, minute=59, second=59)
+                history.extend(
+                    self._fetch_price_history_chunk(
+                        token_id,
+                        int(chunk_start.timestamp()),
+                        int(chunk_end.timestamp()),
+                        interval,
+                    )
+                )
+                chunk_start = (chunk_end + timedelta(seconds=1)).replace(
+                    hour=0,
+                    minute=0,
+                    second=0,
+                )
+
+            deduped = {entry.get("t"): entry for entry in history if entry.get("t") is not None}
+            return [deduped[timestamp] for timestamp in sorted(deduped)]
+        except (RateLimitError, NetworkError, SymbolNotFoundError):
+            raise
+        except Exception as err:
+            raise NetworkError(
+                provider="polymarket",
+                message=f"Failed to fetch price history for token {token_id}",
+            ) from err
+
+    def _fetch_price_history_chunk(
+        self,
+        token_id: str,
+        start_ts: int,
+        end_ts: int,
+        interval: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch a single chunk of raw price history from the CLOB API."""
         endpoint = f"{self.CLOB_URL}/prices-history"
         params = {
             "market": token_id,
@@ -365,34 +404,24 @@ class PolymarketProvider(BaseProvider):
         }
 
         self._acquire_rate_limit()
+        response = self.session.get(endpoint, params=params)
 
-        try:
-            response = self.session.get(endpoint, params=params)
-
-            if response.status_code == 429:
-                raise RateLimitError(provider="polymarket", retry_after=60.0)
-            if response.status_code == 404:
-                raise SymbolNotFoundError(
-                    provider="polymarket",
-                    symbol=token_id,
-                    details={"type": "token_id"},
-                )
-            if response.status_code != 200:
-                raise NetworkError(
-                    provider="polymarket",
-                    message=f"HTTP {response.status_code}: {response.text[:200]}",
-                )
-
-            data = response.json()
-            return data.get("history", [])
-
-        except (RateLimitError, NetworkError, SymbolNotFoundError):
-            raise
-        except Exception as err:
+        if response.status_code == 429:
+            raise RateLimitError(provider="polymarket", retry_after=60.0)
+        if response.status_code == 404:
+            raise SymbolNotFoundError(
+                provider="polymarket",
+                symbol=token_id,
+                details={"type": "token_id"},
+            )
+        if response.status_code != 200:
             raise NetworkError(
                 provider="polymarket",
-                message=f"Failed to fetch price history for token {token_id}",
-            ) from err
+                message=f"HTTP {response.status_code}: {response.text[:200]}",
+            )
+
+        data = response.json()
+        return data.get("history", [])
 
     def _aggregate_to_ohlc(
         self,

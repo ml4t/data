@@ -249,16 +249,35 @@ class KalshiProvider(BaseProvider):
                 message=f"Request failed for market {market_ticker}",
             ) from err
 
+    @staticmethod
+    def _struct_field_names(dtype: pl.DataType | None) -> set[str]:
+        """Return the available field names for a Polars struct dtype."""
+        if dtype is None or not hasattr(dtype, "fields"):
+            return set()
+        return {field.name for field in dtype.fields}
+
+    @staticmethod
+    def _struct_price_expr(column: str, field: str, fields: set[str]) -> pl.Expr:
+        """Extract a probability price from a Kalshi nested struct."""
+        if field in fields:
+            return pl.col(column).struct.field(field).cast(pl.Float64) / 100.0
+
+        dollar_field = f"{field}_dollars"
+        if dollar_field in fields:
+            return pl.col(column).struct.field(dollar_field).cast(pl.Float64)
+
+        return pl.lit(None, dtype=pl.Float64)
+
     def _transform_data(self, raw_data: list[dict[str, Any]], symbol: str) -> pl.DataFrame:
         """Transform raw Kalshi API response to Polars DataFrame.
 
         Kalshi API returns nested structs for price data:
-        - price.open, price.high, price.low, price.close (in cents, 0-100) - actual trades
-        - yes_bid.open/high/low/close - bid side quotes (in cents)
-        - yes_ask.open/high/low/close - ask side quotes (in cents)
-        - volume (contracts traded)
+        - price.open/high/low/close or price.*_dollars for actual trades
+        - yes_bid.*_dollars and yes_ask.*_dollars for quote-side OHLC
+        - volume or volume_fp for contracts traded
 
-        When price values are null (no trades), we use mid-price from bid/ask.
+        When trade prices are missing, we fall back to the YES bid-side implied
+        probability, which matches how the book downloader consumes Kalshi OHLC.
         Prices are converted to probability (0-1) format.
 
         Args:
@@ -278,110 +297,74 @@ class KalshiProvider(BaseProvider):
             # Kalshi returns end_period_ts as unix timestamp
             df = df.with_columns(pl.from_epoch("end_period_ts", time_unit="s").alias("timestamp"))
 
+            volume_expr = pl.lit(0.0).alias("volume")
+            if "volume" in df.columns:
+                volume_expr = pl.col("volume").cast(pl.Float64).alias("volume")
+            elif "volume_fp" in df.columns:
+                volume_expr = pl.col("volume_fp").cast(pl.Float64).alias("volume")
+
+            price_fields = self._struct_field_names(df.schema.get("price"))
+            bid_fields = self._struct_field_names(df.schema.get("yes_bid"))
+            ask_fields = self._struct_field_names(df.schema.get("yes_ask"))
+
             # Check data schema - Kalshi returns nested structs
-            if "price" in df.columns:
-                price_schema = df.schema.get("price")
-
-                if price_schema is not None and hasattr(price_schema, "fields"):
-                    # Extract trade prices first
-                    df = df.with_columns(
-                        [
-                            (pl.col("price").struct.field("open").cast(pl.Float64) / 100.0).alias(
-                                "trade_open"
-                            ),
-                            (pl.col("price").struct.field("high").cast(pl.Float64) / 100.0).alias(
-                                "trade_high"
-                            ),
-                            (pl.col("price").struct.field("low").cast(pl.Float64) / 100.0).alias(
-                                "trade_low"
-                            ),
-                            (pl.col("price").struct.field("close").cast(pl.Float64) / 100.0).alias(
-                                "trade_close"
-                            ),
-                        ]
-                    )
-
-                    # Check if we have yes_bid/yes_ask for fallback (when no trades)
-                    if "yes_bid" in df.columns and "yes_ask" in df.columns:
-                        # Extract bid/ask OHLC and compute mid-prices
-                        df = df.with_columns(
-                            [
-                                (
-                                    pl.col("yes_bid").struct.field("open").cast(pl.Float64) / 100.0
-                                ).alias("bid_open"),
-                                (
-                                    pl.col("yes_bid").struct.field("high").cast(pl.Float64) / 100.0
-                                ).alias("bid_high"),
-                                (
-                                    pl.col("yes_bid").struct.field("low").cast(pl.Float64) / 100.0
-                                ).alias("bid_low"),
-                                (
-                                    pl.col("yes_bid").struct.field("close").cast(pl.Float64) / 100.0
-                                ).alias("bid_close"),
-                                (
-                                    pl.col("yes_ask").struct.field("open").cast(pl.Float64) / 100.0
-                                ).alias("ask_open"),
-                                (
-                                    pl.col("yes_ask").struct.field("high").cast(pl.Float64) / 100.0
-                                ).alias("ask_high"),
-                                (
-                                    pl.col("yes_ask").struct.field("low").cast(pl.Float64) / 100.0
-                                ).alias("ask_low"),
-                                (
-                                    pl.col("yes_ask").struct.field("close").cast(pl.Float64) / 100.0
-                                ).alias("ask_close"),
-                            ]
-                        )
-
-                        # Use trade price if available, otherwise mid-price from bid/ask
-                        df = df.with_columns(
-                            [
-                                pl.coalesce(
-                                    pl.col("trade_open"),
-                                    (pl.col("bid_open") + pl.col("ask_open")) / 2.0,
-                                ).alias("open"),
-                                pl.coalesce(
-                                    pl.col("trade_high"),
-                                    (pl.col("bid_high") + pl.col("ask_high")) / 2.0,
-                                ).alias("high"),
-                                pl.coalesce(
-                                    pl.col("trade_low"),
-                                    (pl.col("bid_low") + pl.col("ask_low")) / 2.0,
-                                ).alias("low"),
-                                pl.coalesce(
-                                    pl.col("trade_close"),
-                                    (pl.col("bid_close") + pl.col("ask_close")) / 2.0,
-                                ).alias("close"),
-                                pl.col("volume").cast(pl.Float64),
-                                pl.lit(symbol.upper()).alias("symbol"),
-                            ]
-                        )
-                    else:
-                        # No bid/ask data, just use trade prices (may be null)
-                        df = df.with_columns(
-                            [
-                                pl.col("trade_open").alias("open"),
-                                pl.col("trade_high").alias("high"),
-                                pl.col("trade_low").alias("low"),
-                                pl.col("trade_close").alias("close"),
-                                pl.col("volume").cast(pl.Float64),
-                                pl.lit(symbol.upper()).alias("symbol"),
-                            ]
-                        )
-                else:
-                    # price is a scalar value (simple format)
-                    df = df.with_columns(
-                        [
-                            (pl.col("price").cast(pl.Float64) / 100.0).alias("open"),
-                            (pl.col("price").cast(pl.Float64) / 100.0).alias("high"),
-                            (pl.col("price").cast(pl.Float64) / 100.0).alias("low"),
-                            (pl.col("price").cast(pl.Float64) / 100.0).alias("close"),
-                            pl.col("volume").cast(pl.Float64)
-                            if "volume" in df.columns
-                            else pl.lit(1.0).alias("volume"),
-                            pl.lit(symbol.upper()).alias("symbol"),
-                        ]
-                    )
+            if price_fields or bid_fields or ask_fields:
+                df = df.with_columns(
+                    [
+                        self._struct_price_expr("price", "open", price_fields).alias("trade_open"),
+                        self._struct_price_expr("price", "high", price_fields).alias("trade_high"),
+                        self._struct_price_expr("price", "low", price_fields).alias("trade_low"),
+                        self._struct_price_expr("price", "close", price_fields).alias(
+                            "trade_close"
+                        ),
+                        self._struct_price_expr("yes_bid", "open", bid_fields).alias("bid_open"),
+                        self._struct_price_expr("yes_bid", "high", bid_fields).alias("bid_high"),
+                        self._struct_price_expr("yes_bid", "low", bid_fields).alias("bid_low"),
+                        self._struct_price_expr("yes_bid", "close", bid_fields).alias("bid_close"),
+                        self._struct_price_expr("yes_ask", "open", ask_fields).alias("ask_open"),
+                        self._struct_price_expr("yes_ask", "high", ask_fields).alias("ask_high"),
+                        self._struct_price_expr("yes_ask", "low", ask_fields).alias("ask_low"),
+                        self._struct_price_expr("yes_ask", "close", ask_fields).alias("ask_close"),
+                    ]
+                )
+                df = df.with_columns(
+                    [
+                        pl.coalesce(
+                            pl.col("trade_open"),
+                            pl.col("bid_open"),
+                            pl.col("ask_open"),
+                        ).alias("open"),
+                        pl.coalesce(
+                            pl.col("trade_high"),
+                            pl.col("bid_high"),
+                            pl.col("ask_high"),
+                        ).alias("high"),
+                        pl.coalesce(
+                            pl.col("trade_low"),
+                            pl.col("bid_low"),
+                            pl.col("ask_low"),
+                        ).alias("low"),
+                        pl.coalesce(
+                            pl.col("trade_close"),
+                            pl.col("bid_close"),
+                            pl.col("ask_close"),
+                        ).alias("close"),
+                        volume_expr,
+                        pl.lit(symbol.upper()).alias("symbol"),
+                    ]
+                )
+            elif "price" in df.columns:
+                # price is a scalar value (simple format)
+                df = df.with_columns(
+                    [
+                        (pl.col("price").cast(pl.Float64) / 100.0).alias("open"),
+                        (pl.col("price").cast(pl.Float64) / 100.0).alias("high"),
+                        (pl.col("price").cast(pl.Float64) / 100.0).alias("low"),
+                        (pl.col("price").cast(pl.Float64) / 100.0).alias("close"),
+                        volume_expr,
+                        pl.lit(symbol.upper()).alias("symbol"),
+                    ]
+                )
             elif all(col in df.columns for col in ["open", "high", "low", "close"]):
                 # Standard flat OHLC format (from mocked tests)
                 df = df.with_columns(
@@ -390,7 +373,7 @@ class KalshiProvider(BaseProvider):
                         pl.col("high").cast(pl.Float64),
                         pl.col("low").cast(pl.Float64),
                         pl.col("close").cast(pl.Float64),
-                        pl.col("volume").cast(pl.Float64),
+                        volume_expr,
                         pl.lit(symbol.upper()).alias("symbol"),
                     ]
                 )

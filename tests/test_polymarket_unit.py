@@ -171,6 +171,24 @@ class TestSymbolResolution:
         result = provider.resolve_symbol("0xabcd1234", outcome="yes")
         assert result == "yes_token_123456789"
 
+    @patch.object(PolymarketProvider, "list_markets")
+    def test_get_market_by_condition_scans_market_pages(self, mock_list_markets, provider):
+        """Test condition-id lookup scans paginated market listings."""
+        condition_id = "0xabcd1234"
+        mock_list_markets.side_effect = [
+            [{"conditionId": "0xother", "slug": "other-market"}],
+            [{"conditionId": condition_id, "slug": "target-market"}],
+        ]
+
+        with patch.object(provider, "MARKET_PAGE_SIZE", 1):
+            result = provider._get_market_by_condition(condition_id)
+
+        assert result["slug"] == "target-market"
+        assert provider._market_cache[f"condition:{condition_id}"]["slug"] == "target-market"
+        assert mock_list_markets.call_args_list[0].kwargs["active"] is True
+        assert mock_list_markets.call_args_list[0].kwargs["offset"] == 0
+        assert mock_list_markets.call_args_list[1].kwargs["offset"] == 1
+
     def test_resolve_invalid_outcome_raises_error(self, provider):
         """Test that invalid outcome raises error."""
         with pytest.raises(DataValidationError) as exc_info:
@@ -314,6 +332,24 @@ class TestFetchOHLCV:
         )
 
         assert df.is_empty()
+
+    @patch.object(PolymarketProvider, "_fetch_price_history_chunk")
+    def test_fetch_price_history_chunks_long_ranges(self, mock_fetch_chunk, provider):
+        """Test long price-history requests are split into smaller CLOB calls."""
+        mock_fetch_chunk.side_effect = [
+            [{"t": 1704067200, "p": 0.45}, {"t": 1704153600, "p": 0.48}],
+            [{"t": 1704153600, "p": 0.48}, {"t": 1704240000, "p": 0.5}],
+        ]
+
+        history = provider._fetch_price_history(
+            "12345678901234567890",
+            "2024-01-01",
+            "2024-01-20",
+            "1d",
+        )
+
+        assert mock_fetch_chunk.call_count == 2
+        assert [point["t"] for point in history] == [1704067200, 1704153600, 1704240000]
 
 
 class TestFetchBothOutcomes:
@@ -693,13 +729,9 @@ class TestErrorHandling:
         with pytest.raises(NetworkError):
             provider.list_markets()
 
-    def test_symbol_not_found_on_404(self, provider):
-        """Test SymbolNotFoundError on 404."""
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        provider.session = MagicMock()
-        provider.session.get.return_value = mock_response
-
+    @patch.object(PolymarketProvider, "list_markets", return_value=[])
+    def test_symbol_not_found_on_condition_scan_miss(self, _mock_list_markets, provider):
+        """Test SymbolNotFoundError when condition-id scan finds no matching market."""
         with pytest.raises(SymbolNotFoundError):
             provider._get_market_by_condition("0xnonexistent")
 
