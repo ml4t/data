@@ -171,6 +171,46 @@ class TestSymbolResolution:
         result = provider.resolve_symbol("0xabcd1234", outcome="yes")
         assert result == "yes_token_123456789"
 
+    def test_get_market_by_slug_uses_documented_slug_endpoint(self, provider):
+        """Test slug lookup uses the Gamma slug path endpoint."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "slug": "fed-interest-rates-march-2026",
+            "conditionId": "0xabcd1234",
+        }
+        provider.session = MagicMock()
+        provider.session.get.return_value = mock_response
+
+        result = provider._get_market_by_slug("fed-interest-rates-march-2026")
+
+        assert result["slug"] == "fed-interest-rates-march-2026"
+        provider.session.get.assert_called_once_with(
+            "https://gamma-api.polymarket.com/markets/slug/fed-interest-rates-march-2026"
+        )
+
+    @patch.object(PolymarketProvider, "list_markets")
+    def test_get_market_by_slug_scans_market_pages(self, mock_list_markets, provider):
+        """Test slug lookup scans paginated market listings."""
+        slug = "fed-interest-rates-march-2026"
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        provider.session = MagicMock()
+        provider.session.get.return_value = mock_response
+        mock_list_markets.side_effect = [
+            [{"slug": "other-market", "conditionId": "0xother"}],
+            [{"slug": slug, "conditionId": "0xabcd1234"}],
+        ]
+
+        with patch.object(provider, "MARKET_PAGE_SIZE", 1):
+            result = provider._get_market_by_slug(slug)
+
+        assert result["slug"] == slug
+        assert provider._market_cache[f"slug:{slug}"]["slug"] == slug
+        assert mock_list_markets.call_args_list[0].kwargs["active"] is True
+        assert mock_list_markets.call_args_list[0].kwargs["closed"] is False
+        assert mock_list_markets.call_args_list[1].kwargs["offset"] == 1
+
     @patch.object(PolymarketProvider, "list_markets")
     def test_get_market_by_condition_scans_market_pages(self, mock_list_markets, provider):
         """Test condition-id lookup scans paginated market listings."""
@@ -440,6 +480,11 @@ class TestListMarkets:
 
         assert len(markets) == 2
         assert markets[0]["slug"] == "will-bitcoin-reach-100k"
+        params = provider.session.get.call_args.kwargs["params"]
+        assert params["active"] == "true"
+        assert params["closed"] == "false"
+        assert params["order"] == "volume24hr"
+        assert params["ascending"] == "false"
 
     def test_list_markets_with_category_filter(self, provider):
         """Test market listing with category filter."""
@@ -689,7 +734,7 @@ class TestCaching:
         """Test that market data is cached by slug."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = [{"id": "0x123", "slug": "test-market"}]
+        mock_response.json.return_value = {"id": "0x123", "slug": "test-market"}
         provider.session = MagicMock()
         provider.session.get.return_value = mock_response
 

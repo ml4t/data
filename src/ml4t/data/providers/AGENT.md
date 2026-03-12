@@ -52,3 +52,11 @@
 ## Key
 
 `BaseProvider`, `Provider`, `fetch_ohlcv()`, `fetch_series()`, `fetch()`
+
+## Prediction Market API References
+
+- Polymarket docs: `https://docs.polymarket.com/market-data/overview`
+- Polymarket live slug lookup uses `GET /markets/slug/{slug}` on Gamma. The older `GET /markets?slug=...` query has returned empty results for current markets during March 2026 verification.
+- Polymarket current-market discovery should prefer `active=true` with `closed=false`. `active=true` alone still returns many closed 2020-2021 markets.
+- Kalshi docs: `https://docs.kalshi.com/welcome`
+- For Kalshi OHLCV, verify the live candlestick schema before changing transforms. Recent live responses have used nested structs like `price`, `yes_bid`, `yes_ask`, plus `volume_fp`.

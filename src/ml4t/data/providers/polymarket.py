@@ -168,38 +168,59 @@ class PolymarketProvider(BaseProvider):
         if cache_key in self._market_cache:
             return self._market_cache[cache_key]
 
-        endpoint = f"{self.GAMMA_URL}/markets"
-        params = {"slug": slug}
-
-        self._acquire_rate_limit()
-
         try:
-            response = self.session.get(endpoint, params=params)
+            endpoint = f"{self.GAMMA_URL}/markets/slug/{slug}"
+            self._acquire_rate_limit()
+            response = self.session.get(endpoint)
 
             if response.status_code == 429:
                 raise RateLimitError(provider="polymarket", retry_after=60.0)
-            if response.status_code != 200:
+            if response.status_code == 200:
+                market = response.json()
+                if isinstance(market, dict) and market.get("slug"):
+                    self._market_cache[cache_key] = market
+                    condition_id = market.get("conditionId") or market.get("condition_id")
+                    if condition_id:
+                        self._market_cache[f"condition:{condition_id}"] = market
+                    return market
+            elif response.status_code != 404:
                 raise NetworkError(
                     provider="polymarket",
                     message=f"HTTP {response.status_code}: {response.text[:200]}",
                 )
 
-            data = response.json()
+            normalized_slug = slug.strip().lower()
+            for active, closed in ((True, False), (None, None)):
+                offset = 0
+                while offset < self.MAX_MARKET_SCAN:
+                    markets = self.list_markets(
+                        active=active,
+                        closed=closed,
+                        limit=self.MARKET_PAGE_SIZE,
+                        offset=offset,
+                    )
+                    if not markets:
+                        break
 
-            # Gamma API returns a list
-            if not data:
-                raise SymbolNotFoundError(
-                    provider="polymarket",
-                    symbol=slug,
-                    details={"type": "slug"},
-                )
+                    for market in markets:
+                        market_slug = str(market.get("slug", "")).strip().lower()
+                        if market_slug == normalized_slug:
+                            self._market_cache[cache_key] = market
+                            condition_id = market.get("conditionId") or market.get("condition_id")
+                            if condition_id:
+                                self._market_cache[f"condition:{condition_id}"] = market
+                            return market
 
-            market = data[0] if isinstance(data, list) else data
+                    if len(markets) < self.MARKET_PAGE_SIZE:
+                        break
 
-            # Cache the result
-            self._market_cache[cache_key] = market
+                    offset += len(markets)
 
-            return market
+            raise SymbolNotFoundError(
+                provider="polymarket",
+                symbol=slug,
+                details={"type": "slug"},
+            )
 
         except (RateLimitError, NetworkError, SymbolNotFoundError):
             raise
@@ -243,6 +264,9 @@ class PolymarketProvider(BaseProvider):
                         market_condition = market.get("conditionId") or market.get("condition_id")
                         if market_condition == condition_id:
                             self._market_cache[cache_key] = market
+                            market_slug = market.get("slug")
+                            if market_slug:
+                                self._market_cache[f"slug:{market_slug}"] = market
                             return market
 
                     if len(markets) < self.MARKET_PAGE_SIZE:
@@ -776,9 +800,14 @@ class PolymarketProvider(BaseProvider):
             ...     print(f"{m['slug']}: {m['question'][:50]}")
         """
         endpoint = f"{self.GAMMA_URL}/markets"
+        if active is True and closed is None:
+            closed = False
+
         params: dict[str, Any] = {
             "limit": min(limit, 1000),
             "offset": offset,
+            "order": "volume24hr",
+            "ascending": "false",
         }
 
         if active is not None:
