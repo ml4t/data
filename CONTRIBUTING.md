@@ -19,7 +19,7 @@ uv run pre-commit install
 uv run pytest tests/ -q
 ```
 
-**Requirements**: Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+**Requirements**: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ## Quality Gates
 
@@ -128,7 +128,7 @@ uv run pytest -m "" -q
 4. **CI runs automatically** on the PR. All checks must pass before merge:
    - Lint (ruff check + format)
    - Type Check (ty)
-   - Test Core (Python 3.11, 3.12, 3.13)
+   - Test Core (Python 3.12, 3.13, 3.14)
    - Package Build
 
 5. **Address review feedback**, then the PR is squash-merged into `main`.

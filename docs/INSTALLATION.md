@@ -147,7 +147,7 @@ pip install -e .
 If running in Docker container:
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 COPY . /app
@@ -254,7 +254,7 @@ print('\n✓ All core dependencies installed correctly')
 Expected output:
 
 ```
-Python: 3.11.x
+Python: 3.12.x
 ✓ polars 0.20.x
 ✓ pandas-market-calendars 4.3.x
 ✓ ml4t-data.DataManager

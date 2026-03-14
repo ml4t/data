@@ -58,14 +58,14 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 # Core dependencies
 dependencies = [
@@ -210,7 +210,7 @@ timeout = 300
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 fix = true
 exclude = ["_version.py"]
 
@@ -248,7 +248,7 @@ ignore = [
 "examples/notebooks/*" = ["E402"]  # Jupyter notebooks
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 # Set mypy_path to src for proper module resolution
 mypy_path = "src"
 namespace_packages = true
@@ -372,7 +372,7 @@ module = [
 ignore_errors = true
 
 [tool.ty.environment]
-python-version = "3.11"
+python-version = "3.12"
 root = ["src"]
 
 [tool.ty.src]
