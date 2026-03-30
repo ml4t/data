@@ -7,6 +7,7 @@ high-performance time-series data management.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from .backend import StorageBackend, StorageConfig
 from .data_profile import (
@@ -22,7 +23,9 @@ from .flat import FlatStorage
 from .hive import HiveStorage
 
 
-def create_storage(base_path: str | Path, strategy: str = "hive", **kwargs) -> StorageBackend:
+def create_storage(
+    base_path: str | Path, strategy: str = "hive", **kwargs: Any
+) -> StorageBackend:
     """Create a storage backend with the specified strategy.
 
     Args:

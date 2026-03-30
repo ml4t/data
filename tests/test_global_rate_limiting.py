@@ -41,7 +41,7 @@ class TestGlobalRateLimitManager:
         manager = GlobalRateLimitManager()
 
         yahoo_limiter = manager.get_rate_limiter("yahoo", 10, 60.0)
-        binance_limiter = manager.get_rate_limiter("binance", 10, 60.0)
+        binance_limiter = manager.get_rate_limiter("binance_api", 10, 60.0)
 
         assert yahoo_limiter is not binance_limiter
 
@@ -51,7 +51,7 @@ class TestGlobalRateLimitManager:
 
         # Create limiters and use them
         yahoo_limiter = manager.get_rate_limiter("yahoo", 2, 10.0)
-        binance_limiter = manager.get_rate_limiter("binance", 2, 10.0)
+        binance_limiter = manager.get_rate_limiter("binance_api", 2, 10.0)
 
         # Use up the limits
         yahoo_limiter.acquire()
@@ -66,7 +66,7 @@ class TestGlobalRateLimitManager:
         # Reset only yahoo
         manager.reset_provider_limits("yahoo")
 
-        # Yahoo should be reset, binance should still be limited
+        # Yahoo should be reset, binance_api should still be limited
         assert yahoo_limiter.acquire(blocking=False)
         assert not binance_limiter.acquire(blocking=False)
 
@@ -76,7 +76,7 @@ class TestGlobalRateLimitManager:
 
         # Create limiters and use them
         yahoo_limiter = manager.get_rate_limiter("yahoo", 1, 10.0)
-        binance_limiter = manager.get_rate_limiter("binance", 1, 10.0)
+        binance_limiter = manager.get_rate_limiter("binance_api", 1, 10.0)
 
         # Use up the limits
         yahoo_limiter.acquire()
@@ -122,7 +122,7 @@ class TestGlobalRateLimitManager:
         assert yahoo_status["period"] == 60.0
         assert yahoo_status["current_calls"] == 2
 
-        # Check binance status
+        # Check binance_api status
         binance_status = status["test_binance"][0]
         assert binance_status["max_calls"] == 10
         assert binance_status["period"] == 30.0

@@ -4,6 +4,32 @@ ml4t-data uses YAML configuration files validated by Pydantic models. The config
 system supports environment variable interpolation, file includes, and
 per-asset-class defaults.
 
+Use this page when you want a repeatable, config-driven workflow instead of
+ad hoc provider calls. It is the right place to start for scheduled downloads,
+multi-dataset pipelines, and book-style dataset orchestration.
+
+## Minimal Working Example
+
+```yaml
+storage:
+  path: ~/ml4t-data
+
+datasets:
+  etf_core:
+    provider: yahoo
+    symbols: [SPY, QQQ, IWM, TLT, GLD]
+    frequency: daily
+```
+
+```python
+from pathlib import Path
+
+from ml4t.data.config import load_config
+
+config = load_config(Path("ml4t-data.yaml"))
+print(config)
+```
+
 ## File Discovery
 
 The `ConfigLoader` searches these locations in order:
@@ -83,7 +109,7 @@ datasets:
 
   - name: crypto_spot
     symbols: [BTC, ETH, SOL]
-    provider: binance
+    provider: binance_api
     frequency: hourly
     asset_class: crypto
 
@@ -140,7 +166,7 @@ Each provider entry configures connection parameters:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `name` | required | Provider identifier |
-| `type` | required | `yahoo`, `binance`, `cryptocompare`, `databento`, `oanda`, `polygon`, `mock` |
+| `type` | required | `yahoo`, `binance_api`, `binance_bulk`, `cryptocompare`, `databento`, `oanda`, `polygon`, `mock` |
 | `enabled` | `true` | Toggle provider on/off |
 | `api_key` | `null` | API key (use `${ENV_VAR}` format) |
 | `rate_limit` | see below | Rate limiting and circuit breaker config |
@@ -256,3 +282,22 @@ issues = config.validate_config()
 # Save back to YAML
 config.to_yaml("ml4t.data.yaml")
 ```
+
+## See It In The Book
+
+The book codebase uses the same pattern for canonical dataset automation:
+
+- [Download orchestrator](https://github.com/ml4t/third-edition/blob/main/code/data/download_all.py)
+- [ETF config](https://github.com/ml4t/third-edition/blob/main/code/data/etfs/config.yaml)
+- [Crypto config](https://github.com/ml4t/third-edition/blob/main/code/data/crypto/config.yaml)
+- [Macro config](https://github.com/ml4t/third-edition/blob/main/code/data/macro/config.yaml)
+
+These files show how the book moves from one-off notebook exploration to
+reusable dataset definitions that can be updated repeatedly.
+
+## Next Steps
+
+- [Incremental Updates](incremental-updates.md)
+- [Storage](storage.md)
+- [CLI Reference](cli-reference.md)
+- [Book Guide](../book-guide/index.md)

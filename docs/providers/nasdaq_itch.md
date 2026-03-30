@@ -69,4 +69,4 @@ Free sample files available from NASDAQ:
 ## See Also
 
 - [NASDAQ ITCH Specification](https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification.pdf)
-- [Provider README](README.md)
+- [Provider Index](index.md)

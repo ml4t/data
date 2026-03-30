@@ -19,7 +19,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | TwelveData | Multi-Asset | Yes | 800 calls/day | [Pricing](https://twelvedata.com/pricing) |
 | CoinGecko | Crypto | No | 50 calls/min | [Pricing](https://www.coingecko.com/en/api/pricing) |
 | Binance | Crypto | No | Generous | [API](https://www.binance.com/en/binance-api) |
-| BinancePublic | Crypto | No | Unlimited | [Data](https://data.binance.vision) |
+| BinanceBulk | Crypto | No | Unlimited | [Data](https://data.binance.vision) |
 | CryptoCompare | Crypto | Yes | 250k calls/mo | [Pricing](https://min-api.cryptocompare.com/pricing) |
 | Oanda | Forex | Yes | Trial | [Pricing](https://www.oanda.com/fx-for-business/fx-data-services) |
 | FRED | Economic | Yes | 120 req/min | [API](https://fred.stlouisfed.org/docs/api/fred/) |
@@ -297,12 +297,12 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 - Demo API key available
 - Pro plans: $129+/mo
 
-#### Binance (BinanceProvider / BinancePublicProvider)
+#### Binance (BinanceAPIProvider / BinanceBulkProvider)
 **Website**: https://www.binance.com
 **Data Portal**: https://data.binance.vision
 
-- **BinanceProvider**: Live API (may have geo-restrictions in US)
-- **BinancePublicProvider**: Bulk historical downloads (no restrictions)
+- **BinanceAPIProvider**: Live API (may have geo-restrictions in US)
+- **BinanceBulkProvider**: Bulk historical downloads (no restrictions)
 
 #### CryptoCompare (CryptoCompareProvider)
 **Website**: https://min-api.cryptocompare.com
@@ -392,7 +392,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | US equities (production) | EODHD or Polygon/Massive |
 | Global equities | EODHD |
 | Futures/options | Databento |
-| Crypto | BinancePublic |
+| Crypto | BinanceBulk |
 | Forex | Oanda |
 | Academic factors | Fama-French + AQR |
 | Economic indicators | FRED |
@@ -403,7 +403,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 
 | Budget | Providers |
 |--------|-----------|
-| $0 | Yahoo, CoinGecko, BinancePublic, WikiPrices, FRED, AQR, Fama-French |
+| $0 | Yahoo, CoinGecko, BinanceBulk, WikiPrices, FRED, AQR, Fama-French |
 | <$30/mo | EODHD ($19.99), Polygon Starter ($29) |
 | <$100/mo | EODHD All-in-One ($99.99), Polygon Developer ($79) |
 | Professional | Databento ($179+), Polygon Advanced ($199) |

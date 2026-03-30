@@ -11,6 +11,8 @@ This guide walks you through creating a new data provider for ML4T Data. We'll u
 - [Documentation](#documentation)
 - [Checklist](#checklist)
 
+<a id="checklist"></a>
+
 ## Overview
 
 A ML4T Data provider is a class that inherits from `BaseProvider` and implements methods to:
@@ -25,7 +27,7 @@ A ML4T Data provider is a class that inherits from `BaseProvider` and implements
 - Familiarity with Python async/await
 - Understanding of the target API
 - API key from the data provider (if required)
-- Development environment set up (see [CONTRIBUTING.md](../CONTRIBUTING.md))
+- Development environment set up (see the [Contributing Overview](index.md))
 
 ## Step-by-Step Guide
 
@@ -685,7 +687,7 @@ data = provider.fetch_ohlcv("AAPL.US", "2024-01-01", "2024-01-31")
 - Simple CSV format
 ```
 
-## Checklist
+## Checklist { #checklist }
 
 Before submitting your provider, verify:
 
@@ -767,7 +769,7 @@ if response.status_code == 429:
 
 - Check existing providers for patterns: `src/ml4t-data/providers/`
 - Use the template: `provider_template/`
-- Read [extending_ml4t-data.md](extending_ml4t-data.md) for architecture details
+- Read the [Architecture Guide](architecture.md) for architecture details
 - Ask in GitHub Discussions
 
 ---

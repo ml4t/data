@@ -1420,6 +1420,7 @@ all = [
     { name = "mkdocs-git-revision-date-localized-plugin" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "ml4t-docs-theme" },
     { name = "mypy" },
     { name = "oandapyv20" },
     { name = "pre-commit" },
@@ -1464,6 +1465,7 @@ docs = [
     { name = "mkdocs-git-revision-date-localized-plugin" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "ml4t-docs-theme" },
 ]
 oanda = [
     { name = "oandapyv20" },
@@ -1518,6 +1520,8 @@ requires-dist = [
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'all'", specifier = ">=0.24.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
+    { name = "ml4t-docs-theme", marker = "extra == 'all'", editable = "../ml4t-docs-theme" },
+    { name = "ml4t-docs-theme", marker = "extra == 'docs'", editable = "../ml4t-docs-theme" },
     { name = "mypy", marker = "extra == 'all'", specifier = ">=1.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "numpy", specifier = ">=1.24.0" },
@@ -1577,6 +1581,17 @@ dev = [
     { name = "xlsxwriter", specifier = ">=3.1.0" },
     { name = "yfinance", specifier = ">=0.2.0" },
 ]
+
+[[package]]
+name = "ml4t-docs-theme"
+version = "0.1.0"
+source = { editable = "../ml4t-docs-theme" }
+dependencies = [
+    { name = "mkdocs-material" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mkdocs-material", specifier = ">=9.7,<10" }]
 
 [[package]]
 name = "more-itertools"

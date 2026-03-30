@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import polars as pl
 
-from ml4t.data.providers import BinancePublicProvider
+from ml4t.data.providers import BinanceBulkProvider
 
 
 def main():
@@ -59,7 +59,7 @@ def main():
     print(f"Fetching BTC spot 1-minute data from {start_date} to {end_date}...")
 
     # Initialize provider for spot market (default)
-    spot_provider = BinancePublicProvider(market="spot")
+    spot_provider = BinanceBulkProvider(market="spot")
 
     # Fetch 1-minute OHLCV
     spot_1m = spot_provider.fetch_ohlcv("BTCUSDT", start_date, end_date, frequency="minute")
@@ -105,7 +105,7 @@ def main():
     print(f"Fetching BTC futures 1-minute data from {start_date} to {end_date}...")
 
     # Initialize provider for futures market
-    futures_provider = BinancePublicProvider(market="futures")
+    futures_provider = BinanceBulkProvider(market="futures")
 
     # Fetch 1-minute OHLCV
     futures_1m = futures_provider.fetch_ohlcv("BTCUSDT", start_date, end_date, frequency="minute")

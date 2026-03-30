@@ -93,5 +93,5 @@ When using AQR data, cite the relevant papers:
 
 - [AQR Datasets](https://www.aqr.com/Insights/Datasets)
 - [Fama-French Provider](fama_french.md)
-- [Example Config](../../configs/examples/academic_factors.yaml)
-- [Provider README](README.md)
+- [Configuration Guide](../user-guide/configuration.md)
+- [Provider Index](index.md)

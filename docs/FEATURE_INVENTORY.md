@@ -42,7 +42,7 @@ ML4T-Data is a production-ready market data acquisition library providing:
 | 6 | **Wiki Prices** | `wiki_prices.py` | Equities | Local file only | Complete | Historical US equities (1962-2018) |
 | 7 | **Kalshi** | `kalshi.py` | Prediction Markets | Public data | Complete | Prediction market contracts |
 | 8 | **Polymarket** | `polymarket.py` | Prediction Markets | Public data | Complete | Prediction market history |
-| 9 | **Binance Public** | `binance_public.py` | Crypto | Bulk downloads | Complete | No geo-restrictions |
+| 9 | **Binance Bulk** | `binance_bulk.py` | Crypto | Bulk downloads | Complete | No geo-restrictions |
 | 10 | **NASDAQ ITCH** | `nasdaq_itch.py` | Tick Data | Sample data | Complete | Tick-level market data |
 
 #### Live Providers (Authenticated or Metered)
@@ -882,7 +882,7 @@ from ml4t.data.providers import (
 
     # Crypto
     CoinGeckoProvider,
-    BinanceProvider,
+    BinanceAPIProvider,
     CryptoCompareProvider,
 
     # Forex

@@ -75,5 +75,5 @@ Get your free API key at [fred.stlouisfed.org/docs/api/fred](https://fred.stloui
 ## See Also
 
 - [FRED API Docs](https://fred.stlouisfed.org/docs/api/fred/)
-- [Example Config](../../configs/examples/macro_factors.yaml)
-- [Provider README](README.md)
+- [Configuration Guide](../user-guide/configuration.md)
+- [Provider Index](index.md)

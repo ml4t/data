@@ -73,4 +73,4 @@ Get your API key at [finnhub.io/register](https://finnhub.io/register).
 ## See Also
 
 - [Finnhub Pricing](https://finnhub.io/pricing)
-- [Provider README](README.md)
+- [Provider Index](index.md)

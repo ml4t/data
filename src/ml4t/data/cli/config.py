@@ -36,8 +36,8 @@ def providers():
     providers_list = [
         ("yahoo", "Yahoo Finance - Free US/Global equities", "No"),
         ("coingecko", "CoinGecko - Free crypto historical", "No"),
-        ("binance", "Binance - Free crypto spot", "No"),
-        ("binance_futures", "Binance Futures - Free crypto futures", "No"),
+        ("binance_api", "Binance REST API - crypto spot/futures", "No"),
+        ("binance_bulk", "Binance bulk archives - historical spot/futures", "No"),
         ("cryptocompare", "CryptoCompare - Crypto + paid features", "Optional"),
         ("databento", "DataBento - Professional derivatives", "Yes"),
         ("oanda", "OANDA - Professional forex", "Yes"),

@@ -74,5 +74,5 @@ The Wiki Prices dataset was originally from Quandl's WIKI database before Quandl
 
 ## See Also
 
-- [Provider README](README.md)
-- [Example Config](../../configs/examples/sp500.yaml)
+- [Provider Index](index.md)
+- [Configuration Guide](../user-guide/configuration.md)

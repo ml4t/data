@@ -4,7 +4,7 @@ Tests the async methods added to additional providers:
 
 **Native async (using AsyncSessionMixin - httpx):**
 - EODHDProvider.fetch_ohlcv_async()
-- BinanceProvider.fetch_ohlcv_async()
+- BinanceAPIProvider.fetch_ohlcv_async()
 - CoinGeckoProvider.fetch_ohlcv_async()
 - OKXProvider.fetch_ohlcv_async()
 - TwelveDataProvider.fetch_ohlcv_async()
@@ -107,21 +107,21 @@ class TestEODHDProviderAsync:
             assert len(results) == 3
 
 
-# ===== BinanceProvider Async Tests =====
+# ===== BinanceAPIProvider Async Tests =====
 
 
-class TestBinanceProviderAsync:
-    """Test async methods on BinanceProvider (spot/futures)."""
+class TestBinanceAPIProviderAsync:
+    """Test async methods on BinanceAPIProvider (spot/futures)."""
 
     @pytest.fixture
     def provider(self):
         """Create Binance provider."""
-        from ml4t.data.providers.binance import BinanceProvider
+        from ml4t.data.providers.binance_api import BinanceAPIProvider
 
-        return BinanceProvider()
+        return BinanceAPIProvider()
 
     def test_has_async_methods(self, provider):
-        """Test BinanceProvider has required async methods."""
+        """Test BinanceAPIProvider has required async methods."""
         assert hasattr(provider, "fetch_ohlcv_async")
         assert asyncio.iscoroutinefunction(provider.fetch_ohlcv_async)
         # AsyncSessionMixin provides close_async_session
@@ -133,7 +133,7 @@ class TestBinanceProviderAsync:
         """Test async context manager protocol."""
         async with provider as p:
             assert p is not None
-            assert p.name == "binance"
+            assert p.name == "binance_api"
 
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_async_signature(self, provider, sample_ohlcv_data):
@@ -531,7 +531,7 @@ class TestExtendedAsyncProtocolConformance:
         "provider_module,provider_class,env_var,api_key_param",
         [
             ("ml4t.data.providers.eodhd", "EODHDProvider", "EODHD_API_KEY", "api_key"),
-            ("ml4t.data.providers.binance", "BinanceProvider", None, None),
+            ("ml4t.data.providers.binance_api", "BinanceAPIProvider", None, None),
             ("ml4t.data.providers.coingecko", "CoinGeckoProvider", None, None),
             ("ml4t.data.providers.okx", "OKXProvider", None, None),
             ("ml4t.data.providers.finnhub", "FinnhubProvider", "FINNHUB_API_KEY", "api_key"),

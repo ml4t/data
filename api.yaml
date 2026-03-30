@@ -40,10 +40,15 @@ providers:
       best_for: Real-time quotes
 
   crypto:
-    - name: BinanceProvider
-      import: ml4t.data.providers.binance
+    - name: BinanceAPIProvider
+      import: ml4t.data.providers.binance_api
       free_tier: generous
-      best_for: Spot and futures data
+      best_for: REST API access to spot and futures data
+
+    - name: BinanceBulkProvider
+      import: ml4t.data.providers.binance_bulk
+      free_tier: unlimited
+      best_for: Bulk historical archive downloads
 
     - name: CoinGeckoProvider
       import: ml4t.data.providers.coingecko

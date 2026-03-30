@@ -1,7 +1,7 @@
-"""Binance Public Data provider for bulk historical downloads.
+"""Binance bulk data provider for historical downloads.
 
 This provider downloads from data.binance.vision, Binance's public data repository.
-Unlike the live API (BinanceProvider), this:
+Unlike the REST API provider (BinanceAPIProvider), this:
 - Works globally without geographic restrictions
 - Downloads bulk ZIP files (not rate-limited)
 - Provides historical data going back years
@@ -30,7 +30,7 @@ from ml4t.data.providers.base import BaseProvider
 logger = structlog.get_logger()
 
 
-class BinancePublicProvider(BaseProvider):
+class BinanceBulkProvider(BaseProvider):
     """Provider for bulk historical data from Binance Public Data repository.
 
     Downloads from data.binance.vision - Binance's public S3 bucket with
@@ -50,7 +50,7 @@ class BinancePublicProvider(BaseProvider):
     - Futures: /data/futures/um/daily/klines/{symbol}/{interval}/
 
     Example:
-        >>> provider = BinancePublicProvider(market="spot")
+        >>> provider = BinanceBulkProvider(market="spot")
         >>> df = provider.fetch_ohlcv("BTCUSDT", "2024-01-01", "2024-01-31", "daily")
     """
 
@@ -116,7 +116,7 @@ class BinancePublicProvider(BaseProvider):
     @property
     def name(self) -> str:
         """Return the provider name."""
-        return "binance_public"
+        return "binance_bulk"
 
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with the correct schema."""
@@ -579,7 +579,7 @@ class BinancePublicProvider(BaseProvider):
             Polars DataFrame with metrics data
 
         Example:
-            >>> provider = BinancePublicProvider(market="futures")
+            >>> provider = BinanceBulkProvider(market="futures")
             >>> df = provider.fetch_metrics("BTCUSDT", "2024-01-01", "2024-01-31")
             >>> df.columns
             ['timestamp', 'symbol', 'open_interest', 'open_interest_value', ...]
@@ -787,7 +787,7 @@ class BinancePublicProvider(BaseProvider):
             - premium_index_close: Closing premium index
 
         Example:
-            >>> provider = BinancePublicProvider(market="futures")
+            >>> provider = BinanceBulkProvider(market="futures")
             >>> df = provider.fetch_premium_index("BTCUSDT", "2024-01-01", "2024-01-31")
             >>> df.head()
             shape: (5, 6)
@@ -931,7 +931,7 @@ class BinancePublicProvider(BaseProvider):
             Combined DataFrame with symbol column for grouping
 
         Example:
-            >>> provider = BinancePublicProvider(market="futures")
+            >>> provider = BinanceBulkProvider(market="futures")
             >>> df = provider.fetch_premium_index_multi(
             ...     ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
             ...     "2024-01-01", "2024-01-31"
@@ -1819,7 +1819,7 @@ class BinancePublicProvider(BaseProvider):
             Combined DataFrame with symbol column for grouping
 
         Example:
-            >>> async with BinancePublicProvider(market="futures") as provider:
+            >>> async with BinanceBulkProvider(market="futures") as provider:
             ...     df = await provider.fetch_premium_index_multi_async(
             ...         ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
             ...         "2024-01-01", "2024-01-31"
@@ -1898,7 +1898,7 @@ class BinancePublicProvider(BaseProvider):
             Combined DataFrame with all symbols
 
         Example:
-            >>> provider = BinancePublicProvider(market="futures")
+            >>> provider = BinanceBulkProvider(market="futures")
             >>> df = provider.fetch_premium_index_multi_parallel(
             ...     ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
             ...     "2024-01-01", "2024-01-31"

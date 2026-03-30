@@ -59,4 +59,4 @@ Kalshi is regulated by the CFTC (Commodity Futures Trading Commission) as a Desi
 
 - [Kalshi Developer Docs](https://kalshi.com/developer)
 - [Polymarket Provider](polymarket.md)
-- [Provider README](README.md)
+- [Provider Index](index.md)

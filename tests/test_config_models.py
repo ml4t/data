@@ -39,7 +39,7 @@ class TestProviderConfig:
         """Test provider with API key."""
         provider = ProviderConfig(
             name="crypto_provider",
-            type=ProviderType.BINANCE,
+            type=ProviderType.BINANCE_API,
             api_key="${BINANCE_API_KEY}",
             api_secret="${BINANCE_API_SECRET}",
             rate_limit=10.0,
@@ -53,8 +53,8 @@ class TestProviderConfig:
     def test_provider_extra_settings(self):
         """Test provider with extra settings."""
         provider = ProviderConfig(
-            name="binance",
-            type=ProviderType.BINANCE,
+            name="binance_api",
+            type=ProviderType.BINANCE_API,
             extra={
                 "market": "spot",
                 "test_net": True,
@@ -114,7 +114,7 @@ class TestDatasetConfig:
         dataset = DatasetConfig(
             name="crypto",
             symbols=["BTC-USD", "ETH-USD"],
-            provider="binance",
+            provider="binance_api",
             asset_class=AssetClass.CRYPTO,
             frequency=Frequency.HOURLY,
             validation={
@@ -357,7 +357,7 @@ class TestDataConfig:
         config = DataConfig(
             providers=[
                 ProviderConfig(name="yahoo", type=ProviderType.YAHOO),
-                ProviderConfig(name="binance", type=ProviderType.BINANCE),
+                ProviderConfig(name="binance_api", type=ProviderType.BINANCE_API),
             ]
         )
 
@@ -365,9 +365,9 @@ class TestDataConfig:
         assert yahoo is not None
         assert yahoo.name == "yahoo"
 
-        binance = config.get_provider("binance")
+        binance = config.get_provider("binance_api")
         assert binance is not None
-        assert binance.type == ProviderType.BINANCE
+        assert binance.type == ProviderType.BINANCE_API
 
         missing = config.get_provider("nonexistent")
         assert missing is None
@@ -377,7 +377,7 @@ class TestDataConfig:
         config = DataConfig(
             datasets=[
                 DatasetConfig(name="stocks", symbols=["AAPL"], provider="yahoo"),
-                DatasetConfig(name="crypto", symbols=["BTC"], provider="binance"),
+                DatasetConfig(name="crypto", symbols=["BTC"], provider="binance_api"),
             ]
         )
 
@@ -387,7 +387,7 @@ class TestDataConfig:
 
         crypto = config.get_dataset("crypto")
         assert crypto is not None
-        assert crypto.provider == "binance"
+        assert crypto.provider == "binance_api"
 
         missing = config.get_dataset("nonexistent")
         assert missing is None

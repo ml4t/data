@@ -1,8 +1,8 @@
 """Test provider registration in DataManager."""
 
 from ml4t.data.data_manager import DataManager
-from ml4t.data.providers.binance import BinanceProvider
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_api import BinanceAPIProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 from ml4t.data.providers.databento import DataBentoProvider
 from ml4t.data.providers.mock import MockProvider
@@ -21,8 +21,8 @@ def test_all_providers_registered():
     - Historical: wiki_prices (standalone, local file only)
     """
     expected_providers = {
-        "binance": BinanceProvider,
-        "binance_public": BinancePublicProvider,
+        "binance_api": BinanceAPIProvider,
+        "binance_bulk": BinanceBulkProvider,
         "cryptocompare": CryptoCompareProvider,
         "databento": DataBentoProvider,
         "mock": MockProvider,
@@ -40,8 +40,8 @@ def test_provider_imports_work():
     """Test that all provider imports are functional."""
     # This test ensures the imports at the top of data_manager.py work
     providers = [
-        BinanceProvider,
-        BinancePublicProvider,
+        BinanceAPIProvider,
+        BinanceBulkProvider,
         CryptoCompareProvider,
         DataBentoProvider,
         MockProvider,
@@ -61,7 +61,7 @@ def test_free_providers_detected():
     dm = DataManager()
 
     # These providers should be available even without API keys
-    free_providers = ["yahoo", "binance", "binance_public", "mock", "cryptocompare", "synthetic"]
+    free_providers = ["yahoo", "binance_api", "binance_bulk", "mock", "cryptocompare", "synthetic"]
 
     for provider in free_providers:
         assert provider in dm._available_providers, (
@@ -104,8 +104,8 @@ def test_provider_count():
 
     # List all provider names for clarity
     provider_names = list(DataManager.PROVIDER_CLASSES.keys())
-    assert "binance" in provider_names
-    assert "binance_public" in provider_names
+    assert "binance_api" in provider_names
+    assert "binance_bulk" in provider_names
     assert "cryptocompare" in provider_names
     assert "databento" in provider_names
     assert "mock" in provider_names

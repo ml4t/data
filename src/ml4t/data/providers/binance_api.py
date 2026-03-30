@@ -1,9 +1,9 @@
-"""Binance provider for cryptocurrency data.
+"""Binance REST API provider for cryptocurrency data.
 
 Supports both sync and async operations for spot and futures markets.
 
 Async Example:
-    async with BinanceProvider() as provider:
+    async with BinanceAPIProvider() as provider:
         df = await provider.fetch_ohlcv_async("BTCUSDT", "2024-01-01", "2024-06-30")
 """
 
@@ -23,8 +23,8 @@ from ml4t.data.providers.mixins import AsyncSessionMixin
 logger = structlog.get_logger()
 
 
-class BinanceProvider(AsyncSessionMixin, BaseProvider):
-    """Provider for cryptocurrency data from Binance API.
+class BinanceAPIProvider(AsyncSessionMixin, BaseProvider):
+    """Provider for cryptocurrency data from the Binance REST API.
 
     Features:
     - No API key required for public market data
@@ -76,7 +76,7 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
         timeout: float = 30.0,
         rate_limit: tuple[int, float] | None = None,
     ) -> None:
-        """Initialize Binance provider.
+        """Initialize Binance REST API provider.
 
         Args:
             market: Market type (spot or futures)
@@ -95,7 +95,7 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
     @property
     def name(self) -> str:
         """Return the provider name."""
-        return "binance"
+        return "binance_api"
 
     @property
     def client(self) -> httpx.Client:
@@ -243,10 +243,10 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
                     logger.warning("Rate limited by Binance")
-                    raise RateLimitError("binance", retry_after=60.0) from e
+                    raise RateLimitError("binance_api", retry_after=60.0) from e
                 if e.response.status_code == 400:
                     logger.error(f"Invalid symbol or parameters: {symbol}")
-                    raise SymbolNotFoundError("binance", symbol) from e
+                    raise SymbolNotFoundError("binance_api", symbol) from e
                 raise
 
         # Return empty DataFrame if no data (base class will handle validation)
@@ -307,7 +307,7 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
             Polars DataFrame with OHLCV data
 
         Example:
-            async with BinanceProvider() as provider:
+            async with BinanceAPIProvider() as provider:
                 df = await provider.fetch_ohlcv_async("BTCUSDT", "2024-01-01", "2024-06-30")
         """
         # Parse dates
@@ -377,9 +377,9 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    raise RateLimitError("binance", retry_after=60.0) from e
+                    raise RateLimitError("binance_api", retry_after=60.0) from e
                 if e.response.status_code == 400:
-                    raise SymbolNotFoundError("binance", symbol) from e
+                    raise SymbolNotFoundError("binance_api", symbol) from e
                 raise
 
         if not all_klines:

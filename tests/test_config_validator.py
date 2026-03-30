@@ -48,7 +48,7 @@ class TestConfigValidator:
         config = DataConfig(
             providers=[
                 ProviderConfig(name="yahoo", type=ProviderType.YAHOO),
-                ProviderConfig(name="yahoo", type=ProviderType.BINANCE),
+                ProviderConfig(name="yahoo", type=ProviderType.BINANCE_API),
             ],
         )
 
@@ -184,7 +184,7 @@ class TestConfigValidator:
         config = DataConfig(
             providers=[
                 ProviderConfig(name="yahoo", type=ProviderType.YAHOO),
-                ProviderConfig(name="unused", type=ProviderType.BINANCE),
+                ProviderConfig(name="unused", type=ProviderType.BINANCE_API),
             ],
             datasets=[
                 DatasetConfig(

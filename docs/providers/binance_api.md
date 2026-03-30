@@ -1,6 +1,6 @@
-# Binance Provider
+# Binance API Provider
 
-**Provider**: `BinanceProvider`
+**Provider**: `BinanceAPIProvider`
 **Website**: [binance.com](https://www.binance.com)
 **API Key**: Not required for market data
 **Free Tier**: Generous rate limits
@@ -9,9 +9,9 @@
 
 ## Overview
 
-Binance provides comprehensive crypto market data for spot and futures markets.
+Binance's REST API provides spot and futures market data for recent and historical pulls.
 
-**Best For**: Crypto spot and futures, high-frequency data
+**Best For**: API-based crypto spot and futures pulls, recent/history access
 
 **Note**: May have geo-restrictions in certain countries (US).
 
@@ -20,9 +20,9 @@ Binance provides comprehensive crypto market data for spot and futures markets.
 ## Quick Start
 
 ```python
-from ml4t.data.providers import BinanceProvider
+from ml4t.data.providers import BinanceAPIProvider
 
-provider = BinanceProvider()
+provider = BinanceAPIProvider()
 
 # USDT pairs
 df = provider.fetch_ohlcv("BTCUSDT", "2024-01-01", "2024-12-01", frequency="daily")
@@ -66,12 +66,12 @@ Binance has generous rate limits for market data:
 
 ## Geo-Restrictions
 
-Binance may block access from certain countries. Consider using `BinancePublicProvider` for bulk historical downloads without restrictions.
+Binance may block access from certain countries. Consider using `BinanceBulkProvider` for bulk historical downloads without restrictions.
 
 ---
 
 ## See Also
 
 - [Binance API](https://www.binance.com/en/binance-api)
-- [BinancePublic Provider](binance_public.md)
-- [Provider README](README.md)
+- [Binance Bulk Provider](binance_bulk.md)
+- [Provider Index](index.md)

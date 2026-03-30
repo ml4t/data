@@ -17,7 +17,7 @@ from ml4t.data.providers import (
     TiingoProvider,
     FinnhubProvider,
     EODHDProvider,
-    BinanceProvider,
+    BinanceAPIProvider,
     OandaProvider,
     DataBentoProvider,
 )

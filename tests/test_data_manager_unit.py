@@ -435,9 +435,9 @@ class TestDataManagerProviderClasses:
         """Test PROVIDER_CLASSES includes cryptocompare."""
         assert "cryptocompare" in DataManager.PROVIDER_CLASSES
 
-    def test_provider_classes_has_binance(self):
-        """Test PROVIDER_CLASSES includes binance."""
-        assert "binance" in DataManager.PROVIDER_CLASSES
+    def test_provider_classes_has_binance_api(self):
+        """Test PROVIDER_CLASSES includes binance_api."""
+        assert "binance_api" in DataManager.PROVIDER_CLASSES
 
 
 class TestDataManagerFetchBatch:

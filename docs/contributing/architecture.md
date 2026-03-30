@@ -303,7 +303,7 @@ def fetch_ohlcv(self, ...):
 
 ### 1. Adding a New Provider
 
-**See**: [Creating a Provider](creating_a_provider.md)
+**See**: [Creating a Provider](creating-a-provider.md)
 
 **Steps:**
 1. Inherit from `BaseProvider`
@@ -521,7 +521,7 @@ def _fetch_raw_data(self, symbol, start, end, frequency):
 
 ## Contributing Guidelines
 
-1. **Read first**: [CONTRIBUTING.md](../CONTRIBUTING.md)
+1. **Read first**: [Contributing Overview](index.md)
 2. **Use templates**: `provider_template/` directory
 3. **Follow patterns**: Study existing providers
 4. **Test thoroughly**: Integration tests required

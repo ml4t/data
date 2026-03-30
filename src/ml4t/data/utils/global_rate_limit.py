@@ -46,7 +46,7 @@ class GlobalRateLimitManager:
         Get or create a rate limiter for a specific provider.
 
         Args:
-            provider_name: Name of the provider (e.g., 'yahoo', 'binance')
+            provider_name: Name of the provider (e.g., 'yahoo', 'binance_api')
             max_calls: Maximum number of calls allowed
             period: Time period in seconds
             burst: Optional burst allowance

@@ -1,6 +1,7 @@
 # User Guide
 
-Complete documentation for ML4T Data features.
+Use the User Guide when you are moving from a first fetch to a repeatable
+workflow with configuration, storage, validation, and updates.
 
 ## Core Features
 
@@ -62,4 +63,5 @@ ML4T Data is optimized for speed:
 
 - [API Reference](../api/index.md) - Auto-generated from source
 - [Tutorials](../tutorials/index.md) - Step-by-step guides
+- [Book Guide](../book-guide/index.md) - Chapter and notebook mapping for ML4T
 - [Contributing](../contributing/index.md) - Add your own provider

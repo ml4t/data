@@ -195,7 +195,7 @@ class TestConfigIntegration:
             "version": "1.0",
             "providers": [
                 {"name": "provider1", "type": "yahoo"},
-                {"name": "provider1", "type": "binance"},  # Duplicate name
+                {"name": "provider1", "type": "binance_api"},  # Duplicate name
             ],
             "datasets": [
                 {

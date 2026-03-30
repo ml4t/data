@@ -67,4 +67,4 @@ async with OKXProvider() as provider:
 ## See Also
 
 - [OKX API v5 Documentation](https://www.okx.com/docs-v5/en/)
-- [Provider README](README.md)
+- [Provider Index](index.md)

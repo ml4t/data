@@ -688,7 +688,8 @@ class TestProvidersCommand:
         assert result.exit_code == 0
         assert "Available Data Providers" in result.output
         assert "yahoo" in result.output
-        assert "binance" in result.output
+        assert "binance_api" in result.output
+        assert "binance_bulk" in result.output
         assert "cryptocompare" in result.output
 
     def test_providers_shows_api_key_requirements(self):

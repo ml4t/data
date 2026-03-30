@@ -33,8 +33,8 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 | Provider | API Key | Free Tier | Best For |
 |----------|---------|-----------|----------|
 | [CoinGecko](coingecko.md) | No | 50 calls/min | Market overview |
-| [Binance](binance.md) | No | Generous | Spot + futures trading |
-| [BinancePublic](binance_public.md) | No | Unlimited | Bulk historical downloads |
+| [Binance API](binance_api.md) | No | Generous | Spot + futures trading |
+| [Binance Bulk](binance_bulk.md) | No | Unlimited | Bulk historical downloads |
 | [CryptoCompare](cryptocompare.md) | Yes | 250k calls/mo | Crypto historical |
 
 ### Forex Providers
@@ -176,7 +176,7 @@ print(f"Total history: {len(combined)} trading days")
 | US equities (production) | EODHD or Polygon/Massive |
 | Global equities | EODHD |
 | Futures/options | Databento |
-| Crypto | BinancePublic |
+| Crypto | BinanceBulk |
 | Forex | Oanda |
 | Academic factors | Fama-French + AQR |
 | Economic indicators | FRED |
@@ -187,7 +187,7 @@ print(f"Total history: {len(combined)} trading days")
 
 | Budget | Providers |
 |--------|-----------|
-| $0 | Yahoo, CoinGecko, BinancePublic, WikiPrices, FRED, AQR, Fama-French |
+| $0 | Yahoo, CoinGecko, BinanceBulk, WikiPrices, FRED, AQR, Fama-French |
 | <$30/mo | EODHD ($19.99), Polygon Starter ($29) |
 | <$100/mo | EODHD All-in-One ($99.99), Polygon Developer ($79) |
 | Professional | Databento ($179+), Polygon Advanced ($199) |

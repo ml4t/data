@@ -14,8 +14,8 @@ Available Providers (20 live + 3 synthetic/testing):
     - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
     - PolymarketProvider: Polymarket prediction market history/order book snapshots
     - CoinGeckoProvider: CoinGecko crypto data (free, no API key)
-    - BinanceProvider: Binance cryptocurrency exchange (live API, may have geo-restrictions)
-    - BinancePublicProvider: Binance public data (bulk downloads, no geo-restrictions)
+    - BinanceAPIProvider: Binance REST API data (historical/current API access, may have geo-restrictions)
+    - BinanceBulkProvider: Binance public bulk data (historical archive downloads, no geo-restrictions)
     - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
     - CryptoCompareProvider: CryptoCompare crypto data
     - TwelveDataProvider: Twelve Data multi-asset (stocks, forex, crypto)
@@ -95,11 +95,11 @@ except ImportError:
 from ml4t.data.providers.coingecko import CoinGeckoProvider
 
 try:
-    from ml4t.data.providers.binance import BinanceProvider
+    from ml4t.data.providers.binance_api import BinanceAPIProvider
 except ImportError:
-    BinanceProvider = None  # type: ignore
+    BinanceAPIProvider = None  # type: ignore
 
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
 try:
     from ml4t.data.providers.okx import OKXProvider
@@ -161,8 +161,8 @@ __all__ = [
     "PolymarketProvider",
     # Crypto providers
     "CoinGeckoProvider",
-    "BinanceProvider",
-    "BinancePublicProvider",
+    "BinanceAPIProvider",
+    "BinanceBulkProvider",
     "OKXProvider",
     "CryptoCompareProvider",
     # Forex providers

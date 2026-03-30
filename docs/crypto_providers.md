@@ -60,13 +60,13 @@ The providers automatically normalize various symbol formats:
 
 ```python
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
-from ml4t.data.providers.binance import BinanceProvider
+from ml4t.data.providers.binance_api import BinanceAPIProvider
 from ml4t.data.pipeline import Pipeline
 from ml4t.data.storage.filesystem import FileSystemBackend
 from ml4t.data.core.config import Config
 
 # Initialize provider
-provider = BinanceProvider(market="spot")
+provider = BinanceAPIProvider(market="spot")
 
 # Initialize storage and config
 storage = FileSystemBackend(data_root="./data")

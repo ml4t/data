@@ -1,4 +1,4 @@
-"""Integration tests for BinancePublicProvider.
+"""Integration tests for BinanceBulkProvider.
 
 These tests download actual data from data.binance.vision and verify
 the provider works correctly. No API key required.
@@ -12,30 +12,30 @@ from datetime import UTC
 import polars as pl
 import pytest
 
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
 
-class TestBinancePublicProvider:
-    """Tests for BinancePublicProvider."""
+class TestBinanceBulkProvider:
+    """Tests for BinanceBulkProvider."""
 
     @pytest.fixture
     def spot_provider(self):
         """Create a spot market provider."""
-        return BinancePublicProvider(market="spot")
+        return BinanceBulkProvider(market="spot")
 
     @pytest.fixture
     def futures_provider(self):
         """Create a futures market provider."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_provider_name(self, spot_provider):
         """Test provider name is correct."""
-        assert spot_provider.name == "binance_public"
+        assert spot_provider.name == "binance_bulk"
 
     def test_invalid_market(self):
         """Test invalid market raises error."""
         with pytest.raises(ValueError, match="Invalid market"):
-            BinancePublicProvider(market="invalid")
+            BinanceBulkProvider(market="invalid")
 
     def test_symbol_normalization(self, spot_provider):
         """Test symbol normalization."""
@@ -198,13 +198,13 @@ class TestBinancePublicProvider:
             )
 
 
-class TestBinancePublicProviderEdgeCases:
-    """Edge case tests for BinancePublicProvider."""
+class TestBinanceBulkProviderEdgeCases:
+    """Edge case tests for BinanceBulkProvider."""
 
     @pytest.fixture
     def provider(self):
         """Create provider."""
-        return BinancePublicProvider(market="spot")
+        return BinanceBulkProvider(market="spot")
 
     def test_date_filtering(self, provider):
         """Test that data is properly filtered to date range."""
@@ -214,8 +214,8 @@ class TestBinancePublicProviderEdgeCases:
 
     def test_context_manager(self):
         """Test provider works as context manager."""
-        with BinancePublicProvider(market="spot") as provider:
-            assert provider.name == "binance_public"
+        with BinanceBulkProvider(market="spot") as provider:
+            assert provider.name == "binance_bulk"
 
 
 class TestFetchPremiumIndex:
@@ -230,7 +230,7 @@ class TestFetchPremiumIndex:
     @pytest.fixture
     def futures_provider(self):
         """Create a futures market provider."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     @pytest.mark.integration
     @pytest.mark.slow
@@ -385,7 +385,7 @@ class TestFetchPremiumIndexMulti:
     @pytest.fixture
     def futures_provider(self):
         """Create a futures market provider."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     @pytest.mark.integration
     @pytest.mark.slow
@@ -509,7 +509,7 @@ class TestPremiumIndexDataConsistency:
     @pytest.fixture
     def futures_provider(self):
         """Create a futures market provider."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     @pytest.mark.integration
     @pytest.mark.slow

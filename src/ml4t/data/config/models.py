@@ -52,7 +52,8 @@ class ProviderType(str, Enum):
     """Provider type enumeration."""
 
     YAHOO = "yahoo"
-    BINANCE = "binance"
+    BINANCE_API = "binance_api"
+    BINANCE_BULK = "binance_bulk"
     CRYPTOCOMPARE = "cryptocompare"
     DATABENTO = "databento"
     OANDA = "oanda"

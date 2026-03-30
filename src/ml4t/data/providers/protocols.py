@@ -4,7 +4,7 @@ This module defines Protocol-based interfaces for different provider types,
 enabling structural subtyping and better type checking without inheritance.
 
 Provider Types:
-    - OHLCVProvider: Price/volume data (Yahoo, Binance, etc.)
+    - OHLCVProvider: Price/volume data (Yahoo, Binance API, Binance bulk, etc.)
     - FactorProvider: Academic factor data (Fama-French, AQR)
     - EventProvider: Event/prediction data (Kalshi, Polymarket)
 
@@ -15,7 +15,7 @@ Usage:
 
     # Works with any provider implementing fetch_ohlcv
     yahoo = YahooFinanceProvider()
-    binance = BinanceProvider()
+    binance = BinanceAPIProvider()
     fetch_data(yahoo, "AAPL")
     fetch_data(binance, "BTCUSDT")
 """
@@ -77,7 +77,7 @@ class OHLCVProvider(Protocol):
 
     @property
     def name(self) -> str:
-        """Return the provider name (e.g., 'yahoo', 'binance')."""
+        """Return the provider name (e.g., 'yahoo', 'binance_api')."""
         ...
 
     def fetch_ohlcv(

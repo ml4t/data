@@ -51,7 +51,7 @@ logger = structlog.get_logger(__name__)
 class CryptoConfig:
     """Configuration for crypto data download."""
 
-    provider: str = "binance_public"
+    provider: str = "binance_bulk"
     market: str = "futures"
     start: str = "2021-01-01"
     end: str = "2025-12-31"
@@ -127,7 +127,7 @@ class CryptoDataManager(ProfileMixin):
         crypto_config = raw_config.get("crypto", {})
 
         config = CryptoConfig(
-            provider=crypto_config.get("provider", "binance_public"),
+            provider=crypto_config.get("provider", "binance_bulk"),
             market=crypto_config.get("market", "futures"),
             start=crypto_config.get("start", "2021-01-01"),
             end=crypto_config.get("end", "2025-12-31"),
@@ -141,7 +141,7 @@ class CryptoDataManager(ProfileMixin):
 
     @property
     def provider(self):
-        """Lazily initialize Binance Public provider."""
+        """Lazily initialize Binance bulk provider."""
         return self._get_provider(self.config.market)
 
     def _get_provider(self, market: str):
@@ -151,15 +151,15 @@ class CryptoDataManager(ProfileMixin):
 
         if normalized_market == default_market:
             if self._provider is None:
-                from ml4t.data.providers.binance_public import BinancePublicProvider
+                from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
-                self._provider = BinancePublicProvider(market=normalized_market)
+                self._provider = BinanceBulkProvider(market=normalized_market)
             return self._provider
 
         if normalized_market not in self._providers:
-            from ml4t.data.providers.binance_public import BinancePublicProvider
+            from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
-            self._providers[normalized_market] = BinancePublicProvider(market=normalized_market)
+            self._providers[normalized_market] = BinanceBulkProvider(market=normalized_market)
 
         return self._providers[normalized_market]
 

@@ -1,167 +1,115 @@
-# ML4T Book Integration
+# ML4T Book Guide
 
-This page maps ml4t-data features to their usage in
-**Machine Learning for Trading** (Third Edition).
+This guide maps `ml4t-data` to the current
+[*Machine Learning for Trading, Third Edition*](https://github.com/ml4t/third-edition)
+codebase so you can move cleanly between the book's pedagogical examples and the
+library's reusable APIs.
 
-## How the Book Uses ml4t-data
+## How to Read This Guide
 
-The book uses ml4t-data at two levels:
+The book uses `ml4t-data` in three distinct ways:
 
-1. **Download scripts** (`data/download_all.py`): Config-driven managers
-   (`ETFDataManager`, `CryptoDataManager`, `MacroDataManager`, `FuturesDataManager`)
-   that fetch and store the book's canonical datasets from YAML configs.
+1. provider-level exploration inside chapter notebooks and companion scripts
+2. library-level workflows built around `DataManager`, storage, validation, and
+   updates
+3. dataset download scripts under `code/data/` that package canonical book data
+   into repeatable pipelines
 
-2. **Notebooks**: Provider-level access for analysis and demonstration,
-   plus high-level APIs (`DataManager`, `Universe`, `HiveStorage`) for
-   production data management patterns.
+If you are starting from the book, the fastest path is:
 
-## Chapter-to-Provider Mapping
+1. follow the chapter script that introduces the concept
+2. identify the corresponding `ml4t-data` class or provider
+3. reuse that API in your own config-driven workflow
 
-| Chapter | Topic | Providers Used | Notebooks |
-|---------|-------|----------------|-----------|
-| **2** | Financial Data Universe | Yahoo, Wiki Prices, EODHD, FRED, Binance Public, CoinGecko | 02-18 (11 notebooks) |
-| **4** | Fundamental & Alternative | FRED, CoinGecko, Kalshi, Polymarket, COT | 08, 10, 11, 13, 14 |
-| **5** | Synthetic Data | SyntheticProvider | 00 |
-| **16** | Strategy Simulation | Binance Public | 02, 03, 05 |
-| **17** | Portfolio Construction | FRED, AQR, Fama-French, Binance Public | 02, 07, 09 |
-| **19** | Risk Management | Fama-French | 04 |
+## Book Entry Points
 
-## Chapter 2: Deep Integration
+| Goal | Library surface | Book path |
+|---|---|---|
+| Download the canonical datasets used across the book | `ETFDataManager`, `CryptoDataManager`, `MacroDataManager`, `FuturesDataManager` | [code/data/download_all.py](https://github.com/ml4t/third-edition/blob/main/code/data/download_all.py) |
+| Learn provider-first data exploration | provider classes such as `YahooFinanceProvider`, `BinanceBulkProvider`, `FREDProvider` | [code/data/etfs/notebook.py](https://github.com/ml4t/third-edition/blob/main/code/data/etfs/notebook.py), [code/data/crypto/notebook.py](https://github.com/ml4t/third-edition/blob/main/code/data/crypto/notebook.py), [code/data/macro/notebook.py](https://github.com/ml4t/third-edition/blob/main/code/data/macro/notebook.py) |
+| Build a reusable storage-backed data workflow | `DataManager`, `HiveStorage`, `Universe` | [code/02_financial_data_universe/18_data_management.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/18_data_management.py) |
+| Understand updates, validation, and health checks | `DataManager.update()`, `GapDetector`, `OHLCVValidator` | [code/02_financial_data_universe/19_incremental_updates.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py) |
+| See the end-to-end Chapter 2 workflow | providers plus storage and validation APIs | [code/02_financial_data_universe/17_complete_pipeline.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py) |
 
-Chapter 2 is the primary data chapter and uses almost every ml4t-data feature:
+## Chapter-to-Feature Mapping
 
-### Data Management (Notebooks 17-18)
+### Chapter 2: Financial Data Universe
 
-| Feature | Class | Notebook | Section |
-|---------|-------|----------|---------|
-| Unified fetch | `DataManager.fetch()` | 17 | 1. DataManager |
-| Batch loading | `DataManager.batch_load()` | 17 | 1. DataManager |
-| Symbol universes | `Universe.SP500`, `.get()`, `.add_custom()` | 17 | 2. Universe |
-| Hive storage | `HiveStorage`, `StorageConfig` | 17 | 3. HiveStorage |
-| Incremental updates | `DataManager.update()` | 17, 18 | 4. Updates |
-| Gap detection | `GapDetector.detect_gaps()` | 17, 18 | Gap Detection |
-| Update strategies | `UpdateStrategy` enum | 18 | 2. Strategies |
-| Health monitoring | `OHLCVValidator` + `GapDetector` | 18 | 4. Health Dashboard |
-| CLI commands | `ml4t-data fetch`, `update`, `validate` | 17 | 5. CLI |
-| Config-driven downloads | `download_all.py --update` | 18 | 5. Update Workflow |
+This is the deepest `ml4t-data` integration point in the book.
 
-### Data Quality (Notebook 12)
+| Book path | What it teaches | `ml4t-data` surface |
+|---|---|---|
+| [02_corporate_actions.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/02_corporate_actions.py) | price adjustment workflows | `apply_corporate_actions`, `YahooFinanceProvider` |
+| [16_provider_comparison.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/16_provider_comparison.py) | source tradeoffs across free and paid providers | `YahooFinanceProvider`, `WikiPricesProvider`, `EODHDProvider`, `FREDProvider` |
+| [17_complete_pipeline.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py) | complete data pipeline | `DataManager`, `HiveStorage`, `Universe`, `GapDetector`, `OHLCVValidator` |
+| [18_data_management.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/18_data_management.py) | storage-backed data management | `DataManager`, `HiveStorage`, `Universe` |
+| [19_incremental_updates.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py) | refreshing existing datasets safely | `DataManager.update()`, `GapDetector`, `OHLCVValidator` |
+| [13_data_quality_framework.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/13_data_quality_framework.py) | structural validation and anomaly detection | `OHLCVValidator`, `AnomalyManager` |
 
-| Feature | Class | Purpose |
-|---------|-------|---------|
-| OHLCV validation | `OHLCVValidator` | 8 configurable checks |
-| Return outliers | `ReturnOutlierDetector` | Extreme return detection |
-| Volume spikes | `VolumeSpikeDetector` | Volume anomaly detection |
-| Price staleness | `PriceStalenessDetector` | Stale price detection |
-| Anomaly management | `AnomalyManager`, `AnomalyConfig` | Combined anomaly pipeline |
+### Chapter 4: Fundamental and Alternative Data
 
-### Provider Comparison (Notebook 15)
+This chapter leans on provider adapters more than on `DataManager`.
 
-| Provider | Asset Class | API Key Required |
-|----------|-------------|------------------|
-| Yahoo Finance | Equities, ETFs | No |
-| Wiki Prices | US Equities (1962-2018) | NASDAQ Data Link (free) |
-| EODHD | Global equities | Yes (paid) |
-| FRED | Macro indicators | Yes (free) |
+| Book path | Provider(s) | Notes |
+|---|---|---|
+| [08_fred_macro_eda.py](https://github.com/ml4t/third-edition/blob/main/code/04_fundamental_alternative_data/08_fred_macro_eda.py) | `FREDProvider` | Macro and rate series |
+| [09_macro_data_alignment.py](https://github.com/ml4t/third-edition/blob/main/code/04_fundamental_alternative_data/09_macro_data_alignment.py) | `FREDProvider` | Vintage-aware macro discussion |
+| [11_onchain_fundamentals.py](https://github.com/ml4t/third-edition/blob/main/code/04_fundamental_alternative_data/11_onchain_fundamentals.py) | `CoinGeckoProvider` | Crypto prices paired with on-chain metrics |
+| [13_kalshi_prediction_markets.py](https://github.com/ml4t/third-edition/blob/main/code/04_fundamental_alternative_data/13_kalshi_prediction_markets.py) | `KalshiProvider` | Event-contract OHLCV |
+| [14_polymarket_prediction_markets.py](https://github.com/ml4t/third-edition/blob/main/code/04_fundamental_alternative_data/14_polymarket_prediction_markets.py) | `PolymarketProvider` | Prediction market history and snapshots |
 
-### Complete Pipeline (Notebook 16)
+### Chapters 17 and 19: Factors, Allocation, and Risk
 
-Notebook 16 demonstrates end-to-end pipelines for both case studies,
-then shows how `DataManager` + `Universe` simplify the manual approach.
+These chapters use `ml4t-data` for factor datasets and risk-free inputs.
 
-## Provider Usage Across the Book
+| Book path | Provider(s) | Notes |
+|---|---|---|
+| [17_portfolio_construction/02_mean_variance_optimization.py](https://github.com/ml4t/third-edition/blob/main/code/17_portfolio_construction/02_mean_variance_optimization.py) | `FREDProvider` | Risk-free rate loading |
+| [17_portfolio_construction/05_factor_allocation_evidence.py](https://github.com/ml4t/third-edition/blob/main/code/17_portfolio_construction/05_factor_allocation_evidence.py) | `FamaFrenchProvider`, `AQRFactorProvider` | Long-history factor evidence |
+| [17_portfolio_construction/08_library_comparison.py](https://github.com/ml4t/third-edition/blob/main/code/17_portfolio_construction/08_library_comparison.py) | `FREDProvider` | Comparison workflows with real rates |
+| [19_risk_management/04_factor_exposure.py](https://github.com/ml4t/third-edition/blob/main/code/19_risk_management/04_factor_exposure.py) | `FamaFrenchProvider` | Factor loading and exposure analysis |
 
-### Free Providers (No API Key)
+## Canonical Download Scripts
 
-| Provider | Chapters | Primary Use |
-|----------|----------|-------------|
-| **Yahoo Finance** | 2 | ETF universe, equity prices |
-| **Binance Public** | 2, 16, 17 | Crypto OHLCV, premium index |
-| **Fama-French** | 17, 19 | Factor returns |
-| **AQR** | 17 | Quality-minus-junk, BAB |
-| **SyntheticProvider** | 5 | Simulated market data |
+The `code/data/` directory is where book examples become reusable download
+pipelines. These are the most direct examples of how the library is intended to
+be used outside a notebook.
 
-### Free Providers (API Key Required)
+| Script | `ml4t-data` surface | Dataset role |
+|---|---|---|
+| [code/data/etfs/download.py](https://github.com/ml4t/third-edition/blob/main/code/data/etfs/download.py) | `ETFDataManager` | Core ETF and benchmark history |
+| [code/data/crypto/download.py](https://github.com/ml4t/third-edition/blob/main/code/data/crypto/download.py) | `BinanceBulkProvider`, `CryptoDataManager` | Spot and futures crypto data |
+| [code/data/macro/download.py](https://github.com/ml4t/third-edition/blob/main/code/data/macro/download.py) | `FREDProvider`, `MacroDataManager` | Treasury and macro series |
+| [code/data/factors/ff_download.py](https://github.com/ml4t/third-edition/blob/main/code/data/factors/ff_download.py) | `FamaFrenchProvider` | Factor benchmarks |
+| [code/data/factors/aqr_download.py](https://github.com/ml4t/third-edition/blob/main/code/data/factors/aqr_download.py) | `AQRFactorProvider` | Extended factor datasets |
+| [code/data/prediction_markets/download.py](https://github.com/ml4t/third-edition/blob/main/code/data/prediction_markets/download.py) | `KalshiProvider`, `PolymarketProvider` | Alternative market data |
 
-| Provider | Chapters | Key Source |
-|----------|----------|------------|
-| **FRED** | 2, 4, 17 | Treasury yields, macro indicators |
-| **CoinGecko** | 4 | On-chain fundamentals |
-| **Wiki Prices** | 2 | Historical US equities (frozen 2018) |
+## From Notebook Code to Reusable Workflows
 
-### Paid Providers
+The book often introduces a concept manually before the library wraps it in a
+more reusable API. A few common transitions:
 
-| Provider | Chapters | Use Case |
-|----------|----------|----------|
-| **EODHD** | 2 | Provider comparison demo |
-| **Kalshi** | 4 | Prediction markets |
-| **Polymarket** | 4 | Prediction markets |
-| **DataBento** | (data scripts) | CME futures |
+| In the book | In the library | Why it matters |
+|---|---|---|
+| provider calls inside one notebook | `DataManager.fetch()` | consistent routing and output handling |
+| ad hoc lists of symbols | `Universe` | reusable universes and custom symbol sets |
+| one-off Parquet writes | `HiveStorage` | partition pruning, metadata, and update support |
+| manual gap checks | `GapDetector` and `DataManager.update()` | safer recurring refreshes |
+| exploratory validation logic | `OHLCVValidator` and `AnomalyManager` | repeatable data-quality gates |
+| chapter download helpers | `update-all` plus manager classes | automation outside the notebook |
 
-## Feature Coverage
+## Suggested Reader Journey
 
-### Used in Book
+If you want the shortest path from the book to production-style code:
 
-| Feature | Status |
-|---------|--------|
-| DataManager (fetch, batch, load, update) | Notebook 17 |
-| Universe (SP500, NASDAQ100, custom) | Notebook 17 |
-| HiveStorage + StorageConfig | Notebooks 17, 18 |
-| GapDetector | Notebooks 17, 18 |
-| IncrementalUpdater + UpdateStrategy | Notebook 18 |
-| OHLCVValidator | Notebooks 12, 18 |
-| Anomaly detection (3 detectors) | Notebook 12 |
-| Corporate actions | Notebook 02 |
-| Config-driven managers (ETF, Crypto, Macro, Futures) | `data/download_all.py` |
-| CLI (`ml4t-data fetch/update/validate`) | Notebook 17 (docs) |
-| 14 of 20 providers | Various chapters |
+1. Read [17_complete_pipeline.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py).
+2. Move to [18_data_management.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/18_data_management.py) for `DataManager`, `Universe`, and storage.
+3. Read [19_incremental_updates.py](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py) before setting up recurring refreshes.
+4. Use [code/data/download_all.py](https://github.com/ml4t/third-edition/blob/main/code/data/download_all.py) as the reference shape for your own dataset automation.
 
-### Library-Only (Not in Book)
+## Related Docs
 
-| Feature | Documentation |
-|---------|---------------|
-| Export module (CSV, JSON, Excel) | [CLI Reference](../user-guide/cli-reference.md) |
-| Session management | [Storage Guide](../user-guide/storage.md) |
-| Trading calendar | [Incremental Updates](../user-guide/incremental-updates.md) |
-| Async providers | [Architecture](../contributing/architecture.md) |
-| Transaction support | [Storage Guide](../user-guide/storage.md) |
-| Remaining 6 providers | [Provider docs](../providers/index.md) |
-
-## Download Scripts
-
-The book's `data/` directory contains download scripts that use ml4t-data:
-
-```bash
-# Initial download (run once)
-python data/download_all.py
-
-# Update all datasets to present
-python data/download_all.py --update
-```
-
-| Script | ml4t-data Class | Config |
-|--------|-----------------|--------|
-| `data/etfs/download.py` | `YahooFinanceProvider` | `etfs/config.yaml` |
-| `data/crypto/download.py` | `BinancePublicProvider` | `crypto/config.yaml` |
-| `data/macro/download.py` | `FREDProvider` | `macro/config.yaml` |
-| `data/futures/download.py` | `databento` (direct) | `futures/config.yaml` |
-| `data/fx/download.py` | `OandaProvider` | `fx/config.yaml` |
-| `data/factors/ff_download.py` | `FamaFrenchProvider` | Built-in |
-| `data/factors/aqr_download.py` | `AQRFactorProvider` | Built-in |
-
-The orchestrator (`download_all.py`) wraps these with higher-level managers:
-
-```python
-from ml4t.data.etfs import ETFDataManager
-from ml4t.data.crypto import CryptoDataManager
-from ml4t.data.macro import MacroDataManager
-from ml4t.data.futures import FuturesDataManager
-```
-
-## Cross-References
-
-- **User Guide**: [Incremental Updates](../user-guide/incremental-updates.md),
-  [Storage](../user-guide/storage.md), [Data Quality](../user-guide/data-quality.md)
-- **Tutorials**: [Understanding OHLCV](../tutorials/01_understanding_ohlcv.md),
-  [Multi-Provider](../tutorials/05_multi_provider.md)
-- **API Reference**: [DataManager](../api/index.md), [HiveStorage](../api/index.md)
+- [Getting Started](../getting-started/quickstart.md)
+- [Incremental Updates](../user-guide/incremental-updates.md)
+- [Data Quality](../user-guide/data-quality.md)
+- [API Reference](../api/index.md)

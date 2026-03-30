@@ -7,31 +7,51 @@ site_description: High-performance market data acquisition for quantitative fina
 site_url: https://ml4t.io/docs/data/
 repo_url: https://github.com/stefan-jansen/ml4t-data
 repo_name: stefan-jansen/ml4t-data
+exclude_docs: |
+  README.md
+  ASYNC_STORAGE.md
+  FEATURES.md
+  FEATURE_INVENTORY.md
+  GAP_ANALYSIS.md
+  INCREMENTAL_UPDATES.md
+  INSTALLATION.md
+  INTEGRATION_TESTING.md
+  SESSION_MANAGEMENT.md
+  TESTING.md
+  TEST_AUDIT.md
+  api_guide.md
+  creating_a_provider.md
+  crypto_providers.md
+  export_guide.md
+  extending_ml4t_data.md
+  multi_asset_guide.md
+  provider-selection-guide.md
+  wiki_prices_status.md
+  yahoo_bulk_download_analysis.md
+  yahoo_provider.md
+  api/rest-api.md
+  archive/**
+  asset-classes/**
+  deployment/**
+  providers/PROVIDER_AUDIT.md
+  providers/README.md
+  providers/databento_reference.md
+  providers/mock.md
+  providers/synthetic.md
+  storage/**
+  tutorials/README.md
+  user-guide/getting-started.md
 
-# Theme configuration - Picasso Blue Period palette
+# Theme configuration - shared ML4T docs suite theme
 theme:
-  name: material
-  custom_dir: docs/overrides
+  name: ml4t-docs-theme
 
   palette:
-    # Light mode (default)
-    - media: "(prefers-color-scheme: light)"
-      scheme: ml4t
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    # Dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: amber
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+    scheme: default
+    primary: custom
+    accent: custom
 
-  font:
-    text: DM Sans
-    code: JetBrains Mono
+  font: false
 
   features:
     - navigation.tabs
@@ -51,12 +71,7 @@ theme:
   icon:
     repo: fontawesome/brands/github
 
-  logo: assets/logo.svg
   favicon: assets/favicon.ico
-
-# Custom CSS for Picasso palette
-extra_css:
-  - stylesheets/ml4t-theme.css
 
 # Extensions
 markdown_extensions:
@@ -144,7 +159,7 @@ nav:
     - Wiki Prices: providers/wiki_prices.md
     - Kalshi: providers/kalshi.md
     - Polymarket: providers/polymarket.md
-    - Binance Public: providers/binance_public.md
+    - Binance Bulk: providers/binance_bulk.md
     - NASDAQ ITCH: providers/nasdaq_itch.md
     - EODHD: providers/eodhd.md
     - Tiingo: providers/tiingo.md
@@ -152,7 +167,7 @@ nav:
     - DataBento: providers/databento.md
     - Polygon: providers/polygon.md
     - Finnhub: providers/finnhub.md
-    - Binance: providers/binance.md
+    - Binance API: providers/binance_api.md
     - OKX: providers/okx.md
     - CryptoCompare: providers/cryptocompare.md
     - Oanda: providers/oanda.md

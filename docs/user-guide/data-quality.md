@@ -4,6 +4,21 @@ ml4t-data provides two complementary quality systems: **OHLCV validation** for
 structural correctness checks, and **anomaly detection** for statistical
 pattern analysis. Both can be run from code or through the CLI.
 
+Use this page when you want to gate provider output before it reaches research,
+feature engineering, backtests, or production storage.
+
+## Minimal Working Example
+
+```python
+from ml4t.data.anomaly import AnomalyManager
+from ml4t.data.validation import OHLCVValidator
+
+validation = OHLCVValidator().validate(df)
+report = AnomalyManager().analyze(df, symbol="AAPL")
+
+print(validation.passed, len(report.anomalies))
+```
+
 ## OHLCV Validation
 
 The `OHLCVValidator` performs eight configurable checks on any DataFrame with
@@ -229,3 +244,21 @@ ml4t-data validate --all --anomalies --save-report --storage-path ./data
 
 The CLI returns exit code 1 if any issues are found, making it suitable for
 CI pipelines and pre-processing checks.
+
+## See It In The Book
+
+The strongest book connection is the Chapter 2 data-quality workflow:
+
+- [Data quality framework](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/13_data_quality_framework.py)
+- [Complete pipeline](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py)
+- [Incremental updates](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py)
+
+These scripts show how validation and anomaly detection fit into the broader
+dataset lifecycle rather than living as isolated checks.
+
+## Next Steps
+
+- [Storage](storage.md)
+- [Incremental Updates](incremental-updates.md)
+- [API Reference](../api/index.md)
+- [Book Guide](../book-guide/index.md)

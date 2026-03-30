@@ -7,6 +7,14 @@ hide:
 
 **High-performance market data acquisition for quantitative finance.**
 
+ML4T Data is the data layer for the ML4T stack: provider adapters, storage,
+incremental updates, and validation for research and production workflows.
+Start with [Getting Started](getting-started/quickstart.md) if you want a first
+result, move to the [User Guide](user-guide/index.md) for recurring workflows,
+use the [API Reference](api/index.md) for exact interfaces, and follow the
+[Book Guide](book-guide/index.md) if you are working from *Machine Learning for
+Trading, Third Edition*.
+
 <div class="grid cards" markdown>
 
 -   :material-clock-fast:{ .lg .middle } __5-Minute Setup__
@@ -119,7 +127,8 @@ print(f"Fetched {len(df)} rows for {df['symbol'].n_unique()} symbols")
 ## For ML4T Book Readers
 
 This library is the reference implementation for **Machine Learning for Trading (Third Edition)**.
-The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 providers.
+The book uses it both for chapter-scale demonstrations and for the reusable
+dataset download scripts under the `ml4t/third-edition` repository.
 
 <div class="grid cards" markdown>
 
@@ -127,9 +136,9 @@ The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 pr
 
     ---
 
-    - **Ch 2**: DataManager, Universe, HiveStorage, gap detection, data quality
-    - **Ch 4**: FRED, CoinGecko, Kalshi, Polymarket, COT data
-    - **Ch 16-19**: Binance, Fama-French, AQR for backtesting and risk
+    - **Chapter 2**: `DataManager`, `Universe`, `HiveStorage`, validation, updates
+    - **Chapter 4**: `FREDProvider`, `CoinGeckoProvider`, `KalshiProvider`, `PolymarketProvider`
+    - **Chapters 17-19**: `FamaFrenchProvider`, `AQRFactorProvider`, factor and risk workflows
 
     [:octicons-arrow-right-24: Full book guide](book-guide/index.md)
 
@@ -137,12 +146,20 @@ The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 pr
 
     ---
 
-    Graduate from notebooks to automated pipelines with `download_all.py --update`,
+    Graduate from notebook examples to reusable pipelines with
+    [`code/data/download_all.py`](https://github.com/ml4t/third-edition/blob/main/code/data/download_all.py),
     incremental updates, and CLI automation.
 
     [:octicons-arrow-right-24: Incremental updates](user-guide/incremental-updates.md)
 
 </div>
+
+Start from the exact book entry points if you want to match the code in print:
+
+- [Chapter 2 complete pipeline](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py)
+- [Chapter 2 data management](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/18_data_management.py)
+- [Chapter 2 incremental updates](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py)
+- [Canonical download orchestrator](https://github.com/ml4t/third-edition/blob/main/code/data/download_all.py)
 
 ## Next Steps
 
@@ -160,8 +177,8 @@ The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 pr
 
     Auto-generated documentation from source code.
 
--   [:octicons-people-24: __Contributing__](contributing/index.md)
+-   [:octicons-book-24: __Book Guide__](book-guide/index.md)
 
-    Create your own provider or contribute to the project.
+    Chapter, notebook, and production API mapping for ML4T.
 
 </div>

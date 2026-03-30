@@ -168,7 +168,7 @@ flowchart TD
 
 ## Next Steps
 
-1. **Read the full provider docs** in the [main README](../README.md)
+1. **Read the full provider docs** in the [provider index](../providers/index.md)
 2. **Check provider status** in your target asset class
 3. **Get API keys** from provider websites
 4. **Test with free tiers** before committing to paid plans
@@ -176,7 +176,7 @@ flowchart TD
 
 ## Getting Help
 
-- **Documentation**: See [docs/user-guide/](user-guide/)
-- **Examples**: Check [examples/](../examples/) directory
+- **Documentation**: See the [User Guide](../user-guide/index.md)
+- **Examples**: Start with the [Tutorials](../tutorials/index.md) and [Book Guide](../book-guide/index.md)
 - **Issues**: Report problems on GitHub
 - **Community**: Join discussions for provider recommendations

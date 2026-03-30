@@ -18,7 +18,7 @@ class TestCryptoConfig:
         """Test default configuration values."""
         config = CryptoConfig()
 
-        assert config.provider == "binance_public"
+        assert config.provider == "binance_bulk"
         assert config.market == "futures"
         assert config.start == "2021-01-01"
         assert config.end == "2025-12-31"
@@ -105,7 +105,7 @@ class TestCryptoDataManager:
     def config(self, temp_storage):
         """Create test configuration."""
         return CryptoConfig(
-            provider="binance_public",
+            provider="binance_bulk",
             market="futures",
             start="2024-01-01",
             end="2024-12-31",
@@ -131,7 +131,7 @@ class TestCryptoDataManager:
         """Test creating manager from YAML config."""
         yaml_content = f"""
 crypto:
-  provider: binance_public
+  provider: binance_bulk
   market: futures
   start: "2023-01-01"
   end: "2024-12-31"
@@ -150,7 +150,7 @@ crypto:
 
         manager = CryptoDataManager.from_config(config_file)
 
-        assert manager.config.provider == "binance_public"
+        assert manager.config.provider == "binance_bulk"
         assert manager.config.start == "2023-01-01"
         assert manager.config.perps["start"] == "2022-01-01"
         assert "BTCUSDT" in manager.config.get_all_symbols()
@@ -159,7 +159,7 @@ crypto:
         """Test that provider is lazily initialized."""
         assert manager._provider is None
 
-        with patch("ml4t.data.providers.binance_public.BinancePublicProvider") as mock_provider:
+        with patch("ml4t.data.providers.binance_bulk.BinanceBulkProvider") as mock_provider:
             mock_provider.return_value = MagicMock()
             _ = manager.provider
 

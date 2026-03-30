@@ -104,5 +104,5 @@ Get your API key at [massive.com](https://massive.com).
 ## See Also
 
 - [Massive Pricing](https://massive.com/pricing)
-- [Provider README](README.md)
-- [Provider Audit](PROVIDER_AUDIT.md)
+- [Provider Index](index.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)

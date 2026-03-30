@@ -176,7 +176,7 @@ class TestConfigLoader:
         providers_data = {
             "providers": [
                 {"name": "yahoo", "type": "yahoo"},
-                {"name": "binance", "type": "binance"},
+                {"name": "binance_api", "type": "binance_api"},
             ]
         }
 
@@ -236,7 +236,7 @@ class TestConfigLoader:
                 {
                     "name": "crypto",
                     "symbols": ["BTC"],
-                    "provider": "binance",
+                    "provider": "binance_api",
                     "asset_class": "crypto",  # Override default
                     # Will use defaults for update_mode and frequency
                 },

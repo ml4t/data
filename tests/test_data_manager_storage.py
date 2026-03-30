@@ -657,7 +657,7 @@ class TestDataManagerImportData:
         key_crypto = manager.import_data(
             data=sample_data,
             symbol="BTC",
-            provider="binance",
+            provider="binance_api",
             asset_class="crypto",
         )
         assert key_crypto == "crypto/daily/BTC"
@@ -806,7 +806,7 @@ class TestDataManagerListSymbols:
         manager.import_data(
             data=sample_data,
             symbol="BTC",
-            provider="binance",
+            provider="binance_api",
             asset_class="crypto",
         )
 

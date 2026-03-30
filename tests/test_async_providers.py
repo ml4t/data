@@ -1,7 +1,7 @@
 """Tests for async provider functionality.
 
 Tests the async methods added to providers:
-- BinancePublicProvider.fetch_ohlcv_async()
+- BinanceBulkProvider.fetch_ohlcv_async()
 - YahooFinanceProvider.fetch_ohlcv_async()
 - CryptoCompareProvider.fetch_ohlcv_async()
 - AsyncBaseProvider and async_batch_load()
@@ -19,7 +19,7 @@ import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
 from ml4t.data.managers.async_batch import AsyncBatchManager, async_batch_load
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 from ml4t.data.providers.yahoo import YahooFinanceProvider
 
@@ -49,15 +49,15 @@ def sample_ohlcv_data() -> pl.DataFrame:
     )
 
 
-# ===== BinancePublicProvider Async Tests =====
+# ===== BinanceBulkProvider Async Tests =====
 
 
-class TestBinancePublicProviderAsync:
-    """Test async methods on BinancePublicProvider."""
+class TestBinanceBulkProviderAsync:
+    """Test async methods on BinanceBulkProvider."""
 
     def test_async_session_lazily_created(self):
         """Test that async session is created lazily."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         assert not hasattr(provider, "_async_client") or provider._async_client is None
 
         # Access async session
@@ -68,14 +68,14 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_async_context_manager(self):
         """Test async context manager protocol."""
-        async with BinancePublicProvider() as provider:
+        async with BinanceBulkProvider() as provider:
             assert provider is not None
-            assert provider.name == "binance_public"
+            assert provider.name == "binance_bulk"
 
     @pytest.mark.asyncio
     async def test_close_async(self):
         """Test async close cleans up resources."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         # Create async client
         _ = provider._async_session
         assert provider._async_client is not None
@@ -87,7 +87,7 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_download_and_parse_zip_async_404(self):
         """Test async download returns None for 404."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
         with patch.object(
             provider._async_session,
@@ -106,7 +106,7 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_fetch_daily_data_async_concurrent(self, sample_ohlcv_data):
         """Test that async fetching happens concurrently."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
         # Track call times to verify concurrency
         call_times = []
@@ -139,7 +139,7 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_fetch_daily_data_async_skips_pre_listing_gap(self, sample_ohlcv_data):
         """Test async daily fetch avoids downloading every pre-listing day."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         start_dt = datetime(2024, 1, 1)
         end_dt = datetime(2024, 3, 31)
         listing_date = datetime(2024, 3, 1)
@@ -164,7 +164,7 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_multi_async_combines_symbols(self, sample_ohlcv_data):
         """Test multi-symbol OHLCV fetch combines successful results."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
         with patch.object(provider, "fetch_ohlcv_async", new_callable=AsyncMock) as mock_fetch:
             mock_fetch.side_effect = [sample_ohlcv_data, sample_ohlcv_data]
@@ -182,7 +182,7 @@ class TestBinancePublicProviderAsync:
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_multi_async_empty_symbols_raises_error(self):
         """Test multi-symbol OHLCV fetch validates non-empty symbols."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
         with pytest.raises(DataValidationError, match="symbols list cannot be empty"):
             await provider.fetch_ohlcv_multi_async([], "2024-01-01", "2024-01-31")
@@ -463,8 +463,8 @@ class TestAsyncProtocolConformance:
     """Test that providers conform to async protocol patterns."""
 
     def test_binance_has_async_methods(self):
-        """Test BinancePublicProvider has required async methods."""
-        provider = BinancePublicProvider()
+        """Test BinanceBulkProvider has required async methods."""
+        provider = BinanceBulkProvider()
 
         assert hasattr(provider, "fetch_ohlcv_async")
         assert asyncio.iscoroutinefunction(provider.fetch_ohlcv_async)

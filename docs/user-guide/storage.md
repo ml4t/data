@@ -4,6 +4,20 @@ ml4t-data stores time-series data as Parquet files with two backend strategies:
 **Hive** (partitioned by time) and **Flat** (single file per key). Both backends
 share atomic writes, file locking, metadata tracking, and Polars lazy evaluation.
 
+Use this page when you need durable local datasets, faster repeated reads, or a
+storage layout that supports incremental updates instead of repeated full
+downloads.
+
+## Minimal Working Example
+
+```python
+from ml4t.data.storage import create_storage
+
+storage = create_storage("./data", strategy="hive")
+lf = storage.read("equities/daily/AAPL")
+df = lf.collect()
+```
+
 ## Choosing a Backend
 
 | | Hive | Flat |
@@ -238,3 +252,21 @@ Both backends use two mechanisms for safe concurrent access:
   when multiple processes write simultaneously. Lock timeout is 10 seconds.
 
 These are enabled by default and can be toggled via `StorageConfig`.
+
+## See It In The Book
+
+Storage-backed workflows are introduced most clearly in Chapter 2:
+
+- [Complete pipeline](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/17_complete_pipeline.py)
+- [Data management](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/18_data_management.py)
+- [Incremental updates](https://github.com/ml4t/third-edition/blob/main/code/02_financial_data_universe/19_incremental_updates.py)
+
+Those scripts show how the book moves from provider calls to stored datasets,
+partitioned reads, validation, and recurring refreshes.
+
+## Next Steps
+
+- [Configuration](configuration.md)
+- [Incremental Updates](incremental-updates.md)
+- [Data Quality](data-quality.md)
+- [Book Guide](../book-guide/index.md)

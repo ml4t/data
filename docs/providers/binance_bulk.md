@@ -1,6 +1,6 @@
-# Binance Public Provider
+# Binance Bulk Provider
 
-**Provider**: `BinancePublicProvider`
+**Provider**: `BinanceBulkProvider`
 **Website**: [data.binance.vision](https://data.binance.vision)
 **API Key**: Not required
 **Free Tier**: Unlimited
@@ -9,7 +9,7 @@
 
 ## Overview
 
-BinancePublic downloads bulk historical data from Binance's public data repository. No API key or authentication required.
+BinanceBulkProvider downloads bulk historical data from Binance's public data repository. No API key or authentication required.
 
 **Best For**: Bulk crypto historical downloads, no geo-restrictions
 
@@ -18,9 +18,9 @@ BinancePublic downloads bulk historical data from Binance's public data reposito
 ## Quick Start
 
 ```python
-from ml4t.data.providers import BinancePublicProvider
+from ml4t.data.providers import BinanceBulkProvider
 
-provider = BinancePublicProvider()
+provider = BinanceBulkProvider()
 
 # Download historical data
 df = provider.fetch_ohlcv("BTCUSDT", "2020-01-01", "2024-12-01", frequency="daily")
@@ -61,9 +61,9 @@ Same as Binance:
 
 ---
 
-## Advantages Over BinanceProvider
+## Advantages Over BinanceAPIProvider
 
-| Feature | BinancePublic | Binance |
+| Feature | Binance Bulk | Binance API |
 |---------|---------------|---------|
 | Geo-restrictions | None | Yes (some countries) |
 | Rate limits | None | 1,200/min |
@@ -75,5 +75,5 @@ Same as Binance:
 ## See Also
 
 - [Binance Data Portal](https://data.binance.vision)
-- [Binance Provider](binance.md)
-- [Provider README](README.md)
+- [Binance API Provider](binance_api.md)
+- [Provider Index](index.md)

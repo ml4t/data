@@ -77,7 +77,7 @@ class DataManager:
         use_transactions: bool = False,
         enable_validation: bool = True,
         progress_callback: Callable[[str, float], None] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize DataManager.
 
@@ -212,7 +212,7 @@ class DataManager:
         end: str,
         frequency: str = "daily",
         provider: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame | pl.LazyFrame | Any:
         """Fetch data for a symbol.
 
@@ -238,7 +238,7 @@ class DataManager:
         start: str,
         end: str,
         frequency: str = "daily",
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, pl.DataFrame | pl.LazyFrame | Any | None]:
         """Fetch data for multiple symbols.
 
@@ -267,7 +267,7 @@ class DataManager:
         provider: str | None = None,
         max_workers: int = 4,
         fail_on_partial: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame:
         """Fetch data for multiple symbols and return in multi-asset stacked format."""
         return self._batch_manager.batch_load(
@@ -283,7 +283,7 @@ class DataManager:
         provider: str | None = None,
         max_workers: int = 4,
         fail_on_partial: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame:
         """Fetch data for all symbols in a pre-defined universe."""
         return self._batch_manager.batch_load_universe(
@@ -300,7 +300,7 @@ class DataManager:
         provider: str | None = None,
         fetch_missing: bool = True,
         max_workers: int = 4,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame:
         """Load multiple symbols from storage with optional fetch fallback."""
         return self._batch_manager.batch_load_from_storage(

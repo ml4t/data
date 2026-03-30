@@ -66,4 +66,4 @@ Find IDs at [coingecko.com/api/documentation](https://www.coingecko.com/api/docu
 ## See Also
 
 - [CoinGecko API](https://www.coingecko.com/en/api/pricing)
-- [Provider README](README.md)
+- [Provider Index](index.md)

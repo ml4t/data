@@ -193,6 +193,51 @@ storage = create_storage("./data", strategy="hive", partition_granularity="day")
 
 ---
 
+## Book-Facing Managers
+
+These classes power the dataset download workflows used throughout the ML4T book
+repository. They are useful when you want opinionated, higher-level wrappers
+around specific canonical datasets instead of the full generality of
+`DataManager`.
+
+### ETFDataManager
+
+Wrapper around the Yahoo ETF download workflow used by the book datasets.
+
+::: ml4t.data.etfs.downloader.ETFDataManager
+    options:
+      show_source: false
+      heading_level: 4
+
+### CryptoDataManager
+
+Simplified manager for Binance Bulk spot and futures download workflows.
+
+::: ml4t.data.crypto.downloader.CryptoDataManager
+    options:
+      show_source: false
+      heading_level: 4
+
+### MacroDataManager
+
+Simplified manager for FRED-backed macroeconomic and rates datasets.
+
+::: ml4t.data.macro.downloader.MacroDataManager
+    options:
+      show_source: false
+      heading_level: 4
+
+### FuturesDataManager
+
+Book-facing CME futures downloader built around Databento.
+
+::: ml4t.data.futures.book_downloader.FuturesDataManager
+    options:
+      show_source: false
+      heading_level: 4
+
+---
+
 ## Providers
 
 ### BaseProvider
@@ -259,6 +304,79 @@ Structural typing protocol for OHLCV providers. Any class implementing
 without inheriting from `BaseProvider`.
 
 ::: ml4t.data.providers.protocols.OHLCVProvider
+    options:
+      show_source: false
+      heading_level: 4
+
+---
+
+## Validation and Updates
+
+### OHLCVValidator
+
+Primary structural validation entry point for OHLCV datasets.
+
+::: ml4t.data.validation.ohlcv.OHLCVValidator
+    options:
+      show_source: false
+      heading_level: 4
+
+### AnomalyManager
+
+Coordinates statistical anomaly detectors such as return outliers, volume
+spikes, and stale prices.
+
+::: ml4t.data.anomaly.manager.AnomalyManager
+    options:
+      show_source: false
+      heading_level: 4
+
+### GapDetector
+
+Utility for detecting missing periods in stored or freshly fetched time series.
+
+::: ml4t.data.utils.gaps.GapDetector
+    options:
+      show_source: false
+      heading_level: 4
+
+### MetadataTracker
+
+Tracks dataset metadata and update history under the storage root.
+
+::: ml4t.data.storage.metadata_tracker.MetadataTracker
+    options:
+      show_source: false
+      heading_level: 4
+
+---
+
+## Universe and Contracts
+
+### Universe
+
+Convenience registry for predefined and custom symbol universes.
+
+::: ml4t.data.universe.Universe
+    options:
+      show_source: false
+      heading_level: 4
+
+### ContractSpec
+
+Contract metadata for futures and other exchange-traded assets available from
+the package root.
+
+::: ml4t.data.assets.contracts.ContractSpec
+    options:
+      show_source: false
+      heading_level: 4
+
+### AssetClass
+
+Top-level asset-class enum exported from the package root.
+
+::: ml4t.data.assets.asset_class.AssetClass
     options:
       show_source: false
       heading_level: 4

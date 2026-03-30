@@ -70,4 +70,4 @@ Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptoco
 ## See Also
 
 - [CryptoCompare Pricing](https://min-api.cryptocompare.com/pricing)
-- [Provider README](README.md)
+- [Provider Index](index.md)

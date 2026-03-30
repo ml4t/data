@@ -13,8 +13,8 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | yahoo.py | 603 | Yahoo Finance (free) |
-| binance.py | 410 | Binance authenticated |
-| binance_public.py | 1430 | Binance public API |
+| binance_api.py | 410 | Binance REST API |
+| binance_bulk.py | 1430 | Binance bulk historical archive |
 | eodhd.py | 464 | EOD Historical Data |
 | databento.py | 430 | Databento (futures) |
 | tiingo.py | 259 | Tiingo API |

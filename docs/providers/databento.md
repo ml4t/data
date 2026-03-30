@@ -129,5 +129,5 @@ Use the $125 free credit to explore before committing.
 ## See Also
 
 - [Databento Pricing](https://databento.com/pricing)
-- [Databento Reference](databento_reference.md) - Detailed schema guide
-- [Provider README](README.md)
+- [Databento API Docs](https://docs.databento.com/)
+- [Provider Index](index.md)

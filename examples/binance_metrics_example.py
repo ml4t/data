@@ -32,7 +32,7 @@ from pathlib import Path
 # Add src to path for development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ml4t.data.providers import BinancePublicProvider
+from ml4t.data.providers import BinanceBulkProvider
 
 
 def main():
@@ -52,7 +52,7 @@ def main():
     print()
 
     # Initialize provider for futures market
-    provider = BinancePublicProvider(market="futures")
+    provider = BinanceBulkProvider(market="futures")
 
     # Fetch metrics data (5-minute intervals)
     metrics = provider.fetch_metrics("BTCUSDT", start_date, end_date)

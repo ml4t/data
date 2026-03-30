@@ -132,12 +132,13 @@ dev = [
     "oandapyV20>=0.7.0",  # OANDA provider tests/imports
 ]
 
-# Documentation dependencies (MkDocs Material with Picasso theme)
+# Documentation dependencies (MkDocs Material with shared ML4T theme)
 docs = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
     "mkdocs-git-revision-date-localized-plugin>=1.2.0",
+    "ml4t-docs-theme>=0.1.0",
 ]
 
 # All optional dependencies
@@ -172,6 +173,9 @@ dev = [
     "oandapyV20>=0.7.0",
     "xlsxwriter>=3.1.0",
 ]
+
+[tool.uv.sources]
+ml4t-docs-theme = { path = "../ml4t-docs-theme", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

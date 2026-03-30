@@ -14,7 +14,7 @@ ML4T Data supports 20 live data providers with a unified API (plus synthetic and
 | [Wiki Prices](wiki_prices.md) | Historical | Static | Thread | No |
 | [Kalshi](kalshi.md) | Prediction Markets | Public data | Thread | No |
 | [Polymarket](polymarket.md) | Prediction Markets | Public data | Thread | No |
-| [Binance Public](binance_public.md) | Crypto | Bulk downloads | Thread | No |
+| [Binance Bulk](binance_bulk.md) | Crypto | Bulk downloads | Thread | No |
 | [NASDAQ ITCH](nasdaq_itch.md) | Tick Data | Sample data | Thread | No |
 | [EODHD](eodhd.md) | Global Stocks | 500/day | Native | Yes |
 | [Tiingo](tiingo.md) | US Stocks | 1000/day | Thread | Yes |
@@ -22,7 +22,7 @@ ML4T Data supports 20 live data providers with a unified API (plus synthetic and
 | [DataBento](databento.md) | Futures, Options | $10 credits | Thread | Yes |
 | [Polygon](polygon.md) | Multi-asset | Paid only | Thread | Yes |
 | [Finnhub](finnhub.md) | Global Stocks | 30/day OHLCV | Thread | Yes |
-| [Binance](binance.md) | Crypto | Unlimited | Native | No |
+| [Binance API](binance_api.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |
 | [CryptoCompare](cryptocompare.md) | Crypto | Good | Native | Optional |
 | [Oanda](oanda.md) | Forex | Demo only | Thread | Yes |

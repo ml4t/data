@@ -1,4 +1,4 @@
-"""Tests for Binance Public Data provider module."""
+"""Tests for Binance bulk data provider module."""
 
 import io
 import zipfile
@@ -10,40 +10,40 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
 
-class TestBinancePublicProviderInit:
+class TestBinanceBulkProviderInit:
     """Tests for provider initialization."""
 
     def test_default_init(self):
         """Test default initialization."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
-        assert provider.name == "binance_public"
+        assert provider.name == "binance_bulk"
         assert provider.market == "spot"
         assert provider.timeout == 60.0
 
     def test_futures_market_init(self):
         """Test initialization with futures market."""
-        provider = BinancePublicProvider(market="futures")
+        provider = BinanceBulkProvider(market="futures")
 
         assert provider.market == "futures"
 
     def test_custom_timeout(self):
         """Test initialization with custom timeout."""
-        provider = BinancePublicProvider(timeout=120.0)
+        provider = BinanceBulkProvider(timeout=120.0)
 
         assert provider.timeout == 120.0
 
     def test_invalid_market_raises_error(self):
         """Test invalid market raises ValueError."""
         with pytest.raises(ValueError, match="Invalid market"):
-            BinancePublicProvider(market="invalid")
+            BinanceBulkProvider(market="invalid")
 
     def test_custom_rate_limit(self):
         """Test initialization with custom rate limit."""
-        provider = BinancePublicProvider(rate_limit=(100, 60.0))
+        provider = BinanceBulkProvider(rate_limit=(100, 60.0))
 
         # Rate limit should be set (internal implementation detail)
         assert provider is not None
@@ -52,10 +52,10 @@ class TestBinancePublicProviderInit:
 class TestNameProperty:
     """Tests for name property."""
 
-    def test_name_returns_binance_public(self):
+    def test_name_returns_binance_bulk(self):
         """Test name property returns correct value."""
-        provider = BinancePublicProvider()
-        assert provider.name == "binance_public"
+        provider = BinanceBulkProvider()
+        assert provider.name == "binance_bulk"
 
 
 class TestCreateEmptyDataframe:
@@ -63,7 +63,7 @@ class TestCreateEmptyDataframe:
 
     def test_empty_dataframe_schema(self):
         """Test empty DataFrame has correct schema."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         df = provider._create_empty_dataframe()
 
         assert df.is_empty()
@@ -76,7 +76,7 @@ class TestCreateEmptyDataframe:
 
     def test_empty_dataframe_dtypes(self):
         """Test empty DataFrame has correct dtypes."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         df = provider._create_empty_dataframe()
 
         assert df.schema["timestamp"] == pl.Datetime("ms", "UTC")
@@ -91,7 +91,7 @@ class TestNormalizeSymbol:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_uppercase_conversion(self, provider):
         """Test symbols are uppercased."""
@@ -156,12 +156,12 @@ class TestBuildUrl:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     @pytest.fixture
     def futures_provider(self):
         """Create futures provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_build_spot_url(self, provider):
         """Test spot market URL construction."""
@@ -201,17 +201,17 @@ class TestIntervalMap:
 
     def test_interval_map_contains_expected_keys(self):
         """Test INTERVAL_MAP contains expected frequencies."""
-        assert "minute" in BinancePublicProvider.INTERVAL_MAP
-        assert "hourly" in BinancePublicProvider.INTERVAL_MAP
-        assert "daily" in BinancePublicProvider.INTERVAL_MAP
-        assert "weekly" in BinancePublicProvider.INTERVAL_MAP
+        assert "minute" in BinanceBulkProvider.INTERVAL_MAP
+        assert "hourly" in BinanceBulkProvider.INTERVAL_MAP
+        assert "daily" in BinanceBulkProvider.INTERVAL_MAP
+        assert "weekly" in BinanceBulkProvider.INTERVAL_MAP
 
     def test_interval_map_values(self):
         """Test INTERVAL_MAP returns correct Binance intervals."""
-        assert BinancePublicProvider.INTERVAL_MAP["minute"] == "1m"
-        assert BinancePublicProvider.INTERVAL_MAP["hourly"] == "1h"
-        assert BinancePublicProvider.INTERVAL_MAP["daily"] == "1d"
-        assert BinancePublicProvider.INTERVAL_MAP["weekly"] == "1w"
+        assert BinanceBulkProvider.INTERVAL_MAP["minute"] == "1m"
+        assert BinanceBulkProvider.INTERVAL_MAP["hourly"] == "1h"
+        assert BinanceBulkProvider.INTERVAL_MAP["daily"] == "1d"
+        assert BinanceBulkProvider.INTERVAL_MAP["weekly"] == "1w"
 
 
 class TestDownloadAndParseZip:
@@ -220,7 +220,7 @@ class TestDownloadAndParseZip:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def _create_mock_zip_response(self, csv_content: str, filename: str = "data.csv") -> bytes:
         """Create mock ZIP response with CSV content."""
@@ -297,7 +297,7 @@ class TestFetchAndTransformData:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_invalid_frequency_raises_error(self, provider):
         """Test invalid frequency raises ValueError."""
@@ -360,7 +360,7 @@ class TestFetchDailyData:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_downloads_consecutive_days(self, provider):
         """Test data is fetched for consecutive days."""
@@ -434,7 +434,7 @@ class TestFetchMonthlyData:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_downloads_months_in_range(self, provider):
         """Test monthly data is fetched for months in range."""
@@ -472,7 +472,7 @@ class TestFetchMetrics:
     @pytest.fixture
     def provider(self):
         """Create provider for futures market."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_empty_metrics_dataframe_schema(self, provider):
         """Test empty metrics DataFrame has correct schema."""
@@ -506,7 +506,7 @@ class TestFetchPremiumIndex:
     @pytest.fixture
     def provider(self):
         """Create provider for futures market."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_invalid_interval_raises_error(self, provider):
         """Test invalid interval raises DataValidationError."""
@@ -581,7 +581,7 @@ class TestFetchOhlcvMultiParallel:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_fetch_ohlcv_multi_parallel_returns_combined(self, provider):
         """Test sync wrapper returns combined multi-symbol OHLCV data."""
@@ -624,7 +624,7 @@ class TestGetAvailableSymbols:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_returns_common_pairs(self, provider):
         """Test returns list of common pairs."""
@@ -660,7 +660,7 @@ class TestParseMetricsZip:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def _create_mock_zip_response(self, csv_content: str) -> bytes:
         """Create mock ZIP response with CSV content."""
@@ -705,7 +705,7 @@ class TestParsePremiumIndexZip:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def _create_mock_zip_response(self, csv_content: str) -> bytes:
         """Create mock ZIP response with CSV content."""
@@ -750,11 +750,11 @@ class TestParsePremiumIndexZip:
 
 
 class TestIntegration:
-    """Integration tests for BinancePublicProvider."""
+    """Integration tests for BinanceBulkProvider."""
 
     def test_full_fetch_workflow_with_mocks(self):
         """Test complete fetch workflow with mocked responses."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
 
         # Create mock data
         mock_df = pl.DataFrame(
@@ -778,7 +778,7 @@ class TestIntegration:
 
     def test_futures_market_complete_workflow(self):
         """Test futures market workflow."""
-        provider = BinancePublicProvider(market="futures")
+        provider = BinanceBulkProvider(market="futures")
 
         mock_df = pl.DataFrame(
             {

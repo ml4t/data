@@ -65,7 +65,7 @@ providers:
     enabled: true
     rate_limit: 10
 
-  binance:
+  binance_api:
     enabled: true
     # Optional API credentials for higher limits
     api_key: ${BINANCE_API_KEY}
@@ -95,13 +95,13 @@ ml4t-data fetch AAPL --start 2024-01-01 --end 2024-06-30
 
 ```bash
 # Fetch Bitcoin/USDT hourly data
-ml4t-data fetch BTC/USDT --provider binance --frequency 1h
+ml4t-data fetch BTC/USDT --provider binance_api --frequency 1h
 
 # Fetch daily data
-ml4t-data fetch ETH/USDT --provider binance --frequency 1d
+ml4t-data fetch ETH/USDT --provider binance_api --frequency 1d
 
 # Fetch minute data (last 7 days)
-ml4t-data fetch BTC/USDT --provider binance --frequency 1m --start 2024-01-01
+ml4t-data fetch BTC/USDT --provider binance_api --frequency 1m --start 2024-01-01
 ```
 
 ### 4. View and Export Data
@@ -292,7 +292,7 @@ def daily_update():
 
     for symbol in symbols:
         try:
-            provider = "binance" if "/" in symbol else "yahoo"
+            provider = "binance_api" if "/" in symbol else "yahoo"
             ml4t-data.update(symbol, provider=provider)
             logger.info(f"✅ Updated {symbol}")
         except Exception as e:

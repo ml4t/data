@@ -102,7 +102,7 @@ class TestUpdateRecord:
             "rows_updated": 0,
             "start_date": "2024-01-01T00:00:00",
             "end_date": "2024-01-15T00:00:00",
-            "provider": "binance",
+            "provider": "binance_api",
             "duration_seconds": 15.0,
             "gaps_filled": 0,
             "errors": ["test error"],
@@ -114,7 +114,7 @@ class TestUpdateRecord:
         assert record.update_type == "full"
         assert record.rows_before == 0
         assert record.rows_after == 100
-        assert record.provider == "binance"
+        assert record.provider == "binance_api"
         assert record.gaps_filled == 0
         assert record.errors == ["test error"]
 
@@ -207,7 +207,7 @@ class TestDatasetMetadata:
             symbol="BTC",
             asset_class="crypto",
             frequency="hourly",
-            provider="binance",
+            provider="binance_api",
             first_update=datetime(2024, 1, 1),
             last_update=datetime(2024, 1, 1),
             total_rows=100,
@@ -309,7 +309,7 @@ class TestDatasetMetadata:
             "symbol": "ETH",
             "asset_class": "crypto",
             "frequency": "hourly",
-            "provider": "binance",
+            "provider": "binance_api",
             "first_update": "2024-01-01T00:00:00",
             "last_update": "2024-01-15T00:00:00",
             "total_rows": 100,
@@ -834,7 +834,7 @@ class TestMetadataTracker:
             rows_updated=0,
             start_date=datetime(2024, 1, 1),
             end_date=datetime.now() - timedelta(days=1),
-            provider="binance",
+            provider="binance_api",
             duration_seconds=3.0,
         )
         tracker.update_metadata(

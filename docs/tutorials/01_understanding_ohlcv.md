@@ -345,7 +345,7 @@ Don't mix daily and intraday data without careful timestamp alignment.
 
 Now that you understand OHLCV data:
 
-1. **Explore Providers**: [Provider Selection Guide](../provider-selection-guide.md)
+1. **Explore Providers**: [Provider Selection Guide](../getting-started/provider-selection.md)
 2. **Learn Rate Limiting**: [Tutorial 02: Rate Limiting Best Practices](02_rate_limiting.md)
 3. **Master Updates**: [Tutorial 03: Incremental Updates](03_incremental_updates.md)
 4. **Build Strategies**: Start with simple moving average crossovers
@@ -356,8 +356,8 @@ Now that you understand OHLCV data:
   - *Advances in Financial Machine Learning* by Marcos López de Prado
   - *Quantitative Trading* by Ernest Chan
 - **ML4T Data Docs**:
-  - [Creating a Provider](../creating_a_provider.md)
-  - [Data Validation](../../src/ml4t-data/validation/)
+  - [Creating a Provider](../contributing/creating-a-provider.md)
+  - [Data Quality](../user-guide/data-quality.md)
   - [Storage Layer](../user-guide/storage.md)
 
 ---

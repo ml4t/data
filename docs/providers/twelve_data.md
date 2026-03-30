@@ -71,4 +71,4 @@ Get your API key at [twelvedata.com/account](https://twelvedata.com/account).
 ## See Also
 
 - [TwelveData Pricing](https://twelvedata.com/pricing)
-- [Provider README](README.md)
+- [Provider Index](index.md)

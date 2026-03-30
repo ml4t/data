@@ -61,4 +61,4 @@ Get your API key at [tiingo.com/account/api/token](https://api.tiingo.com/accoun
 ## See Also
 
 - [Tiingo Pricing](https://tiingo.com/about/pricing)
-- [Provider README](README.md)
+- [Provider Index](index.md)

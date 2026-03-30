@@ -581,6 +581,6 @@ logger.info(f"{symbol}: Fetched from {provider_name}")
 **Tutorial Series Complete!** 🎉
 
 **Continue Learning**:
-- [Provider Selection Guide](../provider-selection-guide.md)
-- [Creating a Provider](../creating_a_provider.md)
-- [Contributing to ML4T Data](../../CONTRIBUTING.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)
+- [Creating a Provider](../contributing/creating-a-provider.md)
+- [Contributing to ML4T Data](../contributing/index.md)

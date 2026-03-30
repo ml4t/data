@@ -295,7 +295,7 @@ datasets:
 
   # Crypto
   major_crypto:
-    provider: binance
+    provider: binance_api
     symbols:
       - BTC
       - ETH

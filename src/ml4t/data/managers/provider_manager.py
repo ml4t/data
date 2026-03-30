@@ -31,9 +31,9 @@ class ProviderRouter:
 
     Example:
         >>> router = ProviderRouter()
-        >>> router.add_pattern(r"^BTC", "binance")
+        >>> router.add_pattern(r"^BTC", "binance_api")
         >>> router.add_pattern(r"^[A-Z]{4}$", "yahoo")
-        >>> router.get_provider("BTCUSD")  # Returns "binance"
+        >>> router.get_provider("BTCUSD")  # Returns "binance_api"
         >>> router.get_provider("AAPL")    # Returns "yahoo"
     """
 
@@ -137,8 +137,8 @@ class ProviderManager:
     FREE_PROVIDERS = frozenset(
         {
             "yahoo",
-            "binance",
-            "binance_public",
+            "binance_api",
+            "binance_bulk",
             "mock",
             "cryptocompare",
             "synthetic",
@@ -182,8 +182,8 @@ class ProviderManager:
             return cls._PROVIDER_CLASSES
 
         # Import core providers
-        from ml4t.data.providers.binance import BinanceProvider
-        from ml4t.data.providers.binance_public import BinancePublicProvider
+        from ml4t.data.providers.binance_api import BinanceAPIProvider
+        from ml4t.data.providers.binance_bulk import BinanceBulkProvider
         from ml4t.data.providers.cryptocompare import CryptoCompareProvider
         from ml4t.data.providers.mock import MockProvider
         from ml4t.data.providers.okx import OKXProvider
@@ -191,8 +191,8 @@ class ProviderManager:
         from ml4t.data.providers.yahoo import YahooFinanceProvider
 
         provider_classes: dict[str, type] = {
-            "binance": BinanceProvider,
-            "binance_public": BinancePublicProvider,
+            "binance_api": BinanceAPIProvider,
+            "binance_bulk": BinanceBulkProvider,
             "cryptocompare": CryptoCompareProvider,
             "mock": MockProvider,
             "okx": OKXProvider,

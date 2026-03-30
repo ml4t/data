@@ -14,7 +14,7 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_bulk import BinanceBulkProvider
 
 
 class TestMarketValidation:
@@ -22,17 +22,17 @@ class TestMarketValidation:
 
     def test_spot_market_lowercase(self):
         """Test spot market is case insensitive."""
-        provider = BinancePublicProvider(market="SPOT")
+        provider = BinanceBulkProvider(market="SPOT")
         assert provider.market == "spot"
 
     def test_futures_market_lowercase(self):
         """Test futures market is case insensitive."""
-        provider = BinancePublicProvider(market="FUTURES")
+        provider = BinanceBulkProvider(market="FUTURES")
         assert provider.market == "futures"
 
     def test_mixed_case_market(self):
         """Test mixed case market is normalized."""
-        provider = BinancePublicProvider(market="FuTuReS")
+        provider = BinanceBulkProvider(market="FuTuReS")
         assert provider.market == "futures"
 
 
@@ -42,7 +42,7 @@ class TestSymbolNormalization:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_already_has_btc_suffix(self, provider):
         """Test symbol with BTC suffix is unchanged."""
@@ -71,7 +71,7 @@ class TestHttpErrorHandling:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_http_timeout_exception_propagates(self, provider):
         """Test HTTP timeout exception propagates."""
@@ -111,7 +111,7 @@ class TestZipParsing:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def _create_mock_zip_response(self, csv_content: str, filename: str = "data.csv") -> bytes:
         """Create mock ZIP response with CSV content."""
@@ -151,7 +151,7 @@ class TestFetchMetricsEdgeCases:
     @pytest.fixture
     def provider(self):
         """Create futures provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_fetch_metrics_no_data_returns_empty(self, provider):
         """Test fetch_metrics with no data returns empty DataFrame."""
@@ -168,7 +168,7 @@ class TestFetchPremiumIndexEdgeCases:
     @pytest.fixture
     def provider(self):
         """Create futures provider instance."""
-        return BinancePublicProvider(market="futures")
+        return BinanceBulkProvider(market="futures")
 
     def test_premium_index_invalid_interval_raises(self, provider):
         """Test fetch_premium_index with invalid interval raises error."""
@@ -182,7 +182,7 @@ class TestDateRangeHandling:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_very_short_range_uses_daily(self, provider):
         """Test 1-day range uses daily fetch."""
@@ -218,7 +218,7 @@ class TestGetAvailableSymbolsEdgeCases:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return BinancePublicProvider()
+        return BinanceBulkProvider()
 
     def test_search_partial_match(self, provider):
         """Test partial match search."""
@@ -247,14 +247,14 @@ class TestSessionConfiguration:
 
     def test_custom_timeout(self):
         """Test custom timeout is applied."""
-        provider = BinancePublicProvider(timeout=120.0)
+        provider = BinanceBulkProvider(timeout=120.0)
         assert provider.timeout == 120.0
 
     def test_session_has_follow_redirects(self):
         """Test session is configured to follow redirects."""
-        provider = BinancePublicProvider()
+        provider = BinanceBulkProvider()
         assert provider.session.follow_redirects is True
 
     def test_default_rate_limit(self):
         """Test default rate limit is set."""
-        assert BinancePublicProvider.DEFAULT_RATE_LIMIT == (1000, 60.0)
+        assert BinanceBulkProvider.DEFAULT_RATE_LIMIT == (1000, 60.0)

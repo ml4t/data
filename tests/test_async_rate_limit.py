@@ -112,12 +112,12 @@ async def test_multi_provider_rate_limiter():
 
     # Add providers with different limits
     await multi_limiter.add_provider("yahoo", max_calls=100, period=60)
-    await multi_limiter.add_provider("binance", max_calls=1200, period=60)
+    await multi_limiter.add_provider("binance_api", max_calls=1200, period=60)
     await multi_limiter.add_provider("cryptocompare", max_calls=50, period=60, adaptive=True)
 
     # Test acquiring for different providers
     assert await multi_limiter.acquire("yahoo", blocking=False) is True
-    assert await multi_limiter.acquire("binance", blocking=False) is True
+    assert await multi_limiter.acquire("binance_api", blocking=False) is True
     assert await multi_limiter.acquire("cryptocompare", blocking=False) is True
 
     # Test unknown provider
@@ -127,11 +127,11 @@ async def test_multi_provider_rate_limiter():
     # Test status
     status = multi_limiter.get_status()
     assert "yahoo" in status
-    assert "binance" in status
+    assert "binance_api" in status
     assert "cryptocompare" in status
 
     assert status["yahoo"]["remaining_calls"] == 99
-    assert status["binance"]["remaining_calls"] == 1199
+    assert status["binance_api"]["remaining_calls"] == 1199
     assert status["cryptocompare"]["remaining_calls"] == 49
 
     # Test reset
@@ -142,7 +142,7 @@ async def test_multi_provider_rate_limiter():
     # Test reset all
     await multi_limiter.reset_all()
     status = multi_limiter.get_status()
-    assert status["binance"]["remaining_calls"] == 1200
+    assert status["binance_api"]["remaining_calls"] == 1200
 
 
 @pytest.mark.asyncio

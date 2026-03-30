@@ -1,4 +1,4 @@
-"""Tests for Binance provider."""
+"""Tests for Binance API provider."""
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -6,39 +6,39 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from ml4t.data.providers.binance import BinanceProvider
+from ml4t.data.providers.binance_api import BinanceAPIProvider
 
 
-class TestBinanceProvider:
-    """Test Binance provider functionality."""
+class TestBinanceAPIProvider:
+    """Test Binance API provider functionality."""
 
     def test_provider_name(self) -> None:
         """Test provider name."""
-        provider_spot = BinanceProvider(market="spot")
-        assert provider_spot.name == "binance"
+        provider_spot = BinanceAPIProvider(market="spot")
+        assert provider_spot.name == "binance_api"
 
-        provider_futures = BinanceProvider(market="futures")
-        assert provider_futures.name == "binance"
+        provider_futures = BinanceAPIProvider(market="futures")
+        assert provider_futures.name == "binance_api"
 
     def test_initialization(self) -> None:
         """Test provider initialization."""
         # Spot market
-        provider1 = BinanceProvider()
+        provider1 = BinanceAPIProvider()
         assert provider1.market == "spot"
         assert provider1.base_url == "https://api.binance.com/api/v3"
 
         # Futures market
-        provider2 = BinanceProvider(market="futures")
+        provider2 = BinanceAPIProvider(market="futures")
         assert provider2.market == "futures"
         assert provider2.base_url == "https://fapi.binance.com/fapi/v1"
 
         # Invalid market
         with pytest.raises(ValueError, match="Invalid market"):
-            BinanceProvider(market="options")
+            BinanceAPIProvider(market="options")
 
     def test_symbol_normalization(self) -> None:
         """Test symbol normalization to Binance format."""
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
 
         # Different input formats
         assert provider._normalize_symbol("BTC") == "BTCUSDT"
@@ -52,7 +52,7 @@ class TestBinanceProvider:
         assert provider._normalize_symbol("ADABTC") == "ADABTC"
 
     @patch("time.sleep")
-    @patch("ml4t.data.providers.binance.httpx.Client")
+    @patch("ml4t.data.providers.binance_api.httpx.Client")
     def test_fetch_daily_data(self, mock_client_class: MagicMock, mock_sleep: MagicMock) -> None:
         """Test fetching daily OHLCV data."""
         # Setup mock response - Binance kline format
@@ -94,7 +94,7 @@ class TestBinanceProvider:
         mock_client_class.return_value = mock_client
 
         # Fetch data
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
         df = provider.fetch_ohlcv(
             symbol="BTC-USD",
             start="2024-01-01",
@@ -125,7 +125,7 @@ class TestBinanceProvider:
         assert isinstance(df["timestamp"][0], datetime)
 
     @patch("time.sleep")
-    @patch("ml4t.data.providers.binance.httpx.Client")
+    @patch("ml4t.data.providers.binance_api.httpx.Client")
     def test_fetch_minute_data(self, mock_client_class: MagicMock, mock_sleep: MagicMock) -> None:
         """Test fetching minute-level data."""
         # Setup mock response
@@ -167,7 +167,7 @@ class TestBinanceProvider:
         mock_client_class.return_value = mock_client
 
         # Fetch data
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
         df = provider.fetch_ohlcv(
             symbol="ETH/USD",
             start="2024-01-01",
@@ -186,7 +186,7 @@ class TestBinanceProvider:
         assert len(df) == 2
         assert df["close"][0] == 42005.0
 
-    @patch("ml4t.data.providers.binance.httpx.Client")
+    @patch("ml4t.data.providers.binance_api.httpx.Client")
     def test_rate_limit_handling(self, mock_client_class: MagicMock) -> None:
         """Test rate limit handling."""
         # First call returns rate limit error
@@ -207,7 +207,7 @@ class TestBinanceProvider:
         mock_client_class.return_value = mock_client
 
         # The provider now raises RateLimitError instead of sleeping
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
         from ml4t.data.core.exceptions import RateLimitError
 
         # First call raises rate limit error (caught by retry decorator)
@@ -218,7 +218,7 @@ class TestBinanceProvider:
         assert mock_client.get.call_count == 1
 
     @patch("time.sleep")
-    @patch("ml4t.data.providers.binance.httpx.Client")
+    @patch("ml4t.data.providers.binance_api.httpx.Client")
     def test_invalid_symbol_handling(
         self, mock_client_class: MagicMock, mock_sleep: MagicMock
     ) -> None:
@@ -236,7 +236,7 @@ class TestBinanceProvider:
         mock_client_class.return_value = mock_client
 
         # Should raise SymbolNotFoundError
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
         from ml4t.data.core.exceptions import SymbolNotFoundError
 
         with pytest.raises(SymbolNotFoundError):
@@ -249,7 +249,7 @@ class TestBinanceProvider:
 
     def test_frequency_mapping(self) -> None:
         """Test frequency to interval mapping."""
-        provider = BinanceProvider()
+        provider = BinanceAPIProvider()
 
         # Valid frequencies
         assert provider.INTERVAL_MAP["minute"] == "1m"
@@ -269,7 +269,7 @@ class TestBinanceProvider:
             )
 
     @patch("time.sleep")
-    @patch("ml4t.data.providers.binance.httpx.Client")
+    @patch("ml4t.data.providers.binance_api.httpx.Client")
     def test_futures_market(self, mock_client_class: MagicMock, mock_sleep: MagicMock) -> None:
         """Test futures market endpoint."""
         mock_response = MagicMock()
@@ -281,7 +281,7 @@ class TestBinanceProvider:
         mock_client_class.return_value = mock_client
 
         # Create futures provider
-        provider = BinanceProvider(market="futures")
+        provider = BinanceAPIProvider(market="futures")
         provider.fetch_ohlcv(
             symbol="BTC",
             start="2024-01-01",
@@ -297,7 +297,7 @@ class TestBinanceProvider:
     # NOTE: get_available_symbols() is not part of the base provider interface
     # and is not required by TASK-008. Commenting out for now.
     # TODO: Implement get_available_symbols() as optional enhancement
-    # @patch("ml4t.data.providers.binance.httpx.Client")
+    # @patch("ml4t.data.providers.binance_api.httpx.Client")
     # def test_get_available_symbols(self, mock_client_class: MagicMock) -> None:
     #     """Test getting available symbols."""
     #     mock_response = MagicMock()
@@ -315,7 +315,7 @@ class TestBinanceProvider:
     #     mock_client.get.return_value = mock_response
     #     mock_client_class.return_value = mock_client
 
-    #     provider = BinanceProvider()
+    #     provider = BinanceAPIProvider()
     #     symbols = provider.get_available_symbols()
 
     #     # Should only return trading symbols
