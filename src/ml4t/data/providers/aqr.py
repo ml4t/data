@@ -637,6 +637,16 @@ class AQRFactorProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
+        if data_path is None:
+            # Check ML4T_DATA_PATH first (test/CI environments), then default
+            import os
+
+            ml4t_data = os.environ.get("ML4T_DATA_PATH")
+            if ml4t_data:
+                candidate = Path(ml4t_data) / "factors" / "aqr"
+                if candidate.exists():
+                    data_path = candidate
+
         self.data_path = Path(data_path or self.DEFAULT_PATH).expanduser()
 
         if not self.data_path.exists():
