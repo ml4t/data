@@ -139,7 +139,6 @@ docs = [
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
     "mkdocs-git-revision-date-localized-plugin>=1.2.0",
-    "ml4t-docs-theme>=0.1.0",
 ]
 
 # All optional dependencies
@@ -177,7 +176,6 @@ dev = [
 
 [tool.uv.sources]
 ml4t-specs = { path = "../ml4t-specs", editable = true }
-ml4t-docs-theme = { path = "../ml4t-docs-theme", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

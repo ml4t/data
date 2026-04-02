@@ -44,7 +44,8 @@ exclude_docs: |
 
 # Theme configuration - shared ML4T docs suite theme
 theme:
-  name: ml4t-docs-theme
+  name: material
+  custom_dir: docs/overrides
 
   palette:
     scheme: default
@@ -56,9 +57,9 @@ theme:
   features:
     - navigation.tabs
     - navigation.tabs.sticky
+    - navigation.indexes
     - navigation.sections
     - navigation.expand
-    - navigation.path
     - navigation.top
     - navigation.footer
     - toc.follow
@@ -194,6 +195,10 @@ nav:
 
 # Extra configuration
 extra:
+  ml4t_docs_hub_url: /docs/
+  ml4t_libraries_url: /libraries/
+  ml4t_chapters_url: /chapters/
+
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/stefan-jansen
