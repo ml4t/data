@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <link
+    rel="stylesheet"
+    href="{{ 'assets/stylesheets/ml4t-docs-theme.css' | url }}"
+  >
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:wght@500;600;700&display=swap"
+  >
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ 'assets/javascripts/ml4t-docs-theme.js' | url }}"></script>
+{% endblock %}
