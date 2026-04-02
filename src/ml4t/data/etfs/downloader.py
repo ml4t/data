@@ -39,6 +39,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.data_profile import (
     ProfileMixin,
     generate_profile,
@@ -68,7 +69,12 @@ class ETFConfig:
     start: str = "2005-01-01"
     end: str = "2025-12-31"
     frequency: str = "daily"
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "etfs")
+    storage_path: Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "etfs",
+            default_path=default_ml4t_data_path("etfs"),
+        )
+    )
     tickers: dict[str, dict[str, Any]] = field(default_factory=dict)
     generate_profile: bool = True  # Generate column-level statistics on save
 
@@ -141,7 +147,13 @@ class ETFDataManager(ProfileMixin):
             start=etf_config.get("start", "2005-01-01"),
             end=etf_config.get("end", "2025-12-31"),
             frequency=etf_config.get("frequency", "daily"),
-            storage_path=Path(etf_config.get("storage_path", "~/ml4t-data/etfs")).expanduser(),
+            storage_path=resolve_ml4t_data_path(
+                "etfs",
+                default_path=default_ml4t_data_path("etfs"),
+                configured_path=etf_config.get("storage_path"),
+                config=raw_config,
+                config_dir=config_path.parent,
+            ),
             tickers=etf_config.get("tickers", {}),
         )
 

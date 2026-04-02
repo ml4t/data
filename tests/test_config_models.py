@@ -293,6 +293,7 @@ class TestDataConfig:
 
         assert config.version == "1.0"
         assert config.base_dir == Path("./data")
+        assert config.storage.base_path == Path("data")
         assert config.log_level == "INFO"
         assert config.providers == []
         assert config.datasets == []
@@ -343,6 +344,7 @@ class TestDataConfig:
 
         assert config.version == "1.0"
         assert config.base_dir == Path("/var/lib/qldm")
+        assert config.storage.base_path == Path("/var/lib/qldm")
         assert len(config.providers) == 1
         assert len(config.datasets) == 1
         assert len(config.workflows) == 1
@@ -351,6 +353,13 @@ class TestDataConfig:
         # Storage dict gets converted to StorageConfig when possible
         assert config.storage.compression == CompressionType.ZSTD
         assert config.env["QLDM_TEST"] == "value"
+
+    def test_storage_base_path_sets_base_dir(self):
+        """storage.base_path should populate the legacy base_dir alias."""
+        config = DataConfig(storage={"base_path": "/srv/ml4t-data"})
+
+        assert config.base_dir == Path("/srv/ml4t-data")
+        assert config.storage.base_path == Path("/srv/ml4t-data")
 
     def test_get_provider(self):
         """Test get_provider method."""

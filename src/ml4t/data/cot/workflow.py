@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import polars as pl
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
+
 
 def combine_cot_ohlcv(
     ohlcv: pl.DataFrame,
@@ -293,8 +295,8 @@ def combine_cot_ohlcv_pit(
 
 def load_combined_futures_data(
     product: str,
-    ohlcv_path: str = "~/ml4t-data/futures/ohlcv-1d",
-    cot_path: str = "~/ml4t-data/cot",
+    ohlcv_path: str | None = None,
+    cot_path: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pl.DataFrame:
@@ -320,8 +322,19 @@ def load_combined_futures_data(
     """
     from pathlib import Path
 
-    ohlcv_path = Path(ohlcv_path).expanduser()
-    cot_path = Path(cot_path).expanduser()
+    ohlcv_path = (
+        Path(ohlcv_path).expanduser()
+        if ohlcv_path is not None
+        else resolve_ml4t_data_path(
+            "futures/ohlcv-1d",
+            default_path=default_ml4t_data_path("futures/ohlcv-1d"),
+        )
+    )
+    cot_path = (
+        Path(cot_path).expanduser()
+        if cot_path is not None
+        else resolve_ml4t_data_path("cot", default_path=default_ml4t_data_path("cot"))
+    )
 
     # Load OHLCV data
     ohlcv_file = ohlcv_path / f"product={product}" / "data.parquet"

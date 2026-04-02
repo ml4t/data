@@ -124,6 +124,21 @@ macro:
         assert manager.config.provider == "fred"
         assert manager.config.start == "2020-01-01"
 
+    def test_from_config_uses_global_storage_root(self, temp_storage):
+        """Global storage.base_path should drive macro storage when section path is absent."""
+        yaml_content = f"""
+storage:
+  base_path: {temp_storage}
+macro:
+  provider: fred
+"""
+        config_file = temp_storage / "macro_config.yaml"
+        config_file.write_text(yaml_content)
+
+        manager = MacroDataManager.from_config(config_file)
+
+        assert manager.config.storage_path == temp_storage / "macro"
+
     def test_get_provider_without_api_key(self, manager):
         """Test _get_provider returns None without API key."""
         with patch.dict("os.environ", {}, clear=True):

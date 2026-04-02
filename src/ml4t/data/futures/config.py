@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
+
 
 class FuturesCategory(str, Enum):
     """Futures product categories."""
@@ -60,7 +62,12 @@ class FuturesDownloadConfig:
     )
     start: str = "2016-01-01"
     end: str = "2025-12-13"
-    storage_path: str | Path = "~/ml4t-data/futures"
+    storage_path: str | Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "futures",
+            default_path=default_ml4t_data_path("futures"),
+        )
+    )
     dataset: str = "GLBX.MDP3"
     schemas: list[str] = field(default_factory=lambda: ["ohlcv-1d", "definition", "statistics"])
     api_key: str | None = None
@@ -163,7 +170,13 @@ def load_yaml_config(yaml_path: str | Path) -> FuturesDownloadConfig:
         products=products,
         start=futures_config.get("start", "2016-01-01"),
         end=futures_config.get("end", "2025-12-13"),
-        storage_path=futures_config.get("storage_path", "~/ml4t-data/futures"),
+        storage_path=resolve_ml4t_data_path(
+            "futures",
+            default_path=default_ml4t_data_path("futures"),
+            configured_path=futures_config.get("storage_path"),
+            config=data,
+            config_dir=yaml_path.parent,
+        ),
         dataset=futures_config.get("dataset", "GLBX.MDP3"),
         schemas=futures_config.get("schemas", ["ohlcv-1d", "definition", "statistics"]),
         api_key=futures_config.get("api_key"),
@@ -193,7 +206,13 @@ def load_definitions_config(yaml_path: str | Path) -> tuple[list[str], Path, Def
     if isinstance(products, dict):
         products = [p for cat_products in products.values() for p in cat_products]
 
-    storage_path = Path(futures_config.get("storage_path", "~/ml4t-data/futures")).expanduser()
+    storage_path = resolve_ml4t_data_path(
+        "futures",
+        default_path=default_ml4t_data_path("futures"),
+        configured_path=futures_config.get("storage_path"),
+        config=data,
+        config_dir=yaml_path.parent,
+    )
 
     # Get definitions config
     defn_config = futures_config.get("definitions", {})

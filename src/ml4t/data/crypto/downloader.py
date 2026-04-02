@@ -37,6 +37,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.data_profile import (
     ProfileMixin,
     generate_profile,
@@ -56,7 +57,12 @@ class CryptoConfig:
     start: str = "2021-01-01"
     end: str = "2025-12-31"
     interval: str = "8h"  # Funding rate settlement interval
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "crypto")
+    storage_path: Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "crypto",
+            default_path=default_ml4t_data_path("crypto"),
+        )
+    )
     symbols: dict[str, dict[str, Any]] = field(default_factory=dict)
     perps: dict[str, Any] = field(default_factory=dict)
     generate_profile: bool = True  # Generate column-level statistics on save
@@ -132,7 +138,13 @@ class CryptoDataManager(ProfileMixin):
             start=crypto_config.get("start", "2021-01-01"),
             end=crypto_config.get("end", "2025-12-31"),
             interval=crypto_config.get("interval", "8h"),
-            storage_path=Path(crypto_config.get("storage_path", "~/ml4t-data/crypto")).expanduser(),
+            storage_path=resolve_ml4t_data_path(
+                "crypto",
+                default_path=default_ml4t_data_path("crypto"),
+                configured_path=crypto_config.get("storage_path"),
+                config=raw_config,
+                config_dir=config_path.parent,
+            ),
             symbols=crypto_config.get("symbols", {}),
             perps=crypto_config.get("perps", {}),
         )

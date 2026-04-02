@@ -14,6 +14,11 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.exceptions import DataNotAvailableError, DataValidationError
+from ml4t.data.paths import (
+    default_ml4t_data_path,
+    ml4t_data_path_candidates,
+    resolve_ml4t_data_path,
+)
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -152,13 +157,12 @@ class WikiPricesProvider(BaseProvider):
 
     # Default locations to search for Wiki Prices Parquet
     DEFAULT_PATHS: ClassVar[list[Path]] = [
-        Path("~/ml4t/data/wiki/wiki_prices.parquet").expanduser(),
-        Path("~/ml3t/data/equities/nasdaq/wiki_prices.parquet").expanduser(),
+        default_ml4t_data_path("wiki/wiki_prices.parquet"),
         Path("./wiki_prices.parquet"),
     ]
 
     # Default download location
-    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = Path("~/ml4t/data/wiki").expanduser()
+    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = default_ml4t_data_path("wiki")
 
     # NASDAQ Data Link API endpoint for Wiki Prices export
     NASDAQ_EXPORT_URL: ClassVar[str] = "https://data.nasdaq.com/api/v3/datatables/WIKI/PRICES.csv"
@@ -238,8 +242,8 @@ class WikiPricesProvider(BaseProvider):
                 f"Wiki Prices Parquet not found at provided path: {provided_path}"
             )
 
-        # Auto-detect: try default locations
-        for path in self.DEFAULT_PATHS:
+        candidate_paths = ml4t_data_path_candidates(["wiki/wiki_prices.parquet"], self.DEFAULT_PATHS)
+        for path in candidate_paths:
             resolved = path.expanduser().resolve()
             if resolved.exists():
                 self.logger.debug("Auto-detected Wiki Prices Parquet", path=str(resolved))
@@ -248,7 +252,7 @@ class WikiPricesProvider(BaseProvider):
         # Not found anywhere
         raise FileNotFoundError(
             "Wiki Prices Parquet not found. Tried locations:\n"
-            + "\n".join(f"  - {p}" for p in self.DEFAULT_PATHS)
+            + "\n".join(f"  - {p}" for p in candidate_paths)
             + "\n\nProvide explicit path: WikiPricesProvider(parquet_path='/path/to/file.parquet')"
         )
 
@@ -532,7 +536,7 @@ class WikiPricesProvider(BaseProvider):
         Args:
             output_path: Directory or file path for the downloaded data.
                         If directory, saves as 'wiki_prices.parquet' in that directory.
-                        Defaults to ~/ml4t/data/wiki/wiki_prices.parquet
+                        Defaults to ./data/wiki/wiki_prices.parquet
             api_key: NASDAQ Data Link API key. If not provided, looks for:
                     1. QUANDL_API_KEY environment variable
                     2. NASDAQ_DATA_LINK_API_KEY environment variable
@@ -574,7 +578,7 @@ class WikiPricesProvider(BaseProvider):
 
         # Resolve output path
         if output_path is None:
-            output_dir = cls.DEFAULT_DOWNLOAD_PATH
+            output_dir = resolve_ml4t_data_path("wiki", default_path=cls.DEFAULT_DOWNLOAD_PATH)
             output_file = output_dir / "wiki_prices.parquet"
         else:
             output_path = Path(output_path).expanduser()

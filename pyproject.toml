@@ -69,6 +69,7 @@ requires-python = ">=3.12"
 
 # Core dependencies
 dependencies = [
+    "ml4t-specs>=0.1.0b0",
     # Data processing
     "polars>=0.20.0",
     "pandas>=2.0.0",
@@ -150,11 +151,11 @@ all = [
 ml4t-data = "ml4t.data.cli_interface:cli"
 
 [project.urls]
-Homepage = "https://github.com/stefan-jansen/ml4t-data"
+Homepage = "https://github.com/ml4t/data"
 Documentation = "https://ml4t-data.readthedocs.io"
-Repository = "https://github.com/stefan-jansen/ml4t-data"
-Issues = "https://github.com/stefan-jansen/ml4t-data/issues"
-Changelog = "https://github.com/stefan-jansen/ml4t-data/blob/main/CHANGELOG.md"
+Repository = "https://github.com/ml4t/data"
+Issues = "https://github.com/ml4t/data/issues"
+Changelog = "https://github.com/ml4t/data/releases"
 
 [dependency-groups]
 dev = [
@@ -175,6 +176,7 @@ dev = [
 ]
 
 [tool.uv.sources]
+ml4t-specs = { path = "../ml4t-specs", editable = true }
 ml4t-docs-theme = { path = "../ml4t-docs-theme", editable = true }
 
 [tool.pytest.ini_options]

@@ -28,6 +28,16 @@ class TestConfigLoader:
         finally:
             os.chdir(original_cwd)
 
+    def test_find_config_file_with_env_override(self, tmp_path, monkeypatch):
+        """Test ML4T_DATA_CONFIG overrides the default search."""
+        config_file = tmp_path / "custom.yaml"
+        config_file.write_text("version: '1.0'")
+        monkeypatch.setenv("ML4T_DATA_CONFIG", str(config_file))
+
+        loader = ConfigLoader()
+
+        assert loader.config_path == config_file
+
     def test_no_config_file(self, tmp_path):
         """Test behavior when no config file exists."""
         original_cwd = Path.cwd()
@@ -55,6 +65,7 @@ class TestConfigLoader:
 
         assert config.version == "1.0"
         assert config.base_dir == Path("/data")
+        assert config.storage.base_path == Path("/data")
         assert config.log_level == "DEBUG"
 
     def test_environment_variable_interpolation(self, tmp_path):

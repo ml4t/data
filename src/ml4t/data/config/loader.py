@@ -12,6 +12,7 @@ import yaml
 from pydantic import ValidationError
 
 from ml4t.data.config.models import DataConfig
+from ml4t.data.paths import find_ml4t_data_config_path
 
 logger = structlog.get_logger()
 
@@ -31,21 +32,10 @@ class ConfigLoader:
 
     def _find_config_file(self) -> Path | None:
         """Find configuration file in standard locations."""
-        search_paths = [
-            Path.cwd() / "ml4t.data.yaml",
-            Path.cwd() / "ml4t.data.yml",
-            Path.cwd() / ".ml4t-data.yaml",
-            Path.cwd() / ".ml4t-data.yml",
-            Path.cwd() / "config" / "ml4t.data.yaml",
-            Path.home() / ".config" / "ml4t-data" / "config.yaml",
-        ]
-
-        for path in search_paths:
-            if path.exists():
-                logger.info(f"Found configuration file: {path}")
-                return path
-
-        return None
+        path = find_ml4t_data_config_path()
+        if path is not None:
+            logger.info(f"Found configuration file: {path}")
+        return path
 
     def _interpolate_env_vars(self, data: Any) -> Any:
         """
@@ -241,7 +231,7 @@ class ConfigLoader:
         """
         save_path = path or self.config_path
         if not save_path:
-            save_path = Path.cwd() / "mlquant.data.yaml"
+            save_path = Path.cwd() / "ml4t.data.yaml"
 
         # Convert to dictionary with JSON-compatible types
         data = config.model_dump(exclude_none=True, exclude_defaults=False, mode="json")

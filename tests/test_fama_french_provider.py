@@ -41,6 +41,14 @@ class TestFamaFrenchProviderInit:
 
         assert provider.use_cache is False
 
+    def test_default_init_uses_ml4t_data_path(self, tmp_path, monkeypatch):
+        """Test cache path defaults under ML4T_DATA_PATH when set."""
+        monkeypatch.setenv("ML4T_DATA_PATH", str(tmp_path))
+
+        provider = FamaFrenchProvider()
+
+        assert provider.cache_path == tmp_path / "factors" / "fama_french"
+
 
 class TestListMethods:
     """Tests for listing datasets and categories."""

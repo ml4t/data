@@ -50,6 +50,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -203,7 +204,7 @@ class AQRFactorProvider(BaseProvider):
     """
 
     # Default data location
-    DEFAULT_PATH: ClassVar[Path] = Path("~/ml4t/data/aqr_factors").expanduser()
+    DEFAULT_PATH: ClassVar[Path] = default_ml4t_data_path("factors/aqr")
 
     # AQR base URL
     BASE_URL: ClassVar[str] = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/"
@@ -629,7 +630,7 @@ class AQRFactorProvider(BaseProvider):
         Initialize AQR factor provider.
 
         Args:
-            data_path: Path to AQR data directory (default: ~/ml4t/data/aqr_factors/)
+            data_path: Path to AQR data directory (default: ./data/factors/aqr)
                       Should contain parquet files from download().
 
         Raises:
@@ -637,17 +638,14 @@ class AQRFactorProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
-        if data_path is None:
-            # Check ML4T_DATA_PATH first (test/CI environments), then default
-            import os
-
-            ml4t_data = os.environ.get("ML4T_DATA_PATH")
-            if ml4t_data:
-                candidate = Path(ml4t_data) / "factors" / "aqr"
-                if candidate.exists():
-                    data_path = candidate
-
-        self.data_path = Path(data_path or self.DEFAULT_PATH).expanduser()
+        self.data_path = (
+            Path(data_path).expanduser()
+            if data_path is not None
+            else resolve_ml4t_data_path(
+                "factors/aqr",
+                default_path=self.DEFAULT_PATH,
+            )
+        )
 
         if not self.data_path.exists():
             raise FileNotFoundError(
@@ -817,7 +815,7 @@ class AQRFactorProvider(BaseProvider):
         and saves as Parquet files for efficient querying.
 
         Args:
-            output_path: Directory to save data (default: ~/ml4t/data/aqr_factors/)
+            output_path: Directory to save data (default: ./data/factors/aqr)
             datasets: List of datasets to download (default: all except optional)
             include_optional: Include optional/static datasets (default: False)
 
@@ -836,7 +834,11 @@ class AQRFactorProvider(BaseProvider):
         """
         log = structlog.get_logger()
 
-        output_dir = Path(output_path or cls.DEFAULT_PATH).expanduser()
+        output_dir = (
+            Path(output_path).expanduser()
+            if output_path is not None
+            else resolve_ml4t_data_path("factors/aqr", default_path=cls.DEFAULT_PATH)
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine which datasets to download

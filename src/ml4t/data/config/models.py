@@ -103,8 +103,8 @@ class StorageConfig(BaseModel):
     @field_validator("base_path")
     @classmethod
     def expand_path(cls, v: Path) -> Path:
-        """Expand user home directory and make absolute."""
-        return v.expanduser().resolve()
+        """Expand user home directory."""
+        return v.expanduser()
 
     @model_validator(mode="after")
     def validate_partitions(self) -> StorageConfig:
@@ -355,6 +355,38 @@ class DataConfig(BaseSettings):
         extra="ignore",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_storage_root(cls, data: Any) -> Any:
+        """Keep legacy base_dir aligned with storage.base_path."""
+        if not isinstance(data, dict):
+            return data
+
+        normalized = dict(data)
+        storage = normalized.get("storage")
+        storage_dict = dict(storage) if isinstance(storage, dict) else storage
+        storage_base_path = storage_dict.get("base_path") if isinstance(storage_dict, dict) else None
+        base_dir = normalized.get("base_dir")
+        data_root = normalized.get("data_root")
+
+        if storage_base_path is not None:
+            normalized["base_dir"] = storage_base_path
+        else:
+            shared_root = base_dir if base_dir is not None else data_root
+            if shared_root is not None:
+                if isinstance(storage_dict, dict):
+                    storage_dict["base_path"] = shared_root
+                    normalized["storage"] = storage_dict
+                elif storage_dict is None:
+                    normalized["storage"] = {"base_path": shared_root}
+
+        if normalized.get("base_dir") is None and isinstance(normalized.get("storage"), dict):
+            base_path = normalized["storage"].get("base_path")
+            if base_path is not None:
+                normalized["base_dir"] = base_path
+
+        return normalized
+
     @field_validator("storage", mode="before")
     @classmethod
     def convert_storage(cls, v):
@@ -371,28 +403,9 @@ class DataConfig(BaseSettings):
     @classmethod
     def from_yaml(cls, path: str | Path) -> DataConfig:
         """Load configuration from YAML file with environment variable support."""
-        import os
-        import re
+        from ml4t.data.config.loader import ConfigLoader
 
-        import yaml
-
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {path}")
-
-        with open(path) as f:
-            content = f.read()
-
-        # Expand environment variables in format ${VAR_NAME}
-        def expand_env_vars(match):
-            var_name = match.group(1)
-            return os.environ.get(var_name, match.group(0))
-
-        content = re.sub(r"\$\{([^}]+)\}", expand_env_vars, content)
-        data = yaml.safe_load(content)
-
-        # Create instance with merged config
-        return cls(**data)
+        return ConfigLoader(Path(path)).load()
 
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML file."""

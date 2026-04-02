@@ -18,6 +18,7 @@ from ml4t.data.futures.roll import (
     VolumeBasedRoll,
 )
 from ml4t.data.futures.schema import AssetClass, ContractSpec, SettlementType
+from ml4t.data.paths import default_ml4t_data_path
 
 
 # Test fixtures
@@ -188,7 +189,7 @@ class TestContinuousContractBuilderBuild:
             result = builder.build("ES", data_source="databento")
 
             # Verify parsers were called with default path
-            expected_path = Path("~/ml4t-data/futures").expanduser()
+            expected_path = default_ml4t_data_path("futures")
             mock_raw.assert_called_once_with("ES", expected_path)
             mock_cont.assert_called_once_with("ES", expected_path)
 

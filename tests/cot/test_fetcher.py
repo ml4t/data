@@ -123,6 +123,14 @@ class TestCOTConfig:
         config = COTConfig(start_year=2020, end_year=None)
         assert config.end_year == datetime.now().year
 
+    def test_default_storage_path_uses_ml4t_data_path(self, tmp_path, monkeypatch):
+        """Test ML4T_DATA_PATH drives the default COT storage path."""
+        monkeypatch.setenv("ML4T_DATA_PATH", str(tmp_path))
+
+        config = COTConfig()
+
+        assert config.storage_path == tmp_path / "cot"
+
 
 class TestLoadCOTConfig:
     """Tests for load_cot_config function."""

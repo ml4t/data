@@ -95,3 +95,14 @@ class TestParseQuandlCHRIS:
         missing = tmp_path / "missing.parquet"
         with pytest.raises(FileNotFoundError, match="legacy CHRIS dataset is no longer available"):
             parse_quandl_chris("ES", data_path=missing)
+
+    def test_default_path_uses_ml4t_data_path(self, tmp_path, monkeypatch, chris_data_path):
+        data_root = tmp_path / "data-root"
+        target = data_root / "futures" / "quandl" / "chris_futures.parquet"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(chris_data_path.read_bytes())
+        monkeypatch.setenv("ML4T_DATA_PATH", str(data_root))
+
+        data = parse_quandl_chris("ES")
+
+        assert len(data) == 2

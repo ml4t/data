@@ -33,6 +33,14 @@ class TestCryptoConfig:
         assert "~" not in str(config.storage_path)
         assert config.storage_path.is_absolute()
 
+    def test_default_storage_path_uses_ml4t_data_path(self, tmp_path, monkeypatch):
+        """Test ML4T_DATA_PATH drives the default storage path."""
+        monkeypatch.setenv("ML4T_DATA_PATH", str(tmp_path))
+
+        config = CryptoConfig()
+
+        assert config.storage_path == tmp_path / "crypto"
+
     def test_get_all_symbols_empty(self):
         """Test get_all_symbols with empty config."""
         config = CryptoConfig()
@@ -154,6 +162,40 @@ crypto:
         assert manager.config.start == "2023-01-01"
         assert manager.config.perps["start"] == "2022-01-01"
         assert "BTCUSDT" in manager.config.get_all_symbols()
+
+    def test_from_config_uses_global_storage_root(self, temp_storage):
+        """Global storage.base_path should drive crypto storage when section path is absent."""
+        yaml_content = f"""
+storage:
+  base_path: {temp_storage}
+crypto:
+  provider: binance_bulk
+  symbols:
+    major:
+      symbols: ["BTCUSDT"]
+"""
+        config_file = temp_storage / "crypto_config.yaml"
+        config_file.write_text(yaml_content)
+
+        manager = CryptoDataManager.from_config(config_file)
+
+        assert manager.config.storage_path == temp_storage / "crypto"
+
+    def test_from_config_resolves_relative_storage_path_from_config_dir(self, temp_storage):
+        """Relative storage_path should resolve from the YAML file location."""
+        config_dir = temp_storage / "configs"
+        config_dir.mkdir()
+        config_file = config_dir / "crypto_config.yaml"
+        config_file.write_text(
+            """
+crypto:
+  storage_path: data/crypto
+"""
+        )
+
+        manager = CryptoDataManager.from_config(config_file)
+
+        assert manager.config.storage_path == config_dir / "data" / "crypto"
 
     def test_provider_lazy_initialization(self, manager):
         """Test that provider is lazily initialized."""

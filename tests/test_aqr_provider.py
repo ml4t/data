@@ -55,6 +55,24 @@ class TestAQRFactorProviderInit:
             with pytest.raises(FileNotFoundError):
                 AQRFactorProvider()
 
+    def test_init_uses_ml4t_data_path_when_present(self, tmp_path, monkeypatch):
+        """Test ML4T_DATA_PATH is preferred when it contains AQR data."""
+        data_root = tmp_path / "data-root"
+        aqr_path = data_root / "factors" / "aqr"
+        aqr_path.mkdir(parents=True)
+        monkeypatch.setenv("ML4T_DATA_PATH", str(data_root))
+
+        provider = AQRFactorProvider()
+
+        assert provider.data_path == aqr_path
+
+    def test_init_raises_when_env_target_missing(self, tmp_path, monkeypatch):
+        """Configured data root should not silently fall back elsewhere."""
+        monkeypatch.setenv("ML4T_DATA_PATH", str(tmp_path / "data-root"))
+
+        with pytest.raises(FileNotFoundError):
+            AQRFactorProvider()
+
 
 class TestNameProperty:
     """Tests for name property."""

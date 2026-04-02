@@ -1,13 +1,13 @@
 """Tests for NASDAQ ITCH sample data provider."""
 
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.paths import default_ml4t_data_path
 from ml4t.data.providers.nasdaq_itch import ITCHSampleProvider
 
 
@@ -18,11 +18,19 @@ class TestITCHSampleProviderInit:
         """Test default download and parsed paths."""
         provider = ITCHSampleProvider()
 
-        # Default paths use ~/.ml4t/data/equities/nasdaq_itch
-        assert provider.download_path == Path("~/.ml4t/data/equities/nasdaq_itch").expanduser()
+        assert provider.download_path == default_ml4t_data_path("equities/nasdaq_itch")
         assert (
-            provider.parsed_path == Path("~/.ml4t/data/equities/nasdaq_itch/messages").expanduser()
+            provider.parsed_path == default_ml4t_data_path("equities/nasdaq_itch/messages")
         )
+
+    def test_default_paths_use_ml4t_data_path(self, tmp_path, monkeypatch):
+        """Test ML4T_DATA_PATH drives default ITCH locations."""
+        monkeypatch.setenv("ML4T_DATA_PATH", str(tmp_path))
+
+        provider = ITCHSampleProvider()
+
+        assert provider.download_path == tmp_path / "equities" / "nasdaq_itch"
+        assert provider.parsed_path == tmp_path / "equities" / "nasdaq_itch" / "messages"
 
     def test_custom_download_path(self, tmp_path):
         """Test custom download path."""

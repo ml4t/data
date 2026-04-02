@@ -614,6 +614,22 @@ futures:
         assert FuturesCategory.EQUITY_INDEX in config.products
         assert config.products[FuturesCategory.EQUITY_INDEX] == ["ES", "NQ"]
 
+    def test_load_yaml_config_uses_global_storage_root(self, temp_storage):
+        """Global storage.base_path should drive futures storage when section path is absent."""
+        yaml_content = f"""
+storage:
+  base_path: {temp_storage}
+futures:
+  products:
+    - ES
+"""
+        config_file = temp_storage / "config.yaml"
+        config_file.write_text(yaml_content)
+
+        config = load_yaml_config(config_file)
+
+        assert config.storage_path == temp_storage / "futures"
+
     def test_load_definitions_config(self, temp_storage):
         """Test loading definitions config from YAML."""
         yaml_content = """

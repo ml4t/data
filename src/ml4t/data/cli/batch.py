@@ -8,6 +8,7 @@ import click
 import yaml
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 
@@ -62,7 +63,13 @@ def update_all(ctx, config, dataset, dry_run):
             cfg = yaml.safe_load(f)
 
         # Get storage path
-        storage_path = Path(cfg["storage"]["path"]).expanduser()
+        storage_path = resolve_ml4t_data_path(
+            ".",
+            default_path=default_ml4t_data_path(),
+            configured_path=cfg.get("storage", {}).get("path"),
+            config=cfg,
+            config_dir=config_path.parent,
+        )
         console.print(f"[cyan]Storage:[/cyan] {storage_path}")
 
         # Initialize storage and manager

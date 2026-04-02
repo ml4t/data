@@ -50,6 +50,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -552,7 +553,7 @@ class FamaFrenchProvider(BaseProvider):
     }
 
     # Default cache location
-    DEFAULT_CACHE_PATH: ClassVar[Path] = Path("~/ml4t/data/french_factors").expanduser()
+    DEFAULT_CACHE_PATH: ClassVar[Path] = default_ml4t_data_path("factors/fama_french")
 
     def __init__(
         self,
@@ -563,12 +564,19 @@ class FamaFrenchProvider(BaseProvider):
         Initialize Fama-French provider.
 
         Args:
-            cache_path: Directory to cache downloaded data (default: ~/ml4t/data/french_factors/)
+            cache_path: Directory to cache downloaded data (default: ./data/factors/fama_french)
             use_cache: Whether to use cached data if available (default: True)
         """
         super().__init__(rate_limit=None)
 
-        self.cache_path = Path(cache_path or self.DEFAULT_CACHE_PATH).expanduser()
+        self.cache_path = (
+            Path(cache_path).expanduser()
+            if cache_path is not None
+            else resolve_ml4t_data_path(
+                "factors/fama_french",
+                default_path=self.DEFAULT_CACHE_PATH,
+            )
+        )
         self.use_cache = use_cache
 
         if use_cache:

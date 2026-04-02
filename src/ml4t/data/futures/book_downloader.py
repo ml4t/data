@@ -40,6 +40,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.data_profile import (
     DatasetProfile,
     generate_profile,
@@ -84,7 +85,12 @@ class FuturesConfig:
     dataset: str = "GLBX.MDP3"
     start: str = "2016-01-01"
     end: str = "2025-12-31"
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "futures")
+    storage_path: Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "futures",
+            default_path=default_ml4t_data_path("futures"),
+        )
+    )
     products: dict[str, list[str]] = field(default_factory=dict)
     definition_dates: list[str] = field(default_factory=list)
     generate_profile: bool = True  # Generate column-level statistics per product
@@ -145,9 +151,13 @@ class FuturesDataManager:
             dataset=futures_config.get("dataset", "GLBX.MDP3"),
             start=futures_config.get("start", "2016-01-01"),
             end=futures_config.get("end", "2025-12-31"),
-            storage_path=Path(
-                futures_config.get("storage_path", "~/ml4t-data/futures")
-            ).expanduser(),
+            storage_path=resolve_ml4t_data_path(
+                "futures",
+                default_path=default_ml4t_data_path("futures"),
+                configured_path=futures_config.get("storage_path"),
+                config=raw_config,
+                config_dir=config_path.parent,
+            ),
             products=futures_config.get("products", {}),
             definition_dates=futures_config.get("definitions", {}).get("snapshot_dates", []),
         )

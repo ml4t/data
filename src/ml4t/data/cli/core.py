@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.metadata_tracker import MetadataTracker
@@ -30,6 +31,12 @@ from .utils import (
     save_dataframe,
     validate_date,
 )
+
+
+def _resolve_storage_path(storage_path: str | Path | None) -> Path:
+    if storage_path:
+        return Path(storage_path).expanduser()
+    return resolve_ml4t_data_path(".", default_path=default_ml4t_data_path())
 
 
 @click.command()
@@ -155,7 +162,7 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
     help="Update strategy",
 )
 @click.option("--provider", "-p", help="Provider to use for fetching")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--storage-path", default=None, help="Storage directory path")
 @click.pass_context
 def update(ctx, symbol, start, end, strategy, provider, storage_path):
     """Perform incremental data updates."""
@@ -163,9 +170,10 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
+        storage_path = _resolve_storage_path(storage_path)
+        storage_config = StorageConfig(base_path=storage_path)
         storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
+        tracker = MetadataTracker(storage_path)
 
         update_strategy = UpdateStrategy[strategy.upper()]
         updater = IncrementalUpdater(strategy=update_strategy)
@@ -246,7 +254,7 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
     type=click.Choice(["info", "warning", "error", "critical"]),
     help="Minimum severity to display",
 )
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--storage-path", default=None, help="Storage directory path")
 @click.pass_context
 def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storage_path):
     """Validate data quality and integrity."""
@@ -254,7 +262,8 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
+        storage_path = _resolve_storage_path(storage_path)
+        storage_config = StorageConfig(base_path=storage_path)
         storage = HiveStorage(storage_config)
 
         symbols = []
@@ -381,7 +390,7 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
 
 @click.command()
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed status")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--storage-path", default=None, help="Storage directory path")
 @click.pass_context
 def status(ctx, detailed, storage_path):
     """Show system overview and health status."""
@@ -389,9 +398,10 @@ def status(ctx, detailed, storage_path):
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
+        storage_path = _resolve_storage_path(storage_path)
+        storage_config = StorageConfig(base_path=storage_path)
         storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
+        tracker = MetadataTracker(storage_path)
 
         summary = tracker.get_summary()
 
@@ -463,7 +473,7 @@ Status: [{status_color}]{metadata.health_status}[/{status_color}]""".strip()
 def export(symbol, output, format_type, storage_path):
     """Export data to various formats (CSV, JSON, Parquet)."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
+        storage_path = _resolve_storage_path(storage_path)
         config = StorageConfig(base_path=storage_path)
         storage = HiveStorage(config)
 
@@ -497,7 +507,7 @@ def export(symbol, output, format_type, storage_path):
 def info(symbol, storage_path):
     """Show information about stored data."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
+        storage_path = _resolve_storage_path(storage_path)
         config = StorageConfig(base_path=storage_path)
         storage = HiveStorage(config)
         tracker = MetadataTracker(base_path=storage_path)
@@ -547,9 +557,15 @@ def list_data(_ctx, config, storage_path):
         if config:
             with open(config) as f:
                 cfg = yaml.safe_load(f)
-            storage_path = Path(cfg["storage"]["path"]).expanduser()
+            storage_path = resolve_ml4t_data_path(
+                ".",
+                default_path=default_ml4t_data_path(),
+                configured_path=cfg.get("storage", {}).get("path"),
+                config=cfg,
+                config_dir=Path(config).expanduser().parent,
+            )
         elif storage_path:
-            storage_path = Path(storage_path).expanduser()
+            storage_path = _resolve_storage_path(storage_path)
         else:
             console.print("[red]Either --config or --storage-path required[/red]")
             raise click.Abort()

@@ -82,6 +82,18 @@ class TestWikiPricesProviderInit:
             with pytest.raises(FileNotFoundError, match="Wiki Prices Parquet not found"):
                 WikiPricesProvider()
 
+    def test_init_auto_detects_ml4t_data_path(self, tmp_path, monkeypatch):
+        """Test auto-detection checks ML4T_DATA_PATH before legacy paths."""
+        data_root = tmp_path / "data-root"
+        parquet_file = data_root / "wiki" / "wiki_prices.parquet"
+        parquet_file.parent.mkdir(parents=True)
+        pl.DataFrame({"ticker": [], "date": []}).write_parquet(parquet_file)
+        monkeypatch.setenv("ML4T_DATA_PATH", str(data_root))
+
+        provider = WikiPricesProvider()
+
+        assert provider.parquet_path == parquet_file.resolve()
+
 
 class TestNameProperty:
     """Tests for name property."""

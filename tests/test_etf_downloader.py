@@ -146,6 +146,24 @@ etfs:
         assert manager.config.start == "2020-01-01"
         assert "SPY" in manager.config.get_all_symbols()
 
+    def test_from_config_uses_global_storage_root(self, temp_storage):
+        """Global storage.base_path should drive ETF storage when section path is absent."""
+        yaml_content = f"""
+storage:
+  base_path: {temp_storage}
+etfs:
+  provider: yahoo
+  tickers:
+    equity:
+      symbols: ["SPY"]
+"""
+        config_file = temp_storage / "etf_config.yaml"
+        config_file.write_text(yaml_content)
+
+        manager = ETFDataManager.from_config(config_file)
+
+        assert manager.config.storage_path == temp_storage / "etfs"
+
     def test_provider_lazy_initialization(self, manager):
         """Test that provider is lazily initialized."""
         assert manager._provider is None

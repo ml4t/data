@@ -10,15 +10,23 @@ from pathlib import Path
 import polars as pl
 
 from ml4t.data.futures.schema import ContractSpec
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 
 DEFAULT_CHRIS_ENV_VAR = "ML4T_QUANDL_CHRIS_PATH"
-DEFAULT_CHRIS_PATH = Path("~/ml4t-data/futures/quandl/chris_futures.parquet").expanduser()
+DEFAULT_CHRIS_PATH = default_ml4t_data_path("futures/quandl/chris_futures.parquet")
 
 
 def _resolve_chris_data_path(data_path: str | Path | None) -> Path:
     if data_path is None:
         env_path = os.getenv(DEFAULT_CHRIS_ENV_VAR)
-        resolved = Path(env_path).expanduser() if env_path else DEFAULT_CHRIS_PATH
+        resolved = (
+            Path(env_path).expanduser()
+            if env_path
+            else resolve_ml4t_data_path(
+                "futures/quandl/chris_futures.parquet",
+                default_path=DEFAULT_CHRIS_PATH,
+            )
+        )
     else:
         resolved = Path(data_path).expanduser()
 

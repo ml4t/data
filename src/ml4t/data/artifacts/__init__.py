@@ -1,20 +1,19 @@
-"""Artifact contracts owned by ml4t-data."""
+"""Backward-compatible re-exports for ML4T artifact specs."""
 
-from .base import (
+from ml4t.specs import (
     ArtifactKind,
     ArtifactProvenance,
     ArtifactSpec,
     ArtifactStorage,
-    optional_str,
-    serialize_artifact_value,
-)
-from .io import read_spec_payload, write_spec_payload
-from .market_data import (
     FeedSpec,
     MarketDataSchema,
     MarketDataSemantics,
     MarketDataSpec,
     TimestampSemantics,
+    optional_str,
+    read_spec_payload,
+    serialize_artifact_value,
+    write_spec_payload,
 )
 
 __all__ = [

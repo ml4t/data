@@ -30,7 +30,7 @@ class DefinitionsDownloader:
     Example:
         >>> downloader = DefinitionsDownloader(
         ...     products=["ES", "CL", "GC"],
-        ...     storage_path="~/ml4t-data/futures",
+        ...     storage_path="./data/futures",
         ... )
         >>> downloader.download_snapshots()
         >>> df = downloader.get_merged_definitions()

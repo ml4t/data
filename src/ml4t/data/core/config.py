@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ml4t.data.paths import ML4T_DATA_ENV_VAR, default_ml4t_data_path, resolve_ml4t_data_path
+
 
 class StorageBackendType(str, Enum):
     """Supported storage backend types."""
@@ -65,7 +67,9 @@ class CacheConfig(BaseModel):
 class Config(BaseModel):
     """Main configuration for QLDM."""
 
-    data_root: Path = Field(default_factory=lambda: Path.home() / ".qldm" / "data")
+    data_root: Path = Field(
+        default_factory=lambda: resolve_ml4t_data_path(".", default_path=default_ml4t_data_path())
+    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     storage: StorageConfig = Field(default_factory=StorageConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
@@ -83,9 +87,8 @@ class Config(BaseModel):
 
     def __init__(self, **data: Any) -> None:
         """Initialize config with environment variables."""
-        # Override with environment variables
-        if "QLDM_DATA_ROOT" in os.environ:
-            data["data_root"] = Path(os.environ["QLDM_DATA_ROOT"])
+        if ML4T_DATA_ENV_VAR in os.environ:
+            data["data_root"] = Path(os.environ[ML4T_DATA_ENV_VAR]).expanduser()
         if "QLDM_LOG_LEVEL" in os.environ:
             data["log_level"] = os.environ["QLDM_LOG_LEVEL"]
 

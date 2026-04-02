@@ -11,6 +11,7 @@ from rich import box
 from rich.table import Table
 
 from ml4t.data import __version__
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 from ml4t.data.storage.metadata_tracker import MetadataTracker
 
 from .utils import console
@@ -55,7 +56,9 @@ def providers():
 @click.pass_context
 def show_config(ctx):
     """Show current configuration."""
-    storage_path = ctx.params.get("storage_path") or Path.cwd() / "data"
+    storage_path = ctx.params.get("storage_path") or resolve_ml4t_data_path(
+        ".", default_path=default_ml4t_data_path()
+    )
 
     table = Table(title="ML4T Data Configuration", box=box.ROUNDED)
     table.add_column("Setting", style="cyan")
@@ -75,7 +78,11 @@ def show_config(ctx):
 def health(storage_path, stale_days, detailed):
     """Check health status of all datasets."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
+        storage_path = (
+            Path(storage_path).expanduser()
+            if storage_path
+            else resolve_ml4t_data_path(".", default_path=default_ml4t_data_path())
+        )
         tracker = MetadataTracker(base_path=storage_path)
 
         summary = tracker.get_summary()

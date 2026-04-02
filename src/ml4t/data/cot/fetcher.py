@@ -15,6 +15,8 @@ from typing import Literal
 import polars as pl
 import yaml
 
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -279,7 +281,12 @@ class COTConfig:
     products: list[str] = field(default_factory=list)
     start_year: int = 2020
     end_year: int | None = None  # None = current year
-    storage_path: Path = field(default_factory=lambda: Path("~/ml4t-data/cot").expanduser())
+    storage_path: Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "cot",
+            default_path=default_ml4t_data_path("cot"),
+        )
+    )
     include_options: bool = False  # Use *_futopt reports instead of *_fut
 
     def __post_init__(self):
@@ -303,7 +310,7 @@ def load_cot_config(config_path: str | Path) -> COTConfig:
           - GC
         start_year: 2020
         end_year: 2024
-        storage_path: ~/ml4t-data/cot
+        storage_path: ./data/cot
     """
     with open(config_path) as f:
         data = yaml.safe_load(f)
@@ -312,7 +319,13 @@ def load_cot_config(config_path: str | Path) -> COTConfig:
         products=data.get("products", []),
         start_year=data.get("start_year", 2020),
         end_year=data.get("end_year"),
-        storage_path=Path(data.get("storage_path", "~/ml4t-data/cot")).expanduser(),
+        storage_path=resolve_ml4t_data_path(
+            "cot",
+            default_path=default_ml4t_data_path("cot"),
+            configured_path=data.get("storage_path"),
+            config=data,
+            config_dir=Path(config_path).expanduser().parent,
+        ),
         include_options=data.get("include_options", False),
     )
 

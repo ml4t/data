@@ -23,7 +23,7 @@ Usage:
             "CL": {"months": list(range(1, 13))},  # Monthly
         },
         years=[2024, 2025],
-        storage_path="~/ml4t-data/futures/individual",
+        storage_path="./data/futures/individual",
     )
     downloader = IndividualDownloader(config)
     downloader.download_all()
@@ -47,6 +47,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 
 from .databento_parser import MONTH_TO_CODE
 
@@ -86,7 +88,12 @@ class IndividualDownloadConfig:
 
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
     years: list[int] = field(default_factory=lambda: [2024, 2025])
-    storage_path: str | Path = "~/ml4t-data/futures/individual"
+    storage_path: str | Path = field(
+        default_factory=lambda: resolve_ml4t_data_path(
+            "futures/individual",
+            default_path=default_ml4t_data_path("futures/individual"),
+        )
+    )
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1h"
     api_key: str | None = None
@@ -138,11 +145,13 @@ def load_individual_config(yaml_path: str | Path) -> IndividualDownloadConfig:
     individual_data = data.get("individual", data)
 
     # Extract storage path
-    storage_path = individual_data.get("output_dir", "futures/individual")
-    if not storage_path.startswith("/") and not storage_path.startswith("~"):
-        # Relative path - prepend default data dir
-        base_storage = data.get("storage", {}).get("path", "~/ml4t-data")
-        storage_path = f"{base_storage}/{storage_path}"
+    storage_path = resolve_ml4t_data_path(
+        "futures/individual",
+        default_path=default_ml4t_data_path("futures/individual"),
+        configured_path=individual_data.get("output_dir"),
+        config=data,
+        config_dir=yaml_path.parent,
+    )
 
     return IndividualDownloadConfig(
         products=individual_data.get("products", {}),

@@ -1393,6 +1393,7 @@ dependencies = [
     { name = "html5lib" },
     { name = "httpx" },
     { name = "lxml" },
+    { name = "ml4t-specs" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -1522,6 +1523,7 @@ requires-dist = [
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
     { name = "ml4t-docs-theme", marker = "extra == 'all'", editable = "../ml4t-docs-theme" },
     { name = "ml4t-docs-theme", marker = "extra == 'docs'", editable = "../ml4t-docs-theme" },
+    { name = "ml4t-specs", editable = "../ml4t-specs" },
     { name = "mypy", marker = "extra == 'all'", specifier = ">=1.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "numpy", specifier = ">=1.24.0" },
@@ -1592,6 +1594,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "mkdocs-material", specifier = ">=9.7,<10" }]
+
+[[package]]
+name = "ml4t-specs"
+source = { editable = "../ml4t-specs" }
+dependencies = [
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6.0" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "ruff", specifier = ">=0.8.0" },
+    { name = "ty" },
+]
 
 [[package]]
 name = "more-itertools"

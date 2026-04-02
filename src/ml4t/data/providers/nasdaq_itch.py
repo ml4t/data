@@ -9,7 +9,6 @@ Data Source: https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urljoin
@@ -19,6 +18,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.paths import default_ml4t_data_path, resolve_ml4t_data_path
 
 logger = structlog.get_logger()
 
@@ -62,7 +62,7 @@ class ITCHSampleProvider:
 
     # Download a sample file
     provider = ITCHSampleProvider()
-    path = provider.download("01302019")  # Downloads to ~/ml4t/data/itch/
+    path = provider.download("01302019")  # Downloads to ./data/equities/nasdaq_itch/
 
     # List available files on NASDAQ server
     files = provider.list_available_files()
@@ -121,13 +121,10 @@ class ITCHSampleProvider:
         "12302019.NASDAQ_ITCH50.gz": 3_780_000_000,  # ~3.52 GB
     }
 
-    # Default locations (configurable via ML4T_DATA_DIR env var or ~/.ml4t/data/)
-    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = (
-        Path(os.environ.get("ML4T_DATA_DIR", "~/.ml4t/data")).expanduser() / "equities/nasdaq_itch"
-    )
-    DEFAULT_PARSED_PATH: ClassVar[Path] = (
-        Path(os.environ.get("ML4T_DATA_DIR", "~/.ml4t/data")).expanduser()
-        / "equities/nasdaq_itch/messages"
+    # Default legacy locations
+    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = default_ml4t_data_path("equities/nasdaq_itch")
+    DEFAULT_PARSED_PATH: ClassVar[Path] = default_ml4t_data_path(
+        "equities/nasdaq_itch/messages"
     )
 
     # Message type descriptions
@@ -165,17 +162,27 @@ class ITCHSampleProvider:
 
         Args:
             download_path: Directory to store downloaded ITCH files
-                          (default: ~/ml4t/data/itch)
+                          (default: ./data/equities/nasdaq_itch)
             parsed_path: Directory containing pre-parsed message parquets
-                        (default: $ML4T_DATA_DIR/equities/nasdaq_itch/messages or ~/.ml4t/data/...)
+                        (default: ./data/equities/nasdaq_itch/messages)
         """
         self.logger = structlog.get_logger(name=self.__class__.__name__)
 
         self.download_path = (
-            Path(download_path).expanduser() if download_path else self.DEFAULT_DOWNLOAD_PATH
+            Path(download_path).expanduser()
+            if download_path
+            else resolve_ml4t_data_path(
+                "equities/nasdaq_itch",
+                default_path=self.DEFAULT_DOWNLOAD_PATH,
+            )
         )
         self.parsed_path = (
-            Path(parsed_path).expanduser() if parsed_path else self.DEFAULT_PARSED_PATH
+            Path(parsed_path).expanduser()
+            if parsed_path
+            else resolve_ml4t_data_path(
+                "equities/nasdaq_itch/messages",
+                default_path=self.DEFAULT_PARSED_PATH,
+            )
         )
 
         self.logger.info(
