@@ -505,6 +505,10 @@ class StorageManager:
             fetch_start = last_timestamp - timedelta(days=lookback_days)
             fetch_end = datetime.now(UTC)
 
+            # Normalize timezone: stored timestamps may be naive while now(UTC) is aware
+            if last_timestamp.tzinfo is None and fetch_end.tzinfo is not None:
+                fetch_end = fetch_end.replace(tzinfo=None)
+
             # Skip update if data is already current
             if frequency == "daily" and (fetch_end - last_timestamp).days < 1:
                 logger.info("Data is already up to date", last_timestamp=last_timestamp)
