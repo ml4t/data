@@ -5,8 +5,8 @@
 site_name: ML4T Data
 site_description: High-performance market data acquisition for quantitative finance
 site_url: https://ml4t.io/docs/data/
-repo_url: https://github.com/stefan-jansen/ml4t-data
-repo_name: stefan-jansen/ml4t-data
+repo_url: https://github.com/ml4t/data
+repo_name: ml4t/data
 
 # Theme configuration - Picasso Blue Period palette
 theme:
