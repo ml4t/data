@@ -14,31 +14,18 @@ theme:
   custom_dir: docs/overrides
 
   palette:
-    # Light mode (default)
-    - media: "(prefers-color-scheme: light)"
-      scheme: ml4t
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    # Dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: amber
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+    scheme: default
+    primary: custom
+    accent: custom
 
-  font:
-    text: DM Sans
-    code: JetBrains Mono
+  font: false
 
   features:
     - navigation.tabs
     - navigation.tabs.sticky
+    - navigation.indexes
     - navigation.sections
     - navigation.expand
-    - navigation.path
     - navigation.top
     - navigation.footer
     - toc.follow
