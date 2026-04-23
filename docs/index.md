@@ -17,11 +17,11 @@ hide:
 
     [:octicons-arrow-right-24: Quickstart](getting-started/quickstart.md)
 
--   :material-database:{ .lg .middle } __19 Data Providers__
+-   :material-database:{ .lg .middle } __20+ Provider Adapters__
 
     ---
 
-    Crypto, equities, forex, futures, and factor data from trusted sources.
+    Equities, crypto, forex, futures, macro, prediction markets, and factors.
 
     [:octicons-arrow-right-24: Provider Guide](getting-started/provider-selection.md)
 
@@ -33,11 +33,11 @@ hide:
 
     [:octicons-arrow-right-24: Performance](user-guide/index.md)
 
--   :material-shield-check:{ .lg .middle } __Production Ready__
+-   :material-shield-check:{ .lg .middle } __Pipeline Ready__
 
     ---
 
-    Circuit breakers, rate limiting, OHLC validation, incremental updates.
+    Circuit breakers, rate limiting, OHLC validation, and incremental updates.
 
     [:octicons-arrow-right-24: Features](user-guide/data-quality.md)
 
@@ -133,7 +133,7 @@ The book uses ml4t-data across 6 chapters and 25 notebooks, covering 14 of 20 pr
 
     [:octicons-arrow-right-24: Full book guide](book-guide/index.md)
 
--   :material-rocket-launch:{ .lg .middle } __Production Ready__
+-   :material-rocket-launch:{ .lg .middle } __Recurring Workflows__
 
     ---
 

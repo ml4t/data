@@ -19,7 +19,7 @@ Each library addresses a distinct stage: data infrastructure, feature engineerin
 Quantitative research requires consistent, reproducible access to market data from multiple sources. ml4t-data provides:
 
 - `DataManager` as the unified interface: fetch, store, update, and query across all providers
-- 23 live provider adapters covering equities, crypto, futures, forex, and economic data
+- 20+ provider adapters covering equities, crypto, futures, forex, macro, prediction markets, and factors
 - Automated storage in Hive-partitioned Parquet format with metadata tracking
 - Incremental updates, gap detection, and backfill via CLI
 - Built-in data validation (OHLC invariants, deduplication, anomaly detection)

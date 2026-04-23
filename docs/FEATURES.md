@@ -5,7 +5,7 @@
 | Metric | Value |
 |--------|-------|
 | **Status** | Pre-release (0.1.0) - breaking changes acceptable |
-| **Data Providers** | 13 active (12 live + 1 historical) + 1 mock |
+| **Data Providers** | 20 source/provider adapters, plus synthetic and mock providers for testing |
 | **Test Files** | 73 (50+ unit, 10 integration, 5+ acceptance) |
 | **Lines of Code** | ~18,900 in src/ |
 | **Python Version** | 3.9+ |
@@ -16,7 +16,7 @@
 
 ## Core Features Checklist
 
-### Providers (13/13 Complete)
+### Providers (20+ adapters)
 - [x] Yahoo Finance (unlimited, free)
 - [x] EODHD (500 calls/day)
 - [x] CoinGecko (free, no key)
@@ -24,7 +24,8 @@
 - [x] DataBento (institutional, trial)
 - [x] Wiki Prices (historical 1962-2018)
 - [x] Tiingo, Finnhub, Polygon, Twelve Data, CryptoCompare, Oanda
-- [x] MockProvider (testing)
+- [x] FRED, AQR, Fama-French, Kalshi, Polymarket, OKX, Binance public bulk, ITCH sample
+- [x] Synthetic and mock providers for testing
 
 ### Storage (Complete)
 - [x] Hive-partitioned Parquet (7x faster)
