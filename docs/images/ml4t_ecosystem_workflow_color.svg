@@ -1,0 +1,106 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-blue" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2 2L11 7L2 12" stroke="#1A2D4A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M2 2L11 7L2 12" stroke="#D4A84B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1600" height="900" fill="#FAFAF9"/>
+
+  <text x="120" y="102" fill="#0A1628" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">
+    The ML4T Library Ecosystem
+  </text>
+  <text x="120" y="138" fill="#475569" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="500">
+    One workflow for data, features, models, diagnostics, backtests, and deployment
+  </text>
+
+  <text x="120" y="208" fill="#1A2D4A" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="1.2">
+    BUILD
+  </text>
+  <text x="120" y="486" fill="#1A2D4A" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="1.2">
+    VALIDATE AND DEPLOY
+  </text>
+
+  <rect x="120" y="232" width="360" height="156" rx="24" fill="#0A1628"/>
+  <rect x="620" y="232" width="360" height="156" rx="24" fill="#152238"/>
+  <rect x="1120" y="232" width="360" height="156" rx="24" fill="#1A2D4A"/>
+
+  <rect x="120" y="510" width="360" height="156" rx="24" fill="#152238"/>
+  <rect x="620" y="510" width="360" height="156" rx="24" fill="#0A1628"/>
+  <rect x="1120" y="510" width="360" height="156" rx="24" fill="#152238"/>
+
+  <rect x="148" y="258" width="74" height="6" rx="3" fill="#D4A84B"/>
+  <rect x="648" y="258" width="74" height="6" rx="3" fill="#7DD3FC"/>
+  <rect x="1148" y="258" width="74" height="6" rx="3" fill="#D4A84B"/>
+  <rect x="148" y="536" width="74" height="6" rx="3" fill="#86EFAC"/>
+  <rect x="648" y="536" width="74" height="6" rx="3" fill="#93C5FD"/>
+  <rect x="1148" y="536" width="74" height="6" rx="3" fill="#FDA4AF"/>
+
+  <text x="148" y="294" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-data</text>
+  <text x="648" y="294" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-engineer</text>
+  <text x="1148" y="294" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-models</text>
+
+  <text x="148" y="324" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Curated market datasets</text>
+  <text x="648" y="324" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Features, labels, targets</text>
+  <text x="1148" y="324" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Forecasts, signals, weights</text>
+
+  <text x="148" y="364" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">providers • storage • updates</text>
+  <text x="648" y="364" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">indicators • bars • transforms</text>
+  <text x="1148" y="364" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">latent factors • SDF • portfolios</text>
+
+  <text x="148" y="572" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-diagnostic</text>
+  <text x="648" y="572" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-backtest</text>
+  <text x="1148" y="572" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="26" font-weight="700">ml4t-live</text>
+
+  <text x="148" y="602" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Signal quality and robustness</text>
+  <text x="648" y="602" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Execution-aware simulation</text>
+  <text x="1148" y="602" fill="#E8E8E6" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="500">Shadow and live deployment</text>
+
+  <text x="148" y="642" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">IC • CPCV • tear sheets</text>
+  <text x="648" y="642" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">risk rules • fills • artifacts</text>
+  <text x="1148" y="642" fill="#F8F8F6" font-family="Inter, Arial, sans-serif" font-size="14">brokers • controls • monitoring</text>
+
+  <path d="M480 314H620" stroke="#1A2D4A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
+  <path d="M980 314H1120" stroke="#1A2D4A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
+  <path d="M1300 388V454H300V510" stroke="#1A2D4A" stroke-width="4" stroke-linecap="round" fill="none" marker-end="url(#arrow-blue)"/>
+  <path d="M480 592H620" stroke="#1A2D4A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
+  <path d="M980 592H1120" stroke="#1A2D4A" stroke-width="4" stroke-linecap="round" marker-end="url(#arrow-blue)"/>
+
+  <rect x="510" y="292" width="86" height="28" rx="14" fill="#F8F8F6" stroke="#CBD5E1"/>
+  <text x="553" y="310" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">datasets</text>
+
+  <rect x="1012" y="292" width="84" height="28" rx="14" fill="#F8F8F6" stroke="#CBD5E1"/>
+  <text x="1054" y="310" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">features</text>
+
+  <rect x="900" y="418" width="126" height="28" rx="14" fill="#FFF7ED" stroke="#FCD34D"/>
+  <text x="963" y="436" text-anchor="middle" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">predictions / weights</text>
+
+  <rect x="510" y="570" width="110" height="28" rx="14" fill="#F8F8F6" stroke="#CBD5E1"/>
+  <text x="565" y="588" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">validated signals</text>
+
+  <rect x="1012" y="570" width="108" height="28" rx="14" fill="#F8F8F6" stroke="#CBD5E1"/>
+  <text x="1066" y="588" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">run artifacts</text>
+
+  <path d="M1298 666V714H300V388" stroke="#D4A84B" stroke-width="3" stroke-dasharray="8 10" fill="none" marker-end="url(#arrow-amber)"/>
+  <text x="1148" y="700" fill="#B7791F" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">
+    iterate and redeploy
+  </text>
+
+  <rect x="120" y="742" width="1360" height="102" rx="24" fill="#F8F8F6" stroke="#CBD5E1" stroke-width="1.5"/>
+  <text x="152" y="782" fill="#0A1628" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="700">
+    Shared handoffs
+  </text>
+  <rect x="420" y="760" width="148" height="36" rx="18" fill="#E2E8F0"/>
+  <text x="494" y="782" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">datasets</text>
+  <rect x="584" y="760" width="188" height="36" rx="18" fill="#E2E8F0"/>
+  <text x="678" y="782" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">feature matrices and labels</text>
+  <rect x="788" y="760" width="176" height="36" rx="18" fill="#FFF7ED" stroke="#FCD34D"/>
+  <text x="876" y="782" text-anchor="middle" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">predictions and weights</text>
+  <rect x="980" y="760" width="154" height="36" rx="18" fill="#E2E8F0"/>
+  <text x="1057" y="782" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">validated signals</text>
+  <rect x="1150" y="760" width="182" height="36" rx="18" fill="#E2E8F0"/>
+  <text x="1241" y="782" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">backtest artifacts</text>
+</svg>
