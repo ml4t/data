@@ -19,9 +19,49 @@ Schema Design:
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import polars as pl
+
+
+def _build_fill_expression(name: str, value: Any, dtype: pl.DataType | None) -> pl.Expr:
+    if dtype is not None:
+        return pl.lit(value, dtype=dtype).alias(name)
+    return pl.lit(value).alias(name)
+
+
+def _align_frame_columns(
+    df: pl.DataFrame,
+    columns: list[str],
+    schema: dict[str, pl.DataType],
+    fill_values: dict[str, Any] | None = None,
+) -> pl.DataFrame:
+    fill_values = fill_values or {}
+    missing = [col for col in columns if col not in df.columns]
+
+    if missing:
+        df = df.with_columns(
+            [_build_fill_expression(col, fill_values.get(col), schema.get(col)) for col in missing]
+        )
+
+    return df.select(columns)
+
+
+def align_frames_for_concat(
+    left: pl.DataFrame,
+    right: pl.DataFrame,
+    *,
+    left_fill_values: dict[str, Any] | None = None,
+    right_fill_values: dict[str, Any] | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Align two DataFrames to a shared column set for safe vertical concatenation."""
+    columns = [*left.columns, *[col for col in right.columns if col not in left.columns]]
+    schema = {**right.schema, **left.schema}
+
+    return (
+        _align_frame_columns(left, columns, schema, left_fill_values),
+        _align_frame_columns(right, columns, schema, right_fill_values),
+    )
 
 
 class MultiAssetSchema:

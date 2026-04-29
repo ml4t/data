@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import polars as pl
 import pytest
 
-from ml4t.data.core.schemas import MultiAssetSchema
+from ml4t.data.core.schemas import MultiAssetSchema, align_frames_for_concat
 
 
 class TestMultiAssetSchemaConstants:
@@ -614,6 +614,72 @@ class TestCastToSchema:
 
         # Should be identical since no casting needed
         assert df_cast.equals(df)
+
+
+class TestAlignFramesForConcat:
+    """Test frame alignment for concat-safe updates."""
+
+    def test_aligns_reordered_columns(self):
+        left = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "open": [100.0],
+                "close": [101.0],
+            }
+        )
+        right = pl.DataFrame(
+            {
+                "close": [102.0],
+                "timestamp": [datetime(2024, 1, 2, tzinfo=UTC)],
+                "open": [101.0],
+            }
+        )
+
+        aligned_left, aligned_right = align_frames_for_concat(left, right)
+
+        assert aligned_left.columns == ["timestamp", "open", "close"]
+        assert aligned_right.columns == ["timestamp", "open", "close"]
+
+    def test_preserves_new_columns_and_fills_existing_rows(self):
+        left = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "close": [101.0],
+            }
+        )
+        right = pl.DataFrame(
+            {
+                "close": [102.0],
+                "timestamp": [datetime(2024, 1, 2, tzinfo=UTC)],
+                "volume": [1000.0],
+            }
+        )
+
+        aligned_left, aligned_right = align_frames_for_concat(left, right)
+
+        assert aligned_left.columns == ["timestamp", "close", "volume"]
+        assert aligned_right.columns == ["timestamp", "close", "volume"]
+        assert aligned_left["volume"].to_list() == [None]
+        assert aligned_right["volume"].to_list() == [1000.0]
+
+    def test_applies_fill_values_for_missing_columns(self):
+        left = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "dividends": [0.25],
+                "splits": [2.0],
+            }
+        )
+        right = pl.DataFrame({"timestamp": [datetime(2024, 1, 2, tzinfo=UTC)]})
+
+        _, aligned_right = align_frames_for_concat(
+            left,
+            right,
+            right_fill_values={"dividends": 0.0, "splits": 1.0},
+        )
+
+        assert aligned_right["dividends"].to_list() == [0.0]
+        assert aligned_right["splits"].to_list() == [1.0]
 
 
 class TestIntegration:

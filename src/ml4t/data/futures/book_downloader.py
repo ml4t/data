@@ -40,6 +40,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.storage.data_profile import (
     DatasetProfile,
     generate_profile,
@@ -267,6 +268,7 @@ class FuturesDataManager:
                 # Check if file exists and merge
                 if output_path.exists():
                     existing = pl.read_parquet(output_path)
+                    existing, year_df = align_frames_for_concat(existing, year_df)
                     year_df = pl.concat([existing, year_df])
                     year_df = year_df.unique(subset=["ts_event", "symbol"], keep="last")
 

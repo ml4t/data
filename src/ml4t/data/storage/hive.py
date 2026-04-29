@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from ml4t.data.core.schemas import align_frames_for_concat
+
 from .backend import StorageBackend, StorageConfig
 
 if TYPE_CHECKING:
@@ -510,6 +512,7 @@ class HiveStorage(StorageBackend):
         # Read existing data
         if self.exists(key):
             existing_df = self.read(key).collect()
+            existing_df, data = align_frames_for_concat(existing_df, data)
             combined = pl.concat([existing_df, data])
         else:
             combined = data

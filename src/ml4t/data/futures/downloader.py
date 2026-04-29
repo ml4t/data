@@ -38,6 +38,8 @@ import structlog
 from databento import Historical
 from databento.common.error import BentoClientError, BentoServerError
 
+from ml4t.data.core.schemas import align_frames_for_concat
+
 from .config import (
     DEFAULT_PRODUCTS,
     DefinitionsConfig,
@@ -802,11 +804,7 @@ class FuturesDownloader:
 
                     # Merge and deduplicate
                     if existing_data.height > 0:
-                        # Ensure same columns
-                        common_cols = set(existing_data.columns) & set(new_data.columns)
-                        existing_data = existing_data.select(sorted(common_cols))
-                        new_data = new_data.select(sorted(common_cols))
-
+                        existing_data, new_data = align_frames_for_concat(existing_data, new_data)
                         merged = pl.concat([existing_data, new_data])
 
                         # Deduplicate based on key columns

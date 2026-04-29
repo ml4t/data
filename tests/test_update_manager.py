@@ -498,6 +498,22 @@ class TestIncrementalUpdaterStrategies:
         # Should only add data after Jan 15
         assert result.rows_updated == 0
 
+    def test_append_only_strategy_with_reordered_columns(
+        self, storage: HiveStorage, existing_data: pl.DataFrame, new_data: pl.DataFrame
+    ):
+        """APPEND_ONLY tolerates provider column reordering."""
+        updater = IncrementalUpdater()
+        storage.write(existing_data, "test")
+
+        reordered = new_data.select(["close", "timestamp", "volume", "open", "low", "high"])
+
+        result = updater.apply_strategy(storage, "test", reordered, UpdateStrategy.APPEND_ONLY)
+
+        assert result.success is True
+        stored = storage.read("test").collect().sort("timestamp")
+        assert stored.columns == existing_data.columns
+        assert stored["timestamp"].max() == reordered["timestamp"].max()
+
     def test_incremental_strategy(
         self, storage: HiveStorage, existing_data: pl.DataFrame, new_data: pl.DataFrame
     ):

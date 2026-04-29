@@ -11,6 +11,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
@@ -458,6 +459,7 @@ class IncrementalUpdater:
 
                 if not new_rows.is_empty():
                     # Append new rows
+                    existing_df, new_rows = align_frames_for_concat(existing_df, new_rows)
                     combined = pl.concat([existing_df, new_rows])
                     storage.delete(key)
                     storage.write(combined, key)
@@ -511,6 +513,7 @@ class IncrementalUpdater:
 
                 if not gap_data.is_empty():
                     # Merge with existing data
+                    existing_df, gap_data = align_frames_for_concat(existing_df, gap_data)
                     combined = pl.concat([existing_df, gap_data]).sort("timestamp")
                     storage.delete(key)
                     storage.write(combined, key)
@@ -564,6 +567,7 @@ class IncrementalUpdater:
                 )
 
                 # Combine all data
+                existing_filtered, new_data = align_frames_for_concat(existing_filtered, new_data)
                 combined = pl.concat([existing_filtered, new_data]).sort("timestamp")
 
                 storage.delete(key)
@@ -578,6 +582,7 @@ class IncrementalUpdater:
                     rows_after=len(combined),
                 )
             # No overlap, just append
+            existing_df, new_data = align_frames_for_concat(existing_df, new_data)
             combined = pl.concat([existing_df, new_data]).sort("timestamp")
             storage.delete(key)
             storage.write(combined, key)

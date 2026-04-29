@@ -380,6 +380,42 @@ etfs:
 
             assert "AAPL" in stats or "MSFT" in stats
 
+    def test_update_handles_reordered_provider_columns(self, manager, temp_storage):
+        """Test update succeeds when provider returns columns in a different order."""
+        existing_dir = temp_storage / "ohlcv_1d" / "ticker=AAPL"
+        existing_dir.mkdir(parents=True)
+        pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        ).write_parquet(existing_dir / "data.parquet")
+
+        mock_provider = MagicMock()
+        mock_provider.fetch_ohlcv.return_value = pl.DataFrame(
+            {
+                "close": [102.0],
+                "timestamp": [datetime(2024, 1, 2)],
+                "volume": [1100.0],
+                "open": [101.0],
+                "low": [100.0],
+                "high": [103.0],
+            }
+        )
+
+        with patch("ml4t.data.providers.yahoo.YahooFinanceProvider") as mock_yf:
+            mock_yf.return_value = mock_provider
+            stats = manager.update()
+
+        saved = pl.read_parquet(existing_dir / "data.parquet")
+        assert stats["AAPL"] == 1
+        assert saved.columns == ["timestamp", "open", "high", "low", "close", "volume"]
+        assert saved["timestamp"].to_list() == [datetime(2024, 1, 1), datetime(2024, 1, 2)]
+
     def test_save_metadata(self, manager, temp_storage):
         """Test _save_metadata creates JSON file."""
         manager._save_metadata()
