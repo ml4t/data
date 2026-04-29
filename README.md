@@ -10,7 +10,7 @@ Unified market data acquisition and storage for quantitative research workflows.
 
 This library is one of six interconnected libraries supporting the machine learning for trading workflow described in [Machine Learning for Trading](https://ml4trading.io):
 
-![ML4T Library Ecosystem](docs/images/ml4t_ecosystem_workflow_color.svg)
+![ML4T Library Ecosystem](docs/images/ml4t_ecosystem_workflow_color.png)
 
 Together they cover data infrastructure, feature engineering, modeling, signal evaluation, strategy backtesting, and live deployment.
 
