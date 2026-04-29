@@ -10,6 +10,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
+from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -448,6 +449,7 @@ class ChunkedStorage:
                     existing_df = pl.read_parquet(chunk_path)
 
                 # Merge data
+                existing_df, chunk_df = align_frames_for_concat(existing_df, chunk_df)
                 merged_df = (
                     pl.concat([existing_df, chunk_df])
                     .unique(

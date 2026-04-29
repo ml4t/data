@@ -17,6 +17,8 @@ import polars as pl
 import structlog
 from tenacity import RetryError
 
+from ml4t.data.core.schemas import align_frames_for_concat
+
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
 
@@ -151,18 +153,11 @@ class StorageManager:
         Returns:
             Merged DataFrame with duplicates removed
         """
-        # Ensure new_df has same columns as existing_df for concatenation
-        for col in existing.columns:
-            if col not in new.columns:
-                if col == "dividends":
-                    new = new.with_columns(pl.lit(0.0).alias(col))
-                elif col == "splits":
-                    new = new.with_columns(pl.lit(1.0).alias(col))
-                else:
-                    new = new.with_columns(pl.lit(None).alias(col))
-
-        # Ensure column order matches
-        new = new.select(existing.columns)
+        existing, new = align_frames_for_concat(
+            existing,
+            new,
+            right_fill_values={"dividends": 0.0, "splits": 1.0},
+        )
 
         # Merge data: concatenate and remove duplicates
         merged_df = pl.concat([existing, new])

@@ -39,6 +39,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.storage.data_profile import (
     ProfileMixin,
     generate_profile,
@@ -259,6 +260,7 @@ class ETFDataManager(ProfileMixin):
                     # Ensure datetime precision matches (existing may be ns, new data is μs)
                     existing = existing.with_columns(pl.col("timestamp").cast(pl.Datetime("us")))
                     new_data = new_data.with_columns(pl.col("timestamp").cast(pl.Datetime("us")))
+                    existing, new_data = align_frames_for_concat(existing, new_data)
                     combined = pl.concat([existing, new_data])
                     combined = combined.unique(subset=["timestamp"], maintain_order=True)
                     combined = combined.sort("timestamp")
@@ -400,7 +402,10 @@ class ETFDataManager(ProfileMixin):
         if "symbol" not in df.columns:
             df = df.with_columns(pl.lit(symbol).alias("symbol"))
 
-        return df.sort("timestamp")
+        columns = [col for col in OHLCV_SCHEMA if col in df.columns]
+        columns.extend(col for col in df.columns if col not in OHLCV_SCHEMA)
+
+        return df.sort("timestamp").select(columns)
 
     def load_symbols(self, symbols: list[str]) -> pl.DataFrame:
         """Load OHLCV data for multiple symbols.
