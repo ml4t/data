@@ -41,10 +41,7 @@ def _align_frame_columns(
 
     if missing:
         df = df.with_columns(
-            [
-                _build_fill_expression(col, fill_values.get(col), schema.get(col))
-                for col in missing
-            ]
+            [_build_fill_expression(col, fill_values.get(col), schema.get(col)) for col in missing]
         )
 
     return df.select(columns)
