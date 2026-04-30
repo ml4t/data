@@ -123,10 +123,20 @@ def _timeframe_for(frequency: str) -> TimeFrame:
 
 def _utc_range(start: str, end: str) -> tuple[datetime, datetime, datetime]:
     """Parse YYYY-MM-DD range to Alpaca UTC window (end exclusive for API, inclusive filter)."""
-    start_utc = datetime.combine(
-        datetime.strptime(start, "%Y-%m-%d").date(), dt_time.min, tzinfo=UTC
-    )
-    end_day = datetime.strptime(end, "%Y-%m-%d").date()
+    start_n = _normalize_iso_date(start)
+    end_n = _normalize_iso_date(end)
+    try:
+        start_utc = datetime.combine(
+            datetime.strptime(start_n, "%Y-%m-%d").date(), dt_time.min, tzinfo=UTC
+        )
+        end_day = datetime.strptime(end_n, "%Y-%m-%d").date()
+    except ValueError as e:
+        raise DataValidationError(
+            "alpaca",
+            f"Invalid start/end date (expected YYYY-MM-DD): {e}",
+            field="start/end",
+            value=f"{start!r} / {end!r}",
+        ) from e
     end_excl = datetime.combine(end_day + timedelta(days=1), dt_time.min, tzinfo=UTC)
     end_inclusive = datetime.combine(end_day, dt_time(23, 59, 59, 999999), tzinfo=UTC)
     return start_utc, end_excl, end_inclusive
@@ -183,9 +193,7 @@ def _bars_pandas_to_polars_batch(df_pd: pd.DataFrame, end_inclusive: datetime) -
             "Expected multi-symbol Alpaca bars to include a symbol column after reset_index",
             field="bars.df",
         )
-    out = pl.from_pandas(
-        df_pd[["timestamp", "symbol", "open", "high", "low", "close", "volume"]]
-    )
+    out = pl.from_pandas(df_pd[["timestamp", "symbol", "open", "high", "low", "close", "volume"]])
     return (
         out.with_columns(
             [
@@ -239,13 +247,14 @@ class AlpacaProvider(BaseProvider):
         Args:
             api_key: Alpaca API key; defaults to ``ALPACA_API_KEY``.
             secret_key: Alpaca secret key; defaults to ``ALPACA_SECRET_KEY``.
-            feed: Stock bar feed (e.g. SIP); optional.
+            feed: Stock bar feed (e.g. SIP); optional. If omitted, uses ``ALPACA_STOCK_FEED``
+                when set, otherwise lets the SDK default apply.
             adjustment: Corporate-action adjustment for stock bars; optional.
         """
         super().__init__(rate_limit=None)
         self._api_key = api_key or os.getenv("ALPACA_API_KEY")
         self._secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
-        self._feed = feed
+        self._feed = feed if feed is not None else _optional_stock_feed_from_env()
         self._adjustment = adjustment
         self._crypto: CryptoHistoricalDataClient | None = None
         self._stock: StockHistoricalDataClient | None = None
@@ -456,7 +465,9 @@ class AlpacaProvider(BaseProvider):
             failed_symbols=len(failed),
         )
         if failed:
-            self.logger.warning("Some Alpaca batch symbols failed", count=len(failed), sample=failed[:10])
+            self.logger.warning(
+                "Some Alpaca batch symbols failed", count=len(failed), sample=failed[:10]
+            )
         return result
 
     async def fetch_batch_ohlcv_async(

@@ -17,7 +17,10 @@ from ml4t.data.providers.alpaca import (
     _bars_pandas_to_polars,
     _bars_pandas_to_polars_batch,
     _infer_kind,
+    _normalize_iso_date,
+    _optional_stock_feed_from_env,
     _timeframe_for,
+    _utc_range,
 )
 
 
@@ -56,6 +59,50 @@ class TestFrequencyMap:
         assert p.FREQUENCY_MAP["daily"] == "1day"
         assert p.FREQUENCY_MAP["minute"] == "1minute"
         assert p.FREQUENCY_MAP["5minute"] == "5minute"
+
+
+class TestNormalizeIsoDate:
+    """Whitespace-tolerant YYYY-MM-DD inputs (common copy-paste typo)."""
+
+    def test_collapses_internal_space(self):
+        assert _normalize_iso_date("2024-12- 31") == "2024-12-31"
+
+    def test_strips_edges(self):
+        assert _normalize_iso_date("  2024-01-01  ") == "2024-01-01"
+
+
+class TestUtcRange:
+    """UTC window parsing for Alpaca requests."""
+
+    def test_accepts_date_with_stray_whitespace(self):
+        start_utc, end_excl, end_inc = _utc_range("2024-01-01", "2024-12- 31")
+        assert start_utc.year == 2024 and start_utc.month == 1
+        assert end_inc.month == 12 and end_inc.day == 31
+
+    def test_invalid_date_raises_data_validation(self):
+        with pytest.raises(DataValidationError, match="Invalid start/end date"):
+            _utc_range("2024-13-01", "2024-12-31")
+
+
+class TestStockFeedFromEnv:
+    """ALPACA_STOCK_FEED mirrors metafreq / Alpaca tier defaults."""
+
+    def test_unset_returns_none(self):
+        with patch.dict("os.environ", {}, clear=True):
+            assert _optional_stock_feed_from_env() is None
+
+    def test_iex_parsed(self):
+        with patch.dict("os.environ", {"ALPACA_STOCK_FEED": "iex"}):
+            from alpaca.data.enums import DataFeed
+
+            assert _optional_stock_feed_from_env() == DataFeed.IEX
+
+    def test_init_picks_feed_from_env_when_param_omitted(self):
+        with patch.dict("os.environ", {"ALPACA_STOCK_FEED": "iex"}):
+            from alpaca.data.enums import DataFeed
+
+            p = AlpacaProvider()
+            assert p._feed == DataFeed.IEX
 
 
 class TestTimeframeFor:
