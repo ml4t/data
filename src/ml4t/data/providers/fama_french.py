@@ -54,7 +54,7 @@ from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
-_LEGACY_DEFAULT_CACHE_PATH = Path("~/ml4t/data/french_factors").expanduser()
+_DEFAULT_CACHE_SUBPATH = Path("factors/fama-french")
 
 
 # Dataset categories
@@ -553,14 +553,14 @@ class FamaFrenchProvider(BaseProvider):
         # Add descriptions for other datasets as needed
     }
 
-    DEFAULT_CACHE_PATH: ClassVar[Path] = _LEGACY_DEFAULT_CACHE_PATH
+    DEFAULT_CACHE_PATH: ClassVar[Path] = _DEFAULT_CACHE_SUBPATH
 
     @classmethod
     def default_cache_path(cls) -> Path:
         """Return the default cache directory."""
-        if cls.DEFAULT_CACHE_PATH != _LEGACY_DEFAULT_CACHE_PATH:
+        if cls.DEFAULT_CACHE_PATH != _DEFAULT_CACHE_SUBPATH:
             return Path(cls.DEFAULT_CACHE_PATH).expanduser().resolve()
-        return resolve_storage_path(None, "french_factors")
+        return resolve_storage_path(None, "factors", "fama-french")
 
     def __init__(
         self,
@@ -571,12 +571,12 @@ class FamaFrenchProvider(BaseProvider):
         Initialize Fama-French provider.
 
         Args:
-            cache_path: Directory to cache downloaded data (default: ~/ml4t/data/french_factors/)
+            cache_path: Directory to cache downloaded data
             use_cache: Whether to use cached data if available (default: True)
         """
         super().__init__(rate_limit=None)
 
-        self.cache_path = resolve_storage_path(cache_path, "french_factors")
+        self.cache_path = resolve_storage_path(cache_path, "factors", "fama-french")
         self.use_cache = use_cache
 
         if use_cache:

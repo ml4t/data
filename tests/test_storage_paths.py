@@ -64,8 +64,8 @@ def test_provider_default_paths_follow_ml4t_data_path(monkeypatch, tmp_path: Pat
     root = tmp_path / "configured-data"
     monkeypatch.setenv("ML4T_DATA_PATH", str(root))
 
-    assert FamaFrenchProvider.default_cache_path() == root.resolve() / "french_factors"
-    assert AQRFactorProvider.default_data_path() == root.resolve() / "aqr_factors"
+    assert FamaFrenchProvider.default_cache_path() == root.resolve() / "factors" / "fama-french"
+    assert AQRFactorProvider.default_data_path() == root.resolve() / "factors" / "aqr"
     assert WikiPricesProvider.default_download_path() == root.resolve() / "wiki"
     assert WikiPricesProvider.default_paths() == [
         root.resolve() / "wiki" / "wiki_prices.parquet",

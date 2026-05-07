@@ -18,12 +18,12 @@ from ml4t.data.core.exceptions import DataNotAvailableError, DataValidationError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
-_LEGACY_DEFAULT_PATHS = [
-    Path("~/ml4t/data/wiki/wiki_prices.parquet").expanduser(),
-    Path("~/ml3t/data/equities/nasdaq/wiki_prices.parquet").expanduser(),
+_DEFAULT_PATHS = [
+    Path("wiki/wiki_prices.parquet"),
+    Path("equities/nasdaq/wiki_prices.parquet"),
     Path("./wiki_prices.parquet"),
 ]
-_LEGACY_DEFAULT_DOWNLOAD_PATH = Path("~/ml4t/data/wiki").expanduser()
+_DEFAULT_DOWNLOAD_PATH = Path("wiki")
 
 
 class WikiPricesProvider(BaseProvider):
@@ -157,13 +157,13 @@ class WikiPricesProvider(BaseProvider):
     - **No Real-Time**: Static archive, not live API
     """
 
-    DEFAULT_PATHS: ClassVar[list[Path]] = _LEGACY_DEFAULT_PATHS
-    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = _LEGACY_DEFAULT_DOWNLOAD_PATH
+    DEFAULT_PATHS: ClassVar[list[Path]] = _DEFAULT_PATHS
+    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = _DEFAULT_DOWNLOAD_PATH
 
     @classmethod
     def default_paths(cls) -> list[Path]:
         """Return default locations to search for Wiki Prices parquet."""
-        if cls.DEFAULT_PATHS != _LEGACY_DEFAULT_PATHS:
+        if cls.DEFAULT_PATHS != _DEFAULT_PATHS:
             return [Path(path).expanduser().resolve() for path in cls.DEFAULT_PATHS]
         return [
             resolve_storage_path(None, "wiki", "wiki_prices.parquet"),
@@ -174,7 +174,7 @@ class WikiPricesProvider(BaseProvider):
     @classmethod
     def default_download_path(cls) -> Path:
         """Return the default download directory."""
-        if cls.DEFAULT_DOWNLOAD_PATH != _LEGACY_DEFAULT_DOWNLOAD_PATH:
+        if cls.DEFAULT_DOWNLOAD_PATH != _DEFAULT_DOWNLOAD_PATH:
             return Path(cls.DEFAULT_DOWNLOAD_PATH).expanduser().resolve()
         return resolve_storage_path(None, "wiki")
 
