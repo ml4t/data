@@ -10,6 +10,8 @@ from rich import box
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
+from ml4t.data.core.config import resolve_storage_path
+
 from .utils import console
 
 
@@ -43,7 +45,7 @@ from .utils import console
     "-o",
     type=click.Path(),
     default=None,
-    help="Output directory (default: ~/ml4t-data/cot)",
+    help="Output directory (default: <ML4T_DATA_PATH>/cot or ./data/cot)",
 )
 @click.option(
     "--list-products",
@@ -157,7 +159,7 @@ def download_cot(
                 products=list(products),
                 start_year=start_year,
                 end_year=end_year or datetime.now().year,
-                storage_path=Path(output or "~/ml4t-data/cot").expanduser(),
+                storage_path=resolve_storage_path(output, "cot"),
             )
 
         # Validate products

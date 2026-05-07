@@ -1,7 +1,6 @@
 """Tests for NASDAQ ITCH sample data provider."""
 
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -18,11 +17,8 @@ class TestITCHSampleProviderInit:
         """Test default download and parsed paths."""
         provider = ITCHSampleProvider()
 
-        # Default paths use ~/.ml4t/data/equities/nasdaq_itch
-        assert provider.download_path == Path("~/.ml4t/data/equities/nasdaq_itch").expanduser()
-        assert (
-            provider.parsed_path == Path("~/.ml4t/data/equities/nasdaq_itch/messages").expanduser()
-        )
+        assert provider.download_path == ITCHSampleProvider.default_download_path()
+        assert provider.parsed_path == ITCHSampleProvider.default_parsed_path()
 
     def test_custom_download_path(self, tmp_path):
         """Test custom download path."""

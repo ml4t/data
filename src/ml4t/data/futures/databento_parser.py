@@ -19,6 +19,7 @@ from pathlib import Path
 
 import polars as pl
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.schema import ContractSpec
 
 # Month code to month number mapping (CME standard)
@@ -136,7 +137,7 @@ def parse_contract_symbol(symbol: str) -> ContractInfo:
 
 def load_databento_definitions(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> pl.DataFrame:
     """
     Load contract definitions for a product from downloaded Databento data.
@@ -159,7 +160,7 @@ def load_databento_definitions(
     Raises:
         FileNotFoundError: If definition data not found
     """
-    storage_path = Path(storage_path).expanduser()
+    storage_path = resolve_storage_path(storage_path, "futures")
     definition_file = storage_path / "definition" / f"product={product}" / "definition.parquet"
 
     if not definition_file.exists():
@@ -181,7 +182,7 @@ def load_databento_definitions(
 
 def load_databento_ohlcv(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> pl.DataFrame:
     """
     Load OHLCV data for all contracts of a product.
@@ -202,7 +203,7 @@ def load_databento_ohlcv(
     Raises:
         FileNotFoundError: If OHLCV data not found
     """
-    storage_path = Path(storage_path).expanduser()
+    storage_path = resolve_storage_path(storage_path, "futures")
     ohlcv_file = storage_path / "ohlcv_1d" / f"product={product}" / "ohlcv_1d.parquet"
 
     if not ohlcv_file.exists():
@@ -235,7 +236,7 @@ STAT_TYPE_FIXING_PRICE = 10
 
 def load_databento_statistics(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
     stat_types: list[int] | None = None,
 ) -> pl.DataFrame:
     """
@@ -257,7 +258,7 @@ def load_databento_statistics(
     Raises:
         FileNotFoundError: If statistics data not found
     """
-    storage_path = Path(storage_path).expanduser()
+    storage_path = resolve_storage_path(storage_path, "futures")
     stats_file = storage_path / "statistics" / f"product={product}" / "statistics.parquet"
 
     if not stats_file.exists():
@@ -285,7 +286,7 @@ def load_databento_statistics(
 
 def load_databento_open_interest(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> pl.DataFrame:
     """
     Load daily open interest data for all contracts of a product.
@@ -323,7 +324,7 @@ def load_databento_open_interest(
 
 def get_expiration_dates(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> dict[str, date]:
     """
     Get expiration dates for all contracts of a product.
@@ -376,7 +377,7 @@ def get_expiration_dates(
 
 def parse_databento_raw(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
     _contract_spec: ContractSpec | None = None,
     include_open_interest: bool = True,
 ) -> pl.DataFrame:
@@ -401,7 +402,7 @@ def parse_databento_raw(
         - open_interest: float (from statistics if available, else null)
         - expiration: date (from definition schema)
     """
-    storage_path = Path(storage_path).expanduser()
+    storage_path = resolve_storage_path(storage_path, "futures")
     ohlcv = load_databento_ohlcv(product, storage_path)
 
     # Get expiration dates
@@ -482,7 +483,7 @@ def parse_databento_raw(
 
 def parse_databento(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
     _contract_spec: ContractSpec | None = None,
 ) -> pl.DataFrame:
     """
@@ -530,7 +531,7 @@ def parse_databento(
 
 def get_contract_chain(
     product: str,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> list[ContractInfo]:
     """
     Get the full contract chain with expiration dates.
@@ -565,7 +566,7 @@ def get_contract_chain(
 def get_front_back_contracts(
     product: str,
     as_of_date: date,
-    storage_path: str | Path = "~/ml4t-data/futures",
+    storage_path: str | Path | None = None,
 ) -> tuple[ContractInfo | None, ContractInfo | None]:
     """
     Get front and back month contracts as of a specific date.

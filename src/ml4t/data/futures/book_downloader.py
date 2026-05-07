@@ -40,6 +40,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.storage.data_profile import (
     DatasetProfile,
@@ -85,13 +86,13 @@ class FuturesConfig:
     dataset: str = "GLBX.MDP3"
     start: str = "2016-01-01"
     end: str = "2025-12-31"
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "futures")
+    storage_path: Path = field(default_factory=lambda: resolve_storage_path(None, "futures"))
     products: dict[str, list[str]] = field(default_factory=dict)
     definition_dates: list[str] = field(default_factory=list)
     generate_profile: bool = True  # Generate column-level statistics per product
 
     def __post_init__(self):
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "futures")
 
     def get_all_products(self) -> list[str]:
         """Get flat list of all products across categories."""
@@ -146,9 +147,7 @@ class FuturesDataManager:
             dataset=futures_config.get("dataset", "GLBX.MDP3"),
             start=futures_config.get("start", "2016-01-01"),
             end=futures_config.get("end", "2025-12-31"),
-            storage_path=Path(
-                futures_config.get("storage_path", "~/ml4t-data/futures")
-            ).expanduser(),
+            storage_path=resolve_storage_path(futures_config.get("storage_path"), "futures"),
             products=futures_config.get("products", {}),
             definition_dates=futures_config.get("definitions", {}).get("snapshot_dates", []),
         )

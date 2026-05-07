@@ -15,6 +15,8 @@ from typing import Literal
 import polars as pl
 import yaml
 
+from ml4t.data.core.config import resolve_storage_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -279,14 +281,13 @@ class COTConfig:
     products: list[str] = field(default_factory=list)
     start_year: int = 2020
     end_year: int | None = None  # None = current year
-    storage_path: Path = field(default_factory=lambda: Path("~/ml4t-data/cot").expanduser())
+    storage_path: Path = field(default_factory=lambda: resolve_storage_path(None, "cot"))
     include_options: bool = False  # Use *_futopt reports instead of *_fut
 
     def __post_init__(self):
         if self.end_year is None:
             self.end_year = datetime.now().year
-        if isinstance(self.storage_path, str):
-            self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "cot")
 
     def get_years(self) -> list[int]:
         """Get list of years to download."""
@@ -312,7 +313,7 @@ def load_cot_config(config_path: str | Path) -> COTConfig:
         products=data.get("products", []),
         start_year=data.get("start_year", 2020),
         end_year=data.get("end_year"),
-        storage_path=Path(data.get("storage_path", "~/ml4t-data/cot")).expanduser(),
+        storage_path=resolve_storage_path(data.get("storage_path"), "cot"),
         include_options=data.get("include_options", False),
     )
 

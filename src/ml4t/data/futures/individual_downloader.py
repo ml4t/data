@@ -48,6 +48,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from ml4t.data.core.config import resolve_data_root, resolve_storage_path
+
 from .databento_parser import MONTH_TO_CODE
 
 logger = structlog.get_logger(__name__)
@@ -86,14 +88,16 @@ class IndividualDownloadConfig:
 
     products: dict[str, dict[str, Any]] = field(default_factory=dict)
     years: list[int] = field(default_factory=lambda: [2024, 2025])
-    storage_path: str | Path = "~/ml4t-data/futures/individual"
+    storage_path: str | Path = field(
+        default_factory=lambda: resolve_storage_path(None, "futures", "individual")
+    )
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1h"
     api_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "futures", "individual")
 
     def get_product_config(self, product: str) -> IndividualProductConfig:
         """Get configuration for a specific product."""
@@ -141,8 +145,10 @@ def load_individual_config(yaml_path: str | Path) -> IndividualDownloadConfig:
     storage_path = individual_data.get("output_dir", "futures/individual")
     if not storage_path.startswith("/") and not storage_path.startswith("~"):
         # Relative path - prepend default data dir
-        base_storage = data.get("storage", {}).get("path", "~/ml4t-data")
-        storage_path = f"{base_storage}/{storage_path}"
+        base_storage = resolve_data_root(data.get("storage", {}).get("path"))
+        storage_path = base_storage / storage_path
+    else:
+        storage_path = resolve_storage_path(storage_path, "futures", "individual")
 
     return IndividualDownloadConfig(
         products=individual_data.get("products", {}),

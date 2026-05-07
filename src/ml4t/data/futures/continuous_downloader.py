@@ -54,6 +54,8 @@ from tenacity import (
     wait_exponential,
 )
 
+from ml4t.data.core.config import resolve_storage_path
+
 logger = structlog.get_logger(__name__)
 
 
@@ -76,7 +78,9 @@ class ContinuousDownloadConfig:
     products: list[str] = field(default_factory=list)
     start: str = "2011-01-01"
     end: str = "2025-12-31"
-    storage_path: str | Path = "~/ml4t-data/futures/continuous"
+    storage_path: str | Path = field(
+        default_factory=lambda: resolve_storage_path(None, "futures", "continuous")
+    )
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1h"
     roll_type: str = "v"  # "v" = volume-based, "c" = calendar-based
@@ -85,7 +89,7 @@ class ContinuousDownloadConfig:
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "futures", "continuous")
 
 
 @dataclass
@@ -149,7 +153,9 @@ def load_continuous_config(yaml_path: str | Path) -> ContinuousDownloadConfig:
         products=products,
         start=data.get("default_start", "2011-01-01"),
         end=data.get("default_end", "2025-12-31"),
-        storage_path=data.get("storage", {}).get("path", "~/ml4t-data/futures/continuous"),
+        storage_path=resolve_storage_path(
+            data.get("storage", {}).get("path"), "futures", "continuous"
+        ),
         dataset=data.get("dataset", "GLBX.MDP3"),
         schema=data.get("schema", "ohlcv-1h"),
         roll_type=data.get("roll_type", "v"),

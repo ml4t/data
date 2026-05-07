@@ -39,6 +39,7 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.storage.data_profile import (
     ProfileMixin,
@@ -69,12 +70,12 @@ class ETFConfig:
     start: str = "2005-01-01"
     end: str = "2025-12-31"
     frequency: str = "daily"
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "etfs")
+    storage_path: Path = field(default_factory=lambda: resolve_storage_path(None, "etfs"))
     tickers: dict[str, dict[str, Any]] = field(default_factory=dict)
     generate_profile: bool = True  # Generate column-level statistics on save
 
     def __post_init__(self):
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "etfs")
 
     def get_all_symbols(self) -> list[str]:
         """Get flat list of all symbols across categories."""
@@ -142,7 +143,7 @@ class ETFDataManager(ProfileMixin):
             start=etf_config.get("start", "2005-01-01"),
             end=etf_config.get("end", "2025-12-31"),
             frequency=etf_config.get("frequency", "daily"),
-            storage_path=Path(etf_config.get("storage_path", "~/ml4t-data/etfs")).expanduser(),
+            storage_path=resolve_storage_path(etf_config.get("storage_path"), "etfs"),
             tickers=etf_config.get("tickers", {}),
         )
 

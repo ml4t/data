@@ -9,7 +9,6 @@ Data Source: https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urljoin
@@ -18,6 +17,7 @@ import httpx
 import polars as pl
 import structlog
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 
 logger = structlog.get_logger()
@@ -121,14 +121,15 @@ class ITCHSampleProvider:
         "12302019.NASDAQ_ITCH50.gz": 3_780_000_000,  # ~3.52 GB
     }
 
-    # Default locations (configurable via ML4T_DATA_DIR env var or ~/.ml4t/data/)
-    DEFAULT_DOWNLOAD_PATH: ClassVar[Path] = (
-        Path(os.environ.get("ML4T_DATA_DIR", "~/.ml4t/data")).expanduser() / "equities/nasdaq_itch"
-    )
-    DEFAULT_PARSED_PATH: ClassVar[Path] = (
-        Path(os.environ.get("ML4T_DATA_DIR", "~/.ml4t/data")).expanduser()
-        / "equities/nasdaq_itch/messages"
-    )
+    @classmethod
+    def default_download_path(cls) -> Path:
+        """Return the default ITCH download directory."""
+        return resolve_storage_path(None, "equities", "nasdaq_itch")
+
+    @classmethod
+    def default_parsed_path(cls) -> Path:
+        """Return the default ITCH parsed-messages directory."""
+        return resolve_storage_path(None, "equities", "nasdaq_itch", "messages")
 
     # Message type descriptions
     MESSAGE_TYPES: ClassVar[dict[str, str]] = {
@@ -172,10 +173,10 @@ class ITCHSampleProvider:
         self.logger = structlog.get_logger(name=self.__class__.__name__)
 
         self.download_path = (
-            Path(download_path).expanduser() if download_path else self.DEFAULT_DOWNLOAD_PATH
+            Path(download_path).expanduser() if download_path else self.default_download_path()
         )
         self.parsed_path = (
-            Path(parsed_path).expanduser() if parsed_path else self.DEFAULT_PARSED_PATH
+            Path(parsed_path).expanduser() if parsed_path else self.default_parsed_path()
         )
 
         self.logger.info(

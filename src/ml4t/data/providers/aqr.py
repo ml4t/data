@@ -49,10 +49,12 @@ import pandas as pd
 import polars as pl
 import structlog
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
+_LEGACY_DEFAULT_PATH = Path("~/ml4t/data/aqr_factors").expanduser()
 
 
 # Available AQR datasets - organized by category
@@ -202,8 +204,14 @@ class AQRFactorProvider(BaseProvider):
     - Daily data available for QMJ, BAB, and HML Devil factors
     """
 
-    # Default data location
-    DEFAULT_PATH: ClassVar[Path] = Path("~/ml4t/data/aqr_factors").expanduser()
+    DEFAULT_PATH: ClassVar[Path] = _LEGACY_DEFAULT_PATH
+
+    @classmethod
+    def default_data_path(cls) -> Path:
+        """Return the default AQR data directory."""
+        if cls.DEFAULT_PATH != _LEGACY_DEFAULT_PATH:
+            return Path(cls.DEFAULT_PATH).expanduser().resolve()
+        return resolve_storage_path(None, "aqr_factors")
 
     # AQR base URL
     BASE_URL: ClassVar[str] = "https://www.aqr.com/-/media/AQR/Documents/Insights/Data-Sets/"
@@ -637,7 +645,7 @@ class AQRFactorProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
-        self.data_path = Path(data_path or self.DEFAULT_PATH).expanduser()
+        self.data_path = resolve_storage_path(data_path, "aqr_factors")
 
         if not self.data_path.exists():
             raise FileNotFoundError(
@@ -826,7 +834,7 @@ class AQRFactorProvider(BaseProvider):
         """
         log = structlog.get_logger()
 
-        output_dir = Path(output_path or cls.DEFAULT_PATH).expanduser()
+        output_dir = resolve_storage_path(output_path, "aqr_factors")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine which datasets to download

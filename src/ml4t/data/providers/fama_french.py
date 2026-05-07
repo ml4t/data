@@ -49,10 +49,12 @@ import httpx
 import polars as pl
 import structlog
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
+_LEGACY_DEFAULT_CACHE_PATH = Path("~/ml4t/data/french_factors").expanduser()
 
 
 # Dataset categories
@@ -551,8 +553,14 @@ class FamaFrenchProvider(BaseProvider):
         # Add descriptions for other datasets as needed
     }
 
-    # Default cache location
-    DEFAULT_CACHE_PATH: ClassVar[Path] = Path("~/ml4t/data/french_factors").expanduser()
+    DEFAULT_CACHE_PATH: ClassVar[Path] = _LEGACY_DEFAULT_CACHE_PATH
+
+    @classmethod
+    def default_cache_path(cls) -> Path:
+        """Return the default cache directory."""
+        if cls.DEFAULT_CACHE_PATH != _LEGACY_DEFAULT_CACHE_PATH:
+            return Path(cls.DEFAULT_CACHE_PATH).expanduser().resolve()
+        return resolve_storage_path(None, "french_factors")
 
     def __init__(
         self,
@@ -568,7 +576,7 @@ class FamaFrenchProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
-        self.cache_path = Path(cache_path or self.DEFAULT_CACHE_PATH).expanduser()
+        self.cache_path = resolve_storage_path(cache_path, "french_factors")
         self.use_cache = use_cache
 
         if use_cache:
