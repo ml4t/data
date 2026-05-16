@@ -110,9 +110,12 @@ oanda = [
 cot = [
     "cot-reports>=0.1.0",  # CFTC Commitment of Traders data
 ]
+alpaca = [
+    "alpaca-py>=0.30.0",
+]
 
 all-providers = [
-    "ml4t-data[yahoo,databento,oanda,cot]",
+    "ml4t-data[yahoo,databento,oanda,cot,alpaca]",
 ]
 
 # Development dependencies
@@ -171,6 +174,7 @@ dev = [
     "yfinance>=0.2.0",
     "oandapyV20>=0.7.0",
     "xlsxwriter>=3.1.0",
+    "alpaca-py>=0.30.0",
 ]
 
 [tool.pytest.ini_options]
