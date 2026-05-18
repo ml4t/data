@@ -17,6 +17,22 @@ from typing import Any, Literal
 import polars as pl
 from filelock import FileLock
 
+import os
+import shutil
+# ============================================================
+# During module loading, the optimal atomic write function is determined and bound in one go.
+# ============================================================
+if os.name == "nt":
+    # Windows Exclusive: Securely Release Handle + Explicit Unlock
+    def _execute_atomic_replace(tmp_path: Path, target_path: Path) -> None:
+        if target_path.exists():
+            target_path.unlink()  # Forcefully unlock Windows file lock
+        shutil.move(str(tmp_path), str(target_path))
+else:
+    # Linux/macOS Exclusive: Retains the highest performance of native POSIX single-step atomic replacement
+    def _execute_atomic_replace(tmp_path: Path, target_path: Path) -> None:
+        tmp_path.replace(target_path)
+
 # Type alias for partition granularity
 PartitionGranularityType = Literal["year", "month", "day", "hour"]
 
@@ -180,8 +196,13 @@ class StorageBackend(ABC):
             # Write with compression
             df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
 
-            # Atomic rename
-            tmp_path.replace(target_path)
+        # At this point, the with block has ended, and the handle has been completely closed!
+        try:
+            # Directly call the optimal function bound during module loading that corresponds to the current system (zero runtime branch determination).
+            _execute_atomic_replace(tmp_path, target_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
         """Update metadata for a key.
@@ -213,7 +234,14 @@ class StorageBackend(ABC):
         ) as tmp_file:
             json.dump(metadata, tmp_file, indent=2, default=str)
             tmp_path = Path(tmp_file.name)
-            tmp_path.replace(path)
+        
+        # At this point, the with block has ended, and the handle has been completely closed!
+        try:
+            # Directly call the optimal function bound during module loading that corresponds to the current system (zero runtime branch determination).
+            _execute_atomic_replace(tmp_path, path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def _ensure_lazy(self, data: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
         """Ensure data is a LazyFrame for efficient processing.
