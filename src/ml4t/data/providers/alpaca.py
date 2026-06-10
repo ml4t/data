@@ -34,9 +34,17 @@ from __future__ import annotations
 import os
 from typing import Any, ClassVar
 
+import polars as pl
 import structlog
 
-from ml4t.data.core.exceptions import AuthenticationError, DataValidationError
+from ml4t.data.core.exceptions import (
+    AuthenticationError,
+    DataNotAvailableError,
+    DataValidationError,
+    NetworkError,
+    ProviderError,
+    RateLimitError,
+)
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.mixins import AsyncSessionMixin
 from ml4t.data.providers.protocols import ProviderCapabilities
@@ -194,4 +202,237 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 f"Supported: {list(self.FREQUENCY_MAP.keys())}",
                 field="frequency",
                 value=frequency,
+            ) from err
+
+    def _stock_bars_params(self, frequency: str, start: str, end: str) -> dict[str, Any]:
+        """Build the query parameters for a stock bars request.
+
+        Args:
+            frequency: Canonical frequency key or alias.
+            start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+
+        Returns:
+            The query parameter mapping, including the configured data feed.
+        """
+        return {
+            "timeframe": self._map_frequency(frequency),
+            "start": start,
+            "end": end,
+            "limit": 10000,
+            "feed": self.feed,
+        }
+
+    def _check_response_status(self, status_code: int, symbol: str, response_text: str) -> None:
+        """Map an HTTP status code to a typed provider exception.
+
+        The status code is inspected directly rather than delegating to
+        ``raise_for_status``, so that each documented failure mode surfaces as a
+        specific provider error instead of a generic transport error.
+
+        Args:
+            status_code: The HTTP status code from the response.
+            symbol: The requested symbol, for error context.
+            response_text: The response body, included in network-error messages.
+
+        Raises:
+            RateLimitError: On HTTP 429.
+            AuthenticationError: On HTTP 401/403.
+            DataNotAvailableError: On HTTP 404.
+            NetworkError: On any other non-200 status.
+        """
+        if status_code == 429:
+            raise RateLimitError(provider="alpaca", retry_after=60.0)
+        if status_code in (401, 403):
+            raise AuthenticationError(
+                provider="alpaca", message="Invalid API key or unauthorized access"
+            )
+        if status_code == 404:
+            raise DataNotAvailableError(provider="alpaca", symbol=symbol)
+        if status_code != 200:
+            raise NetworkError(provider="alpaca", message=f"HTTP {status_code}: {response_text}")
+
+    def _parse_bars_response(self, response: Any) -> dict[str, Any]:
+        """Parse a validated bars response into a JSON dict.
+
+        Args:
+            response: An HTTP response whose status has already been checked.
+
+        Returns:
+            The parsed JSON payload.
+
+        Raises:
+            NetworkError: If the body cannot be decoded as JSON.
+        """
+        try:
+            return response.json()
+        except Exception as err:
+            raise NetworkError(provider="alpaca", message="Failed to parse JSON response") from err
+
+    def _fetch_raw_data(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: str | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        """Fetch a single page of stock bars from Alpaca.
+
+        Args:
+            symbol: The equity symbol to fetch (case-insensitive).
+            start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+            frequency: Canonical frequency key or alias.
+            asset_class: Reserved for routing to other asset classes; the stock
+                branch is the default.
+
+        Returns:
+            The parsed JSON payload containing the ``bars`` data.
+
+        Raises:
+            RateLimitError, AuthenticationError, DataNotAvailableError,
+            NetworkError: Per the HTTP status of the response.
+        """
+        endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
+        params = self._stock_bars_params(frequency, start, end)
+
+        try:
+            self.rate_limiter.acquire(blocking=True)
+            response = self.session.get(endpoint, params=params)
+            self._check_response_status(response.status_code, symbol, response.text)
+            return self._parse_bars_response(response)
+        except (
+            AuthenticationError,
+            RateLimitError,
+            NetworkError,
+            DataNotAvailableError,
+            ProviderError,
+        ):
+            raise
+        except Exception as err:
+            raise NetworkError(provider="alpaca", message=f"Request failed: {endpoint}") from err
+
+    async def _fetch_raw_data_async(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: str | None = None,  # noqa: ARG002
+    ) -> dict[str, Any]:
+        """Asynchronously fetch a single page of stock bars from Alpaca.
+
+        Mirrors :meth:`_fetch_raw_data` over the async transport; the async
+        session carries the same two-header credentials as the sync session.
+
+        Args:
+            symbol: The equity symbol to fetch (case-insensitive).
+            start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+            frequency: Canonical frequency key or alias.
+            asset_class: Reserved for routing to other asset classes; the stock
+                branch is the default.
+
+        Returns:
+            The parsed JSON payload containing the ``bars`` data.
+
+        Raises:
+            RateLimitError, AuthenticationError, DataNotAvailableError,
+            NetworkError: Per the HTTP status of the response.
+        """
+        endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
+        params = self._stock_bars_params(frequency, start, end)
+
+        try:
+            self.rate_limiter.acquire(blocking=True)
+            response = await self._aget(endpoint, params=params)
+            self._check_response_status(response.status_code, symbol, response.text)
+            return self._parse_bars_response(response)
+        except (
+            AuthenticationError,
+            RateLimitError,
+            NetworkError,
+            DataNotAvailableError,
+            ProviderError,
+        ):
+            raise
+        except Exception as err:
+            raise NetworkError(provider="alpaca", message=f"Request failed: {endpoint}") from err
+
+    def _extract_bars(self, raw_data: dict[str, Any], symbol: str) -> list[dict[str, Any]]:
+        """Extract the bar list from either response shape.
+
+        Alpaca's single-symbol endpoint returns ``{"bars": [...]}`` while the
+        multi-symbol endpoint returns ``{"bars": {"<SYMBOL>": [...]}}``. Both are
+        accepted so the endpoint choice does not ripple into the transform.
+
+        Args:
+            raw_data: The parsed JSON payload.
+            symbol: The requested symbol, used to key into a dict payload.
+
+        Returns:
+            The list of bar dicts, or an empty list when none are present.
+        """
+        bars = raw_data.get("bars")
+        if isinstance(bars, dict):
+            return bars.get(symbol) or bars.get(symbol.upper()) or []
+        return bars or []
+
+    def _transform_data(
+        self,
+        raw_data: dict[str, Any],
+        symbol: str,
+        asset_class: str | None = None,
+    ) -> pl.DataFrame:
+        """Transform a raw bars payload into the canonical OHLCV schema.
+
+        Args:
+            raw_data: The parsed JSON payload from a bars request.
+            symbol: The requested symbol; the literal is added as a column,
+                uppercased for stocks and used verbatim for crypto.
+            asset_class: When ``"crypto"``, the symbol literal is preserved
+                verbatim; otherwise it is uppercased.
+
+        Returns:
+            A DataFrame with columns
+            ``[timestamp, symbol, open, high, low, close, volume]`` sorted by
+            timestamp, or the canonical empty DataFrame when there are no bars.
+
+        Raises:
+            DataValidationError: If the bars cannot be transformed.
+        """
+        bars = self._extract_bars(raw_data, symbol)
+        if not bars:
+            return self._create_empty_dataframe()
+
+        symbol_literal = symbol if asset_class == "crypto" else symbol.upper()
+
+        try:
+            df = pl.DataFrame(bars)
+            df = df.rename(
+                {
+                    "t": "timestamp",
+                    "o": "open",
+                    "h": "high",
+                    "l": "low",
+                    "c": "close",
+                    "v": "volume",
+                }
+            )
+            # Alpaca timestamps are RFC-3339 with a UTC ("Z") offset; parse them
+            # tz-aware then drop the zone to match the canonical naive schema.
+            df = df.with_columns(
+                pl.col("timestamp")
+                .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%.f%#z")
+                .dt.replace_time_zone(None)
+            )
+            for col in ["open", "high", "low", "close", "volume"]:
+                df = df.with_columns(pl.col(col).cast(pl.Float64))
+            df = df.with_columns(pl.lit(symbol_literal).alias("symbol"))
+            df = df.sort("timestamp")
+            return df.select(["timestamp", "symbol", "open", "high", "low", "close", "volume"])
+        except Exception as err:
+            raise DataValidationError(
+                provider="alpaca", message=f"Failed to transform data for {symbol}"
             ) from err

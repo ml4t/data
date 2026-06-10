@@ -1,12 +1,24 @@
 """Tests for Alpaca data provider module."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import polars as pl
 import pytest
 
-from ml4t.data.core.exceptions import AuthenticationError, DataValidationError
+from ml4t.data.core.exceptions import (
+    AuthenticationError,
+    DataNotAvailableError,
+    DataValidationError,
+    NetworkError,
+    RateLimitError,
+)
 from ml4t.data.providers.alpaca import AlpacaDataProvider
 from ml4t.data.providers.protocols import OHLCVProvider
+
+STOCK_BARS = [
+    {"t": "2024-01-03T05:00:00Z", "o": 2.0, "h": 3.0, "l": 1.5, "c": 2.5, "v": 2000},
+    {"t": "2024-01-02T05:00:00Z", "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 1000},
+]
 
 
 class TestAlpacaProviderInit:
@@ -174,3 +186,175 @@ class TestDefaultRateLimit:
     def test_default_rate_limit(self):
         """DEFAULT_RATE_LIMIT reflects the documented Basic-plan figure."""
         assert AlpacaDataProvider.DEFAULT_RATE_LIMIT == (200, 60.0)
+
+
+class TestFetchRawDataStock:
+    """Tests for single-page stock bar fetching and error mapping."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_fetch_raw_data_success(self, provider):
+        """A 200 response returns the parsed bars structure."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": STOCK_BARS, "next_page_token": None}
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+        assert data["bars"] == STOCK_BARS
+        assert data["next_page_token"] is None
+
+    def test_feed_param_sent_for_stock(self):
+        """The configured feed is forwarded in the request params."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="sip")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": [], "next_page_token": None}
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+        assert mock_get.call_args.kwargs["params"]["feed"] == "sip"
+
+    def test_fetch_429_raises_rate_limit(self, provider):
+        """A 429 maps to RateLimitError."""
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(RateLimitError):
+                provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+    def test_fetch_401_raises_auth(self, provider):
+        """A 401 maps to AuthenticationError."""
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(AuthenticationError):
+                provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+    def test_fetch_404_raises_data_not_available(self, provider):
+        """A 404 maps to DataNotAvailableError."""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(DataNotAvailableError):
+                provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+    def test_fetch_500_raises_network(self, provider):
+        """A 500 maps to NetworkError."""
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError):
+                provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+    def test_json_parse_error_raises_network(self, provider):
+        """A JSON parse failure maps to NetworkError."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("Invalid JSON")
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError, match="Failed to parse JSON"):
+                provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+    @pytest.mark.asyncio
+    async def test_fetch_raw_data_async_stock(self, provider):
+        """The async path returns the same parsed structure as the sync path."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": STOCK_BARS, "next_page_token": None}
+
+        with (
+            patch.object(provider, "_aget", new=AsyncMock(return_value=mock_response)),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = await provider._fetch_raw_data_async("AAPL", "2024-01-01", "2024-01-05", "daily")
+
+        assert data["bars"] == STOCK_BARS
+
+
+class TestTransformDataStock:
+    """Tests for transforming stock bars into the standard schema."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_transform_data_stock(self, provider):
+        """Bars transform to the canonical OHLCV schema, sorted, with invariants."""
+        raw = {"bars": STOCK_BARS, "next_page_token": None}
+
+        df = provider._transform_data(raw, "AAPL")
+
+        assert df.columns == [
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        ]
+        assert df.schema["timestamp"] == pl.Datetime
+        for col in ["open", "high", "low", "close", "volume"]:
+            assert df.schema[col] == pl.Float64
+        assert df["symbol"].to_list() == ["AAPL", "AAPL"]
+        # Rows sorted ascending by timestamp.
+        timestamps = df["timestamp"].to_list()
+        assert timestamps == sorted(timestamps)
+        # OHLC invariants hold for every row.
+        assert (df["high"] >= df["low"]).all()
+        assert (df["high"] >= df["open"]).all()
+        assert (df["high"] >= df["close"]).all()
+
+    def test_transform_data_stock_dict_shape(self, provider):
+        """A multi-symbol dict-keyed bars payload is also accepted."""
+        raw = {"bars": {"AAPL": STOCK_BARS}, "next_page_token": None}
+
+        df = provider._transform_data(raw, "AAPL")
+
+        assert df["symbol"].to_list() == ["AAPL", "AAPL"]
+        assert df.height == 2
+
+    def test_empty_bars_returns_empty_dataframe(self, provider):
+        """An empty bars list yields the canonical empty DataFrame."""
+        raw = {"bars": [], "next_page_token": None}
+
+        df = provider._transform_data(raw, "AAPL")
+        expected = provider._create_empty_dataframe()
+
+        assert df.columns == expected.columns
+        assert df.schema == expected.schema
+        assert df.height == 0
