@@ -149,6 +149,7 @@ class ProviderManager:
     # Providers that require API keys
     KEYED_PROVIDERS = frozenset(
         {
+            "alpaca",
             "databento",
             "massive",
             "oanda",
@@ -184,6 +185,7 @@ class ProviderManager:
             return cls._PROVIDER_CLASSES
 
         # Import core providers
+        from ml4t.data.providers.alpaca import AlpacaDataProvider
         from ml4t.data.providers.binance import BinanceProvider
         from ml4t.data.providers.binance_public import BinancePublicProvider
         from ml4t.data.providers.cryptocompare import CryptoCompareProvider
@@ -193,6 +195,7 @@ class ProviderManager:
         from ml4t.data.providers.yahoo import YahooFinanceProvider
 
         provider_classes: dict[str, type] = {
+            "alpaca": AlpacaDataProvider,
             "binance": BinanceProvider,
             "binance_public": BinancePublicProvider,
             "cryptocompare": CryptoCompareProvider,
@@ -244,6 +247,7 @@ class ProviderManager:
 
         # Check environment for API keys not in config
         env_to_provider = {
+            "ALPACA_API_KEY": "alpaca",
             "CRYPTOCOMPARE_API_KEY": "cryptocompare",
             "DATABENTO_API_KEY": "databento",
             "MASSIVE_API_KEY": "massive",

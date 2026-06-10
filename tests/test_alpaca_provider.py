@@ -621,3 +621,85 @@ class TestPagination:
         assert data["bars"] == [STOCK_BARS[0], STOCK_BARS[1]]
         assert mock_aget.call_count == 2
         assert mock_aget.call_args_list[1].kwargs["params"]["page_token"] == "abc"
+
+
+class TestAlpacaRegistration:
+    """Tests that wire Alpaca into the registry, config, and exports."""
+
+    def test_registry_resolves_alpaca(self):
+        """The ProviderManager registry maps 'alpaca' to AlpacaDataProvider."""
+        from ml4t.data.managers.provider_manager import ProviderManager
+
+        classes = ProviderManager._get_provider_classes()
+
+        assert "alpaca" in classes
+        assert classes["alpaca"] is AlpacaDataProvider
+
+    def test_alpaca_in_keyed_providers(self):
+        """Alpaca is registered as an API-key-requiring provider."""
+        from ml4t.data.managers.provider_manager import ProviderManager
+
+        assert "alpaca" in ProviderManager.KEYED_PROVIDERS
+
+    def test_alpaca_exported(self):
+        """AlpacaDataProvider is importable from the package and in __all__."""
+        import ml4t.data.providers as providers
+        from ml4t.data.providers import AlpacaDataProvider as Exported
+
+        assert Exported is AlpacaDataProvider
+        assert "AlpacaDataProvider" in providers.__all__
+
+    def test_env_autodetect_alpaca(self):
+        """ALPACA_API_KEY auto-detection resolves the alpaca provider."""
+        import os
+
+        from ml4t.data.managers.provider_manager import ProviderManager
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("ALPACA_")}
+        env["ALPACA_API_KEY"] = "k"
+        with patch.dict(os.environ, env, clear=True):
+            manager = ProviderManager(config={"providers": {}})
+            assert "alpaca" in manager.available_providers
+
+    def test_provider_type_enum_accepts_alpaca(self):
+        """ProviderType accepts 'alpaca' and ProviderConfig validates with it."""
+        from ml4t.data.config.models import ProviderConfig, ProviderType
+
+        assert ProviderType("alpaca") == ProviderType.ALPACA
+
+        config = ProviderConfig(name="x", type="alpaca")
+        assert config.type == ProviderType.ALPACA
+
+    def test_config_manager_injects_both_credentials(self):
+        """Both Alpaca env credentials land in the resolved provider config."""
+        import os
+
+        from ml4t.data.managers.config_manager import ConfigManager
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("ALPACA_")}
+        env["ALPACA_API_KEY"] = "k"
+        env["ALPACA_API_SECRET"] = "s"
+        with patch.dict(os.environ, env, clear=True):
+            manager = ConfigManager()
+            provider_config = manager.get_provider_config("alpaca")
+
+        assert provider_config.get("api_key") == "k"
+        assert provider_config.get("api_secret") == "s"
+
+    def test_alpaca_missing_secret_fails_clearly(self):
+        """A config with api_key but no api_secret fails with a clear error.
+
+        Availability is keyed on api_key alone, so an alpaca entry with only a
+        key is marked available but fails loudly at construction rather than
+        silently producing a broken provider.
+        """
+        import os
+
+        from ml4t.data.managers.provider_manager import ProviderManager
+
+        env = {k: v for k, v in os.environ.items() if not k.startswith("ALPACA_")}
+        with patch.dict(os.environ, env, clear=True):
+            manager = ProviderManager(config={"providers": {"alpaca": {"api_key": "k"}}})
+
+            with pytest.raises(ValueError, match="secret"):
+                manager.get_provider("alpaca")

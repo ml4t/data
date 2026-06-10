@@ -53,6 +53,7 @@ class ProviderType(str, Enum):
     """Provider type enumeration."""
 
     YAHOO = "yahoo"
+    ALPACA = "alpaca"
     BINANCE = "binance"
     CRYPTOCOMPARE = "cryptocompare"
     DATABENTO = "databento"

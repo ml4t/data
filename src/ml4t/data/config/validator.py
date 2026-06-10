@@ -65,7 +65,10 @@ class ConfigValidator:
             provider_names.add(provider.name)
 
             # Check API keys for providers that need them
-            if provider.type in ["massive", "polygon", "cryptocompare"] and not provider.api_key:
+            if (
+                provider.type in ["massive", "polygon", "cryptocompare", "alpaca"]
+                and not provider.api_key
+            ):
                 self.warnings.append(
                     f"Provider {provider.name} ({provider.type}) may require an API key"
                 )

@@ -42,6 +42,8 @@ class ConfigManager:
 
     # Environment variable to provider config mapping
     ENV_MAPPING = {
+        "ALPACA_API_KEY": ("alpaca", "api_key"),
+        "ALPACA_API_SECRET": ("alpaca", "api_secret"),
         "CRYPTOCOMPARE_API_KEY": ("cryptocompare", "api_key"),
         "DATABENTO_API_KEY": ("databento", "api_key"),
         "POLYGON_API_KEY": ("massive", "api_key"),

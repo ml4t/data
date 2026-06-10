@@ -5,6 +5,7 @@ This module provides unified access to multiple financial data providers.
 Available Providers (20 live + 3 synthetic/testing):
     - BaseProvider: Abstract base class for all providers
     - YahooFinanceProvider: Yahoo Finance (free, no API key)
+    - AlpacaDataProvider: Alpaca US stocks and crypto (free IEX feed, two-credential auth)
     - TiingoProvider: Tiingo stocks (free tier: 1000 req/day, 500 symbols/month)
     - FinnhubProvider: Finnhub multi-asset data (free tier: 60 req/min)
     - EODHDProvider: EODHD global equities (free tier: 500 req/day, 1 year depth)
@@ -48,6 +49,11 @@ try:
     from ml4t.data.providers.yahoo import YahooFinanceProvider
 except ImportError:
     YahooFinanceProvider = None  # type: ignore
+
+try:
+    from ml4t.data.providers.alpaca import AlpacaDataProvider
+except ImportError:
+    AlpacaDataProvider = None  # type: ignore
 
 try:
     from ml4t.data.providers.tiingo import TiingoProvider
@@ -149,6 +155,7 @@ __all__ = [
     "Provider",
     # Equity providers
     "YahooFinanceProvider",
+    "AlpacaDataProvider",
     "TiingoProvider",
     "FinnhubProvider",
     "EODHDProvider",
