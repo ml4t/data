@@ -13,7 +13,7 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | yahoo.py | 603 | Yahoo Finance (free) |
-| alpaca.py | 722 | Alpaca US stocks + crypto (free IEX feed, two-cred auth) |
+| alpaca.py | 968 | Alpaca US stocks + crypto (free IEX feed, two-cred auth) |
 | binance_api.py | 410 | Binance REST API |
 | binance_bulk.py | 1430 | Binance bulk historical archive |
 | eodhd.py | 464 | EOD Historical Data |

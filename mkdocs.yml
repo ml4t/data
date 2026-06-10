@@ -124,6 +124,7 @@ nav:
   - Providers:
     - providers/index.md
     - Yahoo Finance: providers/yahoo.md
+    - Alpaca: providers/alpaca.md
     - CoinGecko: providers/coingecko.md
     - FRED: providers/fred.md
     - Fama-French: providers/fama_french.md

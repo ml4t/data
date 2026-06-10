@@ -2,7 +2,7 @@
 
 This module provides unified access to multiple financial data providers.
 
-Available Providers (20 live + 3 synthetic/testing):
+Available Providers (21 live + 3 synthetic/testing):
     - BaseProvider: Abstract base class for all providers
     - YahooFinanceProvider: Yahoo Finance (free, no API key)
     - AlpacaDataProvider: Alpaca US stocks and crypto (free IEX feed, two-credential auth)
