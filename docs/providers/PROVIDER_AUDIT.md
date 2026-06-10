@@ -12,7 +12,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 |----------|----------|---------|-----------|-------------|
 | YahooFinance | Equity | No | Unlimited* | [Terms](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) |
 | Databento | Multi-Asset | Yes | $125 credit | [Pricing](https://databento.com/pricing) |
-| Polygon/Massive | Multi-Asset | Yes | 5 calls/min | [Pricing](https://massive.com/pricing) |
+| Massive | Multi-Asset | Yes | 5 calls/min | [Pricing](https://massive.com/pricing) |
 | EODHD | Equity | Yes | 20 calls/day | [Pricing](https://eodhd.com/pricing) |
 | Tiingo | Equity | Yes | 1,000 req/day | [Pricing](https://tiingo.com/about/pricing) |
 | Finnhub | Multi-Asset | Yes | 60 req/min | [Pricing](https://finnhub.io/pricing) |
@@ -389,7 +389,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | Use Case | Recommended Provider |
 |----------|---------------------|
 | Quick start (free) | YahooFinance |
-| US equities (production) | EODHD or Polygon/Massive |
+| US equities (production) | EODHD or Massive |
 | Global equities | EODHD |
 | Futures/options | Databento |
 | Crypto | BinancePublic |
@@ -404,9 +404,9 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | Budget | Providers |
 |--------|-----------|
 | $0 | Yahoo, CoinGecko, BinancePublic, WikiPrices, FRED, AQR, Fama-French |
-| <$30/mo | EODHD ($19.99), Polygon Starter ($29) |
-| <$100/mo | EODHD All-in-One ($99.99), Polygon Developer ($79) |
-| Professional | Databento ($179+), Polygon Advanced ($199) |
+| <$30/mo | EODHD ($19.99), Massive Starter ($29) |
+| <$100/mo | EODHD All-in-One ($99.99), Massive Developer ($79) |
+| Professional | Databento ($179+), Massive Advanced ($199) |
 
 ---
 

@@ -71,7 +71,7 @@ Integration tests for provider APIs require API keys:
 export COINGECKO_API_KEY=""  # Optional
 
 # Requires API keys
-export POLYGON_API_KEY="your_key_here"
+export MASSIVE_API_KEY="your_key_here"
 export TWELVE_DATA_API_KEY="your_key_here"
 export CRYPTOCOMPARE_API_KEY="your_key_here"
 export FINNHUB_API_KEY="your_key_here"

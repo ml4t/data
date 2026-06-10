@@ -25,7 +25,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 | Provider | API Key | Free Tier | Best For |
 |----------|---------|-----------|----------|
 | [Databento](databento.md) | Yes | $125 credit | Institutional futures/equities |
-| [Polygon/Massive](polygon.md) | Yes | 5 calls/min | US equities, options |
+| [Massive](massive.md) | Yes | 5 calls/min | US equities, options, futures |
 | [TwelveData](twelve_data.md) | Yes | 800 calls/day | Stocks, Forex, Crypto |
 
 ### Crypto Providers
@@ -74,7 +74,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 |----------|--------|--------|-------|---------|--------------|
 | YahooFinance | ✅ (7d) | ✅ | ✅ | ❌* | ❌* |
 | Databento | ✅ | ✅ | ✅ | ✅ (OPRA) | ❌ |
-| Polygon/Massive | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Massive | ✅ | ✅ | ✅ | ✅ | ✅ |
 | EODHD | ❌ | ❌ | ✅ | ✅ ($29.99) | ✅ ($59.99) |
 | Tiingo | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Finnhub | ✅ | ✅ | ✅ | ❌ | ✅ |
@@ -173,7 +173,7 @@ print(f"Total history: {len(combined)} trading days")
 | Use Case | Recommended Provider |
 |----------|---------------------|
 | Quick start (free) | YahooFinance |
-| US equities (production) | EODHD or Polygon/Massive |
+| US equities (production) | EODHD or Massive |
 | Global equities | EODHD |
 | Futures/options | Databento |
 | Crypto | BinancePublic |
@@ -188,9 +188,9 @@ print(f"Total history: {len(combined)} trading days")
 | Budget | Providers |
 |--------|-----------|
 | $0 | Yahoo, CoinGecko, BinancePublic, WikiPrices, FRED, AQR, Fama-French |
-| <$30/mo | EODHD ($19.99), Polygon Starter ($29) |
-| <$100/mo | EODHD All-in-One ($99.99), Polygon Developer ($79) |
-| Professional | Databento ($179+), Polygon Advanced ($199) |
+| <$30/mo | EODHD ($19.99), Massive Starter ($29) |
+| <$100/mo | EODHD All-in-One ($99.99), Massive Developer ($79) |
+| Professional | Databento ($179+), Massive Advanced ($199) |
 
 ---
 
@@ -208,7 +208,7 @@ CRYPTOCOMPARE_API_KEY=your_key_here
 FRED_API_KEY=your_key_here
 
 # Professional providers
-POLYGON_API_KEY=your_key_here
+MASSIVE_API_KEY=your_key_here
 OANDA_API_KEY=your_key_here
 DATABENTO_API_KEY=your_key_here
 ```

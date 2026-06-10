@@ -413,14 +413,14 @@ except AuthenticationError as e:
 ### Quick Start
 
 ```python
-from ml4t.data.providers import PolygonProvider
+from ml4t.data.providers import MassiveProvider
 
-# Get API key from: https://polygon.io/
-provider = PolygonProvider(api_key="your_polygon_api_key")
+# Get API key from: https://massive.com/
+provider = MassiveProvider(api_key="your_massive_api_key")
 
 # Fetch ES futures data
 df = provider.fetch_ohlcv(
-    symbol="ES",  # E-mini S&P 500 (generic symbol)
+    symbol="F:ESM6",
     start="2024-01-01",
     end="2024-12-31",
     frequency="daily"

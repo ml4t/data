@@ -410,14 +410,14 @@ df = provider.fetch_ohlcv(
 
 ---
 
-### Polygon (Real-Time FX + Stocks)
+### Massive (Real-Time FX + Stocks)
 
 **Best for**: Real-time FX monitoring + stock trading
 
 ```python
-from ml4t.data.providers import PolygonProvider
+from ml4t.data.providers import MassiveProvider
 
-provider = PolygonProvider(api_key="your_key")
+provider = MassiveProvider(api_key="your_key")
 
 # Fetch FX data
 df = provider.fetch_ohlcv(

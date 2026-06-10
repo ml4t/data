@@ -106,7 +106,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Tiingo | US equities with quality focus |
 | Twelve Data | Multi-asset coverage |
 | Databento | CME, CBOE, ICE futures/options |
-| Polygon | US equities, options, forex, crypto |
+| Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | Binance | Crypto exchange data |
 | OKX | Crypto perpetuals and funding rates |

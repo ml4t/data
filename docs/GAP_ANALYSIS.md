@@ -62,7 +62,7 @@ This report analyzes the gaps between what data providers offer and what ml4t-da
 **Available From**:
 | Provider | Offering | Pricing |
 |----------|----------|---------|
-| Polygon/Massive | Full options chains, Greeks, IV | $99+/mo (Developer tier) |
+| Massive | Full options chains, Greeks, IV | $99+/mo (Developer tier) |
 | Yahoo Finance | Options chains via yfinance | Free |
 | Databento | OPRA options | Usage-based |
 | EODHD | Options Marketplace | $29.99/mo add-on |
@@ -70,9 +70,9 @@ This report analyzes the gaps between what data providers offer and what ml4t-da
 **Implementation Approach**:
 ```python
 # Proposed API
-from ml4t.data.providers import PolygonProvider
+from ml4t.data.providers import MassiveProvider
 
-provider = PolygonProvider()
+provider = MassiveProvider()
 chain = provider.fetch_options_chain(
     symbol="AAPL",
     expiration="2025-01-17",

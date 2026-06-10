@@ -56,6 +56,7 @@ class ProviderType(str, Enum):
     BINANCE = "binance"
     CRYPTOCOMPARE = "cryptocompare"
     DATABENTO = "databento"
+    MASSIVE = "massive"
     OANDA = "oanda"
     POLYGON = "polygon"
     MOCK = "mock"

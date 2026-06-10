@@ -19,7 +19,8 @@ Available Providers (20 live + 3 synthetic/testing):
     - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
     - CryptoCompareProvider: CryptoCompare crypto data
     - TwelveDataProvider: Twelve Data multi-asset (stocks, forex, crypto)
-    - PolygonProvider: Polygon multi-asset (stocks, options, crypto, forex)
+    - MassiveProvider: Massive multi-asset (stocks, options, futures, crypto, forex)
+    - PolygonProvider: Deprecated alias for MassiveProvider
     - OandaProvider: Oanda forex and CFDs
     - DataBentoProvider: DataBento market data
     - ITCHSampleProvider: NASDAQ TotalView-ITCH sample data (tick-level, free)
@@ -118,7 +119,7 @@ except ImportError:
     OandaProvider = None  # type: ignore
 
 # Multi-asset providers
-from ml4t.data.providers.polygon import PolygonProvider
+from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
 from ml4t.data.providers.twelve_data import TwelveDataProvider
 
 # Market data providers
@@ -168,6 +169,7 @@ __all__ = [
     # Forex providers
     "OandaProvider",
     # Multi-asset providers
+    "MassiveProvider",
     "PolygonProvider",
     "TwelveDataProvider",
     # Market data providers

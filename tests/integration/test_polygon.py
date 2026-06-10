@@ -1,18 +1,18 @@
-"""Integration tests for Polygon provider (real API calls).
+"""Integration tests for Massive/Polygon provider (real API calls).
 
-These tests verify the Polygon provider works correctly with actual API calls.
+These tests verify the Massive provider works correctly with actual API calls.
 
 Requirements:
-    - POLYGON_API_KEY environment variable must be set
+    - MASSIVE_API_KEY or POLYGON_API_KEY environment variable must be set
     - Free tier: 5 requests/minute (tests respect rate limits)
-    - API key from: https://polygon.io/
+    - API key from: https://massive.com/
 
 Test Coverage:
     - Stock OHLCV data (AAPL)
     - Crypto OHLCV data (X:BTCUSD)
     - Rate limiting behavior
     - Error handling
-    - PolygonUpdater incremental updates
+    - Massive/Polygon compatibility behavior
 """
 
 import os
@@ -22,48 +22,51 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import AuthenticationError
-from ml4t.data.providers.polygon import PolygonProvider
+from ml4t.data.providers.polygon import MassiveProvider
 
 # Get API key from environment
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") or os.getenv("POLYGON_API_KEY")
 
 # Skip all tests if no API key
 pytestmark = pytest.mark.skipif(
-    not POLYGON_API_KEY,
-    reason="POLYGON_API_KEY not set - get key at https://polygon.io/",
+    not MASSIVE_API_KEY,
+    reason="MASSIVE_API_KEY or POLYGON_API_KEY not set - get key at https://massive.com/",
 )
 
 
 @pytest.fixture
 def provider():
-    """Create Polygon provider with API key."""
-    provider = PolygonProvider(api_key=POLYGON_API_KEY)
+    """Create Massive provider with API key."""
+    provider = MassiveProvider(api_key=MASSIVE_API_KEY)
     yield provider
     provider.close()
 
 
-class TestPolygonProvider:
-    """Test Polygon provider with real API calls."""
+class TestMassiveProvider:
+    """Test Massive provider with real API calls."""
 
     def test_provider_initialization(self):
         """Test provider can be initialized with API key."""
-        provider = PolygonProvider(api_key=POLYGON_API_KEY)
-        assert provider.name == "polygon"
-        assert provider.api_key == POLYGON_API_KEY
+        provider = MassiveProvider(api_key=MASSIVE_API_KEY)
+        assert provider.name == "massive"
+        assert provider.api_key == MASSIVE_API_KEY
         provider.close()
 
     def test_provider_requires_api_key(self):
         """Test provider raises error without API key."""
         # Clear environment variable temporarily
-        original_key = os.environ.pop("POLYGON_API_KEY", None)
+        original_massive_key = os.environ.pop("MASSIVE_API_KEY", None)
+        original_polygon_key = os.environ.pop("POLYGON_API_KEY", None)
         try:
             with pytest.raises(AuthenticationError) as exc_info:
-                PolygonProvider(api_key=None)
+                MassiveProvider(api_key=None)
             assert "API key required" in str(exc_info.value)
         finally:
             # Restore key
-            if original_key:
-                os.environ["POLYGON_API_KEY"] = original_key
+            if original_massive_key:
+                os.environ["MASSIVE_API_KEY"] = original_massive_key
+            if original_polygon_key:
+                os.environ["POLYGON_API_KEY"] = original_polygon_key
 
     def test_fetch_ohlcv_stock_daily(self, provider):
         """Test fetching daily stock data with real API call."""
@@ -118,7 +121,7 @@ class TestPolygonProvider:
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
-        # Polygon uses X:BTCUSD format for crypto
+        # Massive uses X:BTCUSD format for crypto
         df = provider.fetch_ohlcv(
             symbol="X:BTCUSD",
             start=start_date,
@@ -187,13 +190,13 @@ class TestPolygonProvider:
                 end=end_date,
             )
 
-        assert "polygon" in str(exc_info.value).lower()
+        assert "massive" in str(exc_info.value).lower()
         assert "INVALID_SYMBOL_12345" in str(exc_info.value)
         print("✅ Invalid symbol raises SymbolNotFoundError")
 
     def test_invalid_api_key(self):
         """Test authentication error with invalid API key."""
-        provider = PolygonProvider(api_key="invalid_key_12345")
+        provider = MassiveProvider(api_key="invalid_key_12345")
 
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -202,7 +205,7 @@ class TestPolygonProvider:
         with pytest.raises(AuthenticationError) as exc_info:
             provider.fetch_ohlcv("AAPL", start_date, end_date)
 
-        assert "polygon" in str(exc_info.value).lower()
+        assert "massive" in str(exc_info.value).lower()
         print("✅ Invalid API key raises AuthenticationError")
 
 

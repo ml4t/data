@@ -210,7 +210,7 @@ es = provider.fetch_ohlcv("ES.v.0", "2024-01-01", "2024-12-31")  # S&P 500 futur
 - **Global Stocks**: [EODHD](asset-classes/equities.md#eodhd-best-value-for-global-coverage), [Finnhub](asset-classes/equities.md#finnhub-professional-grade---paid-for-historical)
 - **Forex**: [OANDA](asset-classes/forex.md#oanda-recommended-for-forex)
 - **Futures**: [Databento](asset-classes/futures.md#databento-recommended-for-futures)
-- **Multi-Asset**: [Twelve Data](asset-classes/equities.md#twelve-data-multi-asset-with-forex), [Polygon](asset-classes/equities.md#polygon-multi-asset-alternative)
+- **Multi-Asset**: [Twelve Data](asset-classes/equities.md#twelve-data-multi-asset-with-forex), [Massive](providers/massive.md)
 
 ### By Concept
 

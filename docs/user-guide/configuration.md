@@ -104,9 +104,9 @@ API keys and secrets support `${VAR}` interpolation with optional defaults:
 
 ```yaml
 providers:
-  - name: polygon
-    api_key: ${POLYGON_API_KEY}           # required
-    api_secret: ${POLYGON_SECRET:default}  # with fallback
+  - name: massive
+    api_key: ${MASSIVE_API_KEY}           # required
+    api_secret: ${MASSIVE_SECRET:default}  # with fallback
 ```
 
 The `env` section defines variables that are set if not already present:

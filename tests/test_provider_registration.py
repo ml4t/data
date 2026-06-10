@@ -8,12 +8,13 @@ from ml4t.data.providers.databento import DataBentoProvider
 from ml4t.data.providers.mock import MockProvider
 from ml4t.data.providers.oanda import OandaProvider
 from ml4t.data.providers.okx import OKXProvider
+from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
 from ml4t.data.providers.synthetic import SyntheticProvider
 from ml4t.data.providers.yahoo import YahooFinanceProvider
 
 
 def test_all_providers_registered():
-    """Test that all 9 OHLCV providers are registered in DataManager.
+    """Test that all OHLCV providers are registered in DataManager.
 
     Note: Specialized providers (factor, prediction market) are not in DataManager.
     - Factor providers: aqr, fama_french (standalone, different API)
@@ -25,15 +26,17 @@ def test_all_providers_registered():
         "binance_public": BinancePublicProvider,
         "cryptocompare": CryptoCompareProvider,
         "databento": DataBentoProvider,
+        "massive": MassiveProvider,
         "mock": MockProvider,
         "oanda": OandaProvider,
         "okx": OKXProvider,
+        "polygon": PolygonProvider,
         "synthetic": SyntheticProvider,
         "yahoo": YahooFinanceProvider,
     }
 
     assert expected_providers == DataManager.PROVIDER_CLASSES
-    assert len(DataManager.PROVIDER_CLASSES) == 9
+    assert len(DataManager.PROVIDER_CLASSES) == 11
 
 
 def test_provider_imports_work():
@@ -44,6 +47,7 @@ def test_provider_imports_work():
         BinancePublicProvider,
         CryptoCompareProvider,
         DataBentoProvider,
+        MassiveProvider,
         MockProvider,
         OandaProvider,
         SyntheticProvider,
@@ -76,30 +80,35 @@ def test_provider_instantiation():
     for provider_name, _provider_class in DataManager.PROVIDER_CLASSES.items():
         # Try to get provider instance
         try:
-            if provider_name in ["databento", "oanda"]:
+            if provider_name in ["databento", "massive", "oanda", "polygon"]:
                 # These require API keys, so we expect None or skip
                 continue
             provider = dm._get_provider(provider_name)
-            assert provider is not None or provider_name in ["databento", "oanda"]
+            assert provider is not None or provider_name in [
+                "databento",
+                "massive",
+                "oanda",
+                "polygon",
+            ]
         except Exception as e:
-            # Only databento and oanda should fail without API keys
-            assert provider_name in ["databento", "oanda"], (
+            # Only keyed providers should fail without API keys
+            assert provider_name in ["databento", "massive", "oanda", "polygon"], (
                 f"Unexpected error for {provider_name}: {e}"
             )
 
 
 def test_provider_count():
-    """Test that we have exactly 9 OHLCV providers registered in DataManager.
+    """Test that we have the expected OHLCV providers registered in DataManager.
 
     Provider categories:
-    - In DataManager (9): General OHLCV providers with unified fetch_ohlcv() interface
+    - In DataManager (11): General OHLCV providers with unified fetch_ohlcv() interface
     - Standalone (5): Specialized providers with unique APIs
       - Factor data: aqr, fama_french
       - Prediction markets: kalshi, polymarket
       - Historical: wiki_prices
     """
-    assert len(DataManager.PROVIDER_CLASSES) == 9, (
-        f"Expected 9 providers, got {len(DataManager.PROVIDER_CLASSES)}"
+    assert len(DataManager.PROVIDER_CLASSES) == 11, (
+        f"Expected 11 providers, got {len(DataManager.PROVIDER_CLASSES)}"
     )
 
     # List all provider names for clarity
@@ -108,9 +117,11 @@ def test_provider_count():
     assert "binance_public" in provider_names
     assert "cryptocompare" in provider_names
     assert "databento" in provider_names
+    assert "massive" in provider_names
     assert "mock" in provider_names
     assert "oanda" in provider_names
     assert "okx" in provider_names
+    assert "polygon" in provider_names
     assert "synthetic" in provider_names
     assert "yahoo" in provider_names
 

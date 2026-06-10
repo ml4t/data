@@ -306,6 +306,7 @@ class TestOutputFormats:
         mock_provider.fetch_ohlcv.return_value = test_df
 
         dm = DataManager(output_format="pandas")
+        dm.router.patterns.clear()
         dm._provider_manager._provider_classes["mock_crypto"] = lambda **kwargs: mock_provider
         dm._provider_manager._available_providers.append("mock_crypto")
         dm.router.add_pattern(r"^BTC", "mock_crypto")
@@ -334,6 +335,7 @@ class TestOutputFormats:
         mock_provider.fetch_ohlcv.return_value = test_df
 
         dm = DataManager(output_format="lazy")
+        dm.router.patterns.clear()
         dm._provider_manager._provider_classes["mock_crypto"] = lambda **kwargs: mock_provider
         dm._provider_manager._available_providers.append("mock_crypto")
         dm.router.add_pattern(r"^BTC", "mock_crypto")

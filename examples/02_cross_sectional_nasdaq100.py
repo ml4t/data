@@ -22,11 +22,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import polars as pl
-import seaborn as sns
 
 # Import qfeatures modules
 import ml4t.engineer as qf
+import polars as pl
+import seaborn as sns
 from ml4t.evaluation import Evaluator, Tier
 from ml4t.evaluation.evaluation.stats import deflated_sharpe_ratio
 from ml4t.evaluation.evaluation.viz import create_factor_tearsheet
