@@ -36,6 +36,7 @@ from typing import Any, ClassVar
 
 import polars as pl
 import structlog
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,
@@ -204,6 +205,24 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 value=frequency,
             ) from err
 
+    def _resolve_asset_class(self, symbol: str, asset_class: str | None) -> str:
+        """Resolve the asset class for a request.
+
+        An explicit ``asset_class`` always wins. Otherwise a ``BASE/QUOTE``
+        symbol (e.g. ``"BTC/USD"``) is treated as crypto and everything else as
+        a stock.
+
+        Args:
+            symbol: The requested symbol.
+            asset_class: An explicit asset class, or ``None`` to infer it.
+
+        Returns:
+            Either ``"crypto"`` or ``"stock"``.
+        """
+        if asset_class is not None:
+            return asset_class
+        return "crypto" if "/" in symbol else "stock"
+
     def _stock_bars_params(self, frequency: str, start: str, end: str) -> dict[str, Any]:
         """Build the query parameters for a stock bars request.
 
@@ -222,6 +241,60 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             "limit": 10000,
             "feed": self.feed,
         }
+
+    def _crypto_bars_params(
+        self, symbol: str, frequency: str, start: str, end: str
+    ) -> dict[str, Any]:
+        """Build the query parameters for a crypto bars request.
+
+        The crypto bars endpoint is multi-symbol: the symbol travels in the
+        ``symbols`` parameter (preserving the ``BASE/QUOTE`` form verbatim) and
+        no ``feed`` is sent, since crypto has a single consolidated feed.
+
+        Args:
+            symbol: The crypto symbol in ``BASE/QUOTE`` form (e.g. "BTC/USD").
+            frequency: Canonical frequency key or alias.
+            start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+
+        Returns:
+            The query parameter mapping for the crypto bars endpoint.
+        """
+        return {
+            "symbols": symbol,
+            "timeframe": self._map_frequency(frequency),
+            "start": start,
+            "end": end,
+            "limit": 10000,
+        }
+
+    def _bars_request(
+        self, symbol: str, start: str, end: str, frequency: str, asset_class: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Resolve the endpoint and query params for a bars request.
+
+        Branches on the resolved asset class so the sync and async fetchers share
+        one routing decision. The stock branch uppercases the symbol into the
+        path; the crypto branch hits the multi-symbol endpoint and preserves the
+        ``BASE/QUOTE`` symbol verbatim.
+
+        Args:
+            symbol: The requested symbol.
+            start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+            frequency: Canonical frequency key or alias.
+            asset_class: The resolved asset class, ``"crypto"`` or ``"stock"``.
+
+        Returns:
+            A ``(endpoint, params)`` tuple.
+        """
+        if asset_class == "crypto":
+            # The {loc} path segment selects the venue group; "us" is the
+            # default consolidated US crypto feed.
+            endpoint = f"{self.crypto_base_url}/v1beta3/crypto/us/bars"
+            return endpoint, self._crypto_bars_params(symbol, frequency, start, end)
+        endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
+        return endpoint, self._stock_bars_params(frequency, start, end)
 
     def _check_response_status(self, status_code: int, symbol: str, response_text: str) -> None:
         """Map an HTTP status code to a typed provider exception.
@@ -275,17 +348,22 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         start: str,
         end: str,
         frequency: str = "daily",
-        asset_class: str | None = None,  # noqa: ARG002
+        asset_class: str | None = None,
     ) -> dict[str, Any]:
-        """Fetch a single page of stock bars from Alpaca.
+        """Fetch a single page of bars from Alpaca.
+
+        Routes to the stock or crypto bars endpoint based on the resolved asset
+        class. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD") routes to crypto unless
+        an explicit ``asset_class`` overrides the inference.
 
         Args:
-            symbol: The equity symbol to fetch (case-insensitive).
+            symbol: The symbol to fetch (stocks are case-insensitive; crypto
+                symbols are preserved verbatim).
             start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
             end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
             frequency: Canonical frequency key or alias.
-            asset_class: Reserved for routing to other asset classes; the stock
-                branch is the default.
+            asset_class: Explicit asset class; inferred from the symbol when
+                ``None``.
 
         Returns:
             The parsed JSON payload containing the ``bars`` data.
@@ -294,8 +372,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             RateLimitError, AuthenticationError, DataNotAvailableError,
             NetworkError: Per the HTTP status of the response.
         """
-        endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
-        params = self._stock_bars_params(frequency, start, end)
+        resolved = self._resolve_asset_class(symbol, asset_class)
+        endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
 
         try:
             self.rate_limiter.acquire(blocking=True)
@@ -319,20 +397,22 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         start: str,
         end: str,
         frequency: str = "daily",
-        asset_class: str | None = None,  # noqa: ARG002
+        asset_class: str | None = None,
     ) -> dict[str, Any]:
-        """Asynchronously fetch a single page of stock bars from Alpaca.
+        """Asynchronously fetch a single page of bars from Alpaca.
 
         Mirrors :meth:`_fetch_raw_data` over the async transport; the async
-        session carries the same two-header credentials as the sync session.
+        session carries the same two-header credentials as the sync session and
+        applies the same stock/crypto routing.
 
         Args:
-            symbol: The equity symbol to fetch (case-insensitive).
+            symbol: The symbol to fetch (stocks are case-insensitive; crypto
+                symbols are preserved verbatim).
             start: Inclusive start date/datetime in ISO-8601 (RFC-3339) form.
             end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
             frequency: Canonical frequency key or alias.
-            asset_class: Reserved for routing to other asset classes; the stock
-                branch is the default.
+            asset_class: Explicit asset class; inferred from the symbol when
+                ``None``.
 
         Returns:
             The parsed JSON payload containing the ``bars`` data.
@@ -341,8 +421,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             RateLimitError, AuthenticationError, DataNotAvailableError,
             NetworkError: Per the HTTP status of the response.
         """
-        endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
-        params = self._stock_bars_params(frequency, start, end)
+        resolved = self._resolve_asset_class(symbol, asset_class)
+        endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
 
         try:
             self.rate_limiter.acquire(blocking=True)
@@ -406,8 +486,33 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         if not bars:
             return self._create_empty_dataframe()
 
+        # Crypto symbols keep their BASE/QUOTE form verbatim; stocks uppercase.
         symbol_literal = symbol if asset_class == "crypto" else symbol.upper()
+        return self._bars_to_dataframe(bars, symbol_literal, symbol)
 
+    def _bars_to_dataframe(
+        self, bars: list[dict[str, Any]], symbol_literal: str, symbol: str
+    ) -> pl.DataFrame:
+        """Convert a list of bar records into the canonical OHLCV DataFrame.
+
+        Stock and crypto bars share the same ``o/h/l/c/v/t`` field names, so a
+        single conversion serves both branches; only the bars-extraction and the
+        symbol literal differ upstream. Crypto bars are 24/7, so no calendar or
+        session filtering is applied here.
+
+        Args:
+            bars: Non-empty list of bar records with ``o/h/l/c/v/t`` keys.
+            symbol_literal: The value to write into the ``symbol`` column.
+            symbol: The requested symbol, used only for error context.
+
+        Returns:
+            A DataFrame with columns
+            ``[timestamp, symbol, open, high, low, close, volume]`` sorted by
+            timestamp.
+
+        Raises:
+            DataValidationError: If the bars cannot be transformed.
+        """
         try:
             df = pl.DataFrame(bars)
             df = df.rename(
@@ -436,3 +541,126 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             raise DataValidationError(
                 provider="alpaca", message=f"Failed to transform data for {symbol}"
             ) from err
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((NetworkError, RateLimitError)),
+        reraise=True,
+    )
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: str | None = None,
+    ) -> pl.DataFrame:
+        """Fetch OHLCV bars for a stock or crypto symbol.
+
+        This fully overrides the base template rather than delegating to it: the
+        base signature cannot thread ``asset_class`` through, and it acquires a
+        rate-limit token up front whereas this provider rate-limits per page
+        inside the fetch. The base contract is reproduced here directly --
+        input validation, circuit-breaker-wrapped fetch/transform/validate, and
+        the same info-logging.
+
+        Args:
+            symbol: The symbol to fetch. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD")
+                is treated as crypto unless ``asset_class`` overrides it.
+            start: Start date in YYYY-MM-DD format (inclusive).
+            end: End date in YYYY-MM-DD format (inclusive).
+            frequency: Canonical frequency key or alias.
+            asset_class: Explicit asset class ("stock" or "crypto"); inferred
+                from the symbol when ``None``.
+
+        Returns:
+            A DataFrame in the canonical OHLCV schema
+            ``[timestamp, symbol, open, high, low, close, volume]``.
+        """
+        self.logger.info(
+            "Fetching OHLCV data",
+            symbol=symbol,
+            start=start,
+            end=end,
+            frequency=frequency,
+            provider=self.name,
+        )
+
+        self._validate_inputs(symbol, start, end, frequency)
+        resolved = self._resolve_asset_class(symbol, asset_class)
+
+        def _fetch_and_process() -> pl.DataFrame:
+            raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=resolved)
+            df = self._transform_data(raw_data, symbol, asset_class=resolved)
+            return self._validate_ohlcv(df, self.name)
+
+        validated_data = self._with_circuit_breaker(_fetch_and_process)
+
+        self.logger.info(
+            "Successfully fetched OHLCV data",
+            symbol=symbol,
+            rows=len(validated_data),
+            provider=self.name,
+        )
+
+        return validated_data
+
+    async def fetch_ohlcv_async(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: str | None = None,
+    ) -> pl.DataFrame:
+        """Asynchronously fetch OHLCV bars for a stock or crypto symbol.
+
+        Mirrors :meth:`fetch_ohlcv` over the async transport. The circuit
+        breaker wraps a synchronous callable, so the coroutine is awaited first
+        and only the transform/validate step runs inside the breaker, preserving
+        failure accounting without blocking the event loop on the fetch.
+
+        Args:
+            symbol: The symbol to fetch. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD")
+                is treated as crypto unless ``asset_class`` overrides it.
+            start: Start date in YYYY-MM-DD format (inclusive).
+            end: End date in YYYY-MM-DD format (inclusive).
+            frequency: Canonical frequency key or alias.
+            asset_class: Explicit asset class ("stock" or "crypto"); inferred
+                from the symbol when ``None``.
+
+        Returns:
+            A DataFrame in the canonical OHLCV schema
+            ``[timestamp, symbol, open, high, low, close, volume]``.
+        """
+        self.logger.info(
+            "Fetching OHLCV data (async)",
+            symbol=symbol,
+            start=start,
+            end=end,
+            frequency=frequency,
+            provider=self.name,
+        )
+
+        self._validate_inputs(symbol, start, end, frequency)
+        resolved = self._resolve_asset_class(symbol, asset_class)
+
+        raw_data = await self._fetch_raw_data_async(
+            symbol, start, end, frequency, asset_class=resolved
+        )
+
+        def _transform_and_validate() -> pl.DataFrame:
+            df = self._transform_data(raw_data, symbol, asset_class=resolved)
+            return self._validate_ohlcv(df, self.name)
+
+        validated_data = self._with_circuit_breaker(_transform_and_validate)
+
+        self.logger.info(
+            "Successfully fetched OHLCV data (async)",
+            symbol=symbol,
+            rows=len(validated_data),
+            provider=self.name,
+        )
+
+        return validated_data

@@ -20,6 +20,13 @@ STOCK_BARS = [
     {"t": "2024-01-02T05:00:00Z", "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 1000},
 ]
 
+# Crypto trades 24/7; 2024-01-06 is a Saturday, included to confirm no
+# weekday-only assumption filters weekend bars out.
+CRYPTO_BARS = [
+    {"t": "2024-01-06T00:00:00Z", "o": 44.0, "h": 46.0, "l": 43.0, "c": 45.0, "v": 12.0},
+    {"t": "2024-01-05T00:00:00Z", "o": 42.0, "h": 44.0, "l": 41.0, "c": 43.0, "v": 10.0},
+]
+
 
 class TestAlpacaProviderInit:
     """Tests for provider construction and authentication."""
@@ -358,3 +365,163 @@ class TestTransformDataStock:
         assert df.columns == expected.columns
         assert df.schema == expected.schema
         assert df.height == 0
+
+
+class TestAssetRouting:
+    """Tests for routing symbols to the stock vs crypto endpoint."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_resolve_asset_class_by_slash(self, provider):
+        """A slash in the symbol resolves to crypto; otherwise stock."""
+        assert provider._resolve_asset_class("BTC/USD", None) == "crypto"
+        assert provider._resolve_asset_class("AAPL", None) == "stock"
+
+    def test_resolve_asset_class_override(self, provider):
+        """An explicit asset_class kwarg wins over the slash heuristic."""
+        assert provider._resolve_asset_class("AAPL", "crypto") == "crypto"
+        assert provider._resolve_asset_class("BTC/USD", "stock") == "stock"
+
+    def test_routes_crypto_by_slash(self, provider):
+        """A BTC/USD symbol hits the crypto bars endpoint; AAPL hits the stock one."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": {}, "next_page_token": None}
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider.fetch_ohlcv("BTC/USD", "2024-01-01", "2024-01-07", "daily")
+            crypto_url = mock_get.call_args.args[0]
+
+            provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
+            stock_url = mock_get.call_args.args[0]
+
+        assert "/v1beta3/crypto/" in crypto_url
+        assert crypto_url.endswith("/bars")
+        assert "/v2/stocks/" in stock_url
+
+    def test_asset_class_override(self, provider):
+        """An explicit asset_class forces crypto routing regardless of the slash."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": {}, "next_page_token": None}
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider.fetch_ohlcv("X", "2024-01-01", "2024-01-07", "daily", asset_class="crypto")
+            url = mock_get.call_args.args[0]
+
+        assert "/v1beta3/crypto/" in url
+
+    def test_feed_not_sent_for_crypto(self, provider):
+        """Crypto request params must not include the stock-only feed parameter."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"bars": {}, "next_page_token": None}
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider.fetch_ohlcv("BTC/USD", "2024-01-01", "2024-01-07", "daily")
+            params = mock_get.call_args.kwargs["params"]
+
+        assert "feed" not in params
+        assert params["symbols"] == "BTC/USD"
+
+
+class TestFetchRawDataCrypto:
+    """Tests for single-page crypto bar fetching."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_fetch_raw_data_crypto_success(self, provider):
+        """A 200 crypto response returns the parsed symbol-keyed bars structure."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "bars": {"BTC/USD": CRYPTO_BARS},
+            "next_page_token": None,
+        }
+
+        with (
+            patch.object(provider.session, "get", return_value=mock_response) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = provider._fetch_raw_data(
+                "BTC/USD", "2024-01-01", "2024-01-07", "daily", asset_class="crypto"
+            )
+
+        assert data["bars"]["BTC/USD"] == CRYPTO_BARS
+        # Symbol is forwarded verbatim, slash preserved, via the symbols param.
+        assert mock_get.call_args.kwargs["params"]["symbols"] == "BTC/USD"
+        assert "/v1beta3/crypto/" in mock_get.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_crypto_async(self, provider):
+        """The async crypto path returns the same parsed structure as the sync path."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "bars": {"BTC/USD": CRYPTO_BARS},
+            "next_page_token": None,
+        }
+
+        with (
+            patch.object(provider, "_aget", new=AsyncMock(return_value=mock_response)) as mock_aget,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = await provider._fetch_raw_data_async(
+                "BTC/USD", "2024-01-01", "2024-01-07", "daily", asset_class="crypto"
+            )
+
+        assert data["bars"]["BTC/USD"] == CRYPTO_BARS
+        assert "/v1beta3/crypto/" in mock_aget.call_args.args[0]
+        assert "feed" not in mock_aget.call_args.kwargs["params"]
+
+
+class TestTransformDataCrypto:
+    """Tests for transforming crypto bars into the standard schema."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_transform_data_crypto(self, provider):
+        """Crypto bars transform with the slash-preserved symbol and weekend bars kept."""
+        raw = {"bars": {"BTC/USD": CRYPTO_BARS}, "next_page_token": None}
+
+        df = provider._transform_data(raw, "BTC/USD", asset_class="crypto")
+
+        assert df.columns == [
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        ]
+        assert df.schema["timestamp"] == pl.Datetime
+        for col in ["open", "high", "low", "close", "volume"]:
+            assert df.schema[col] == pl.Float64
+        # Slash preserved, not uppercased-stripped.
+        assert df["symbol"].to_list() == ["BTC/USD", "BTC/USD"]
+        # Every bar is retained, including the Saturday timestamp.
+        assert df.height == 2
+        weekdays = df["timestamp"].dt.weekday().to_list()
+        # Polars weekday: Saturday == 6. The weekend bar must survive transform.
+        assert 6 in weekdays
+        timestamps = df["timestamp"].to_list()
+        assert timestamps == sorted(timestamps)
