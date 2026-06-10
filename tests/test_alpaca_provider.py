@@ -215,8 +215,9 @@ class TestFetchRawDataStock:
         ):
             data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
 
+        # The fetcher returns the merged-across-pages shape carrying only bars;
+        # the per-page next_page_token is consumed internally, not surfaced.
         assert data["bars"] == STOCK_BARS
-        assert data["next_page_token"] is None
 
     def test_feed_param_sent_for_stock(self):
         """The configured feed is forwarded in the request params."""
@@ -525,3 +526,98 @@ class TestTransformDataCrypto:
         assert 6 in weekdays
         timestamps = df["timestamp"].to_list()
         assert timestamps == sorted(timestamps)
+
+
+def _page_response(bars, token):
+    """Build a mock bars response carrying a given next_page_token."""
+    response = MagicMock()
+    response.status_code = 200
+    response.text = ""
+    response.json.return_value = {"bars": bars, "next_page_token": token}
+    return response
+
+
+class TestPagination:
+    """Tests for following next_page_token across multiple pages."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create a provider instance."""
+        return AlpacaDataProvider(api_key="k", api_secret="s")
+
+    def test_follows_next_page_token(self, provider):
+        """Two stock pages are merged and page 2 is requested with the token."""
+        page1 = _page_response([STOCK_BARS[0]], "abc")
+        page2 = _page_response([STOCK_BARS[1]], None)
+
+        with (
+            patch.object(provider.session, "get", side_effect=[page1, page2]) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert data["bars"] == [STOCK_BARS[0], STOCK_BARS[1]]
+        assert mock_get.call_count == 2
+        # The second request carries the page token returned by page 1.
+        assert mock_get.call_args_list[1].kwargs["params"]["page_token"] == "abc"
+        # The first request does not send a page token.
+        assert "page_token" not in mock_get.call_args_list[0].kwargs["params"]
+
+    def test_single_page_no_extra_request(self, provider):
+        """A null token on page 1 yields exactly one request."""
+        page1 = _page_response(STOCK_BARS, None)
+
+        with (
+            patch.object(provider.session, "get", side_effect=[page1]) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert data["bars"] == STOCK_BARS
+        assert mock_get.call_count == 1
+
+    def test_pagination_crypto(self, provider):
+        """Two crypto pages merge per-symbol bar lists across pages."""
+        page1 = _page_response({"BTC/USD": [CRYPTO_BARS[0]]}, "abc")
+        page2 = _page_response({"BTC/USD": [CRYPTO_BARS[1]]}, None)
+
+        with (
+            patch.object(provider.session, "get", side_effect=[page1, page2]) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = provider._fetch_raw_data(
+                "BTC/USD", "2024-01-01", "2024-01-07", "daily", asset_class="crypto"
+            )
+
+        assert data["bars"]["BTC/USD"] == [CRYPTO_BARS[0], CRYPTO_BARS[1]]
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[1].kwargs["params"]["page_token"] == "abc"
+
+    def test_rate_limit_acquired_once_per_page(self, provider):
+        """acquire is called exactly once per page, not doubled per request."""
+        page1 = _page_response([STOCK_BARS[0]], "abc")
+        page2 = _page_response([STOCK_BARS[1]], None)
+
+        with (
+            patch.object(provider.session, "get", side_effect=[page1, page2]),
+            patch.object(provider.rate_limiter, "acquire") as mock_acquire,
+        ):
+            provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert mock_acquire.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_follows_next_page_token_async(self, provider):
+        """The async path follows the token and merges both pages."""
+        page1 = _page_response([STOCK_BARS[0]], "abc")
+        page2 = _page_response([STOCK_BARS[1]], None)
+
+        with (
+            patch.object(provider, "_aget", new=AsyncMock(side_effect=[page1, page2])) as mock_aget,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            data = await provider._fetch_raw_data_async("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert data["bars"] == [STOCK_BARS[0], STOCK_BARS[1]]
+        assert mock_aget.call_count == 2
+        assert mock_aget.call_args_list[1].kwargs["params"]["page_token"] == "abc"

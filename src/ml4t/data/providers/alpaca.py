@@ -296,6 +296,31 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         endpoint = f"{self.base_url}/v2/stocks/{symbol.upper()}/bars"
         return endpoint, self._stock_bars_params(frequency, start, end)
 
+    def _merge_bars(self, accumulated: Any, page_bars: Any) -> Any:
+        """Merge one page's bars into the accumulator across both response shapes.
+
+        The single-symbol endpoint returns ``bars`` as a list, which is simply
+        extended. The multi-symbol crypto endpoint returns ``bars`` as a dict of
+        per-symbol lists, whose entries are concatenated by symbol. The seed
+        accumulator may be ``None`` on the first page, in which case the page's
+        own container type is adopted.
+
+        Args:
+            accumulated: The bars merged from prior pages, or ``None`` on page 1.
+            page_bars: The ``bars`` value from the current page.
+
+        Returns:
+            The accumulator with the current page's bars appended.
+        """
+        if isinstance(page_bars, dict):
+            merged: dict[str, list[Any]] = accumulated if isinstance(accumulated, dict) else {}
+            for sym, sym_bars in page_bars.items():
+                merged.setdefault(sym, []).extend(sym_bars or [])
+            return merged
+        merged_list: list[Any] = accumulated if isinstance(accumulated, list) else []
+        merged_list.extend(page_bars or [])
+        return merged_list
+
     def _check_response_status(self, status_code: int, symbol: str, response_text: str) -> None:
         """Map an HTTP status code to a typed provider exception.
 
@@ -350,11 +375,14 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         frequency: str = "daily",
         asset_class: str | None = None,
     ) -> dict[str, Any]:
-        """Fetch a single page of bars from Alpaca.
+        """Fetch a full bars range from Alpaca, following pagination to the end.
 
         Routes to the stock or crypto bars endpoint based on the resolved asset
         class. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD") routes to crypto unless
-        an explicit ``asset_class`` overrides the inference.
+        an explicit ``asset_class`` overrides the inference. Requests are repeated
+        with each response's ``next_page_token`` until it is null/absent, and the
+        per-page bars are merged into the single shape ``_transform_data``
+        expects (a list for stocks, a per-symbol dict for crypto).
 
         Args:
             symbol: The symbol to fetch (stocks are case-insensitive; crypto
@@ -375,11 +403,25 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         resolved = self._resolve_asset_class(symbol, asset_class)
         endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
 
+        accumulated: Any = None
+        token: str | None = None
         try:
-            self.rate_limiter.acquire(blocking=True)
-            response = self.session.get(endpoint, params=params)
-            self._check_response_status(response.status_code, symbol, response.text)
-            return self._parse_bars_response(response)
+            while True:
+                # A fresh dict per page keeps each request's params independent;
+                # mutating one shared dict would otherwise rewrite the token on
+                # earlier requests that already went out.
+                page_params = {**params, "page_token": token} if token else params
+                # One acquisition per page is the only rate-limit gate, since
+                # fetch_ohlcv is fully overridden and the base never acquires.
+                self.rate_limiter.acquire(blocking=True)
+                response = self.session.get(endpoint, params=page_params)
+                self._check_response_status(response.status_code, symbol, response.text)
+                payload = self._parse_bars_response(response)
+                accumulated = self._merge_bars(accumulated, payload.get("bars"))
+                token = payload.get("next_page_token")
+                if not token:
+                    break
+            return {"bars": accumulated}
         except (
             AuthenticationError,
             RateLimitError,
@@ -399,11 +441,11 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         frequency: str = "daily",
         asset_class: str | None = None,
     ) -> dict[str, Any]:
-        """Asynchronously fetch a single page of bars from Alpaca.
+        """Asynchronously fetch a full bars range, following pagination to the end.
 
         Mirrors :meth:`_fetch_raw_data` over the async transport; the async
         session carries the same two-header credentials as the sync session and
-        applies the same stock/crypto routing.
+        applies the same stock/crypto routing and ``next_page_token`` loop.
 
         Args:
             symbol: The symbol to fetch (stocks are case-insensitive; crypto
@@ -424,11 +466,25 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         resolved = self._resolve_asset_class(symbol, asset_class)
         endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
 
+        accumulated: Any = None
+        token: str | None = None
         try:
-            self.rate_limiter.acquire(blocking=True)
-            response = await self._aget(endpoint, params=params)
-            self._check_response_status(response.status_code, symbol, response.text)
-            return self._parse_bars_response(response)
+            while True:
+                # A fresh dict per page keeps each request's params independent;
+                # mutating one shared dict would otherwise rewrite the token on
+                # earlier requests that already went out.
+                page_params = {**params, "page_token": token} if token else params
+                # One acquisition per page is the only rate-limit gate, since
+                # fetch_ohlcv is fully overridden and the base never acquires.
+                self.rate_limiter.acquire(blocking=True)
+                response = await self._aget(endpoint, params=page_params)
+                self._check_response_status(response.status_code, symbol, response.text)
+                payload = self._parse_bars_response(response)
+                accumulated = self._merge_bars(accumulated, payload.get("bars"))
+                token = payload.get("next_page_token")
+                if not token:
+                    break
+            return {"bars": accumulated}
         except (
             AuthenticationError,
             RateLimitError,
