@@ -73,6 +73,13 @@ class ConfigValidator:
                     f"Provider {provider.name} ({provider.type}) may require an API key"
                 )
 
+            # Alpaca authenticates with a key/secret pair, so a missing secret
+            # is just as fatal as a missing key.
+            if provider.type == "alpaca" and not provider.api_secret:
+                self.warnings.append(
+                    f"Provider {provider.name} (alpaca) requires api_secret as well as api_key"
+                )
+
             # Validate rate limits
             if provider.rate_limit and provider.rate_limit.requests_per_second <= 0:
                 self.errors.append(

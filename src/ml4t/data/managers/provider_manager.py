@@ -157,6 +157,9 @@ class ProviderManager:
         }
     )
 
+    # Credential fields that must never leave get_provider_info's sanitized view
+    SECRET_FIELDS = frozenset({"api_key", "api_secret"})
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize ProviderManager.
 
@@ -238,16 +241,18 @@ class ProviderManager:
 
         # Check configured providers
         for provider_name, provider_config in providers_config.items():
-            if (
-                provider_name in self.FREE_PROVIDERS
-                or provider_name in self.KEYED_PROVIDERS
-                and provider_config.get("api_key")
-            ):
+            available = provider_name in self.FREE_PROVIDERS or (
+                provider_name in self.KEYED_PROVIDERS and provider_config.get("api_key")
+            )
+            # Alpaca is two-credential: a key without a secret is not
+            # constructable, so it must not be reported as available.
+            if provider_name == "alpaca" and available:
+                available = bool(provider_config.get("api_secret") or self._alpaca_env_secret())
+            if available:
                 self._available_providers.append(provider_name)
 
         # Check environment for API keys not in config
         env_to_provider = {
-            "ALPACA_API_KEY": "alpaca",
             "CRYPTOCOMPARE_API_KEY": "cryptocompare",
             "DATABENTO_API_KEY": "databento",
             "MASSIVE_API_KEY": "massive",
@@ -264,10 +269,27 @@ class ProviderManager:
         if "POLYGON_API_KEY" in os.environ and "polygon" not in self._available_providers:
             self._available_providers.append("polygon")
 
+        # Alpaca needs both credentials; either the project (ALPACA_*) or the
+        # Alpaca SDK (APCA_*) naming scheme satisfies each one.
+        if "alpaca" not in self._available_providers and (
+            self._alpaca_env_key() and self._alpaca_env_secret()
+        ):
+            self._available_providers.append("alpaca")
+
         # Add free providers if not already detected
         for free_provider in self.FREE_PROVIDERS:
             if free_provider not in self._available_providers:
                 self._available_providers.append(free_provider)
+
+    @staticmethod
+    def _alpaca_env_key() -> str | None:
+        """Return the Alpaca API key from the environment, if set."""
+        return os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID")
+
+    @staticmethod
+    def _alpaca_env_secret() -> str | None:
+        """Return the Alpaca API secret from the environment, if set."""
+        return os.environ.get("ALPACA_API_SECRET") or os.environ.get("APCA_API_SECRET_KEY")
 
     @property
     def available_providers(self) -> list[str]:
@@ -348,7 +370,7 @@ class ProviderManager:
             "configured": provider_name in self.config.get("providers", {}),
             "has_api_key": bool(config.get("api_key")),
             "is_free": provider_name in self.FREE_PROVIDERS,
-            "config": {k: v for k, v in config.items() if k != "api_key"},
+            "config": {k: v for k, v in config.items() if k not in self.SECRET_FIELDS},
         }
 
     def close_all(self) -> None:
