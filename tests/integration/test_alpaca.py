@@ -4,7 +4,7 @@ These tests verify the Alpaca provider works correctly with actual API calls.
 
 Requirements:
     - ALPACA_API_KEY and ALPACA_API_SECRET environment variables must be set
-    - Free tier uses the IEX feed (~15-min delayed); ~200 requests/min
+    - Free tier uses the real-time single-exchange IEX feed; ~200 requests/min
     - API key from: https://alpaca.markets/
 
 Test Coverage:

@@ -151,6 +151,55 @@ class TestCircuitBreaker:
         assert breaker.state == "CLOSED"
         assert breaker.failure_count == 0
 
+    @pytest.mark.asyncio
+    async def test_call_async_success_and_failure_accounting(self):
+        """call_async mirrors call: successes pass through, failures count."""
+        breaker = CircuitBreaker(failure_threshold=2)
+
+        async def success_func():
+            return "success"
+
+        async def failing_func():
+            raise Exception("Mock failure")
+
+        assert await breaker.call_async(success_func) == "success"
+        assert breaker.state == "CLOSED"
+
+        with pytest.raises(Exception, match="Mock failure"):
+            await breaker.call_async(failing_func)
+        assert breaker.failure_count == 1
+
+        with pytest.raises(Exception, match="Mock failure"):
+            await breaker.call_async(failing_func)
+        assert breaker.state == "OPEN"
+
+        # While open, calls are refused before executing the function.
+        with pytest.raises(CircuitBreakerOpenError):
+            await breaker.call_async(success_func)
+
+    @pytest.mark.asyncio
+    async def test_call_async_half_open_recovery(self):
+        """After the reset timeout, call_async probes HALF_OPEN and recovers."""
+        import time
+
+        breaker = CircuitBreaker(failure_threshold=1, reset_timeout=0.05)
+
+        async def failing_func():
+            raise Exception("Mock failure")
+
+        async def success_func():
+            return "success"
+
+        with pytest.raises(Exception, match="Mock failure"):
+            await breaker.call_async(failing_func)
+        assert breaker.state == "OPEN"
+
+        time.sleep(0.1)
+
+        assert await breaker.call_async(success_func) == "success"
+        assert breaker.state == "CLOSED"
+        assert breaker.failure_count == 0
+
 
 class TestBaseProvider:
     """Test enhanced BaseProvider functionality."""
