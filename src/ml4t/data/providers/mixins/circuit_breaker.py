@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any, ClassVar, TypeVar
 
@@ -76,6 +76,46 @@ class CircuitBreaker:
 
         try:
             result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except self.expected_exception:
+            self._on_failure()
+            raise
+
+    async def call_async(
+        self,
+        func: Callable[..., Coroutine[Any, Any, T]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
+        """Execute an async function with circuit breaker protection.
+
+        Mirrors :meth:`call` for awaited callables, so async fetch paths get
+        the same state handling and failure accounting as sync ones.
+
+        Args:
+            func: Async function to execute
+            *args: Positional arguments
+            **kwargs: Keyword arguments
+
+        Returns:
+            Function result
+
+        Raises:
+            CircuitBreakerOpenError: If circuit is open
+            Original exception: If function fails
+        """
+        if self.state == "OPEN":
+            if self._should_attempt_reset():
+                self.state = "HALF_OPEN"
+                logger.info("Circuit breaker entering HALF_OPEN state")
+            else:
+                raise CircuitBreakerOpenError(
+                    f"Circuit breaker is OPEN. Failures: {self.failure_count}"
+                )
+
+        try:
+            result = await func(*args, **kwargs)
             self._on_success()
             return result
         except self.expected_exception:
@@ -188,6 +228,30 @@ class CircuitBreakerMixin:
             self.init_circuit_breaker()
 
         return self.circuit_breaker.call(func, *args, **kwargs)
+
+    async def _with_circuit_breaker_async(
+        self,
+        func: Callable[..., Coroutine[Any, Any, T]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
+        """Execute an async function with circuit breaker protection.
+
+        Args:
+            func: Async function to execute
+            *args: Positional arguments
+            **kwargs: Keyword arguments
+
+        Returns:
+            Function result
+
+        Raises:
+            CircuitBreakerOpenError: If circuit is open
+        """
+        if not hasattr(self, "circuit_breaker"):
+            self.init_circuit_breaker()
+
+        return await self.circuit_breaker.call_async(func, *args, **kwargs)
 
     def _get_circuit_status(self) -> dict[str, Any]:
         """Get circuit breaker status.
