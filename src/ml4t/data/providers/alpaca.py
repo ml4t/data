@@ -1,32 +1,53 @@
 """Alpaca data provider.
 
 Alpaca provides long-history, high-frequency market data across multiple asset
-classes including equities and crypto, served over a REST API.
+classes including US equities and crypto, served over a historical REST API.
+Daily, hourly, and minute OHLCV bars are supported for both asset classes from a
+single symbol-routed provider.
 
-API Documentation: https://docs.alpaca.markets/
+API Documentation: https://docs.alpaca.markets/us/docs/about-market-data-api
+
+Symbol Format:
+- Stocks use a plain ticker (e.g. "AAPL"); the symbol is uppercased and routed to
+  the stock bars endpoint.
+- Crypto uses ``BASE/QUOTE`` (e.g. "BTC/USD"); the slash routes the request to the
+  crypto bars endpoint, and the symbol is preserved verbatim.
 
 Authentication:
 - Two credentials are required: an API key id and an API secret, sent as the
-  ``APCA-API-KEY-ID`` / ``APCA-API-SECRET-KEY`` request headers.
+  ``APCA-API-KEY-ID`` / ``APCA-API-SECRET-KEY`` request headers on both the sync
+  and async sessions.
 - Set ``ALPACA_API_KEY`` / ``ALPACA_API_SECRET`` (primary, project convention)
   or pass ``api_key`` / ``api_secret`` to the constructor. Alpaca's own SDK/CLI
   names ``APCA_API_KEY_ID`` / ``APCA_API_SECRET_KEY`` are accepted as a fallback.
+- Get a free key at: https://alpaca.markets/
 
-Feed selection:
-- ``feed`` defaults to ``"iex"`` (free tier, ~15-min delayed, thinner coverage).
-  Paid subscribers pass ``feed="sip"`` once at construction.
+Feed selection (stocks):
+- ``feed`` defaults to ``"iex"``: the free tier, served from a single exchange
+  with ~15-min-delayed, thinner coverage.
+- Paid subscribers pass ``feed="sip"`` once at construction to unlock the
+  consolidated tape (100% of US market volume across all exchanges).
+- Crypto has a single consolidated feed, so ``feed`` does not apply to it.
 
 Rate limiting:
 - ``DEFAULT_RATE_LIMIT`` is a conservative client-side throttle of 200 calls per
-  minute reflecting the commonly-cited Basic (free) plan figure. The API itself
-  enforces limits via HTTP 429 and rate-limit response headers rather than a
-  fixed documented number, so this default is tentative and overridable via the
-  ``rate_limit`` constructor argument.
+  minute, reflecting the Basic (free) plan figure documented at
+  docs.alpaca.markets "About Market Data API" and Alpaca support
+  (usage-limit-api-calls). Alpaca enforces the limit server-side via HTTP 429 and
+  rate-limit response headers; this client-side default front-runs that and is
+  overridable via the ``rate_limit`` constructor argument.
 
-Example:
+Sync Example:
     >>> from ml4t.data.providers.alpaca import AlpacaDataProvider
-    >>> provider = AlpacaDataProvider(api_key="k", api_secret="s")
+    >>> provider = AlpacaDataProvider(api_key="key", api_secret="secret")
+    >>> df = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
+    >>> crypto = provider.fetch_ohlcv("BTC/USD", "2024-01-01", "2024-01-02",
+    ...                               frequency="minute")
     >>> provider.close()
+
+Async Example:
+    >>> async with AlpacaDataProvider(api_key="key", api_secret="secret") as provider:
+    ...     df = await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-31")
 """
 
 from __future__ import annotations

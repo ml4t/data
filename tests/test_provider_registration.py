@@ -1,6 +1,7 @@
 """Test provider registration in DataManager."""
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.providers.alpaca import AlpacaDataProvider
 from ml4t.data.providers.binance import BinanceProvider
 from ml4t.data.providers.binance_public import BinancePublicProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
@@ -22,6 +23,7 @@ def test_all_providers_registered():
     - Historical: wiki_prices (standalone, local file only)
     """
     expected_providers = {
+        "alpaca": AlpacaDataProvider,
         "binance": BinanceProvider,
         "binance_public": BinancePublicProvider,
         "cryptocompare": CryptoCompareProvider,
@@ -36,13 +38,14 @@ def test_all_providers_registered():
     }
 
     assert expected_providers == DataManager.PROVIDER_CLASSES
-    assert len(DataManager.PROVIDER_CLASSES) == 11
+    assert len(DataManager.PROVIDER_CLASSES) == 12
 
 
 def test_provider_imports_work():
     """Test that all provider imports are functional."""
     # This test ensures the imports at the top of data_manager.py work
     providers = [
+        AlpacaDataProvider,
         BinanceProvider,
         BinancePublicProvider,
         CryptoCompareProvider,
@@ -80,19 +83,15 @@ def test_provider_instantiation():
     for provider_name, _provider_class in DataManager.PROVIDER_CLASSES.items():
         # Try to get provider instance
         try:
-            if provider_name in ["databento", "massive", "oanda", "polygon"]:
+            keyed = ["alpaca", "databento", "massive", "oanda", "polygon"]
+            if provider_name in keyed:
                 # These require API keys, so we expect None or skip
                 continue
             provider = dm._get_provider(provider_name)
-            assert provider is not None or provider_name in [
-                "databento",
-                "massive",
-                "oanda",
-                "polygon",
-            ]
+            assert provider is not None or provider_name in keyed
         except Exception as e:
             # Only keyed providers should fail without API keys
-            assert provider_name in ["databento", "massive", "oanda", "polygon"], (
+            assert provider_name in ["alpaca", "databento", "massive", "oanda", "polygon"], (
                 f"Unexpected error for {provider_name}: {e}"
             )
 
@@ -101,18 +100,19 @@ def test_provider_count():
     """Test that we have the expected OHLCV providers registered in DataManager.
 
     Provider categories:
-    - In DataManager (11): General OHLCV providers with unified fetch_ohlcv() interface
+    - In DataManager (12): General OHLCV providers with unified fetch_ohlcv() interface
     - Standalone (5): Specialized providers with unique APIs
       - Factor data: aqr, fama_french
       - Prediction markets: kalshi, polymarket
       - Historical: wiki_prices
     """
-    assert len(DataManager.PROVIDER_CLASSES) == 11, (
-        f"Expected 11 providers, got {len(DataManager.PROVIDER_CLASSES)}"
+    assert len(DataManager.PROVIDER_CLASSES) == 12, (
+        f"Expected 12 providers, got {len(DataManager.PROVIDER_CLASSES)}"
     )
 
     # List all provider names for clarity
     provider_names = list(DataManager.PROVIDER_CLASSES.keys())
+    assert "alpaca" in provider_names
     assert "binance" in provider_names
     assert "binance_public" in provider_names
     assert "cryptocompare" in provider_names
