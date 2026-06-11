@@ -9,6 +9,7 @@ Requirements:
 
 Test Coverage:
     - Stock daily OHLCV data (AAPL)
+    - Stock 15-minute OHLCV data (AAPL)
     - Crypto minute OHLCV data (BTC/USD)
 
 IMPORTANT:
@@ -77,6 +78,22 @@ class TestAlpacaProvider:
         assert df["close"].dtype == pl.Float64
         assert (df["high"] >= df["low"]).all(), "High should be >= Low"
         assert (df["symbol"] == "AAPL").all()
+
+    def test_fetch_stock_15_minute(self, provider):
+        """Fetch 15-minute stock bars for AAPL with a real API call."""
+        df = provider.fetch_ohlcv(
+            symbol="AAPL",
+            start="2024-01-02T14:00:00Z",
+            end="2024-01-02T20:00:00Z",
+            frequency="15m",
+        )
+
+        assert isinstance(df, pl.DataFrame)
+        assert not df.is_empty(), "Should fetch some 15-minute data for AAPL"
+        assert all(col in df.columns for col in REQUIRED_COLS)
+        assert (df["high"] >= df["low"]).all(), "High should be >= Low"
+        # Bars must land on 15-minute boundaries.
+        assert (df["timestamp"].dt.minute() % 15 == 0).all()
 
     def test_fetch_crypto_minute(self, provider):
         """Fetch minute crypto bars for BTC/USD with a real API call."""

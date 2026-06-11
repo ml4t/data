@@ -2,8 +2,8 @@
 
 Alpaca provides long-history, high-frequency market data across multiple asset
 classes including US equities and crypto, served over a historical REST API.
-Daily, hourly, and minute OHLCV bars are supported for both asset classes from a
-single symbol-routed provider.
+Daily, hourly, and minute OHLCV bars (1/5/15/30-minute) are supported for both
+asset classes from a single symbol-routed provider.
 
 API Documentation: https://docs.alpaca.markets/us/docs/about-market-data-api
 
@@ -130,9 +130,9 @@ _PAGE_RETRY = retry(
 class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
     """Alpaca market data provider.
 
-    Supports equities and crypto with daily, hourly, and minute OHLCV bars over
-    Alpaca's historical REST API. Authentication uses two header credentials that
-    are wired onto both the sync and async HTTP sessions.
+    Supports equities and crypto with daily, hourly, and minute OHLCV bars
+    (1/5/15/30-minute) over Alpaca's historical REST API. Authentication uses two
+    header credentials that are wired onto both the sync and async HTTP sessions.
 
     Supports both sync and async operations:
         # Sync
@@ -168,6 +168,12 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         "minute": "1Min",
         "1m": "1Min",
         "1minute": "1Min",
+        "5m": "5Min",
+        "5minute": "5Min",
+        "15m": "15Min",
+        "15minute": "15Min",
+        "30m": "30Min",
+        "30minute": "30Min",
     }
 
     def __init__(

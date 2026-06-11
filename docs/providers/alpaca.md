@@ -46,6 +46,9 @@ df = provider.fetch_ohlcv(
     "BTC/USD", "2024-01-01T00:00:00Z", "2024-01-01T01:00:00Z", frequency="minute"
 )
 
+# Multi-year intraday backfills with minute multiples (5m / 15m / 30m)
+df = provider.fetch_ohlcv("AAPL", "2021-01-01", "2024-12-31", frequency="15m")
+
 provider.close()
 ```
 
@@ -74,9 +77,12 @@ crypto slash is preserved (e.g. `BTC/USD`).
 
 | Frequency | Availability |
 |-----------|--------------|
-| `daily` | ✅ |
-| `hourly` | ✅ |
-| `minute` | ✅ |
+| `daily` / `1d` | ✅ |
+| `hourly` / `1h` | ✅ |
+| `minute` / `1m` | ✅ |
+| `5m` / `5minute` | ✅ |
+| `15m` / `15minute` | ✅ |
+| `30m` / `30minute` | ✅ |
 
 `start`/`end` accept `YYYY-MM-DD` dates or RFC-3339 datetimes (both inclusive);
 datetime bounds are the natural shape for sub-day minute/hour windows.

@@ -167,6 +167,12 @@ class TestFrequencyMapping:
             ("minute", "1Min"),
             ("1m", "1Min"),
             ("1minute", "1Min"),
+            ("5m", "5Min"),
+            ("5minute", "5Min"),
+            ("15m", "15Min"),
+            ("15minute", "15Min"),
+            ("30m", "30Min"),
+            ("30minute", "30Min"),
         ],
     )
     def test_frequency_maps_to_timeframe(self, provider, frequency, expected):
