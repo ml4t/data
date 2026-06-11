@@ -34,7 +34,11 @@ htmlcov/
 logs/
 site/
 src/ml4t/data/_version.py
+coverage/
 
 # Claude Code (local development only)
 CLAUDE.md
 .claude/
+.agentic_documentation/
+.skills-outputs/
+planning/
