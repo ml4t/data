@@ -13,6 +13,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 | Provider | API Key | Free Tier | Best For |
 |----------|---------|-----------|----------|
 | [YahooFinance](yahoo.md) | No | Unlimited* | Quick start, US equities |
+| [Alpaca](alpaca.md) | Yes | 200 req/min (IEX feed) | US equities + crypto, intraday |
 | [EODHD](eodhd.md) | Yes | 20 calls/day | Global equities (60+ exchanges) |
 | [Tiingo](tiingo.md) | Yes | 1,000 req/day | US equities alternative |
 | [Finnhub](finnhub.md) | Yes | 60 req/min | Company metrics, real-time |
@@ -73,6 +74,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 | Provider | Minute | Hourly | Daily | Options | Fundamentals |
 |----------|--------|--------|-------|---------|--------------|
 | YahooFinance | ✅ (7d) | ✅ | ✅ | ❌* | ❌* |
+| Alpaca | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Databento | ✅ | ✅ | ✅ | ✅ (OPRA) | ❌ |
 | Massive | ✅ | ✅ | ✅ | ✅ | ✅ |
 | EODHD | ❌ | ❌ | ✅ | ✅ ($29.99) | ✅ ($59.99) |
@@ -200,6 +202,9 @@ Create a `.env` file in your project root:
 
 ```bash
 # Free tier providers
+ALPACA_API_KEY=your_key_here
+ALPACA_API_SECRET=your_secret_here
+# (Alpaca's own SDK names APCA_API_KEY_ID / APCA_API_SECRET_KEY also work)
 EODHD_API_KEY=your_key_here
 TIINGO_API_KEY=your_key_here
 FINNHUB_API_KEY=your_key_here
@@ -251,6 +256,7 @@ See [Incremental Updates Guide](../storage/INCREMENTAL_ARCHITECTURE.md) for deta
 | Provider | Split Adjusted | Dividend Adjusted |
 |----------|----------------|-------------------|
 | YahooFinance | ✅ | ✅ |
+| Alpaca | Opt-in (`adjustment=`) | Opt-in (`adjustment=`) |
 | EODHD | ✅ | ✅ |
 | Tiingo | ✅ | ✅ |
 | WikiPrices | ✅ | ✅ |

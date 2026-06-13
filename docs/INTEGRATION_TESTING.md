@@ -170,6 +170,8 @@ pytest tests/integration/ -v -W default
 
 Required secrets:
 ```
+ALPACA_API_KEY
+ALPACA_API_SECRET
 CRYPTOCOMPARE_API_KEY
 DATABENTO_API_KEY
 OANDA_API_KEY

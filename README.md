@@ -102,6 +102,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 
 | Provider | Coverage |
 |----------|----------|
+| Alpaca | US equities + crypto (free IEX feed) |
 | EODHD | 60+ global exchanges |
 | Tiingo | US equities with quality focus |
 | Twelve Data | Multi-asset coverage |

@@ -40,8 +40,14 @@ class ConfigManager:
         >>> print(config_mgr.config["providers"]["yahoo"])
     """
 
-    # Environment variable to provider config mapping
+    # Environment variable to provider config mapping. Later entries win when
+    # two variables map to the same field, so the APCA_* aliases (Alpaca's own
+    # SDK/CLI names) come before the ALPACA_* project-convention names.
     ENV_MAPPING = {
+        "APCA_API_KEY_ID": ("alpaca", "api_key"),
+        "APCA_API_SECRET_KEY": ("alpaca", "api_secret"),
+        "ALPACA_API_KEY": ("alpaca", "api_key"),
+        "ALPACA_API_SECRET": ("alpaca", "api_secret"),
         "CRYPTOCOMPARE_API_KEY": ("cryptocompare", "api_key"),
         "DATABENTO_API_KEY": ("databento", "api_key"),
         "POLYGON_API_KEY": ("massive", "api_key"),
