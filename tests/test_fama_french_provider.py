@@ -32,7 +32,7 @@ class TestFamaFrenchProviderInit:
             cache_path = Path(tmpdir) / "custom_cache"
             provider = FamaFrenchProvider(cache_path=cache_path)
 
-            assert provider.cache_path == cache_path
+            assert provider.cache_path == cache_path.resolve()
             assert cache_path.exists()
 
     def test_disable_cache(self):
@@ -132,10 +132,10 @@ class TestCaching:
             provider = FamaFrenchProvider(cache_path=tmpdir)
 
             path = provider._get_cache_path("ff3", "monthly")
-            assert path == Path(tmpdir) / "ff3_monthly.parquet"
+            assert path == Path(tmpdir).resolve() / "ff3_monthly.parquet"
 
             path = provider._get_cache_path("ff5", "daily")
-            assert path == Path(tmpdir) / "ff5_daily.parquet"
+            assert path == Path(tmpdir).resolve() / "ff5_daily.parquet"
 
     def test_clear_cache(self):
         """Test clear_cache removes cached files."""
