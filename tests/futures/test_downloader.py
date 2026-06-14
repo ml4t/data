@@ -634,7 +634,7 @@ futures:
         products, storage_path, defn_config = load_definitions_config(config_file)
 
         assert products == ["ES", "CL"]
-        assert storage_path == Path("/tmp/test")
+        assert storage_path == Path("/tmp/test").resolve()
         assert defn_config.strategy == "yearly_snapshots"
         assert defn_config.snapshot_dates == ["2024-01-02"]
         assert defn_config.output_file == "defs.parquet"
