@@ -352,7 +352,7 @@ ml4t-data export -s AAPL --output data.xlsx
 
 - **Full Inventory**: See comprehensive feature list above
 - **README**: `../README.md`
-- **Project Map**: See AGENT.md files at each package level
+- **Project Map**: See AGENTS.md files at each package level
 - **Book Integration**: 6 example notebooks (ML4T third edition)
 - **Performance Analysis**: `PERFORMANCE_BENCHMARKS.md` and `PERFORMANCE_ANALYSIS.md`
 

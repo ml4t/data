@@ -1,4 +1,4 @@
-"""Tests for Polygon.io provider module."""
+"""Tests for Massive/Polygon provider module."""
 
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +13,50 @@ from ml4t.data.core.exceptions import (
     RateLimitError,
     SymbolNotFoundError,
 )
-from ml4t.data.providers.polygon import PolygonProvider
+from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
+
+
+class TestMassiveProviderInit:
+    """Tests for canonical Massive provider initialization."""
+
+    def test_init_with_api_key(self):
+        """Test initialization with API key."""
+        provider = MassiveProvider(api_key="test_key")
+
+        assert provider.name == "massive"
+        assert provider.api_key == "test_key"
+        assert provider.base_url == "https://api.massive.com"
+
+    def test_init_with_massive_env_api_key(self):
+        """Test initialization with MASSIVE_API_KEY."""
+        with patch.dict("os.environ", {"MASSIVE_API_KEY": "massive_env_key"}, clear=True):
+            provider = MassiveProvider()
+
+            assert provider.api_key == "massive_env_key"
+
+    def test_massive_env_preferred_over_polygon_env(self):
+        """Test MASSIVE_API_KEY takes precedence over legacy POLYGON_API_KEY."""
+        with patch.dict(
+            "os.environ",
+            {"MASSIVE_API_KEY": "massive_env_key", "POLYGON_API_KEY": "polygon_env_key"},
+            clear=True,
+        ):
+            provider = MassiveProvider()
+
+            assert provider.api_key == "massive_env_key"
+
+    def test_legacy_polygon_env_api_key_remains_valid(self):
+        """Test existing POLYGON_API_KEY values remain valid."""
+        with patch.dict("os.environ", {"POLYGON_API_KEY": "polygon_env_key"}, clear=True):
+            provider = MassiveProvider()
+
+            assert provider.api_key == "polygon_env_key"
+
+    def test_custom_base_url(self):
+        """Test custom base URL override."""
+        provider = MassiveProvider(api_key="test_key", base_url="https://api.polygon.io/")
+
+        assert provider.base_url == "https://api.polygon.io"
 
 
 class TestPolygonProviderInit:
@@ -21,16 +64,18 @@ class TestPolygonProviderInit:
 
     def test_init_with_api_key(self):
         """Test initialization with API key."""
-        provider = PolygonProvider(api_key="test_key")
+        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
+            provider = PolygonProvider(api_key="test_key")
 
         assert provider.name == "polygon"
         assert provider.api_key == "test_key"
-        assert provider.base_url == "https://api.polygon.io"
+        assert provider.base_url == "https://api.massive.com"
 
     def test_init_with_env_api_key(self):
         """Test initialization with API key from environment."""
-        with patch.dict("os.environ", {"POLYGON_API_KEY": "env_key"}):
-            provider = PolygonProvider()
+        with patch.dict("os.environ", {"POLYGON_API_KEY": "env_key"}, clear=True):
+            with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
+                provider = PolygonProvider()
 
             assert provider.api_key == "env_key"
 
@@ -42,7 +87,8 @@ class TestPolygonProviderInit:
 
     def test_init_custom_rate_limit(self):
         """Test initialization with custom rate limit."""
-        provider = PolygonProvider(api_key="test_key", rate_limit=(100, 60.0))
+        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
+            provider = PolygonProvider(api_key="test_key", rate_limit=(100, 60.0))
 
         # Provider should be initialized successfully
         assert provider is not None
@@ -53,7 +99,8 @@ class TestNameProperty:
 
     def test_name_returns_polygon(self):
         """Test name property returns correct value."""
-        provider = PolygonProvider(api_key="test_key")
+        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
+            provider = PolygonProvider(api_key="test_key")
         assert provider.name == "polygon"
 
 
@@ -63,7 +110,7 @@ class TestFetchRawData:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return PolygonProvider(api_key="test_key")
+        return MassiveProvider(api_key="test_key")
 
     def test_fetch_raw_data_success(self, provider):
         """Test successful raw data fetch."""
@@ -165,7 +212,7 @@ class TestTransformData:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return PolygonProvider(api_key="test_key")
+        return MassiveProvider(api_key="test_key")
 
     def test_transform_data_success(self, provider):
         """Test successful data transformation."""
@@ -258,7 +305,7 @@ class TestFrequencyMapping:
     @pytest.fixture
     def provider(self):
         """Create provider instance."""
-        return PolygonProvider(api_key="test_key")
+        return MassiveProvider(api_key="test_key")
 
     def _create_success_response(self):
         """Create a mock success response."""
@@ -320,16 +367,16 @@ class TestDefaultRateLimit:
 
     def test_default_rate_limit_value(self):
         """Test DEFAULT_RATE_LIMIT has expected value."""
-        # Free tier: 5 requests per second
-        assert PolygonProvider.DEFAULT_RATE_LIMIT == (5, 1.0)
+        # Free tier: 5 requests per minute
+        assert MassiveProvider.DEFAULT_RATE_LIMIT == (5, 60.0)
 
 
 class TestIntegration:
-    """Integration tests for PolygonProvider."""
+    """Integration-style tests for MassiveProvider with mocked responses."""
 
     def test_full_fetch_workflow_with_mocks(self):
         """Test complete fetch workflow with mocked responses."""
-        provider = PolygonProvider(api_key="test_key")
+        provider = MassiveProvider(api_key="test_key")
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -353,7 +400,7 @@ class TestIntegration:
 
     def test_api_parameters(self):
         """Test API parameters are correctly set."""
-        provider = PolygonProvider(api_key="test_key")
+        provider = MassiveProvider(api_key="test_key")
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -375,3 +422,76 @@ class TestIntegration:
             assert params.get("sort") == "asc"
             assert params.get("limit") == 50000
             assert params.get("apiKey") == "test_key"
+
+
+class TestMassiveAssetClassRouting:
+    """Tests for Massive endpoint routing across asset classes."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider instance."""
+        return MassiveProvider(api_key="test_key")
+
+    def _create_success_response(self):
+        """Create a mock success response."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "status": "OK",
+            "results": [
+                {"t": 1704067200000, "o": 170.0, "h": 172.0, "l": 169.0, "c": 171.0, "v": 1000000},
+            ],
+        }
+        return mock_response
+
+    @pytest.mark.parametrize(
+        ("symbol", "expected_asset_class", "expected_path"),
+        [
+            ("AAPL", "stocks", "/v2/aggs/ticker/AAPL/range/1/day/2024-01-01/2024-01-02"),
+            (
+                "O:SPY240119C00480000",
+                "options",
+                "/v2/aggs/ticker/O:SPY240119C00480000/range/1/day/2024-01-01/2024-01-02",
+            ),
+            ("X:BTCUSD", "crypto", "/v2/aggs/ticker/X:BTCUSD/range/1/day/2024-01-01/2024-01-02"),
+            ("C:EURUSD", "forex", "/v2/aggs/ticker/C:EURUSD/range/1/day/2024-01-01/2024-01-02"),
+            ("F:ESM6", "futures", "/futures/v1/aggs/ESM6"),
+        ],
+    )
+    def test_infers_asset_class_and_routes_endpoint(
+        self,
+        provider,
+        symbol,
+        expected_asset_class,
+        expected_path,
+    ):
+        """Test endpoint routing for all supported asset classes."""
+        assert provider._infer_asset_class(symbol) == expected_asset_class
+
+        with patch.object(
+            provider.session, "get", return_value=self._create_success_response()
+        ) as get:
+            provider._fetch_raw_data(symbol, "2024-01-01", "2024-01-02", "daily")
+
+        url = get.call_args.args[0]
+        assert url == f"https://api.massive.com{expected_path}"
+
+    def test_explicit_futures_asset_class_routes_unprefixed_symbol(self, provider):
+        """Test unprefixed futures symbols can be routed explicitly."""
+        with patch.object(
+            provider.session, "get", return_value=self._create_success_response()
+        ) as get:
+            provider._fetch_raw_data(
+                "ESM6",
+                "2024-01-01",
+                "2024-01-02",
+                "daily",
+                asset_class="futures",
+            )
+
+        assert get.call_args.args[0] == "https://api.massive.com/futures/v1/aggs/ESM6"
+        params = get.call_args.kwargs["params"]
+        assert params["multiplier"] == 1
+        assert params["timespan"] == "day"
+        assert params["from"] == "2024-01-01"
+        assert params["to"] == "2024-01-02"

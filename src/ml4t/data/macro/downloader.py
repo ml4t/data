@@ -37,6 +37,8 @@ import polars as pl
 import structlog
 import yaml
 
+from ml4t.data.core.config import resolve_storage_path
+
 logger = structlog.get_logger(__name__)
 
 
@@ -47,11 +49,11 @@ class MacroConfig:
     provider: str = "fred"
     start: str = "2000-01-01"
     end: str = "2025-12-31"
-    storage_path: Path = field(default_factory=lambda: Path.home() / "ml4t-data" / "macro")
+    storage_path: Path = field(default_factory=lambda: resolve_storage_path(None, "macro"))
     series: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "macro")
 
     def get_treasury_symbols(self) -> list[str]:
         """Get list of Treasury yield series IDs."""
@@ -107,7 +109,7 @@ class MacroDataManager:
             provider=macro_config.get("provider", "fred"),
             start=macro_config.get("start", "2000-01-01"),
             end=macro_config.get("end", "2025-12-31"),
-            storage_path=Path(macro_config.get("storage_path", "~/ml4t-data/macro")).expanduser(),
+            storage_path=resolve_storage_path(macro_config.get("storage_path"), "macro"),
             series=macro_config.get("series", {}),
         )
 

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+from ml4t.data.core.config import resolve_storage_path
+
 
 class FuturesCategory(str, Enum):
     """Futures product categories."""
@@ -60,14 +62,14 @@ class FuturesDownloadConfig:
     )
     start: str = "2016-01-01"
     end: str = "2025-12-13"
-    storage_path: str | Path = "~/ml4t-data/futures"
+    storage_path: str | Path = field(default_factory=lambda: resolve_storage_path(None, "futures"))
     dataset: str = "GLBX.MDP3"
     schemas: list[str] = field(default_factory=lambda: ["ohlcv-1d", "definition", "statistics"])
     api_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = Path(self.storage_path).expanduser()
+        self.storage_path = resolve_storage_path(self.storage_path, "futures")
 
     def get_product_list(self) -> list[str]:
         """Get flat list of all products."""
@@ -163,7 +165,7 @@ def load_yaml_config(yaml_path: str | Path) -> FuturesDownloadConfig:
         products=products,
         start=futures_config.get("start", "2016-01-01"),
         end=futures_config.get("end", "2025-12-13"),
-        storage_path=futures_config.get("storage_path", "~/ml4t-data/futures"),
+        storage_path=resolve_storage_path(futures_config.get("storage_path"), "futures"),
         dataset=futures_config.get("dataset", "GLBX.MDP3"),
         schemas=futures_config.get("schemas", ["ohlcv-1d", "definition", "statistics"]),
         api_key=futures_config.get("api_key"),
@@ -193,7 +195,7 @@ def load_definitions_config(yaml_path: str | Path) -> tuple[list[str], Path, Def
     if isinstance(products, dict):
         products = [p for cat_products in products.values() for p in cat_products]
 
-    storage_path = Path(futures_config.get("storage_path", "~/ml4t-data/futures")).expanduser()
+    storage_path = resolve_storage_path(futures_config.get("storage_path"), "futures")
 
     # Get definitions config
     defn_config = futures_config.get("definitions", {})

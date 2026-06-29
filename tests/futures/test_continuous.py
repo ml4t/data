@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.adjustment import BackAdjustment, RatioAdjustment
 from ml4t.data.futures.continuous import (
     ContinuousContractBuilder,
@@ -188,7 +189,7 @@ class TestContinuousContractBuilderBuild:
             result = builder.build("ES", data_source="databento")
 
             # Verify parsers were called with default path
-            expected_path = Path("~/ml4t-data/futures").expanduser()
+            expected_path = resolve_storage_path(None, "futures")
             mock_raw.assert_called_once_with("ES", expected_path)
             mock_cont.assert_called_once_with("ES", expected_path)
 

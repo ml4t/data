@@ -20,7 +20,7 @@ ML4T Data supports 20 live data providers with a unified API (plus synthetic and
 | [Tiingo](tiingo.md) | US Stocks | 1000/day | Thread | Yes |
 | [TwelveData](twelve_data.md) | Multi-asset | 800/day | Native | Yes |
 | [DataBento](databento.md) | Futures, Options | $10 credits | Thread | Yes |
-| [Polygon](polygon.md) | Multi-asset | Paid only | Thread | Yes |
+| [Massive](massive.md) | Multi-asset | Free tier | Thread | Yes |
 | [Finnhub](finnhub.md) | Global Stocks | 30/day OHLCV | Thread | Yes |
 | [Binance](binance.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |

@@ -8,7 +8,7 @@ Unified market data acquisition and storage for quantitative research workflows.
 
 ## Part of the ML4T Library Ecosystem
 
-This library is one of six interconnected libraries supporting the machine learning for trading workflow described in [Machine Learning for Trading](https://ml4trading.io):
+This library is one of six interconnected libraries supporting the machine learning for trading workflow described in [Machine Learning for Trading](https://www.ml4trading.io):
 
 ![ML4T Library Ecosystem](docs/images/ml4t_ecosystem_workflow_color.png)
 
@@ -106,7 +106,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Tiingo | US equities with quality focus |
 | Twelve Data | Multi-asset coverage |
 | Databento | CME, CBOE, ICE futures/options |
-| Polygon | US equities, options, forex, crypto |
+| Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | Binance | Crypto exchange data |
 | OKX | Crypto perpetuals and funding rates |
@@ -299,7 +299,7 @@ report = manager.detect(data)
 ## Development
 
 ```bash
-git clone https://github.com/ml4t/ml4t-data.git
+git clone https://github.com/ml4t/data.git
 cd ml4t-data
 uv sync
 uv run pytest tests/ -q

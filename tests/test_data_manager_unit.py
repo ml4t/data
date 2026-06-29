@@ -11,6 +11,7 @@ import pytest
 
 from ml4t.data.data_manager import DataManager, ProviderRouter
 from ml4t.data.managers.config_manager import ConfigManager
+from ml4t.data.managers.provider_manager import ProviderManager
 
 
 class TestProviderRouterCache:
@@ -123,6 +124,44 @@ class TestDataManagerMergeConfigs:
         result = cm._merge_configs(base, override)
 
         assert result["key"] == "value"
+
+
+class TestMassiveProviderConfig:
+    """Tests for Massive provider config and availability wiring."""
+
+    def test_massive_api_key_config_is_canonical(self):
+        """Test MASSIVE_API_KEY configures the canonical massive provider."""
+        with patch.dict(
+            "os.environ",
+            {"MASSIVE_API_KEY": "massive_key", "POLYGON_API_KEY": "polygon_key"},
+            clear=True,
+        ):
+            config = ConfigManager()
+
+        assert config.config["providers"]["massive"]["api_key"] == "massive_key"
+
+    def test_legacy_polygon_api_key_configures_massive(self):
+        """Test POLYGON_API_KEY remains valid for Massive config."""
+        with patch.dict("os.environ", {"POLYGON_API_KEY": "polygon_key"}, clear=True):
+            config = ConfigManager()
+
+        assert config.config["providers"]["massive"]["api_key"] == "polygon_key"
+
+    def test_provider_manager_detects_massive_from_massive_key(self):
+        """Test MASSIVE_API_KEY makes massive available."""
+        with patch.dict("os.environ", {"MASSIVE_API_KEY": "massive_key"}, clear=True):
+            manager = ProviderManager({"providers": {}})
+
+        assert manager.is_available("massive")
+        assert not manager.is_available("polygon")
+
+    def test_provider_manager_detects_legacy_polygon_alias(self):
+        """Test POLYGON_API_KEY keeps both massive and polygon provider names available."""
+        with patch.dict("os.environ", {"POLYGON_API_KEY": "polygon_key"}, clear=True):
+            manager = ProviderManager({"providers": {}})
+
+        assert manager.is_available("massive")
+        assert manager.is_available("polygon")
 
 
 class TestDataManagerValidateDates:

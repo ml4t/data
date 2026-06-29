@@ -18,6 +18,7 @@ from ml4t.data.config.models import (
     ScheduleType,
     WorkflowConfig,
 )
+from ml4t.data.core.config import resolve_data_root
 
 
 class TestProviderConfig:
@@ -292,7 +293,7 @@ class TestDataConfig:
         config = DataConfig()
 
         assert config.version == "1.0"
-        assert config.base_dir == Path("./data")
+        assert config.base_dir == resolve_data_root()
         assert config.log_level == "INFO"
         assert config.providers == []
         assert config.datasets == []

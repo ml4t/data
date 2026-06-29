@@ -152,11 +152,11 @@ all = [
 ml4t-data = "ml4t.data.cli_interface:cli"
 
 [project.urls]
-Homepage = "https://github.com/stefan-jansen/ml4t-data"
-Documentation = "https://ml4t-data.readthedocs.io"
-Repository = "https://github.com/stefan-jansen/ml4t-data"
-Issues = "https://github.com/stefan-jansen/ml4t-data/issues"
-Changelog = "https://github.com/stefan-jansen/ml4t-data/blob/main/CHANGELOG.md"
+Homepage = "https://www.ml4trading.io/docs/data/"
+Documentation = "https://www.ml4trading.io/docs/data/"
+Repository = "https://github.com/ml4t/data"
+Issues = "https://github.com/ml4t/data/issues"
+Changelog = "https://github.com/ml4t/data/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

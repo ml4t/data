@@ -1,28 +1,32 @@
-"""Polygon.io data provider.
+"""Massive data provider with Polygon compatibility.
 
-Polygon.io offers comprehensive financial data across multiple asset classes:
+Massive.com, formerly Polygon.io, offers comprehensive financial data across
+multiple asset classes:
 - Stocks (equities)
 - Options
+- Futures
 - Cryptocurrencies
 - Forex
 
 Rate Limits:
     - Free tier: 5 requests/minute
-    - Basic tier: 100 requests/minute
+    - Paid tiers: higher or unlimited usage depending on product
 
 Authentication:
-    Requires API key from https://polygon.io/
-    Set POLYGON_API_KEY environment variable or pass api_key parameter
+    Requires API key from https://massive.com/
+    Set MASSIVE_API_KEY or POLYGON_API_KEY, or pass api_key explicitly.
 
 Example:
-    >>> from ml4t.data.providers.polygon import PolygonProvider
-    >>> provider = PolygonProvider(api_key="your_key")
+    >>> from ml4t.data.providers.polygon import MassiveProvider
+    >>> provider = MassiveProvider(api_key="your_key")
     >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
+    >>> futures = provider.fetch_ohlcv("ESM6", "2024-01-01", "2024-01-31", asset_class="futures")
     >>> provider.close()
 """
 
 import os
-from typing import ClassVar
+import warnings
+from typing import Any, ClassVar, Literal
 
 import polars as pl
 
@@ -36,16 +40,26 @@ from ml4t.data.core.exceptions import (
 )
 from ml4t.data.providers.base import BaseProvider
 
+MassiveAssetClass = Literal["stocks", "options", "futures", "crypto", "forex"]
 
-class PolygonProvider(BaseProvider):
-    """Polygon.io data provider.
 
-    Supports stocks, options, cryptocurrencies, and forex data.
+class MassiveProvider(BaseProvider):
+    """Massive data provider.
+
+    Supports OHLCV bars for stocks, options, futures, cryptocurrencies, and forex.
+
+    ``POLYGON_API_KEY`` remains supported because existing Polygon.io keys and
+    accounts continue to work after the Massive.com rebrand.
     """
 
-    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (5, 1.0)  # 5 requests per second (free tier)
+    DEFAULT_BASE_URL: ClassVar[str] = "https://api.massive.com"
+    LEGACY_BASE_URL: ClassVar[str] = "https://api.polygon.io"
+    API_KEY_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_API_KEY", "POLYGON_API_KEY")
+    BASE_URL_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_BASE_URL", "POLYGON_BASE_URL")
 
-    # Map frequencies to Polygon timespans
+    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (5, 60.0)  # Basic free tier
+
+    # Map frequencies to Massive/Polygon timespans.
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {
         "day": "day",
         "daily": "day",
@@ -68,36 +82,129 @@ class PolygonProvider(BaseProvider):
         "1minute": "minute",
     }
 
-    def __init__(self, api_key: str | None = None, rate_limit: tuple[int, float] | None = None):
-        """Initialize Polygon provider.
+    def __init__(
+        self,
+        api_key: str | None = None,
+        rate_limit: tuple[int, float] | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        """Initialize Massive provider.
 
         Args:
-            api_key: Polygon API key. If None, reads from POLYGON_API_KEY env var
+            api_key: Massive/Polygon API key. If None, reads MASSIVE_API_KEY first,
+                then POLYGON_API_KEY for backward compatibility.
             rate_limit: Optional custom rate limit (calls, period_seconds)
+            base_url: Optional API base URL. Defaults to https://api.massive.com.
 
         Raises:
             AuthenticationError: If API key is not provided
         """
         super().__init__(rate_limit=rate_limit or self.DEFAULT_RATE_LIMIT)
 
-        self.api_key = api_key or os.getenv("POLYGON_API_KEY")
+        self.api_key = api_key or self._resolve_api_key()
         if not self.api_key:
             raise AuthenticationError(
-                provider="polygon",
-                message="API key required. Set POLYGON_API_KEY environment variable "
-                "or pass api_key parameter. Get your key at: https://polygon.io/",
+                provider=self.name,
+                message=(
+                    "API key required. Set MASSIVE_API_KEY or POLYGON_API_KEY, "
+                    "or pass api_key. Get your key at: https://massive.com/"
+                ),
             )
 
-        self.base_url = "https://api.polygon.io"
+        self.base_url = self._resolve_base_url(base_url)
 
         self.logger.info(
-            "Initialized Polygon provider", rate_limit=rate_limit or self.DEFAULT_RATE_LIMIT
+            "Initialized Massive provider",
+            base_url=self.base_url,
+            rate_limit=rate_limit or self.DEFAULT_RATE_LIMIT,
         )
 
     @property
     def name(self) -> str:
         """Return provider name."""
-        return "polygon"
+        return "massive"
+
+    @classmethod
+    def _resolve_api_key(cls) -> str | None:
+        """Resolve API key from Massive first, then legacy Polygon env vars."""
+        for env_var in cls.API_KEY_ENV_VARS:
+            api_key = os.getenv(env_var)
+            if api_key:
+                return api_key
+        return None
+
+    @classmethod
+    def _resolve_base_url(cls, base_url: str | None = None) -> str:
+        """Resolve API base URL, preserving a legacy override path."""
+        resolved = base_url
+        if resolved is None:
+            for env_var in cls.BASE_URL_ENV_VARS:
+                env_value = os.getenv(env_var)
+                if env_value:
+                    resolved = env_value
+                    break
+        return (resolved or cls.DEFAULT_BASE_URL).rstrip("/")
+
+    @staticmethod
+    def _infer_asset_class(symbol: str, asset_class: MassiveAssetClass | None = None) -> str:
+        """Infer Massive asset class from symbol prefix when not explicit."""
+        if asset_class:
+            return asset_class
+
+        upper = symbol.upper()
+        if upper.startswith("X:"):
+            return "crypto"
+        if upper.startswith("C:"):
+            return "forex"
+        if upper.startswith("O:"):
+            return "options"
+        if upper.startswith("F:") or upper.startswith("FUT:"):
+            return "futures"
+        return "stocks"
+
+    @staticmethod
+    def _api_symbol(symbol: str, asset_class: str) -> str:
+        """Normalize user-facing symbol prefixes for Massive endpoints."""
+        upper = symbol.upper()
+        if asset_class == "futures":
+            if upper.startswith("FUT:"):
+                return upper[4:]
+            if upper.startswith("F:"):
+                return upper[2:]
+        return upper
+
+    def fetch_ohlcv(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: MassiveAssetClass | None = None,
+    ) -> pl.DataFrame:
+        """Fetch OHLCV bars across Massive-supported asset classes.
+
+        Args:
+            symbol: Massive ticker. Prefixes are supported for disambiguation:
+                ``X:BTCUSD`` for crypto, ``C:EURUSD`` for forex, ``O:...`` for
+                options, and ``F:ESM6`` or ``asset_class="futures"`` for futures.
+            start: Start date in YYYY-MM-DD format.
+            end: End date in YYYY-MM-DD format.
+            frequency: Bar frequency, such as ``daily``, ``1h``, or ``1m``.
+            asset_class: Optional explicit asset class. Required for ambiguous
+                futures tickers without an ``F:`` prefix.
+
+        Returns:
+            DataFrame with canonical OHLCV columns.
+        """
+        self._validate_inputs(symbol, start, end, frequency)
+        self._acquire_rate_limit()
+
+        def _fetch_and_process() -> pl.DataFrame:
+            raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=asset_class)
+            data = self._transform_data(raw_data, symbol)
+            return self._validate_ohlcv(data, self.name)
+
+        return self._with_circuit_breaker(_fetch_and_process)
 
     def _fetch_raw_data(
         self,
@@ -105,26 +212,41 @@ class PolygonProvider(BaseProvider):
         start: str,
         end: str,
         frequency: str = "day",
-    ) -> dict:
-        """Fetch raw data from Polygon API."""
+        asset_class: MassiveAssetClass | None = None,
+    ) -> dict[str, Any]:
+        """Fetch raw data from Massive API."""
         timespan = self.FREQUENCY_MAP.get(frequency.lower())
         if not timespan:
             raise DataValidationError(
-                provider="polygon",
+                provider=self.name,
                 message=f"Unsupported frequency '{frequency}'. Supported: {list(self.FREQUENCY_MAP.keys())}",
                 field="frequency",
                 value=frequency,
             )
 
-        endpoint = (
-            f"{self.base_url}/v2/aggs/ticker/{symbol.upper()}/range/1/{timespan}/{start}/{end}"
-        )
-        params = {
-            "adjusted": "true",
-            "sort": "asc",
-            "limit": 50000,
-            "apiKey": self.api_key,
-        }
+        resolved_asset_class = self._infer_asset_class(symbol, asset_class)
+        api_symbol = self._api_symbol(symbol, resolved_asset_class)
+        if resolved_asset_class == "futures":
+            endpoint = f"{self.base_url}/futures/v1/aggs/{api_symbol}"
+            params = {
+                "multiplier": 1,
+                "timespan": timespan,
+                "from": start,
+                "to": end,
+                "sort": "asc",
+                "limit": 50000,
+                "apiKey": self.api_key,
+            }
+        else:
+            endpoint = (
+                f"{self.base_url}/v2/aggs/ticker/{api_symbol}/range/1/{timespan}/{start}/{end}"
+            )
+            params = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 50000,
+                "apiKey": self.api_key,
+            }
 
         try:
             response = self.session.get(endpoint, params=params)
@@ -132,14 +254,14 @@ class PolygonProvider(BaseProvider):
             # Check for errors
             if response.status_code == 401:
                 raise AuthenticationError(
-                    provider="polygon",
-                    message="Invalid API key. Get your key at: https://polygon.io/",
+                    provider=self.name,
+                    message="Invalid API key. Get your key at: https://massive.com/",
                 )
             elif response.status_code == 429:
-                raise RateLimitError(provider="polygon", retry_after=60.0)
+                raise RateLimitError(provider=self.name, retry_after=60.0)
             elif response.status_code != 200:
                 raise NetworkError(
-                    provider="polygon",
+                    provider=self.name,
                     message=f"API error (HTTP {response.status_code}): {response.text}",
                 )
 
@@ -148,7 +270,7 @@ class PolygonProvider(BaseProvider):
                 data = response.json()
             except Exception as err:
                 raise NetworkError(
-                    provider="polygon", message="Failed to parse JSON response"
+                    provider=self.name, message="Failed to parse JSON response"
                 ) from err
 
             # Check for API-level errors
@@ -157,9 +279,9 @@ class PolygonProvider(BaseProvider):
                 # Check if it's a symbol not found error
                 if "NOT_FOUND" in error_msg or "not found" in error_msg.lower():
                     raise SymbolNotFoundError(
-                        provider="polygon", symbol=symbol, details={"error": error_msg}
+                        provider=self.name, symbol=symbol, details={"error": error_msg}
                     )
-                raise ProviderError(provider="polygon", message=f"API error: {error_msg}")
+                raise ProviderError(provider=self.name, message=f"API error: {error_msg}")
 
             return data
 
@@ -172,14 +294,14 @@ class PolygonProvider(BaseProvider):
         ):
             raise
         except Exception as err:
-            raise NetworkError(provider="polygon", message=f"Request failed: {endpoint}") from err
+            raise NetworkError(provider=self.name, message=f"Request failed: {endpoint}") from err
 
-    def _transform_data(self, raw_data: dict, symbol: str) -> pl.DataFrame:
+    def _transform_data(self, raw_data: dict[str, Any], symbol: str) -> pl.DataFrame:
         """Transform raw API response to Polars DataFrame."""
         if not raw_data.get("results"):
             self.logger.warning(f"No data returned for {symbol}")
             raise SymbolNotFoundError(
-                provider="polygon",
+                provider=self.name,
                 symbol=symbol,
                 details={"message": "No results returned from API"},
             )
@@ -217,5 +339,30 @@ class PolygonProvider(BaseProvider):
 
         except Exception as err:
             raise DataValidationError(
-                provider="polygon", message=f"Failed to transform data for {symbol}"
+                provider=self.name, message=f"Failed to transform data for {symbol}"
             ) from err
+
+
+class PolygonProvider(MassiveProvider):
+    """Deprecated compatibility alias for Polygon.io integrations.
+
+    Use ``MassiveProvider`` for new code.
+    """
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        rate_limit: tuple[int, float] | None = None,
+        base_url: str | None = None,
+    ) -> None:
+        warnings.warn(
+            "PolygonProvider is deprecated; use MassiveProvider instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(api_key=api_key, rate_limit=rate_limit, base_url=base_url)
+
+    @property
+    def name(self) -> str:
+        """Return provider name."""
+        return "polygon"

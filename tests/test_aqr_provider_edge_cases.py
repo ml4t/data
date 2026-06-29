@@ -24,7 +24,7 @@ class TestDataPathValidation:
         assert provider.data_path == tmp_path
 
     def test_relative_path_stored(self, tmp_path, monkeypatch):
-        """Test relative path is stored as provided."""
+        """Test relative path is normalized to an absolute path."""
         # Change to tmp_path so relative path works
         monkeypatch.chdir(tmp_path)
 
@@ -33,8 +33,7 @@ class TestDataPathValidation:
         subdir.mkdir()
 
         provider = AQRFactorProvider(data_path="data")
-        # Relative paths are stored as-is
-        assert provider.data_path == Path("data")
+        assert provider.data_path == subdir.resolve()
 
 
 class TestFetchRegionFiltering:

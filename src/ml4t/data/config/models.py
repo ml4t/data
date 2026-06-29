@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ml4t.data.assets.asset_class import AssetClass
+from ml4t.data.core.config import resolve_data_root
 from ml4t.data.core.models import Frequency
 
 
@@ -55,6 +56,7 @@ class ProviderType(str, Enum):
     BINANCE = "binance"
     CRYPTOCOMPARE = "cryptocompare"
     DATABENTO = "databento"
+    MASSIVE = "massive"
     OANDA = "oanda"
     POLYGON = "polygon"
     MOCK = "mock"
@@ -77,7 +79,9 @@ class StorageConfig(BaseModel):
         default=StorageStrategy.HIVE,
         description="Storage strategy (hive for partitioned, flat for single file)",
     )
-    base_path: Path = Field(default=Path("data"), description="Base directory for data storage")
+    base_path: Path = Field(
+        default_factory=resolve_data_root, description="Base directory for data storage"
+    )
     compression: CompressionType = Field(
         default=CompressionType.ZSTD, description="Compression type for Parquet files"
     )
@@ -286,7 +290,9 @@ class DataConfig(BaseSettings):
 
     # Config metadata
     version: str = Field(default="1.0", description="Configuration file version")
-    base_dir: Path = Field(default=Path("./data"), description="Base directory for project")
+    base_dir: Path = Field(
+        default_factory=resolve_data_root, description="Base directory for project"
+    )
 
     # Storage configuration (supports both dict and StorageConfig)
     storage: StorageConfig | dict[str, Any] = Field(

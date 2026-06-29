@@ -23,7 +23,7 @@ hide:
 
     Equities, crypto, forex, futures, macro, prediction markets, and factors.
 
-    [:octicons-arrow-right-24: Provider Guide](getting-started/provider-selection.md)
+    [:octicons-arrow-right-24: Provider Guide](providers/index.md)
 
 -   :material-lightning-bolt:{ .lg .middle } __10-100x Faster__
 
@@ -114,7 +114,7 @@ print(f"Fetched {len(df)} rows for {df['symbol'].n_unique()} symbols")
 | **DataBento** | Futures, Options | $10 credits | Thread | Institutional data |
 | **Fama-French** | Factors | Unlimited | Thread | Academic research |
 
-[:octicons-arrow-right-24: Full provider comparison](getting-started/provider-selection.md)
+[:octicons-arrow-right-24: Full provider guide](providers/index.md)
 
 ## For ML4T Book Readers
 

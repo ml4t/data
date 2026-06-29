@@ -7,7 +7,7 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
-from ml4t.data.core.config import Config, StorageConfig
+from ml4t.data.core.config import Config, StorageConfig, resolve_data_root
 from ml4t.data.core.models import DataObject, Metadata, SchemaVersion
 from ml4t.data.providers.base import Provider
 
@@ -18,7 +18,7 @@ class TestConfig:
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = Config()
-        assert config.data_root == Path.home() / ".qldm" / "data"
+        assert config.data_root == resolve_data_root()
         assert config.storage.backend == "filesystem"
         assert config.log_level == "INFO"
 

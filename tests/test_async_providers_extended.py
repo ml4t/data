@@ -13,7 +13,7 @@ Tests the async methods added to additional providers:
 - DataBentoProvider.fetch_ohlcv_async()
 - FinnhubProvider.fetch_ohlcv_async()
 - OandaProvider.fetch_ohlcv_async()
-- PolygonProvider.fetch_ohlcv_async()
+- MassiveProvider.fetch_ohlcv_async()
 - TiingoProvider.fetch_ohlcv_async()
 """
 
@@ -423,22 +423,22 @@ class TestOandaProviderAsync:
             )
 
 
-# ===== PolygonProvider Async Tests (Thread-wrapped) =====
+# ===== MassiveProvider Async Tests (Thread-wrapped) =====
 
 
-class TestPolygonProviderAsync:
-    """Test async methods on PolygonProvider (thread-wrapped)."""
+class TestMassiveProviderAsync:
+    """Test async methods on MassiveProvider (thread-wrapped)."""
 
     @pytest.fixture
     def provider(self):
-        """Create Polygon provider with mock API key."""
-        with patch.dict("os.environ", {"POLYGON_API_KEY": "test_key"}):
-            from ml4t.data.providers.polygon import PolygonProvider
+        """Create Massive provider with mock API key."""
+        with patch.dict("os.environ", {"MASSIVE_API_KEY": "test_key"}):
+            from ml4t.data.providers.polygon import MassiveProvider
 
-            return PolygonProvider(api_key="test_key")
+            return MassiveProvider(api_key="test_key")
 
     def test_has_async_method(self, provider):
-        """Test PolygonProvider has fetch_ohlcv_async."""
+        """Test MassiveProvider has fetch_ohlcv_async."""
         assert hasattr(provider, "fetch_ohlcv_async")
         assert asyncio.iscoroutinefunction(provider.fetch_ohlcv_async)
 
@@ -535,7 +535,7 @@ class TestExtendedAsyncProtocolConformance:
             ("ml4t.data.providers.coingecko", "CoinGeckoProvider", None, None),
             ("ml4t.data.providers.okx", "OKXProvider", None, None),
             ("ml4t.data.providers.finnhub", "FinnhubProvider", "FINNHUB_API_KEY", "api_key"),
-            ("ml4t.data.providers.polygon", "PolygonProvider", "POLYGON_API_KEY", "api_key"),
+            ("ml4t.data.providers.polygon", "MassiveProvider", "MASSIVE_API_KEY", "api_key"),
             ("ml4t.data.providers.tiingo", "TiingoProvider", "TIINGO_API_KEY", "api_key"),
         ],
     )

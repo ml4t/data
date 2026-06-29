@@ -629,16 +629,16 @@ crypto = provider.fetch_ohlcv("BTC/USD", start="2024-01-01", end="2024-12-31")
 
 ---
 
-### Polygon (Real-Time + Historical)
+### Massive (Real-Time + Historical)
 
 **Free Tier**: 5 API calls per minute
-**Coverage**: Stocks, forex, crypto, options
+**Coverage**: Stocks, options, futures, forex, crypto
 **Best for**: Real-time data needs
 
 ```python
-from ml4t.data.providers import PolygonProvider
+from ml4t.data.providers import MassiveProvider
 
-provider = PolygonProvider(api_key="your_key")
+provider = MassiveProvider(api_key="your_key")
 df = provider.fetch_ohlcv("AAPL", start="2024-01-01", end="2024-12-31")
 ```
 

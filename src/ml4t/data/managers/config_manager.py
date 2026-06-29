@@ -44,6 +44,8 @@ class ConfigManager:
     ENV_MAPPING = {
         "CRYPTOCOMPARE_API_KEY": ("cryptocompare", "api_key"),
         "DATABENTO_API_KEY": ("databento", "api_key"),
+        "POLYGON_API_KEY": ("massive", "api_key"),
+        "MASSIVE_API_KEY": ("massive", "api_key"),
         "OANDA_API_KEY": ("oanda", "api_key"),
         "OANDA_ACCOUNT_ID": ("oanda", "account_id"),
     }

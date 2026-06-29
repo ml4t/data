@@ -20,7 +20,6 @@ Usage:
         products=["ES", "CL", "GC"],
         start="2016-01-01",
         end="2025-12-13",
-        storage_path="~/ml4t-data/futures",
     )
     downloader = FuturesDownloader(config)
     downloader.download_all()

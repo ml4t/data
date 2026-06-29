@@ -13,6 +13,7 @@ from pathlib import Path
 
 import polars as pl
 
+from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.adjustment import AdjustmentMethod, BackAdjustment
 from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
 from ml4t.data.futures.roll import RollStrategy, VolumeBasedRoll
@@ -62,7 +63,7 @@ class ContinuousContractBuilder:
                 - "quandl_chris": Quandl CHRIS data (legacy)
                 - "databento": Databento downloaded data
             storage_path: For databento, path where data was downloaded.
-                         Defaults to ~/ml4t-data/futures
+                         Defaults to <data-root>/futures
 
         Returns:
             DataFrame with columns:
@@ -103,7 +104,7 @@ class ContinuousContractBuilder:
 
             # Default storage path
             if storage_path is None:
-                storage_path = Path("~/ml4t-data/futures").expanduser()
+                storage_path = resolve_storage_path(None, "futures")
             else:
                 storage_path = Path(storage_path).expanduser()
 

@@ -150,7 +150,9 @@ class ProviderManager:
     KEYED_PROVIDERS = frozenset(
         {
             "databento",
+            "massive",
             "oanda",
+            "polygon",
         }
     )
 
@@ -216,6 +218,14 @@ class ProviderManager:
             pass
 
         try:
+            from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
+
+            provider_classes["massive"] = MassiveProvider
+            provider_classes["polygon"] = PolygonProvider
+        except ImportError:
+            pass
+
+        try:
             from ml4t.data.providers.alpaca import AlpacaProvider
 
             provider_classes["alpaca"] = AlpacaProvider
@@ -243,12 +253,19 @@ class ProviderManager:
         env_to_provider = {
             "CRYPTOCOMPARE_API_KEY": "cryptocompare",
             "DATABENTO_API_KEY": "databento",
+            "MASSIVE_API_KEY": "massive",
             "OANDA_API_KEY": "oanda",
+            "POLYGON_API_KEY": "massive",
         }
 
         for env_var, provider_name in env_to_provider.items():
             if env_var in os.environ and provider_name not in self._available_providers:
                 self._available_providers.append(provider_name)
+
+        # Preserve old DataManager(provider="polygon") usage when users only have
+        # the legacy Polygon key in their environment.
+        if "POLYGON_API_KEY" in os.environ and "polygon" not in self._available_providers:
+            self._available_providers.append("polygon")
 
         # Add free providers if not already detected
         for free_provider in self.FREE_PROVIDERS:
