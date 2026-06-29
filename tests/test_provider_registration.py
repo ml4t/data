@@ -1,6 +1,7 @@
 """Test provider registration in DataManager."""
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.providers.alpaca import AlpacaProvider
 from ml4t.data.providers.binance import BinanceProvider
 from ml4t.data.providers.binance_public import BinancePublicProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
@@ -14,7 +15,7 @@ from ml4t.data.providers.yahoo import YahooFinanceProvider
 
 
 def test_all_providers_registered():
-    """Test that all OHLCV providers are registered in DataManager.
+    """Test that all 12 OHLCV providers are registered in DataManager.
 
     Note: Specialized providers (factor, prediction market) are not in DataManager.
     - Factor providers: aqr, fama_french (standalone, different API)
@@ -33,10 +34,11 @@ def test_all_providers_registered():
         "polygon": PolygonProvider,
         "synthetic": SyntheticProvider,
         "yahoo": YahooFinanceProvider,
+        "alpaca": AlpacaProvider,
     }
 
     assert expected_providers == DataManager.PROVIDER_CLASSES
-    assert len(DataManager.PROVIDER_CLASSES) == 11
+    assert len(DataManager.PROVIDER_CLASSES) == len(expected_providers)
 
 
 def test_provider_imports_work():
@@ -52,6 +54,7 @@ def test_provider_imports_work():
         OandaProvider,
         SyntheticProvider,
         YahooFinanceProvider,
+        AlpacaProvider,
     ]
 
     for provider_class in providers:
@@ -101,17 +104,16 @@ def test_provider_count():
     """Test that we have the expected OHLCV providers registered in DataManager.
 
     Provider categories:
-    - In DataManager (11): General OHLCV providers with unified fetch_ohlcv() interface
+    - In DataManager (12): General OHLCV providers with unified fetch_ohlcv() interface
     - Standalone (5): Specialized providers with unique APIs
       - Factor data: aqr, fama_french
       - Prediction markets: kalshi, polymarket
       - Historical: wiki_prices
     """
-    assert len(DataManager.PROVIDER_CLASSES) == 11, (
-        f"Expected 11 providers, got {len(DataManager.PROVIDER_CLASSES)}"
+    assert len(DataManager.PROVIDER_CLASSES) == 12, (
+        f"Expected 12 providers, got {len(DataManager.PROVIDER_CLASSES)}"
     )
 
-    # List all provider names for clarity
     provider_names = list(DataManager.PROVIDER_CLASSES.keys())
     assert "binance" in provider_names
     assert "binance_public" in provider_names
@@ -124,6 +126,7 @@ def test_provider_count():
     assert "polygon" in provider_names
     assert "synthetic" in provider_names
     assert "yahoo" in provider_names
+    assert "alpaca" in provider_names
 
 
 if __name__ == "__main__":

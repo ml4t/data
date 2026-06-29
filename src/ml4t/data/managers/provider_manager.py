@@ -225,6 +225,13 @@ class ProviderManager:
         except ImportError:
             pass
 
+        try:
+            from ml4t.data.providers.alpaca import AlpacaProvider
+
+            provider_classes["alpaca"] = AlpacaProvider
+        except ImportError:
+            pass
+
         cls._PROVIDER_CLASSES = provider_classes
         return provider_classes
 
@@ -264,6 +271,9 @@ class ProviderManager:
         for free_provider in self.FREE_PROVIDERS:
             if free_provider not in self._available_providers:
                 self._available_providers.append(free_provider)
+
+        if "alpaca" in self._provider_classes and "alpaca" not in self._available_providers:
+            self._available_providers.append("alpaca")
 
     @property
     def available_providers(self) -> list[str]:
