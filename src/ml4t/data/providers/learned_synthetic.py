@@ -25,6 +25,7 @@ Usage examples:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -466,9 +467,12 @@ class LearnedSyntheticProvider(BaseProvider):
             frequency=frequency,
         )
 
-        # Modify RNG state based on symbol for reproducibility
+        # Modify RNG state based on symbol for reproducibility.
         if self.seed is not None:
-            symbol_hash = hash(symbol) % (2**31)
+            symbol_hash = int.from_bytes(
+                hashlib.blake2b(symbol.upper().encode(), digest_size=8).digest(),
+                byteorder="big",
+            ) % (2**31)
             self._rng = np.random.default_rng(self.seed + symbol_hash)
 
         # Calculate how many sequences we need

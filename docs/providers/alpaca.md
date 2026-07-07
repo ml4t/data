@@ -147,5 +147,5 @@ headers, and retries transient failures per pagination page.
 ## See Also
 
 - [Alpaca Market Data docs](https://docs.alpaca.markets/us/docs/about-market-data-api)
-- [Provider README](README.md)
+- [Provider README](index.md)
 - [Provider Audit](PROVIDER_AUDIT.md)
