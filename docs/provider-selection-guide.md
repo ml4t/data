@@ -73,7 +73,7 @@ flowchart TD
 | **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | Paid only | Professional grade |
 | **Twelve Data** | ✅ | ✅ | ❌ | ✅ | ❌ | Yes | 800/day | Multi-asset + indicators |
 | **OANDA** | ❌ | ❌ | ❌ | ✅ | ❌ | Yes | No | Professional forex |
-| **Databento** | ❌ | ✅ | ❌ | ❌ | ✅ | Yes | Paid only | Institutional derivatives |
+| **Databento** | ❌ | ✅ | ❌ | ❌ | ✅ | Yes | Paid only | Institutional futures |
 | **Polygon** | ✅ | ✅ | ❌ | ✅ | ❌ | Yes | Paid only | Professional multi-asset |
 
 ### By Pricing
@@ -105,7 +105,7 @@ flowchart TD
 |----------|----------------|--------------|
 | **Finnhub** | $59.99/mo | Historical OHLCV, 70+ exchanges |
 | **Polygon** | $99/mo | Multi-asset, professional-grade |
-| **Databento** | Custom | Institutional derivatives data |
+| **Databento** | Custom | Institutional futures data |
 
 ## Decision Guidelines
 
@@ -125,7 +125,7 @@ flowchart TD
 3. **Finnhub** - Real-time + historical, professional grade
 
 ### For Institutions
-1. **Databento** - Tick-level derivatives data
+1. **Databento** - Tick-level futures data
 2. **Polygon** - Multi-asset professional data
 3. **Finnhub** - Global exchange coverage
 

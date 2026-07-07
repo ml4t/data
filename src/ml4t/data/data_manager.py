@@ -387,6 +387,9 @@ class DataManager:
         lookback_days: int = 7,
         fill_gaps: bool = True,
         provider: str | None = None,
+        initial_start: str | None = None,
+        initial_end: str | None = None,
+        initial_load_days: int = 365,
     ) -> str:
         """Update existing data with incremental fetch."""
         if not self._storage_manager:
@@ -394,7 +397,15 @@ class DataManager:
                 "Storage not configured. Pass storage= parameter to DataManager.__init__()"
             )
         return self._storage_manager.update(
-            symbol, frequency, asset_class, lookback_days, fill_gaps, provider
+            symbol,
+            frequency,
+            asset_class,
+            lookback_days,
+            fill_gaps,
+            provider,
+            initial_start,
+            initial_end,
+            initial_load_days,
         )
 
     # ========================================================================

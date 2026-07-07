@@ -449,6 +449,61 @@ class TestHiveStorageAtomicWrite:
         tmp_files = list(tmp_path.glob("*.tmp"))
         assert len(tmp_files) == 0
 
+    def test_atomic_write_overwrites_existing_file(self, tmp_path):
+        """Test duplicate writes replace an existing parquet file."""
+        config = StorageConfig(base_path=tmp_path)
+        storage = HiveStorage(config)
+        target_path = tmp_path / "test.parquet"
+
+        storage._atomic_write(pl.DataFrame({"a": [1, 2, 3]}), target_path)
+        storage._atomic_write(pl.DataFrame({"a": [4, 5]}), target_path)
+
+        assert pl.read_parquet(target_path)["a"].to_list() == [4, 5]
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_atomic_write_preserves_existing_file_on_replace_failure(self, tmp_path, monkeypatch):
+        """Test failed replacement does not remove existing committed data."""
+        config = StorageConfig(base_path=tmp_path)
+        storage = HiveStorage(config)
+        target_path = tmp_path / "test.parquet"
+
+        storage._atomic_write(pl.DataFrame({"a": [1, 2, 3]}), target_path)
+
+        def fail_replace(self, target):
+            if target == target_path:
+                raise PermissionError("locked")
+            return original_replace(self, target)
+
+        original_replace = type(target_path).replace
+        monkeypatch.setattr(type(target_path), "replace", fail_replace)
+
+        with pytest.raises(PermissionError, match="locked"):
+            storage._atomic_write(pl.DataFrame({"a": [4, 5]}), target_path)
+
+        assert pl.read_parquet(target_path)["a"].to_list() == [1, 2, 3]
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_metadata_write_preserves_existing_file_on_replace_failure(self, tmp_path, monkeypatch):
+        """Test failed metadata replacement leaves existing metadata intact."""
+        config = StorageConfig(base_path=tmp_path)
+        storage = HiveStorage(config)
+        metadata_path = tmp_path / "metadata.json"
+        metadata_path.write_text(json.dumps({"version": 1}))
+
+        def fail_replace(self, target):
+            if target == metadata_path:
+                raise PermissionError("locked")
+            return original_replace(self, target)
+
+        original_replace = type(metadata_path).replace
+        monkeypatch.setattr(type(metadata_path), "replace", fail_replace)
+
+        with pytest.raises(PermissionError, match="locked"):
+            storage._write_metadata_file(metadata_path, {"version": 2})
+
+        assert json.loads(metadata_path.read_text()) == {"version": 1}
+        assert not list(tmp_path.glob("*.tmp"))
+
 
 class TestHiveStorageSlashInKey:
     """Tests for keys with slashes (hierarchy)."""

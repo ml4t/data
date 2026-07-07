@@ -43,14 +43,14 @@ Some exchanges have trading sessions that don't align with calendar dates:
 The provider supports configurable session date adjustment:
 ```python
 # For CME futures with session starting at 5pm CT (10pm UTC summer time)
-provider = DatabentaProvider(
+provider = DataBentoProvider(
     dataset="GLBX.MDP3",
     adjust_session_dates=True,
     session_start_hour_utc=22
 )
 
 # For equities or crypto (calendar dates)
-provider = DatabentaProvider(
+provider = DataBentoProvider(
     dataset="XNAS.ITCH",
     adjust_session_dates=False  # Default
 )
@@ -80,19 +80,17 @@ provider = DatabentaProvider(
 ### Basic OHLCV Fetch
 ```python
 # For futures with session date adjustment
-provider = DatabentaProvider(
+provider = DataBentoProvider(
     api_key="YOUR_KEY",
     dataset="GLBX.MDP3",
-    default_schema="ohlcv-1m",
     adjust_session_dates=True,  # Enable for CME futures
     session_start_hour_utc=22   # 5pm CT = 10pm UTC (summer)
 )
 
 # For equities (no session adjustment needed)
-provider = DatabentaProvider(
+provider = DataBentoProvider(
     api_key="YOUR_KEY",
     dataset="XNAS.ITCH",
-    default_schema="ohlcv-1m"
 )
 
 # Fetch data
@@ -103,7 +101,12 @@ df = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31", "minute")
 ```python
 # Fetch both trades and quotes
 schemas = ["trades", "tbbo"]
-data = provider.fetch_multiple_schemas("AAPL", "2024-01-01", "2024-01-01", schemas)
+data = provider.fetch_multiple_schemas(
+    symbol="AAPL",
+    start="2024-01-01",
+    end="2024-01-01",
+    schemas=schemas,
+)
 trades_df = data["trades"]
 quotes_df = data["tbbo"]
 ```
@@ -138,17 +141,17 @@ When testing the Databento provider:
 3. Test continuous contract handling
 4. Test session date adjustment configuration (when enabled)
 5. Test multiple schema fetching
-6. Verify behavior with different datasets (equities, futures, options)
+6. Verify wrapper behavior with configured datasets; use the native client for advanced OPRA workflows
 
 ## Migration from ML3T Pattern
 
 The ML4T Data Databento provider improves on the ML3T pattern by:
 1. Using Polars throughout (no pandas conversion)
-2. Supporting multiple schemas in one call
+2. Supporting selected schemas in one call
 3. Configurable session date handling (not hardcoded for CME)
 4. Built-in continuous contract support
 5. Comprehensive error handling with circuit breaker
-6. Support for all Databento datasets (not just futures)
+6. Access to all Databento datasets through the exposed native client
 
 ## References
 

@@ -22,7 +22,7 @@ Complete documentation for the ML4T Data market data library.
 - **[Cryptocurrency Guide](asset-classes/crypto.md)** - CoinGecko, CryptoCompare (free tier available)
 - **[Equities Guide](asset-classes/equities.md)** - US & Global stocks, ETFs (7 providers)
 - **[Forex Guide](asset-classes/forex.md)** - OANDA, currency pairs, forex trading
-- **[Futures Guide](asset-classes/futures.md)** - Databento, derivatives, institutional data
+- **[Futures Guide](asset-classes/futures.md)** - Databento futures and institutional data
 
 ---
 
@@ -61,7 +61,7 @@ Complete documentation for the ML4T Data market data library.
 
 ### Provider-Specific
 
-- **[Databento Reference](providers/databento_reference.md)** - Futures and derivatives
+- **[Databento Reference](providers/databento_reference.md)** - Futures and native Databento datasets
 - **[Yahoo Finance](yahoo_provider.md)** - Free stock data (legacy)
 - **[Crypto Providers](crypto_providers.md)** - Cryptocurrency data sources
 
@@ -133,7 +133,7 @@ Quick comparison of all 14 providers:
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Multi-asset |
 | **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Multi-asset (paid) |
-| **Databento** | ❌ | ⚠️ | ❌ | ✅ | None | Institutional futures |
+| **Databento** | ❌ | ⚠️ | ❌ | ⚠️ native SDK | None | Institutional futures |
 | **Yahoo** | ❌ | ✅ | ❌ | ❌ | Unlimited | Free stocks (unreliable) |
 | **Binance** | ✅ | ❌ | ❌ | ✅ | 1200/min | Crypto exchange data |
 
@@ -184,9 +184,9 @@ eurusd = provider.fetch_ohlcv("EUR_USD", "2024-01-01", "2024-12-31", frequency="
 ### Get Started with Futures
 
 ```python
-from ml4t.data.providers import DatabentoProvider
+from ml4t.data.providers import DataBentoProvider
 
-provider = DatabentoProvider(api_key="your_key", dataset="GLBX.MDP3")
+provider = DataBentoProvider(api_key="your_key", dataset="GLBX.MDP3")
 es = provider.fetch_ohlcv("ES.v.0", "2024-01-01", "2024-12-31")  # S&P 500 futures
 ```
 

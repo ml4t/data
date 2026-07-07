@@ -30,7 +30,7 @@ Some providers require additional dependencies:
 # Yahoo Finance (included by default)
 pip install "ml4t-data[yahoo]"
 
-# DataBento (institutional futures/options)
+# DataBento (institutional futures)
 pip install "ml4t-data[databento]"
 
 # OANDA (forex)

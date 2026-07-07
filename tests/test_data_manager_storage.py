@@ -234,6 +234,31 @@ class TestDataManagerUpdate:
         assert key == "equities/daily/AAPL"
         assert storage.exists(key)
 
+    def test_update_uses_configured_initial_load_dates(self, manager):
+        """Test first update can bootstrap with configured dates."""
+        with patch.object(
+            manager._storage_manager,
+            "load",
+            return_value="equities/daily/AAPL",
+        ) as mock_load:
+            key = manager.update(
+                "AAPL",
+                provider="mock",
+                initial_start="2010-01-01",
+                initial_end="2024-12-31",
+                initial_load_days=3650,
+            )
+
+        assert key == "equities/daily/AAPL"
+        mock_load.assert_called_once_with(
+            symbol="AAPL",
+            start="2010-01-01",
+            end="2024-12-31",
+            frequency="daily",
+            asset_class="equities",
+            provider="mock",
+        )
+
     def test_update_incremental(self, manager, storage):
         """Test incremental update with new data."""
         # First load initial data

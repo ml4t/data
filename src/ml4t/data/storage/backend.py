@@ -7,6 +7,7 @@ implementations for Hive partitioned and flat file storage strategies.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -171,17 +172,16 @@ class StorageBackend(ABC):
             df: DataFrame to write
             target_path: Target file path
         """
-        # Write to temp file first
-        with tempfile.NamedTemporaryFile(
-            dir=target_path.parent, suffix=".parquet.tmp", delete=False
-        ) as tmp_file:
-            tmp_path = Path(tmp_file.name)
+        fd, tmp_name = tempfile.mkstemp(dir=target_path.parent, suffix=".parquet.tmp")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
 
-            # Write with compression
+        try:
             df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
-
-            # Atomic rename
             tmp_path.replace(target_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def _update_metadata(self, key: str, metadata: dict[str, Any]) -> None:
         """Update metadata for a key.
@@ -208,12 +208,16 @@ class StorageBackend(ABC):
             path: Metadata file path
             metadata: Metadata to write
         """
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent, mode="w", suffix=".json.tmp", delete=False
-        ) as tmp_file:
-            json.dump(metadata, tmp_file, indent=2, default=str)
-            tmp_path = Path(tmp_file.name)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".json.tmp", text=True)
+        tmp_path = Path(tmp_name)
+
+        try:
+            with os.fdopen(fd, mode="w") as tmp_file:
+                json.dump(metadata, tmp_file, indent=2, default=str)
             tmp_path.replace(path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def _ensure_lazy(self, data: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
         """Ensure data is a LazyFrame for efficient processing.

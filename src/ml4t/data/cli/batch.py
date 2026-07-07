@@ -3,15 +3,49 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import click
 import yaml
 
 from ml4t.data.data_manager import DataManager
-from ml4t.data.storage.backend import StorageConfig
-from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage import create_storage
 
 from .utils import console, load_symbols_from_file
+
+
+def _resolve_config_path(path: str | Path, config_path: Path) -> Path:
+    """Resolve a path from the YAML file."""
+    resolved = Path(path).expanduser()
+    if not resolved.is_absolute():
+        resolved = config_path.parent / resolved
+    return resolved.resolve()
+
+
+def _build_storage_from_config(config_data: dict[str, Any], config_path: Path):
+    """Create storage using the YAML storage section."""
+    storage_config = dict(config_data.get("storage", {}))
+    storage_path = _resolve_config_path(
+        storage_config.pop("path", storage_config.pop("base_path", "./data")),
+        config_path,
+    )
+    strategy = storage_config.pop("strategy", "hive")
+
+    allowed_options = {
+        "compression",
+        "partition_granularity",
+        "partition_cols",
+        "atomic_writes",
+        "enable_locking",
+        "metadata_tracking",
+        "generate_profile",
+    }
+    storage_options = {key: storage_config[key] for key in allowed_options if key in storage_config}
+
+    if str(storage_options.get("compression", "")).lower() in {"none", "null"}:
+        storage_options["compression"] = None
+
+    return create_storage(storage_path, strategy=strategy, **storage_options), storage_path
 
 
 @click.command("update-all")
@@ -61,12 +95,9 @@ def update_all(ctx, config, dataset, dry_run):
         with open(config_path) as f:
             cfg = yaml.safe_load(f)
 
-        # Get storage path
-        storage_path = Path(cfg["storage"]["path"]).expanduser()
+        storage, storage_path = _build_storage_from_config(cfg, config_path)
         console.print(f"[cyan]Storage:[/cyan] {storage_path}")
 
-        # Initialize storage and manager
-        storage = HiveStorage(config=StorageConfig(base_path=str(storage_path)))
         manager = DataManager(storage=storage)
 
         # Get datasets to update
@@ -117,6 +148,14 @@ def update_all(ctx, config, dataset, dry_run):
 
             # Extract additional config options
             frequency = ds_config.get("frequency", "daily")
+            asset_class = ds_config.get("asset_class", "equities")
+            lookback_days = ds_config.get("lookback_days", 7)
+            fill_gaps = ds_config.get("fill_gaps", True)
+            initial_start = ds_config.get("start") or ds_config.get("start_date")
+            initial_end = ds_config.get("end") or ds_config.get("end_date")
+            initial_load_days = ds_config.get("initial_load_days", 365)
+            if initial_load_days is None:
+                initial_load_days = 365
 
             # Update each symbol
             for symbol in symbols:
@@ -126,8 +165,13 @@ def update_all(ctx, config, dataset, dry_run):
                     key = manager.update(
                         symbol,
                         frequency=frequency,
-                        asset_class=provider,
+                        asset_class=asset_class,
                         provider=provider,
+                        lookback_days=lookback_days,
+                        fill_gaps=fill_gaps,
+                        initial_start=initial_start,
+                        initial_end=initial_end,
+                        initial_load_days=initial_load_days,
                     )
                     console.print(f"[green]OK[/green] {key}")
 

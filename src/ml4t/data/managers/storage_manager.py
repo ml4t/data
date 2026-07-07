@@ -438,6 +438,9 @@ class StorageManager:
         lookback_days: int = 7,
         fill_gaps: bool = True,
         provider: str | None = None,
+        initial_start: str | None = None,
+        initial_end: str | None = None,
+        initial_load_days: int = 365,
     ) -> str:
         """Update existing data with incremental fetch.
 
@@ -448,6 +451,9 @@ class StorageManager:
             lookback_days: Days to look back for updates
             fill_gaps: If True, detect and fill gaps in data
             provider: Optional provider override
+            initial_start: Optional start date for first load when no data exists
+            initial_end: Optional end date for first load when no data exists
+            initial_load_days: Days to fetch on first load when initial_start is not set
 
         Returns:
             Storage key for the updated data
@@ -472,8 +478,10 @@ class StorageManager:
 
             if not self.storage.exists(key):
                 logger.warning("No existing data found, performing initial load", symbol=symbol)
-                end_date = datetime.now().strftime("%Y-%m-%d")
-                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+                end_date = initial_end or datetime.now().strftime("%Y-%m-%d")
+                start_date = initial_start or (
+                    datetime.now() - timedelta(days=initial_load_days)
+                ).strftime("%Y-%m-%d")
                 return self.load(
                     symbol=symbol,
                     start=start_date,

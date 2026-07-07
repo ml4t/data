@@ -104,10 +104,10 @@ df = provider.fetch_ohlcv("EUR_USD", start="2024-01-01", end="2024-12-31", frequ
 
 ---
 
-### [📉 Futures & Options Data Guide](./futures.md)
+### [Futures Data Guide](./futures.md)
 
-**Asset Classes**: Futures Contracts, Options on Futures
-**Providers**: Databento (primary), Polygon
+**Asset Classes**: Futures Contracts
+**Providers**: Databento (primary), Massive for listed options
 **Difficulty**: 🔴 Advanced
 **Free Tier**: ❌ None (Databento requires paid subscription ~$30-50/month)
 
@@ -119,9 +119,9 @@ df = provider.fetch_ohlcv("EUR_USD", start="2024-01-01", end="2024-12-31", frequ
 
 **Quick start**:
 ```python
-from ml4t.data.providers import DatabentoProvider
+from ml4t.data.providers import DataBentoProvider
 
-provider = DatabentoProvider(api_key="your_key", dataset="GLBX.MDP3")
+provider = DataBentoProvider(api_key="your_key", dataset="GLBX.MDP3")
 df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P 500 futures
 ```
 
@@ -191,7 +191,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo account | Required | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Required | Multi-asset |
 | **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Required | Multi-asset (paid) |
-| **Databento** | ❌ | ⚠️ | ❌ | ✅ | None | Required | Institutional futures |
+| **Databento** | ❌ | ⚠️ | ❌ | ⚠️ native SDK | None | Required | Institutional futures |
 
 **Legend**:
 - ✅ Full support

@@ -54,11 +54,13 @@ config = StorageConfig(
 storage = HiveStorage(config)
 ```
 
-On-disk layout for month-level partitioning:
+On-disk layout for month-level partitioning. Storage keys can use slashes, such as
+`equities/daily/AAPL`, but the filesystem directory is flattened to
+`equities_daily_AAPL`:
 
 ```
 data/
-  AAPL/
+  equities_daily_AAPL/
     year=2024/
       month=1/
         data.parquet
@@ -69,7 +71,7 @@ data/
       month=1/
         data.parquet
   .metadata/
-    AAPL.json
+    equities_daily_AAPL.json
 ```
 
 ## Reading and Writing
@@ -90,8 +92,8 @@ df = pl.DataFrame({
     "volume": [...],
 })
 
-# Write with a storage key
-storage.write(df, "AAPL")
+# Write with a hierarchical storage key
+storage.write(df, "equities/daily/AAPL")
 ```
 
 The write operation:
@@ -107,20 +109,20 @@ All reads return a Polars `LazyFrame` for deferred execution:
 
 ```python
 # Read all data for a key
-lf = storage.read("AAPL")
+lf = storage.read("equities/daily/AAPL")
 df = lf.collect()
 
 # Date-filtered read (Hive prunes partitions before scanning)
 from datetime import datetime
 
 lf = storage.read(
-    "AAPL",
+    "equities/daily/AAPL",
     start_date=datetime(2024, 6, 1),
     end_date=datetime(2024, 12, 31),
 )
 
 # Column projection (only read what you need)
-lf = storage.read("AAPL", columns=["timestamp", "close", "volume"])
+lf = storage.read("equities/daily/AAPL", columns=["timestamp", "close", "volume"])
 ```
 
 With Hive storage, date filters prune entire partition directories before

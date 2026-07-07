@@ -106,7 +106,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | EODHD | 60+ global exchanges |
 | Tiingo | US equities with quality focus |
 | Twelve Data | Multi-asset coverage |
-| Databento | CME, CBOE, ICE futures/options |
+| Databento | CME/ICE futures; OPRA available via native SDK |
 | Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | Binance | Crypto exchange data |

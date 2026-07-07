@@ -107,7 +107,7 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | TBBO (Top of book) | Yes | MEDIUM |
 | Trades (tick) | Yes | MEDIUM |
 | WebSocket streaming | Yes | NOT SUPPORTING |
-| OPRA options | Yes | HIGH |
+| OPRA options | Yes | HIGH - planned first-class support |
 | Symbology API | Yes | LOW |
 
 #### Coverage
@@ -391,7 +391,8 @@ This document provides a comprehensive audit of all 21 data providers in ml4t-da
 | Quick start (free) | YahooFinance |
 | US equities (production) | EODHD or Massive |
 | Global equities | EODHD |
-| Futures/options | Databento |
+| Futures | Databento |
+| Listed options | Massive; Databento OPRA support planned |
 | Crypto | BinancePublic |
 | Forex | Oanda |
 | Academic factors | Fama-French + AQR |

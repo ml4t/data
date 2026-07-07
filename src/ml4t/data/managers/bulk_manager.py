@@ -138,6 +138,9 @@ class BulkManager:
         provider: str | None = None,
         lookback_days: int = 7,
         fill_gaps: bool = True,
+        initial_start: str | None = None,
+        initial_end: str | None = None,
+        initial_load_days: int = 365,
     ) -> dict[str, str]:
         """Update specific symbols.
 
@@ -148,6 +151,9 @@ class BulkManager:
             provider: Optional provider override
             lookback_days: Days to look back for updates
             fill_gaps: If True, detect and fill gaps
+            initial_start: Optional start date for first load when no data exists
+            initial_end: Optional end date for first load when no data exists
+            initial_load_days: Days to fetch on first load when initial_start is not set
 
         Returns:
             Dict mapping symbols to storage keys or error messages
@@ -164,6 +170,9 @@ class BulkManager:
                     lookback_days=lookback_days,
                     fill_gaps=fill_gaps,
                     provider=provider,
+                    initial_start=initial_start,
+                    initial_end=initial_end,
+                    initial_load_days=initial_load_days,
                 )
                 results[symbol] = key
 

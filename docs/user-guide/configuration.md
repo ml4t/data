@@ -34,7 +34,7 @@ parallel_downloads: 4
 # Storage backend
 storage:
   strategy: hive            # "hive" (partitioned) or "flat" (single file)
-  base_path: ~/ml4t-data
+  path: ~/ml4t-data         # base_path is also accepted
   compression: zstd         # zstd, lz4, snappy, or none
   partition_granularity: month  # year, month, day, or hour
   atomic_writes: true
@@ -78,6 +78,7 @@ datasets:
     frequency: daily
     asset_class: equity
     update_mode: incremental
+    initial_load_days: 3650  # used when update-all bootstraps missing data
     validation_enabled: true
     anomaly_detection: false
 
@@ -86,6 +87,7 @@ datasets:
     provider: binance
     frequency: hourly
     asset_class: crypto
+    start_date: "2020-01-01"  # explicit first-load start date
 
 # Workflows
 workflows:
@@ -126,7 +128,7 @@ ml4t-data also reads `.env` files automatically via Pydantic Settings.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `strategy` | `hive` | `hive` for partitioned Parquet, `flat` for single files |
-| `base_path` | `./data` | Base directory (supports `~` expansion) |
+| `path` / `base_path` | `./data` | Base directory (supports `~` expansion) |
 | `compression` | `zstd` | Parquet compression: `zstd`, `lz4`, `snappy`, `none` |
 | `partition_granularity` | `month` | Hive partition level: `year`, `month`, `day`, `hour` |
 | `atomic_writes` | `true` | Write to temp file then rename |
@@ -158,6 +160,23 @@ Rate limiting sub-config:
 | `retry_backoff_factor` | `2.0` | Exponential backoff multiplier |
 | `circuit_breaker_threshold` | `5` | Failures before circuit opens |
 | `circuit_breaker_timeout` | `60` | Seconds before circuit half-opens |
+
+### Datasets
+
+`update-all` reads dataset entries and updates each symbol with the configured
+provider, frequency, asset class, and bootstrap range.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `symbols` / `symbols_file` | required | Inline symbols or a file path relative to the config file |
+| `provider` | required | Provider used to fetch the dataset |
+| `frequency` | `daily` | Bar frequency passed to `DataManager.update()` |
+| `asset_class` | `equities` | Storage key prefix and validation context |
+| `lookback_days` | `7` | Overlap fetched for incremental updates |
+| `fill_gaps` | `true` | Enable gap detection and filling after merge |
+| `start` / `start_date` | unset | Explicit first-load start date when storage is empty |
+| `end` / `end_date` | today | Explicit first-load end date when storage is empty |
+| `initial_load_days` | `365` | First-load history length when no start date is set |
 
 ### Schedules
 

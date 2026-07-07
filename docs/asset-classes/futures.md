@@ -1,7 +1,7 @@
-# Futures & Options Data Guide
+# Futures Data Guide
 
-**Asset Classes**: Futures contracts, Options on futures
-**Available Providers**: Databento (primary), Polygon
+**Asset Classes**: Futures contracts
+**Available Providers**: Databento (primary), Massive for listed options
 **Difficulty**: Advanced (requires understanding of derivatives mechanics)
 **Recommended For**: Institutional strategies, derivatives research, quantitative trading
 
@@ -9,10 +9,11 @@
 
 ## Overview
 
-ML4T Data provides access to **institutional-grade futures and options data** through Databento, the gold standard for derivatives market data. Futures markets have unique complexities:
+ML4T Data provides access to institutional-grade futures data through Databento.
+Futures markets have unique complexities:
 
 - **Expiration & Rolling**: Contracts expire monthly/quarterly, requiring continuous contract construction
-- **Multiple Exchanges**: CME, CBOE, ICE, Eurex - each with different conventions
+- **Multiple Exchanges**: CME, ICE, Eurex, and others each have different conventions
 - **Session Times**: Futures trade nearly 24 hours with complex session breaks
 - **Tick Data**: Ultra-high-frequency data (microsecond timestamps)
 - **Margin Requirements**: Leveraged instruments with daily mark-to-market
@@ -21,10 +22,12 @@ ML4T Data provides access to **institutional-grade futures and options data** th
 
 | Provider | Coverage | Free Tier | Data Quality | Best For |
 |----------|----------|-----------|--------------|----------|
-| **Databento** | CME, CBOE, ICE + more | ❌ Paid only | ⭐⭐⭐⭐⭐ Institutional | Professional futures trading |
+| **Databento** | CME/ICE/Eurex futures; OPRA via native SDK | Paid only | Institutional | Professional futures trading |
 | **Polygon** | Limited futures | 5/min | ⭐⭐⭐ Good | Multi-asset portfolios |
 
-**Important**: Futures data is **NOT free**. Databento requires paid subscription (~$30-50/month minimum for historical data).
+**Important**: Futures data is not free. Databento requires a paid subscription
+for most historical workflows. First-class Databento OPRA option-chain and quote
+helpers are planned but not yet implemented in ml4t-data.
 
 ---
 
@@ -36,19 +39,19 @@ ML4T Data provides access to **institutional-grade futures and options data** th
 - ✅ **Normalized data** - Consistent schemas across all exchanges
 - ✅ **Continuous contracts** - Automatic front-month rolling (.v.0 notation)
 - ✅ **Tick-level precision** - Microsecond timestamps
-- ✅ **CME, CBOE, ICE, Eurex** - Major derivatives exchanges worldwide
-- ✅ **Multiple schemas** - OHLCV, trades, quotes, market-by-order
+- ✅ **CME, ICE, Eurex** - Major futures exchanges worldwide
+- ✅ **Selected schemas** - OHLCV plus direct access to native Databento schemas
 
 **Best for**: Quantitative futures strategies, high-frequency trading, institutional research
 
 ### Quick Start
 
 ```python
-from ml4t.data.providers import DatabentoProvider
+from ml4t.data.providers import DataBentoProvider
 
 # Get API key from: https://databento.com/
 # NOTE: Requires paid subscription ($30-50/month minimum)
-provider = DatabentoProvider(
+provider = DataBentoProvider(
     api_key="your_databento_api_key",  # Or set DATABENTO_API_KEY env var
     dataset="GLBX.MDP3"  # CME Globex futures (default)
 )
@@ -191,31 +194,33 @@ Databento provides data from multiple exchanges:
 
 ```python
 # CME Globex (most futures)
-provider = DatabentoProvider(dataset="GLBX.MDP3")
+provider = DataBentoProvider(dataset="GLBX.MDP3")
 
 # CME (all CME markets)
-provider = DatabentoProvider(dataset="CME.MDP3")
+provider = DataBentoProvider(dataset="CME.MDP3")
 
-# CBOE Options (equity options)
-provider = DatabentoProvider(dataset="OPRA.PILLAR")
+# OPRA options through the native client for advanced workflows
+provider = DataBentoProvider(dataset="OPRA.PILLAR")
+client = provider.client
 
 # US Equities
-provider = DatabentoProvider(dataset="XNAS.ITCH")  # NASDAQ
-provider = DatabentoProvider(dataset="XNYS.TRADES")  # NYSE
+provider = DataBentoProvider(dataset="XNAS.ITCH")  # NASDAQ
+provider = DataBentoProvider(dataset="XNYS.TRADES")  # NYSE
 ```
 
 **Available datasets**:
 - `GLBX.MDP3` - CME Globex (futures, options on futures)
 - `CME.MDP3` - CME (all markets)
 - `XCME.MDP3` - CME Crypto
-- `OPRA.PILLAR` - CBOE Equity Options
+- `OPRA.PILLAR` - OPRA listed options (native client; first-class helpers planned)
 - `XNAS.ITCH` - NASDAQ Equities
 - `XNYS.TRADES` - NYSE Equities
 - `BATS.PITCH` - BATS Equities
 
 ### Schemas (Data Types)
 
-Databento supports multiple data schemas beyond OHLCV:
+Databento supports multiple data schemas beyond OHLCV. The wrapper exposes
+selected schema fetches and the native client for advanced workflows:
 
 ```python
 # OHLCV aggregations
@@ -234,14 +239,14 @@ Databento supports multiple data schemas beyond OHLCV:
 **Example: Fetching tick data**:
 
 ```python
-provider = DatabentoProvider(dataset="GLBX.MDP3", default_schema="trades")
+provider = DataBentoProvider(dataset="GLBX.MDP3")
 
 # Fetch trade-by-trade data for ES
 trades = provider.fetch_ohlcv(
     symbol="ES.v.0",
     start="2024-11-04",
     end="2024-11-04",
-    frequency="tick"  # Uses default_schema="trades"
+    frequency="tick"  # requests Databento trades schema
 )
 
 # Result: Every single trade with microsecond timestamps
@@ -288,7 +293,7 @@ Futures markets trade nearly 24 hours with session breaks:
 # But in UTC: Monday 00:00 - Tuesday 22:00
 
 # Databento handles this with adjust_session_dates
-provider = DatabentoProvider(
+provider = DataBentoProvider(
     dataset="GLBX.MDP3",
     adjust_session_dates=True,  # Align dates with session start
     session_start_hour_utc=22  # 22:00 UTC = 5:00 PM CT (CST)
@@ -310,16 +315,16 @@ for symbol in symbols:
     # 50 symbols = 50 requests = completes in 0.5 seconds
 ```
 
-**Live WebSocket**: Unlimited (within subscription limits)
+**Live WebSocket**: Use Databento's native SDK directly.
 
 ### Complete Example: Multi-Contract Strategy
 
 ```python
-from ml4t.data.providers import DatabentoProvider
+from ml4t.data.providers import DataBentoProvider
 import polars as pl
 
 # Initialize provider
-provider = DatabentoProvider(
+provider = DataBentoProvider(
     dataset="GLBX.MDP3",
     adjust_session_dates=True
 )
@@ -375,7 +380,7 @@ except DataNotAvailableError as e:
 
 try:
     # Using expired API key
-    provider = DatabentoProvider(api_key="expired_key")
+    provider = DataBentoProvider(api_key="expired_key")
 except AuthenticationError as e:
     print(f"Authentication failed: {e}")
     # Renew subscription or check API key
@@ -579,7 +584,7 @@ annual_roll_cost = roll_cost_dollars * annual_rolls * num_contracts
 # Daily break: 4:00 PM - 5:00 PM CT
 
 # Use adjust_session_dates for proper date alignment
-provider = DatabentoProvider(
+provider = DataBentoProvider(
     adjust_session_dates=True,
     session_start_hour_utc=22  # 5:00 PM CT = 22:00 UTC (CST)
 )

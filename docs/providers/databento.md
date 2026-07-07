@@ -9,7 +9,10 @@
 
 ## Overview
 
-Databento provides institutional-grade market data for futures, equities, and options across 45+ exchanges with 15+ years of history.
+Databento provides institutional-grade market data across 45+ exchanges with
+15+ years of history. `DataBentoProvider` exposes OHLCV-oriented historical
+fetches, continuous futures helpers, schema discovery, and direct access to the
+native `databento.Historical` client for advanced workflows.
 
 **Best For**: Professional futures research, institutional-quality data
 
@@ -37,15 +40,13 @@ provider = DataBentoProvider()
 # Futures (CME)
 df = provider.fetch_ohlcv("ES", "2024-01-01", "2024-06-01", frequency="daily")
 
-# Multiple schemas
+# Multiple schemas for one symbol
 df = provider.fetch_multiple_schemas(
-    symbols=["ES", "NQ"],
-    schemas=["ohlcv-1d", "ohlcv-1h"],
+    symbol="ES",
     start="2024-01-01",
-    end="2024-06-01"
+    end="2024-06-01",
+    schemas=["ohlcv-1d", "ohlcv-1h"],
 )
-
-provider.close()
 ```
 
 ---
@@ -82,10 +83,11 @@ provider.close()
 ```python
 # Fetch continuous front-month contract
 df = provider.fetch_continuous_futures(
-    symbol="ES",
+    root_symbol="ES",
     start="2020-01-01",
     end="2024-12-01",
-    roll_type="volume"  # Roll on volume crossover
+    frequency="daily",
+    version=0,
 )
 ```
 
@@ -119,10 +121,14 @@ Use the $125 free credit to explore before committing.
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| OPRA Options | HIGH | Options chains |
+| OPRA options | HIGH | First-class chain discovery, option OHLCV helpers, and quote helpers |
 | MBO (Market by Order) | LOW | Full order book |
 | WebSocket streaming | NOT PLANNED | Use native SDK |
 | Symbology API | LOW | Symbol resolution |
+
+Databento's OPRA dataset can be reached through `provider.client`, but
+ml4t-data does not yet provide a dedicated options chain or consolidated quote
+API for Databento. Use Massive for first-class listed-options workflows today.
 
 ---
 
