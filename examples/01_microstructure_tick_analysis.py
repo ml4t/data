@@ -21,12 +21,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
+
 from ml4t.engineer.bars import DollarBar, VolumeBar
 from ml4t.engineer.features import microstructure as ms
 from ml4t.engineer.labeling import BarrierConfig, triple_barrier_labels
-
-# Import qeval modules
-# Import qfeatures modules
 from ml4t.evaluation import Evaluator, Tier
 from ml4t.evaluation.splitters import PurgedWalkForwardCV
 

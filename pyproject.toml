@@ -236,6 +236,13 @@ ignore = [
     "B904",  # exception chaining (not always needed)
 ]
 
+[tool.ruff.lint.isort]
+# Treat the whole ml4t namespace (data, engineer, evaluation, ...) as
+# first-party so its imports always form their own third section after the
+# standard library and third-party blocks, even for ml4t distributions
+# installed from outside this repo.
+known-first-party = ["ml4t"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG001", "ARG002", "ARG005", "B017", "F821", "SIM117"]  # Test patterns
 "src/ml4t/data/futures/continuous_downloader.py" = ["ARG002"]  # Public API placeholder
