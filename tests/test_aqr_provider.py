@@ -187,10 +187,19 @@ class TestFetch:
 
     def test_fetch_with_date_filter(self, provider_with_data):
         """Test fetch with date filtering."""
-        # Note: AQR provider has a type mismatch bug comparing datetime to string
-        # Marking this test to just verify we get data without error
-        df = provider_with_data.fetch("qmj_factors")
-        assert len(df) >= 1
+        df = provider_with_data.fetch("qmj_factors", start="2024-02-01", end="2024-02-29")
+
+        assert len(df) == 1
+        assert df["timestamp"][0] == datetime(2024, 2, 1)
+        assert df["USA"][0] == 0.02
+
+    def test_fetch_with_month_filter(self, provider_with_data):
+        """Test fetch accepts YYYY-MM date filters."""
+        df = provider_with_data.fetch("qmj_factors", start="2024-01", end="2024-01")
+
+        assert len(df) == 1
+        assert df["timestamp"][0] == datetime(2024, 1, 1)
+        assert df["USA"][0] == 0.01
 
     def test_fetch_missing_parquet_raises(self, tmp_path):
         """Test fetch for missing parquet raises error."""

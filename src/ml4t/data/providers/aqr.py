@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -751,11 +752,21 @@ class AQRFactorProvider(BaseProvider):
         if region and region in df.columns:
             df = df.select(["timestamp", region])
 
-        # Filter by date range
+        # Filter by date range (convert strings to date for Polars comparison)
         if start:
-            df = df.filter(pl.col("timestamp") >= start)
+            start_date = (
+                datetime.strptime(start[:10], "%Y-%m-%d").date()
+                if len(start) >= 10
+                else datetime.strptime(start + "-01", "%Y-%m-%d").date()
+            )
+            df = df.filter(pl.col("timestamp") >= start_date)
         if end:
-            df = df.filter(pl.col("timestamp") <= end)
+            end_date = (
+                datetime.strptime(end[:10], "%Y-%m-%d").date()
+                if len(end) >= 10
+                else datetime.strptime(end + "-28", "%Y-%m-%d").date()
+            )
+            df = df.filter(pl.col("timestamp") <= end_date)
 
         self.logger.info(
             "Fetched AQR data",
