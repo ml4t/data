@@ -115,6 +115,27 @@ class TestAlpacaProviderInit:
 
         assert provider.feed == "sip"
 
+    @pytest.mark.parametrize("feed", ["iex", "sip", "otc", "boats"])
+    def test_supported_feeds_accepted(self, feed):
+        """Every feed Alpaca's bars endpoint accepts is honored."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed=feed)
+
+        assert provider.feed == feed
+
+    def test_feed_normalized_case_insensitively(self):
+        """A mixed-case feed is normalized to the lowercase API value."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="SIP")
+
+        assert provider.feed == "sip"
+
+    def test_invalid_feed_raises(self):
+        """A typo'd feed raises DataValidationError instead of a remote error."""
+        with pytest.raises(DataValidationError, match="feed") as exc_info:
+            AlpacaDataProvider(api_key="k", api_secret="s", feed="sup")
+
+        assert exc_info.value.field == "feed"
+        assert exc_info.value.value == "sup"
+
 
 class TestAuthHeaders:
     """Tests for auth header wiring on both sessions."""

@@ -29,12 +29,14 @@ Authentication:
 - Get a free key at: https://alpaca.markets/
 
 Feed selection (stocks):
-- ``feed`` defaults to ``"iex"``: the free tier, served in real time from a
-  single exchange (IEX, roughly 2-3% of US market volume), so coverage is
-  thinner than the consolidated tape. The Basic plan additionally cannot query
-  the most recent 15 minutes of SIP data.
-- Paid subscribers pass ``feed="sip"`` once at construction to unlock the
-  consolidated tape (100% of US market volume across all exchanges).
+- ``feed`` defaults to ``"iex"``: the free, real-time feed served from a single
+  exchange (IEX, roughly 2-3% of US market volume), so coverage is thinner than
+  the consolidated tape.
+- ``feed="sip"`` selects the consolidated tape (100% of US market volume across
+  all exchanges). It is real time on paid plans; the free Basic plan can still
+  query SIP bars, only not the most recent 15 minutes.
+- ``"otc"`` (over-the-counter) and ``"boats"`` (Blue Ocean overnight) are also
+  accepted; any other value raises ``DataValidationError`` at construction.
 - Crypto has a single consolidated feed, so ``feed`` does not apply to it.
 
 Price adjustment (stocks):
@@ -155,6 +157,12 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
     # Asset classes a request can be routed to.
     ASSET_CLASSES: ClassVar[frozenset[str]] = frozenset({"stock", "crypto"})
 
+    # Stock data feeds accepted by the bars endpoint. "iex" is the free
+    # single-exchange feed; "sip" is the consolidated tape (real-time on paid
+    # plans, 15-min-delayed on the free plan); "otc" and "boats" are niche
+    # venues. The feed does not apply to crypto (single consolidated feed).
+    FEEDS: ClassVar[frozenset[str]] = frozenset({"iex", "sip", "otc", "boats"})
+
     # Map canonical frequency keys and aliases to Alpaca timeframe strings
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {
         "daily": "1Day",
@@ -191,7 +199,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             api_key: Alpaca API key id (or set ALPACA_API_KEY / APCA_API_KEY_ID).
             api_secret: Alpaca API secret (or set ALPACA_API_SECRET /
                 APCA_API_SECRET_KEY).
-            feed: Data feed, "iex" (free) or "sip" (paid).
+            feed: Stock data feed, case-insensitive, one of "iex" (free,
+                real-time single exchange), "sip" (consolidated tape; real-time
+                on paid plans, 15-min-delayed on the free plan), "otc", or
+                "boats". Ignored for crypto. Defaults to "iex".
             adjustment: Stock price adjustment, one of "raw" (default, matching
                 Alpaca's own default: no split/dividend adjustment), "split",
                 "dividend", or "all". Ignored for crypto.
@@ -200,6 +211,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
         Raises:
             AuthenticationError: If either credential is missing.
+            DataValidationError: If ``feed`` is not a supported value.
         """
         self.api_key = api_key or os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
         self.api_secret = (
@@ -213,7 +225,15 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 "api_secret parameters. Get a free key at: https://alpaca.markets/",
             )
 
-        self.feed = feed
+        normalized_feed = feed.lower()
+        if normalized_feed not in self.FEEDS:
+            raise DataValidationError(
+                provider="alpaca",
+                message=f"Invalid feed '{feed}'. Supported: {sorted(self.FEEDS)}",
+                field="feed",
+                value=feed,
+            )
+        self.feed = normalized_feed
         self.adjustment = adjustment
         self.base_url = "https://data.alpaca.markets"
 

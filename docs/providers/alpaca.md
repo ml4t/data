@@ -92,9 +92,12 @@ datetime bounds are the natural shape for sub-day minute/hour windows.
 ## Feeds and Adjustment
 
 - `feed="iex"` (default): the free feed, real-time but served from a single
-  exchange (IEX, roughly 2-3% of US volume). The Basic plan additionally cannot
-  query the most recent 15 minutes of SIP data.
-- `feed="sip"`: the consolidated tape (paid plans).
+  exchange (IEX, roughly 2-3% of US volume).
+- `feed="sip"`: the consolidated tape (100% of US volume, all exchanges).
+  Real-time on paid plans; the free Basic plan can still query SIP bars, only
+  not the most recent 15 minutes.
+- `feed="otc"` (over-the-counter) and `feed="boats"` (Blue Ocean overnight) are
+  also accepted. Any other value raises `DataValidationError` at construction.
 - `adjustment="raw"` (default, Alpaca's own default): stock bars are **not**
   adjusted for splits or dividends. Pass `adjustment="split"`, `"dividend"`, or
   `"all"` for adjusted bars. Crypto has no adjustment concept.
