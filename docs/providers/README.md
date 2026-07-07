@@ -75,7 +75,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 |----------|--------|--------|-------|---------|--------------|
 | YahooFinance | ✅ (7d) | ✅ | ✅ | ❌* | ❌* |
 | Alpaca | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Databento | ✅ | ✅ | ✅ | Planned (OPRA) | ❌ |
+| Databento | ✅ | ✅ | ✅ | ✅ OPRA | ❌ |
 | Massive | ✅ | ✅ | ✅ | ✅ | ✅ |
 | EODHD | ❌ | ❌ | ✅ | ✅ ($29.99) | ✅ ($59.99) |
 | Tiingo | ✅ | ✅ | ✅ | ❌ | ❌ |
@@ -178,7 +178,7 @@ print(f"Total history: {len(combined)} trading days")
 | US equities (production) | EODHD or Massive |
 | Global equities | EODHD |
 | Futures | Databento |
-| Listed options | Massive; Databento OPRA support planned |
+| Listed options | Massive; Databento OPRA |
 | Crypto | BinancePublic |
 | Forex | Oanda |
 | Academic factors | Fama-French + AQR |

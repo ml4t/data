@@ -105,7 +105,7 @@ flowchart TD
 |----------|----------------|--------------|
 | **Finnhub** | $59.99/mo | Historical OHLCV, 70+ exchanges |
 | **Polygon** | $99/mo | Multi-asset, professional-grade |
-| **Databento** | Custom | Institutional futures data |
+| **Databento** | Custom | Institutional futures and OPRA options |
 
 ## Decision Guidelines
 

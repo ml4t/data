@@ -1,16 +1,17 @@
-"""Databento provider implementation for futures and equities market data.
+"""Databento provider implementation for futures, equities, and OPRA options data.
 
 This provider supports:
 - Multiple schemas (ohlcv-1m, ohlcv-1h, ohlcv-1d)
 - Continuous futures contracts (symbol.v.0)
 - CME session date logic for futures
+- OPRA option chains, bars, quotes, and cost estimates
 - Native Polars output
 """
 
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -70,6 +71,8 @@ class DataBentoProvider(BaseProvider):
 
     # Databento has generous rate limits
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (100, 1.0)
+    OPRA_DATASET: ClassVar[str] = "OPRA.PILLAR"
+    OPRA_CONSOLIDATED_PUBLISHER_ID: ClassVar[int] = 30
 
     # Schema mappings
     SCHEMA_MAPPING = {
@@ -166,6 +169,98 @@ class DataBentoProvider(BaseProvider):
         # Default to daily
         return "ohlcv-1d"
 
+    @staticmethod
+    def _date_string(value: str | date | datetime) -> str:
+        """Return a Databento-compatible date or timestamp string."""
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return value
+
+    @classmethod
+    def _next_date_string(cls, value: str | date | datetime) -> str:
+        """Return the exclusive next-day endpoint for date-scoped requests."""
+        if isinstance(value, datetime):
+            parsed = value.date()
+        elif isinstance(value, date):
+            parsed = value
+        else:
+            parsed = datetime.strptime(value, "%Y-%m-%d").date()
+        return (parsed + timedelta(days=1)).isoformat()
+
+    @classmethod
+    def _inclusive_end_string(cls, value: str | date | datetime) -> str:
+        """Convert an inclusive date endpoint to Databento's exclusive endpoint."""
+        if isinstance(value, datetime):
+            if value.time() == datetime.min.time():
+                return (value.date() + timedelta(days=1)).isoformat()
+            return value.isoformat()
+        if isinstance(value, date):
+            return (value + timedelta(days=1)).isoformat()
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d").date()
+        except ValueError:
+            return value
+        return (parsed + timedelta(days=1)).isoformat()
+
+    def _raise_databento_error(self, error: Exception, context: str) -> None:
+        """Map Databento SDK exceptions to ml4t-data provider exceptions."""
+        if isinstance(error, BentoClientError):
+            message = str(error)
+            message_lower = message.lower()
+            if "unauthorized" in message_lower:
+                raise AuthenticationError(
+                    provider=self.name,
+                    message=f"Databento authentication failed: {message}",
+                )
+            if "rate limit" in message_lower:
+                raise RateLimitError(provider=self.name)
+            raise DataNotAvailableError(self.name, f"{context}: {message}")
+
+        if isinstance(error, BentoServerError):
+            raise NetworkError(
+                provider=self.name,
+                message=f"Databento server error during {context}: {error}",
+            )
+
+        raise NetworkError(
+            provider=self.name,
+            message=f"Databento request failed during {context}: {error}",
+        )
+
+    def _fetch_timeseries(
+        self,
+        *,
+        dataset: str,
+        symbols: str | list[str],
+        schema: str,
+        stype_in: str,
+        start: Any,
+        end: Any,
+    ) -> Any:
+        """Fetch a Databento timeseries range with shared error handling."""
+        symbols_list = [symbols] if isinstance(symbols, str) else symbols
+        try:
+            self.logger.debug(
+                "Fetching from Databento",
+                dataset=dataset,
+                schema=schema,
+                symbols=symbols_list,
+                stype_in=stype_in,
+            )
+            return self.client.timeseries.get_range(
+                dataset=dataset,
+                start=start,
+                end=end,
+                symbols=symbols_list,
+                schema=schema,
+                stype_in=stype_in,
+            )
+        except Exception as e:
+            self._raise_databento_error(e, f"fetching {dataset} {schema}")
+            raise
+
     def _fetch_raw_data(
         self,
         symbol: str,
@@ -194,41 +289,23 @@ class DataBentoProvider(BaseProvider):
             end_dt = end_dt.replace(hour=23, minute=59, second=59)
 
         try:
-            self.logger.debug(
-                "Fetching from Databento",
-                symbol=symbol,
-                dataset=self.dataset,
-                schema=schema,
-            )
-
-            response = self.client.timeseries.get_range(
+            response = self._fetch_timeseries(
                 dataset=self.dataset,
                 start=start_dt,
                 end=end_dt,
-                symbols=[symbol],
+                symbols=symbol,
                 schema=schema,
                 stype_in="raw_symbol",
             )
 
             return response
 
-        except BentoClientError as e:
-            if "unauthorized" in str(e).lower():
-                raise AuthenticationError(
-                    provider=self.name,
-                    message=f"Databento authentication failed: {e}",
-                )
-            if "rate limit" in str(e).lower():
-                raise RateLimitError(provider=self.name)
-            raise DataNotAvailableError(self.name, f"Client error: {e}")
-
-        except BentoServerError as e:
-            raise NetworkError(
-                provider=self.name,
-                message=f"Databento server error: {e}",
-            )
-
         except Exception as e:
+            if isinstance(
+                e,
+                AuthenticationError | DataNotAvailableError | NetworkError | RateLimitError,
+            ):
+                raise
             self.logger.error("Error fetching from Databento", error=str(e), symbol=symbol)
             raise NetworkError(
                 provider=self.name,
@@ -245,11 +322,13 @@ class DataBentoProvider(BaseProvider):
                 # Databento uses timestamp as DataFrame index
                 df_pandas = df_pandas.reset_index()
 
-                # Rename index column to timestamp
-                if "index" in df_pandas.columns:
-                    df_pandas = df_pandas.rename(columns={"index": "timestamp"})
-                elif "ts_event" in df_pandas.columns:
+                # Prefer Databento's event timestamp over a default pandas index.
+                if "ts_event" in df_pandas.columns:
+                    if "index" in df_pandas.columns:
+                        df_pandas = df_pandas.drop(columns=["index"])
                     df_pandas = df_pandas.rename(columns={"ts_event": "timestamp"})
+                elif "index" in df_pandas.columns:
+                    df_pandas = df_pandas.rename(columns={"index": "timestamp"})
 
                 df = pl.from_pandas(df_pandas)
             else:
@@ -263,7 +342,10 @@ class DataBentoProvider(BaseProvider):
 
             # Add symbol column
             if "symbol" not in df.columns:
-                df = df.with_columns(pl.lit(symbol).alias("symbol"))
+                if "raw_symbol" in df.columns:
+                    df = df.with_columns(pl.col("raw_symbol").cast(pl.String).alias("symbol"))
+                else:
+                    df = df.with_columns(pl.lit(symbol).alias("symbol"))
 
             # For OHLCV data, ensure proper column types
             ohlcv_columns = ["open", "high", "low", "close", "volume"]
@@ -321,6 +403,231 @@ class DataBentoProvider(BaseProvider):
         )
 
         return self.fetch_ohlcv(continuous_symbol, start, end, frequency)
+
+    def estimate_opra_cost(
+        self,
+        symbols: str | list[str],
+        start: str | date | datetime,
+        end: str | date | datetime,
+        schema: str = "ohlcv-1d",
+        stype_in: str = "raw_symbol",
+        include_records: bool = False,
+    ) -> dict[str, Any]:
+        """Estimate OPRA request size and cost before fetching data.
+
+        Args:
+            symbols: OPRA raw symbols or symbols accepted by ``stype_in``
+            start: Start date
+            end: End date
+            schema: Databento schema, such as ``ohlcv-1d`` or ``cbbo-1m``
+            stype_in: Databento input symbol type
+            include_records: Include record count when supported by the account
+
+        Returns:
+            Dictionary with dataset, schema, symbols, billable size, and cost estimate
+        """
+        symbols_list = [symbols] if isinstance(symbols, str) else list(symbols)
+        try:
+            billable_size = self.client.metadata.get_billable_size(
+                dataset=self.OPRA_DATASET,
+                start=self._date_string(start),
+                end=self._inclusive_end_string(end),
+                symbols=symbols_list,
+                schema=schema,
+                stype_in=stype_in,
+            )
+            estimated_cost = self.client.metadata.get_cost(
+                dataset=self.OPRA_DATASET,
+                start=self._date_string(start),
+                end=self._inclusive_end_string(end),
+                symbols=symbols_list,
+                schema=schema,
+                stype_in=stype_in,
+            )
+            result: dict[str, Any] = {
+                "dataset": self.OPRA_DATASET,
+                "schema": schema,
+                "symbols": symbols_list,
+                "stype_in": stype_in,
+                "billable_size": billable_size,
+                "estimated_cost": estimated_cost,
+            }
+            if include_records:
+                result["record_count"] = self.client.metadata.get_record_count(
+                    dataset=self.OPRA_DATASET,
+                    start=self._date_string(start),
+                    end=self._inclusive_end_string(end),
+                    symbols=symbols_list,
+                    schema=schema,
+                    stype_in=stype_in,
+                )
+            return result
+        except Exception as e:
+            self._raise_databento_error(e, f"estimating {self.OPRA_DATASET} {schema} cost")
+            raise
+
+    def fetch_option_chain(
+        self,
+        underlying: str,
+        session_date: str | date | datetime,
+        *,
+        expiry: str | date | datetime | None = None,
+        right: str = "both",
+        min_strike: float | None = None,
+        max_strike: float | None = None,
+    ) -> pl.DataFrame:
+        """Fetch OPRA option definitions for an underlying and apply common filters.
+
+        Databento's OPRA definitions are requested with parent symbology so callers can
+        discover contracts before fetching bars or quotes.
+        """
+        raw_data = self._fetch_timeseries(
+            dataset=self.OPRA_DATASET,
+            symbols=underlying,
+            schema="definition",
+            stype_in="parent",
+            start=self._date_string(session_date),
+            end=self._next_date_string(session_date),
+        )
+        df = self._transform_data(raw_data, underlying)
+
+        if df.is_empty():
+            return df
+
+        df = df.with_columns(pl.lit(underlying).alias("underlying"))
+        expiry_column = self._first_existing_column(
+            df, ["expiration", "expiration_date", "expire_date", "maturity_date"]
+        )
+        if expiry is not None and expiry_column is not None:
+            expiry_value = self._date_string(expiry)
+            df = df.filter(pl.col(expiry_column).cast(pl.Utf8).str.starts_with(expiry_value))
+
+        right_column = self._first_existing_column(
+            df, ["right", "put_call", "option_type", "instrument_class"]
+        )
+        right_lower = right.lower()
+        if right_lower not in {"both", "all"} and right_column is not None:
+            if right_lower in {"call", "c"}:
+                right_prefix = "C"
+            elif right_lower in {"put", "p"}:
+                right_prefix = "P"
+            else:
+                raise ValueError("right must be 'call', 'put', or 'both'")
+            df = df.filter(
+                pl.col(right_column).cast(pl.Utf8).str.to_uppercase().str.starts_with(right_prefix)
+            )
+
+        strike_column = self._first_existing_column(df, ["strike_price", "strike"])
+        if strike_column is not None and (min_strike is not None or max_strike is not None):
+            df = df.with_columns(pl.col(strike_column).cast(pl.Float64, strict=False))
+            if min_strike is not None:
+                df = df.filter(pl.col(strike_column) >= min_strike)
+            if max_strike is not None:
+                df = df.filter(pl.col(strike_column) <= max_strike)
+
+        return df
+
+    def fetch_option_ohlcv(
+        self,
+        contract: str,
+        start: str | date | datetime,
+        end: str | date | datetime,
+        *,
+        frequency: str = "daily",
+        stype_in: str = "raw_symbol",
+        consolidate_publishers: bool = True,
+    ) -> pl.DataFrame:
+        """Fetch OPRA option OHLCV bars for a contract."""
+        schema = self._map_frequency_to_schema(frequency)
+        if not schema.startswith("ohlcv-"):
+            raise ValueError("fetch_option_ohlcv requires an OHLCV frequency")
+
+        raw_data = self._fetch_timeseries(
+            dataset=self.OPRA_DATASET,
+            symbols=contract,
+            schema=schema,
+            stype_in=stype_in,
+            start=self._date_string(start),
+            end=self._inclusive_end_string(end),
+        )
+        df = self._transform_data(raw_data, contract)
+        if consolidate_publishers:
+            df = self._consolidate_ohlcv_publishers(df)
+        return df
+
+    def fetch_option_quotes(
+        self,
+        contract: str,
+        start: str | date | datetime,
+        end: str | date | datetime,
+        *,
+        schema: str = "cbbo-1m",
+        stype_in: str = "raw_symbol",
+        consolidated_only: bool = True,
+    ) -> pl.DataFrame:
+        """Fetch OPRA quotes for a contract.
+
+        By default this keeps Databento's consolidated OPRA publisher when
+        ``publisher_id`` is present in the returned data.
+        """
+        raw_data = self._fetch_timeseries(
+            dataset=self.OPRA_DATASET,
+            symbols=contract,
+            schema=schema,
+            stype_in=stype_in,
+            start=self._date_string(start),
+            end=self._inclusive_end_string(end),
+        )
+        df = self._transform_data(raw_data, contract)
+        if consolidated_only and "publisher_id" in df.columns:
+            df = df.filter(pl.col("publisher_id") == self.OPRA_CONSOLIDATED_PUBLISHER_ID)
+        return df
+
+    @staticmethod
+    def _first_existing_column(df: pl.DataFrame, candidates: list[str]) -> str | None:
+        """Return the first candidate column present in a DataFrame."""
+        for column in candidates:
+            if column in df.columns:
+                return column
+        return None
+
+    @staticmethod
+    def _consolidate_ohlcv_publishers(df: pl.DataFrame) -> pl.DataFrame:
+        """Aggregate per-publisher OPRA OHLCV bars into one row per timestamp/symbol."""
+        if df.is_empty() or "publisher_id" not in df.columns:
+            return df
+
+        group_columns = [column for column in ["timestamp", "symbol"] if column in df.columns]
+        if not group_columns:
+            return df
+
+        aggregations = []
+        if "open" in df.columns:
+            aggregations.append(pl.col("open").drop_nulls().first().alias("open"))
+        if "high" in df.columns:
+            aggregations.append(pl.col("high").max().alias("high"))
+        if "low" in df.columns:
+            aggregations.append(pl.col("low").min().alias("low"))
+        if "close" in df.columns:
+            aggregations.append(pl.col("close").drop_nulls().last().alias("close"))
+        if "volume" in df.columns:
+            aggregations.append(pl.col("volume").sum().alias("volume"))
+
+        if not aggregations:
+            return df
+
+        consolidated = df.group_by(group_columns, maintain_order=True).agg(aggregations)
+        if "timestamp" in consolidated.columns:
+            consolidated = consolidated.sort("timestamp")
+
+        required_ohlcv = ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+        if all(column in consolidated.columns for column in required_ohlcv):
+            extra_columns = [
+                column for column in consolidated.columns if column not in required_ohlcv
+            ]
+            consolidated = consolidated.select(required_ohlcv + extra_columns)
+
+        return consolidated
 
     def fetch_multiple_schemas(
         self,

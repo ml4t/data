@@ -141,7 +141,7 @@ When testing the Databento provider:
 3. Test continuous contract handling
 4. Test session date adjustment configuration (when enabled)
 5. Test multiple schema fetching
-6. Verify wrapper behavior with configured datasets; use the native client for advanced OPRA workflows
+6. Verify wrapper behavior with configured datasets; use the native client for advanced schemas
 
 ## Migration from ML3T Pattern
 

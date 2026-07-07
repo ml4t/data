@@ -346,6 +346,156 @@ class TestDataBentoProvider:
         assert "open" in df.columns
         assert df["open"][0] == 4700.0
 
+    def test_estimate_opra_cost(self, provider, mock_client):
+        """Test OPRA cost estimation delegates to Databento metadata methods."""
+        mock_client.metadata.get_billable_size.return_value = 123456
+        mock_client.metadata.get_cost.return_value = 1.25
+        mock_client.metadata.get_record_count.return_value = 789
+
+        estimate = provider.estimate_opra_cost(
+            ["SPY   240119C00480000"],
+            "2024-01-02",
+            "2024-01-02",
+            schema="cbbo-1m",
+            include_records=True,
+        )
+
+        assert estimate == {
+            "dataset": "OPRA.PILLAR",
+            "schema": "cbbo-1m",
+            "symbols": ["SPY   240119C00480000"],
+            "stype_in": "raw_symbol",
+            "billable_size": 123456,
+            "estimated_cost": 1.25,
+            "record_count": 789,
+        }
+        mock_client.metadata.get_billable_size.assert_called_once_with(
+            dataset="OPRA.PILLAR",
+            start="2024-01-02",
+            end="2024-01-03",
+            symbols=["SPY   240119C00480000"],
+            schema="cbbo-1m",
+            stype_in="raw_symbol",
+        )
+
+    def test_fetch_option_chain_filters_definitions(self, provider, mock_client):
+        """Test OPRA option chain discovery and common filters."""
+        mock_response = Mock()
+        mock_response.to_df.return_value = pd.DataFrame(
+            {
+                "ts_event": [1704153600000000000, 1704153600000000000],
+                "raw_symbol": ["SPY   240119C00450000", "SPY   240119P00460000"],
+                "expiration": ["2024-01-19", "2024-01-19"],
+                "right": ["C", "P"],
+                "strike_price": [450.0, 460.0],
+            }
+        )
+        mock_client.timeseries.get_range.return_value = mock_response
+
+        df = provider.fetch_option_chain(
+            "SPY",
+            "2024-01-02",
+            expiry="2024-01-19",
+            right="call",
+            min_strike=440,
+            max_strike=455,
+        )
+
+        assert df.height == 1
+        assert df["raw_symbol"][0] == "SPY   240119C00450000"
+        assert df["underlying"][0] == "SPY"
+        call_args = mock_client.timeseries.get_range.call_args
+        assert call_args.kwargs["dataset"] == "OPRA.PILLAR"
+        assert call_args.kwargs["schema"] == "definition"
+        assert call_args.kwargs["stype_in"] == "parent"
+        assert call_args.kwargs["symbols"] == ["SPY"]
+        assert call_args.kwargs["start"] == "2024-01-02"
+        assert call_args.kwargs["end"] == "2024-01-03"
+
+    def test_fetch_option_ohlcv_consolidates_publishers(self, provider, mock_client):
+        """Test OPRA OHLCV helper aggregates per-publisher bars."""
+        mock_response = Mock()
+        mock_response.to_df.return_value = pd.DataFrame(
+            {
+                "ts_event": [1704153600000000000, 1704153600000000000],
+                "publisher_id": [1, 2],
+                "open": [1.0, 1.1],
+                "high": [1.5, 1.6],
+                "low": [0.9, 0.8],
+                "close": [1.2, 1.3],
+                "volume": [100, 150],
+            }
+        )
+        mock_client.timeseries.get_range.return_value = mock_response
+
+        df = provider.fetch_option_ohlcv(
+            "SPY   240119C00480000",
+            "2024-01-02",
+            "2024-01-02",
+            frequency="daily",
+        )
+
+        assert df.height == 1
+        assert df["symbol"][0] == "SPY   240119C00480000"
+        assert df["open"][0] == 1.0
+        assert df["high"][0] == 1.6
+        assert df["low"][0] == 0.8
+        assert df["close"][0] == 1.3
+        assert df["volume"][0] == 250.0
+        call_args = mock_client.timeseries.get_range.call_args
+        assert call_args.kwargs["dataset"] == "OPRA.PILLAR"
+        assert call_args.kwargs["schema"] == "ohlcv-1d"
+        assert call_args.kwargs["end"] == "2024-01-03"
+
+    def test_fetch_option_quotes_filters_consolidated_publisher(self, provider, mock_client):
+        """Test OPRA quote helper keeps the consolidated OPRA publisher by default."""
+        mock_response = Mock()
+        mock_response.to_df.return_value = pd.DataFrame(
+            {
+                "ts_event": [1704153600000000000, 1704153660000000000],
+                "publisher_id": [30, 12],
+                "bid_px": [1.1, 1.0],
+                "ask_px": [1.2, 1.3],
+            }
+        )
+        mock_client.timeseries.get_range.return_value = mock_response
+
+        df = provider.fetch_option_quotes(
+            "SPY   240119C00480000",
+            "2024-01-02",
+            "2024-01-02",
+            schema="cbbo-1m",
+        )
+
+        assert df.height == 1
+        assert df["publisher_id"][0] == 30
+        call_args = mock_client.timeseries.get_range.call_args
+        assert call_args.kwargs["dataset"] == "OPRA.PILLAR"
+        assert call_args.kwargs["schema"] == "cbbo-1m"
+        assert call_args.kwargs["end"] == "2024-01-03"
+
+    def test_fetch_option_quotes_can_return_all_publishers(self, provider, mock_client):
+        """Test OPRA quote helper can return publisher-level rows."""
+        mock_response = Mock()
+        mock_response.to_df.return_value = pd.DataFrame(
+            {
+                "ts_event": [1704153600000000000, 1704153660000000000],
+                "publisher_id": [30, 12],
+                "bid_px": [1.1, 1.0],
+                "ask_px": [1.2, 1.3],
+            }
+        )
+        mock_client.timeseries.get_range.return_value = mock_response
+
+        df = provider.fetch_option_quotes(
+            "SPY   240119C00480000",
+            "2024-01-02",
+            "2024-01-02",
+            consolidated_only=False,
+        )
+
+        assert df.height == 2
+
 
 @pytest.mark.integration
 class TestDataBentoProviderIntegration:

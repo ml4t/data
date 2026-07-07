@@ -133,7 +133,7 @@ Quick comparison of all 14 providers:
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Multi-asset |
 | **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Multi-asset (paid) |
-| **Databento** | ❌ | ⚠️ | ❌ | ⚠️ native SDK | None | Institutional futures |
+| **Databento** | ❌ | ⚠️ | ❌ | ✅ OPRA | None | Institutional futures/options |
 | **Yahoo** | ❌ | ✅ | ❌ | ❌ | Unlimited | Free stocks (unreliable) |
 | **Binance** | ✅ | ❌ | ❌ | ✅ | 1200/min | Crypto exchange data |
 

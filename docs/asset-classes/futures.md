@@ -1,7 +1,7 @@
 # Futures Data Guide
 
 **Asset Classes**: Futures contracts
-**Available Providers**: Databento (primary), Massive for listed options
+**Available Providers**: Databento (primary), Massive for multi-asset alternatives
 **Difficulty**: Advanced (requires understanding of derivatives mechanics)
 **Recommended For**: Institutional strategies, derivatives research, quantitative trading
 
@@ -22,12 +22,12 @@ Futures markets have unique complexities:
 
 | Provider | Coverage | Free Tier | Data Quality | Best For |
 |----------|----------|-----------|--------------|----------|
-| **Databento** | CME/ICE/Eurex futures; OPRA via native SDK | Paid only | Institutional | Professional futures trading |
+| **Databento** | CME/ICE/Eurex futures; OPRA options | Paid only | Institutional | Professional derivatives research |
 | **Polygon** | Limited futures | 5/min | ⭐⭐⭐ Good | Multi-asset portfolios |
 
 **Important**: Futures data is not free. Databento requires a paid subscription
-for most historical workflows. First-class Databento OPRA option-chain and quote
-helpers are planned but not yet implemented in ml4t-data.
+for most historical workflows. OPRA requests can be large, so estimate cost
+before downloading broad chains, bars, or quotes.
 
 ---
 
@@ -40,6 +40,7 @@ helpers are planned but not yet implemented in ml4t-data.
 - ✅ **Continuous contracts** - Automatic front-month rolling (.v.0 notation)
 - ✅ **Tick-level precision** - Microsecond timestamps
 - ✅ **CME, ICE, Eurex** - Major futures exchanges worldwide
+- ✅ **OPRA options** - Chain discovery, option OHLCV, quotes, and cost estimates
 - ✅ **Selected schemas** - OHLCV plus direct access to native Databento schemas
 
 **Best for**: Quantitative futures strategies, high-frequency trading, institutional research
@@ -199,9 +200,13 @@ provider = DataBentoProvider(dataset="GLBX.MDP3")
 # CME (all CME markets)
 provider = DataBentoProvider(dataset="CME.MDP3")
 
-# OPRA options through the native client for advanced workflows
+# OPRA options
 provider = DataBentoProvider(dataset="OPRA.PILLAR")
-client = provider.client
+quotes = provider.fetch_option_quotes(
+    "SPY   240119C00480000",
+    start="2024-01-02",
+    end="2024-01-02",
+)
 
 # US Equities
 provider = DataBentoProvider(dataset="XNAS.ITCH")  # NASDAQ
@@ -212,7 +217,7 @@ provider = DataBentoProvider(dataset="XNYS.TRADES")  # NYSE
 - `GLBX.MDP3` - CME Globex (futures, options on futures)
 - `CME.MDP3` - CME (all markets)
 - `XCME.MDP3` - CME Crypto
-- `OPRA.PILLAR` - OPRA listed options (native client; first-class helpers planned)
+- `OPRA.PILLAR` - OPRA listed options
 - `XNAS.ITCH` - NASDAQ Equities
 - `XNYS.TRADES` - NYSE Equities
 - `BATS.PITCH` - BATS Equities

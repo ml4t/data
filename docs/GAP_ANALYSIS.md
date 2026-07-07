@@ -57,7 +57,9 @@ This report analyzes the gaps between what data providers offer and what ml4t-da
 
 ### 1. Options Data (HIGH Priority)
 
-**Current State**: Not implemented
+**Current State**: Partially implemented. Databento OPRA supports chain
+discovery, option OHLCV, quotes, and cost estimates; other provider-specific
+options workflows remain gaps.
 
 **Available From**:
 | Provider | Offering | Pricing |
@@ -238,7 +240,7 @@ financials = provider.fetch_financials(
 |---------|-------|-----------|---------|-------|---------|
 | OHLCV Daily | ✅ | ✅ | ✅ | ✅ | ✅ |
 | OHLCV Minute | ✅ (7d) | ✅ | ✅ | ❌ | ✅ |
-| Options Chains | ❌* | ❌* | ❌* | ❌* | ❌ |
+| Options Chains | ❌* | ✅ OPRA | ❌* | ❌* | ❌ |
 | Financials | ❌* | ❌ | ❌* | ❌* | ❌* |
 | Earnings | ❌* | ❌ | ❌* | ❌* | ❌* |
 | Company Metrics | ❌ | ❌ | ❌* | ❌* | ❌* |

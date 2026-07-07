@@ -11,8 +11,8 @@
 
 Databento provides institutional-grade market data across 45+ exchanges with
 15+ years of history. `DataBentoProvider` exposes OHLCV-oriented historical
-fetches, continuous futures helpers, schema discovery, and direct access to the
-native `databento.Historical` client for advanced workflows.
+fetches, continuous futures helpers, OPRA option helpers, schema discovery, and
+direct access to the native `databento.Historical` client for advanced workflows.
 
 **Best For**: Professional futures research, institutional-quality data
 
@@ -51,6 +51,56 @@ df = provider.fetch_multiple_schemas(
 
 ---
 
+## OPRA Options
+
+The wrapper provides a small OPRA workflow for listed-options research:
+
+1. Estimate request cost before downloading broad quote or bar data.
+2. Discover option contracts from Databento definitions.
+3. Fetch OHLCV bars or consolidated OPRA quotes for selected contracts.
+
+```python
+from ml4t.data.providers import DataBentoProvider
+
+provider = DataBentoProvider()
+
+estimate = provider.estimate_opra_cost(
+    symbols=["SPY   240119C00480000"],
+    start="2024-01-02",
+    end="2024-01-02",
+    schema="cbbo-1m",
+)
+
+chain = provider.fetch_option_chain(
+    underlying="SPY",
+    session_date="2024-01-02",
+    expiry="2024-01-19",
+    right="call",
+    min_strike=440,
+    max_strike=500,
+)
+
+bars = provider.fetch_option_ohlcv(
+    contract="SPY   240119C00480000",
+    start="2024-01-02",
+    end="2024-01-02",
+    frequency="daily",
+)
+
+quotes = provider.fetch_option_quotes(
+    contract="SPY   240119C00480000",
+    start="2024-01-02",
+    end="2024-01-02",
+    schema="cbbo-1m",
+)
+```
+
+`fetch_option_quotes()` keeps Databento's consolidated OPRA publisher when
+`publisher_id` is present. Set `consolidated_only=False` to retain
+publisher-level quote rows.
+
+---
+
 ## Supported Schemas
 
 | Schema | Description | Use Case |
@@ -59,7 +109,8 @@ df = provider.fetch_multiple_schemas(
 | `ohlcv-1h` | Hourly OHLCV | Intraday patterns |
 | `ohlcv-1m` | Minute OHLCV | Short-term strategies |
 | `trades` | Tick trades | Microstructure |
-| `mbp-10` | 10-level depth | Order book analysis |
+| `cbbo-1m` | OPRA consolidated quotes | Listed-options quotes |
+| `mbp-10` | 10-level depth | Order book analysis via native SDK |
 
 ---
 
@@ -117,18 +168,16 @@ Use the $125 free credit to explore before committing.
 
 ---
 
-## Not Yet Implemented
+## Advanced Workflows
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| OPRA options | HIGH | First-class chain discovery, option OHLCV helpers, and quote helpers |
 | MBO (Market by Order) | LOW | Full order book |
 | WebSocket streaming | NOT PLANNED | Use native SDK |
 | Symbology API | LOW | Symbol resolution |
 
-Databento's OPRA dataset can be reached through `provider.client`, but
-ml4t-data does not yet provide a dedicated options chain or consolidated quote
-API for Databento. Use Massive for first-class listed-options workflows today.
+For advanced Databento schemas, batch jobs, symbology resolution, and live
+streaming, use `provider.client` directly.
 
 ---
 
