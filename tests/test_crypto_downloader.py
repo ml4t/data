@@ -123,7 +123,7 @@ class TestCryptoDataManager:
 
     def test_init(self, manager, temp_storage):
         """Test initialization."""
-        assert manager.config.storage_path == temp_storage
+        assert manager.config.storage_path == temp_storage.resolve()
         assert manager._provider is None
         assert temp_storage.exists()
 

@@ -173,7 +173,7 @@ class TestCOTConfig:
         assert config.products == ["ES", "CL"]
         assert config.start_year == 2018
         assert config.end_year == 2023
-        assert config.storage_path == Path("/tmp/cot")
+        assert config.storage_path == Path("/tmp/cot").resolve()
         assert config.include_options is True
 
     def test_get_years(self):
@@ -211,7 +211,7 @@ include_options: true
         assert config.products == ["ES", "CL", "GC"]
         assert config.start_year == 2019
         assert config.end_year == 2024
-        assert config.storage_path == Path("/tmp/cot_data")
+        assert config.storage_path == Path("/tmp/cot_data").resolve()
         assert config.include_options is True
 
 
