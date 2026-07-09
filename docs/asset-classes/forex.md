@@ -344,7 +344,7 @@ except AuthenticationError as e:
 - Intraday FX strategies
 
 ❌ **Not ideal for**:
-- Stock/equity data (use Tiingo, IEX Cloud instead)
+- Stock/equity data (use Tiingo, EODHD, or Massive instead)
 - Cryptocurrency data (use CoinGecko, CryptoCompare)
 - Beginner exploratory projects (may prefer simpler providers)
 

@@ -200,7 +200,7 @@ financials = provider.fetch_financials(
 **Alternatives**:
 - Databento `mbo` schema (native API)
 - Binance WebSocket API
-- IEX Cloud (real-time quotes)
+- Provider-native real-time APIs for supported services
 
 ### News/Sentiment Data
 

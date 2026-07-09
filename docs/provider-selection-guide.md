@@ -25,7 +25,7 @@ flowchart TD
 
     USFree -->|Low 25/day| AlphaVantage[Alpha Vantage<br/>FREE 25/day]
     USFree -->|Medium 1000/day| Tiingo[Tiingo<br/>FREE 1000/day]
-    USFree -->|High 50K/mo| IEXCloud[IEX Cloud<br/>FREE 50K msg/mo]
+    USFree -->|No API key| Yahoo[Yahoo Finance<br/>FREE unofficial]
 
     USPaid -->|Budget €20/mo| EODHD[EODHD<br/>€19.99/mo]
     USPaid -->|Professional $60+| Finnhub[Finnhub<br/>$59.99+/mo]
@@ -53,7 +53,7 @@ flowchart TD
     classDef paidProvider fill:#FFB6C1,stroke:#DC143C,stroke-width:2px
     classDef decision fill:#87CEEB,stroke:#4682B4,stroke-width:2px
 
-    class CoinGecko,AlphaVantage,Tiingo,IEXCloud,EODHDFree,AlphaVantageForex,TwelveData,CryptoCompare freeProvider
+    class CoinGecko,AlphaVantage,Tiingo,Yahoo,EODHDFree,AlphaVantageForex,TwelveData,CryptoCompare freeProvider
     class EODHD,Finnhub,EODHDPaid,FinnhubGlobal,OANDA,Databento,TwelveDataForex,EODHDMulti,PolygonMulti paidProvider
     class AssetType,CryptoChoice,USChoice,GlobalChoice,ForexChoice,USFree,USPaid,GlobalChoice,ForexChoice,MultiChoice decision
 ```
@@ -67,7 +67,6 @@ flowchart TD
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | ❌ | No | Unlimited | Crypto historical |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | ❌ | Optional | Good | Crypto real-time |
 | **Tiingo** | ✅ | ✅ | ❌ | ❌ | ❌ | Yes | 1000/day | High-quality stocks |
-| **IEX Cloud** | ❌ | ✅ | ❌ | ❌ | ❌ | Yes | 50K/mo | US equities + fundamentals |
 | **Alpha Vantage** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | 25/day | Multi-asset research |
 | **EODHD** | ❌ | ✅ | ✅ | ❌ | ❌ | Yes | 500/day | Global stocks, best value |
 | **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | Paid only | Professional grade |
@@ -83,7 +82,6 @@ flowchart TD
 | Provider | Daily Limit | Monthly Limit | Best Use Case |
 |----------|-------------|---------------|---------------|
 | **CoinGecko** | 10-50 calls/min | Unlimited | Crypto research |
-| **IEX Cloud** | N/A | 50K messages | US stock research |
 | **Tiingo** | 1000 calls | 500 symbols | Daily stock updates |
 | **Alpha Vantage** | 25 calls | 750 calls | Conservative research |
 | **EODHD** | 500 calls | ~15K calls | Global stock testing |
@@ -135,7 +133,7 @@ flowchart TD
 → **CoinGecko** (no API key, unlimited)
 
 ### "I want US stock data for free"
-→ **Tiingo** (1000/day) or **IEX Cloud** (50K msg/month)
+→ **Tiingo** (1000/day) or **Yahoo Finance** (no API key, unofficial)
 
 ### "I want global stock data"
 → **EODHD** (€19.99/mo for 60+ exchanges)
@@ -158,7 +156,6 @@ flowchart TD
 
 ### Moderate (Good for research)
 - **Tiingo**: 1000/day
-- **IEX Cloud**: 50K messages/month
 - **CoinGecko**: 10-50/min
 
 ### High Volume (Good for production)

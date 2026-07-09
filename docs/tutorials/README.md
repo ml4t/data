@@ -26,7 +26,7 @@ Master API rate limiting to avoid bans and maximize efficiency:
 - Global rate limiters and why they matter
 - Best practices for respecting provider limits
 - Strategies for high-volume data pipelines
-- Provider-specific tips (Alpha Vantage, Tiingo, IEX Cloud, EODHD)
+- Provider-specific tips (Tiingo, Finnhub, EODHD)
 
 **Essential reading before building production pipelines!**
 

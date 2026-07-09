@@ -349,14 +349,14 @@ def cross_validate_providers(symbol, start, end):
     """Compare data from multiple providers."""
     # Fetch from 2 providers
     tiingo_data = TiingoProvider(api_key="key1").fetch_ohlcv(symbol, start, end)
-    iex_data = IEXCloudProvider(api_key="key2").fetch_ohlcv(symbol, start, end)
+    yahoo_data = YahooFinanceProvider().fetch_ohlcv(symbol, start, end)
 
     # Merge on timestamp
-    merged = tiingo_data.join(iex_data, on="timestamp", suffix="_iex")
+    merged = tiingo_data.join(yahoo_data, on="timestamp", suffix="_yahoo")
 
     # Compare close prices
     merged = merged.with_columns(
-        ((merged["close"] - merged["close_iex"]).abs() / merged["close"] * 100)
+        ((merged["close"] - merged["close_yahoo"]).abs() / merged["close"] * 100)
         .alias("price_diff_pct")
     )
 
@@ -368,7 +368,7 @@ def cross_validate_providers(symbol, start, end):
         print(discrepancies.select([
             "timestamp",
             "close",
-            "close_iex",
+            "close_yahoo",
             "price_diff_pct"
         ]))
         return False

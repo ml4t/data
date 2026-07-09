@@ -21,7 +21,7 @@ ML4T Data provides **multiple free-tier providers** for equity data, ranging fro
 | Provider | US Stocks | Global | Free Tier | API Key | Best For |
 |----------|-----------|--------|-----------|---------|----------|
 | **Tiingo** | ✅ | ❌ | 1000/day | Required | High-quality US stocks |
-| **IEX Cloud** | ✅ | ❌ | 50K/month | Required | Fundamentals + OHLCV |
+| **Yahoo Finance** | ✅ | ⚠️ Limited | Unofficial | No | Quick experiments |
 | **Alpha Vantage** | ✅ | ⚠️ Limited | 25/day | Required | Research (low volume) |
 | **EODHD** | ✅ | ✅ 60+ exchanges | 500/day | Required | Global coverage |
 | **Finnhub** | ✅ | ✅ 70+ exchanges | Real-time only | Required | Professional (paid OHLCV) |
@@ -176,91 +176,6 @@ df = updater.update(
 - Intraday strategies (free tier)
 - High-frequency trading
 - Real-time quotes
-
----
-
-### IEX Cloud (Fundamentals + OHLCV)
-
-#### Why IEX Cloud?
-
-- ✅ **50,000 message credits/month** free tier
-- ✅ **Company fundamentals** - Financials, earnings, news
-- ✅ **Real-time + historical** OHLCV data
-- ✅ **IEX Exchange** - The exchange that inspired Flash Boys
-
-**Best for**: Fundamental + technical analysis, news-driven strategies
-
-#### Quick Start
-
-```python
-from ml4t.data.providers import IEXCloudProvider
-
-# Get free API key from: https://iexcloud.io/
-provider = IEXCloudProvider(api_key="your_iex_cloud_api_key")
-
-# Fetch OHLCV data
-df = provider.fetch_ohlcv(
-    symbol="AAPL",
-    start="2024-01-01",
-    end="2024-12-31",
-    frequency="daily"
-)
-
-# Fetch company fundamentals
-info = provider.fetch_company_info("AAPL")
-print(info)
-# {'companyName': 'Apple Inc.', 'sector': 'Technology', ...}
-```
-
-#### Features
-
-**OHLCV Data**:
-- Daily, weekly, monthly frequencies
-- Adjusted for splits and dividends
-- Real-time quotes (delayed 15 minutes on free tier)
-
-**Fundamentals** (bonus):
-- Company information
-- Financial statements (income, balance sheet, cash flow)
-- Earnings reports
-- News and press releases
-- Analyst recommendations
-
-**Message Credits System**:
-```python
-# 1 OHLCV record ≈ 1 credit
-# Fetch 1 year of daily data (252 trading days) = 252 credits
-df = provider.fetch_ohlcv(symbol="AAPL", start="2024-01-01", end="2024-12-31")
-# Cost: ~252 credits
-
-# Free tier: 50,000 credits/month
-# Can fetch ~198 symbols × 252 days = 50,000 credits
-```
-
-#### Rate Limits
-
-**Free Tier**:
-- 50,000 message credits per month
-- ~198 symbols with 1 year of daily data
-- Resets monthly
-
-**Paid Tiers**:
-- Start: $9/month (1M messages)
-- Grow: $99/month (100M messages)
-- Scale: $999/month (1B messages)
-
-#### When to Use IEX Cloud
-
-✅ **Good for**:
-- Fundamental + technical combined strategies
-- News-driven backtests
-- Moderate symbol counts (50-200)
-- Real-time quote monitoring
-
-❌ **Not ideal for**:
-- Large universes (500+ symbols)
-- Global stocks (US only)
-- High-frequency updates
 
 ---
 
@@ -756,20 +671,20 @@ validate_ohlcv(df)  # Raises exception if invalid
 ### 5. Multi-Provider Fallback
 
 ```python
-from ml4t.data.providers import TiingoProvider, IEXCloudProvider, AlphaVantageProvider
+from ml4t.data.providers import EODHDProvider, TiingoProvider, YahooFinanceProvider
 
 def fetch_stock_data_robust(symbol: str, start: str, end: str):
     """Fetch stock data with fallback providers."""
 
     providers = [
-        ("tiingo", TiingoProvider),
-        ("iex_cloud", IEXCloudProvider),
-        ("alpha_vantage", AlphaVantageProvider),
+        ("yahoo", lambda: YahooFinanceProvider()),
+        ("tiingo", lambda: TiingoProvider(api_key="your_tiingo_key")),
+        ("eodhd", lambda: EODHDProvider(api_key="your_eodhd_key", exchange="US")),
     ]
 
-    for name, ProviderClass in providers:
+    for name, create_provider in providers:
         try:
-            provider = ProviderClass()
+            provider = create_provider()
             return provider.fetch_ohlcv(symbol=symbol, start=start, end=end)
         except Exception as e:
             print(f"{name} failed: {e}")
@@ -856,7 +771,7 @@ START: What markets do you need?
 │  │  → Tiingo (1000/day free) ✅
 │  │
 │  ├─ Need fundamentals too?
-│  │  → IEX Cloud (50K messages/month) ✅
+│  │  → Planned ML4T fundamentals API; use provider-native APIs for now
 │  │
 │  └─ Low volume research (<10 symbols)?
 │     → Alpha Vantage (25/day free) ✅

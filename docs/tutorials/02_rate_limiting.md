@@ -23,14 +23,14 @@ API providers limit how often you can call their endpoints to:
 Most common limit type:
 
 ```python
-# Alpha Vantage: 5 calls per minute
-provider = AlphaVantageProvider(api_key="key")
+# Finnhub free tier: 60 calls per minute
+provider = FinnhubProvider(api_key="key")
 
-# First 5 calls succeed immediately
-for i in range(5):
+# Calls up to the configured rate succeed immediately
+for i in range(60):
     data = provider.fetch_ohlcv("AAPL", start, end)  # ✅ Success
 
-# 6th call blocks until 1 minute passes
+# Additional calls block until capacity is available
 data = provider.fetch_ohlcv("MSFT", start, end)  # ⏳ Waits ~60 seconds
 ```
 
@@ -47,22 +47,12 @@ data = provider.fetch_ohlcv("AAPL", start, end)
 # ❌ RateLimitError: Daily limit exceeded. Resets at 2024-01-15 00:00:00 UTC
 ```
 
-### 3. Message Credits
+### 3. Endpoint and Plan Quotas
 
-Some providers (like IEX Cloud) use **credits** instead of call counts:
-
-```python
-# IEX Cloud: 50,000 message credits/month
-# 1 OHLCV record = ~1 credit
-# Fetching 30 days of AAPL = ~30 credits
-
-provider = IEXCloudProvider(api_key="key")
-data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-30")  # Uses ~30 credits
-
-# Check usage
-usage = provider.get_usage_stats()
-print(f"Used: {usage['credits_used']}/50000")
-```
+Some providers apply different limits by endpoint, market, or subscription
+plan. For example, free tiers may allow daily OHLCV but restrict intraday,
+fundamentals, or bulk endpoints. Treat provider dashboards and HTTP 429
+responses as the source of truth for current usage.
 
 ### 4. Concurrent Connections
 
@@ -194,8 +184,8 @@ quotes = provider.fetch_quote(["AAPL", "MSFT", "GOOGL"])  # 1 API call
 ```
 
 **Providers with batch support**:
-- **Twelve Data**: `fetch_quote(["AAPL", "MSFT", ...])` (up to 120 symbols)
-- **IEX Cloud**: Batch endpoints available
+- **Yahoo Finance**: `fetch_batch_ohlcv(["AAPL", "MSFT", ...], ...)`
+- **Twelve Data**: multi-symbol endpoints where supported by plan
 
 ### 3. Cache Aggressively
 
@@ -269,8 +259,8 @@ for symbol in symbols_priority:
 
 Most providers have usage dashboards:
 - **Tiingo**: https://api.tiingo.com/account/usage
-- **IEX Cloud**: https://iexcloud.io/console/usage
-- **Alpha Vantage**: https://www.alphavantage.co/support/#support
+- **EODHD**: https://eodhd.com/cp/settings
+- **Finnhub**: https://finnhub.io/dashboard
 
 ### 2. Log Rate Limit Events
 
@@ -354,19 +344,17 @@ except CircuitBreakerOpenError:
 
 ## Provider-Specific Tips
 
-### Alpha Vantage (5/min, 25/day)
+### Finnhub (60/min free tier)
 
-**Extremely restrictive!** Only use for research or low-volume updates.
+**Useful for low-volume quote and metadata workflows.** Historical OHLCV is
+limited on the free tier, so use paid access for backtesting workloads.
 
 ```python
-# With 25/day limit, you can update 25 symbols daily
-# Or 5 symbols × 5 frequencies (daily, weekly, monthly, etc.)
+# With 60 calls/minute, use rate limiting and retries for batch jobs.
 
-# Strategy: Update top 25 portfolio holdings daily
-# Rotate through full universe over multiple days
-symbols_day_1 = ["AAPL", "MSFT", "GOOGL", ...]  # Top 25
-symbols_day_2 = ["NFLX", "TSLA", "NVDA", ...]   # Next 25
-# etc.
+# Strategy: Update a small watchlist and persist results.
+for symbol in watchlist_symbols:
+    updater.update_symbol(symbol, incremental=True)
 ```
 
 ### Tiingo (1000/day)
@@ -389,21 +377,15 @@ for symbol in top_holdings[:100]:  # 100 symbols
 # Total: 300/1000 calls used (30%)
 ```
 
-### IEX Cloud (50K messages/month)
+### EODHD (plan-dependent daily quota)
 
-**Message-based pricing** - Count records, not requests.
+**Good for global daily equities.** Free and paid plans differ substantially in
+daily quota and historical depth.
 
 ```python
-# 50,000 messages = ~50,000 OHLCV records
-# Fetching 30 days × 100 symbols = 3,000 records = 3,000 messages
-
-# Strategy: Monthly updates instead of daily
-# Or focus on smaller symbol universe
-
-# Conservative approach:
-# 50K messages ÷ 30 days = ~1,666 messages/day
-# = 1,666 OHLCV records/day
-# = 55 symbols × 30-day history per day
+# Strategy: Prefer incremental daily updates over full re-downloads.
+for symbol in global_symbols:
+    updater.update_symbol(symbol, incremental=True)
 ```
 
 ### EODHD (500/day free, unlimited paid)

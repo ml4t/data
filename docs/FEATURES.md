@@ -202,8 +202,7 @@ None identified
 
 ### Won't Fix
 1. Alpha Vantage - Free tier too limited (25 calls/day)
-2. IEX Cloud - Company closed
-3. Python <3.9 - Using modern syntax
+2. Python <3.9 - Using modern syntax
 
 ---
 

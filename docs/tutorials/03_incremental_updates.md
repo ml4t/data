@@ -125,9 +125,7 @@ Every ML4T Data provider has a corresponding `ProviderUpdater` class:
 |----------|---------------|
 | TiingoProvider | TiingoUpdater |
 | CoinGeckoProvider | CoinGeckoUpdater |
-| IEXCloudProvider | IEXCloudUpdater |
 | EODHDProvider | EODHDUpdater |
-| AlphaVantageProvider | AlphaVantageUpdater |
 | FinnhubProvider | FinnhubUpdater |
 
 All updaters share the same interface:

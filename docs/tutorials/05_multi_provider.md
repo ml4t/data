@@ -21,7 +21,7 @@ Relying on a single data provider creates risks:
 Use a primary provider, fall back to secondary if primary fails.
 
 ```python
-from ml4t.data.providers import TiingoProvider, IEXCloudProvider
+from ml4t.data.providers import TiingoProvider, YahooFinanceProvider
 from ml4t.data.core.exceptions import NetworkError, RateLimitError
 
 class MultiProviderFetcher:
@@ -29,8 +29,8 @@ class MultiProviderFetcher:
         # Primary: Tiingo (good quality, 1000/day)
         self.primary = TiingoProvider(api_key="tiingo_key")
 
-        # Fallback: IEX Cloud (50K msg/month)
-        self.fallback = IEXCloudProvider(api_key="iex_key")
+        # Fallback: Yahoo Finance (no API key, personal-use oriented)
+        self.fallback = YahooFinanceProvider()
 
     def fetch_ohlcv(self, symbol, start, end):
         """Try primary, fall back to secondary."""
@@ -42,11 +42,11 @@ class MultiProviderFetcher:
 
         except (NetworkError, RateLimitError) as e:
             # Primary failed, try fallback
-            logger.warning(f"{symbol}: Tiingo failed ({e}), trying IEX Cloud")
+            logger.warning(f"{symbol}: Tiingo failed ({e}), trying Yahoo Finance")
 
             try:
                 data = self.fallback.fetch_ohlcv(symbol, start, end)
-                logger.info(f"{symbol}: Fetched from IEX Cloud (fallback)")
+                logger.info(f"{symbol}: Fetched from Yahoo Finance (fallback)")
                 return data
 
             except Exception as e2:
@@ -127,14 +127,14 @@ class RateLimitAwareDistributor:
         self.provider1_limit = 1000
         self.provider1_used = 0
 
-        # Provider 2: IEX Cloud (50K msg/month ≈ 1,666/day)
-        self.provider2 = IEXCloudProvider(api_key="key2")
-        self.provider2_limit = 1666
+        # Provider 2: EODHD (global equities, plan-dependent quota)
+        self.provider2 = EODHDProvider(api_key="key2")
+        self.provider2_limit = 500
         self.provider2_used = 0
 
-        # Provider 3: Alpha Vantage (25/day)
-        self.provider3 = AlphaVantageProvider(api_key="key3")
-        self.provider3_limit = 25
+        # Provider 3: Finnhub (paid tier recommended for historical OHLCV)
+        self.provider3 = FinnhubProvider(api_key="key3")
+        self.provider3_limit = 60
         self.provider3_used = 0
 
     def get_available_provider(self):
@@ -142,9 +142,9 @@ class RateLimitAwareDistributor:
         if self.provider1_used < self.provider1_limit:
             return self.provider1, "Tiingo"
         elif self.provider2_used < self.provider2_limit:
-            return self.provider2, "IEX Cloud"
+            return self.provider2, "EODHD"
         elif self.provider3_used < self.provider3_limit:
-            return self.provider3, "Alpha Vantage"
+            return self.provider3, "Finnhub"
         else:
             raise RateLimitError("All providers exhausted")
 
@@ -157,9 +157,9 @@ class RateLimitAwareDistributor:
         # Update usage
         if provider_name == "Tiingo":
             self.provider1_used += 1
-        elif provider_name == "IEX Cloud":
+        elif provider_name == "EODHD":
             self.provider2_used += 1
-        elif provider_name == "Alpha Vantage":
+        elif provider_name == "Finnhub":
             self.provider3_used += 1
 
         logger.info(f"{symbol}: Used {provider_name} ({self.provider1_used + self.provider2_used + self.provider3_used} total)")
@@ -168,8 +168,8 @@ class RateLimitAwareDistributor:
 # Usage
 distributor = RateLimitAwareDistributor()
 
-# Can fetch 1000 + 1666 + 25 = 2,691 symbols per day!
-for symbol in symbols[:2691]:
+# Can fetch across provider-specific quotas.
+for symbol in symbols:
     data = distributor.fetch_ohlcv(symbol, start, end)
 ```
 
@@ -184,8 +184,8 @@ class ConsensusValidator:
     def __init__(self):
         self.providers = [
             ("Tiingo", TiingoProvider(api_key="key1")),
-            ("IEX", IEXCloudProvider(api_key="key2")),
-            ("Alpha Vantage", AlphaVantageProvider(api_key="key3")),
+            ("Yahoo", YahooFinanceProvider()),
+            ("EODHD", EODHDProvider(api_key="key2")),
         ]
 
     def fetch_with_consensus(self, symbol, start, end, min_agreement=2):
@@ -379,7 +379,7 @@ class ProductionDataFetcher:
         self.global_stocks = EODHDProvider(api_key="eodhd_key")
 
         # Fallback provider
-        self.fallback = IEXCloudProvider(api_key="iex_key")
+        self.fallback = YahooFinanceProvider()
 
         # Rate limit tracking
         self.us_stocks_calls = 0

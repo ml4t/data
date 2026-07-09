@@ -1150,8 +1150,7 @@ None identified
 
 ### Won't Fix (Intentional)
 1. Alpha Vantage provider - 25 calls/day free tier not worth porting
-2. IEX Cloud provider - Company closed
-3. Older pandas compatibility - Requires >= 2.0.0
+2. Older pandas compatibility - Requires >= 2.0.0
 
 ---
 

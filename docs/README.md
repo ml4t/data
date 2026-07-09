@@ -126,7 +126,6 @@ Quick comparison of all 14 providers:
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Crypto (beginners) |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/mo | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | US stocks |
-| **IEX Cloud** | ❌ | ✅ US | ❌ | ❌ | 50K msgs | US stocks + fundamentals |
 | **Alpha Vantage** | ⚠️ | ✅ | ⚠️ | ❌ | 25/day | Low-volume research |
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Global (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time | Professional stocks |
@@ -206,7 +205,7 @@ es = provider.fetch_ohlcv("ES.v.0", "2024-01-01", "2024-12-31")  # S&P 500 futur
 ### By Provider
 
 - **Crypto**: [CoinGecko](asset-classes/crypto.md#coingecko-recommended-for-beginners), [CryptoCompare](asset-classes/crypto.md#cryptocompare-advanced-features)
-- **US Stocks**: [Tiingo](asset-classes/equities.md#tiingo-recommended-for-us-stocks), [IEX Cloud](asset-classes/equities.md#iex-cloud-fundamentals--ohlcv), [Alpha Vantage](asset-classes/equities.md#alpha-vantage-low-volume-research)
+- **US Stocks**: [Tiingo](asset-classes/equities.md#tiingo-recommended-for-us-stocks), [EODHD](asset-classes/equities.md#eodhd-best-value-for-global-coverage), [Massive](asset-classes/equities.md#massive-real-time--historical)
 - **Global Stocks**: [EODHD](asset-classes/equities.md#eodhd-best-value-for-global-coverage), [Finnhub](asset-classes/equities.md#finnhub-professional-grade---paid-for-historical)
 - **Forex**: [OANDA](asset-classes/forex.md#oanda-recommended-for-forex)
 - **Futures**: [Databento](asset-classes/futures.md#databento-recommended-for-futures)

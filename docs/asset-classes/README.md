@@ -48,7 +48,7 @@ df = provider.fetch_ohlcv("BTC", start="2024-01-01", end="2024-12-31")
 ### [📊 Equities Data Guide](./equities.md)
 
 **Asset Classes**: US Stocks, Global Stocks, ETFs, Indices
-**Providers**: Tiingo, IEX Cloud, Alpha Vantage, EODHD, Finnhub, Twelve Data, Polygon
+**Providers**: Tiingo, Yahoo, EODHD, Finnhub, Twelve Data, Massive, Polygon
 **Difficulty**: 🟡 Moderate
 **Free Tier**: ⚠️ Varies (25/day to 1000/day depending on provider)
 
@@ -147,7 +147,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 
 **$0/month (Free Tier)**:
 - ✅ **Crypto**: CoinGecko (50 calls/min, no API key)
-- ✅ **US Stocks**: Tiingo (1000/day), IEX Cloud (50K messages/month)
+- ✅ **US Stocks**: Tiingo (1000/day), Yahoo Finance (no API key, unofficial)
 - ✅ **Forex**: OANDA demo account
 - ❌ **Futures**: Not available free
 
@@ -184,7 +184,6 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Optional | Crypto (beginners) |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Optional | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | Required | US stocks |
-| **IEX Cloud** | ❌ | ✅ US | ❌ | ❌ | 50K msgs/mo | Required | US stocks + fundamentals |
 | **Alpha Vantage** | ⚠️ | ✅ | ⚠️ | ❌ | 25/day | Required | Low-volume research |
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Required | Global stocks (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time only | Required | Professional stocks |
@@ -254,16 +253,20 @@ def fetch_data_robust(symbol: str, asset_class: str):
     if asset_class == "crypto":
         providers = [CoinGeckoProvider, CryptoCompareProvider]
     elif asset_class == "stocks":
-        providers = [TiingoProvider, IEXCloudProvider, AlphaVantageProvider]
+        providers = [
+            lambda: YahooFinanceProvider(),
+            lambda: TiingoProvider(api_key="your_tiingo_key"),
+            lambda: EODHDProvider(api_key="your_eodhd_key", exchange="US"),
+        ]
     elif asset_class == "forex":
         providers = [OandaProvider, TwelveDataProvider]
 
-    for ProviderClass in providers:
+    for create_provider in providers:
         try:
-            provider = ProviderClass()
+            provider = create_provider()
             return provider.fetch_ohlcv(symbol, ...)
         except Exception as e:
-            print(f"{ProviderClass.__name__} failed: {e}")
+            print(f"Provider failed: {e}")
 
     raise RuntimeError("All providers failed")
 ```
