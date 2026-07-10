@@ -40,6 +40,17 @@ from ml4t.data.core.exceptions import (
     RateLimitError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.fundamentals import (
+    PeriodType,
+    StatementType,
+    normalize_period_type,
+    normalize_statement_type,
+    numeric_mapping_to_metric_rows,
+    records_to_financials_rows,
+    rows_to_company_metrics_frame,
+    rows_to_financials_frame,
+    sequence_or_mapping_values,
+)
 from ml4t.data.providers.mixins import AsyncSessionMixin
 
 logger = structlog.get_logger()
@@ -78,6 +89,17 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
         "monthly": "m",
         "1M": "m",
         "month": "m",
+    }
+
+    FINANCIAL_STATEMENT_SECTION_MAP: ClassVar[dict[StatementType, str]] = {
+        "income": "Income_Statement",
+        "balance": "Balance_Sheet",
+        "cashflow": "Cash_Flow",
+    }
+
+    FINANCIAL_PERIOD_SECTION_MAP: ClassVar[dict[PeriodType, str]] = {
+        "annual": "yearly",
+        "quarterly": "quarterly",
     }
 
     def __init__(
@@ -304,6 +326,130 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
         self.logger.info(f"Fetched {len(df)} records", symbol=formatted_symbol)
 
         return df
+
+    def fetch_fundamentals(
+        self,
+        symbol: str,
+        exchange: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch raw EODHD fundamentals for a symbol."""
+        formatted_symbol = self._format_symbol(symbol, exchange)
+        return self._request_json(f"/fundamentals/{formatted_symbol}", {"fmt": "json"})
+
+    def fetch_financials(
+        self,
+        symbol: str,
+        statement: str = "income",
+        period: str = "annual",
+        exchange: str | None = None,
+    ) -> pl.DataFrame:
+        """Fetch EODHD financial statements in canonical long form."""
+        try:
+            statement_type = normalize_statement_type(statement)
+            period_type = normalize_period_type(period)
+        except ValueError as err:
+            raise DataValidationError("eodhd", str(err)) from err
+
+        if period_type == "ttm":
+            raise DataValidationError(
+                "eodhd",
+                "EODHD fundamentals support annual and quarterly statements",
+                field="period",
+                value=period,
+            )
+
+        data = self.fetch_fundamentals(symbol, exchange=exchange)
+        section = data.get("Financials", {}).get(
+            self.FINANCIAL_STATEMENT_SECTION_MAP[statement_type], {}
+        )
+        records = sequence_or_mapping_values(
+            section.get(self.FINANCIAL_PERIOD_SECTION_MAP[period_type])
+        )
+        currency = section.get("currency_symbol") or data.get("General", {}).get("CurrencyCode")
+        rows = records_to_financials_rows(
+            records,
+            symbol=symbol,
+            provider=self.name,
+            statement_type=statement_type,
+            period_type=period_type,
+            currency=currency,
+            source="fundamentals",
+        )
+        return rows_to_financials_frame(rows)
+
+    def fetch_company_metrics(
+        self,
+        symbol: str,
+        exchange: str | None = None,
+        metrics: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """Fetch numeric company metrics from EODHD fundamentals."""
+        data = self.fetch_fundamentals(symbol, exchange=exchange)
+        currency = data.get("General", {}).get("CurrencyCode")
+        values: dict[str, Any] = {}
+        for section_name in ["Highlights", "Valuation", "Technicals", "SharesStats"]:
+            section = data.get(section_name, {})
+            if isinstance(section, dict):
+                values.update({f"{section_name}.{key}": value for key, value in section.items()})
+
+        rows = numeric_mapping_to_metric_rows(
+            values,
+            symbol=symbol,
+            provider=self.name,
+            currency=currency,
+            source="fundamentals",
+            metrics=metrics,
+        )
+        return rows_to_company_metrics_frame(rows)
+
+    def _format_symbol(self, symbol: str, exchange: str | None = None) -> str:
+        exchange_code = exchange or self.default_exchange
+        if "." in symbol:
+            return symbol.upper()
+        return f"{symbol.upper()}.{exchange_code.upper()}"
+
+    def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        endpoint = f"{self.base_url}{path}"
+        request_params = {"api_token": self.api_key, **params}
+        try:
+            self.rate_limiter.acquire(blocking=True)
+            response = self.session.get(endpoint, params=request_params)
+            if response.status_code == 429:
+                raise RateLimitError(provider="eodhd", retry_after=180.0)
+            if response.status_code in [401, 403]:
+                raise AuthenticationError(
+                    provider="eodhd", message="Invalid API key or unauthorized access"
+                )
+            if response.status_code == 404:
+                raise DataNotAvailableError(provider="eodhd", symbol=path)
+            if response.status_code != 200:
+                raise NetworkError(
+                    provider="eodhd", message=f"HTTP {response.status_code}: {response.text}"
+                )
+            try:
+                data = response.json()
+            except Exception as err:
+                raise NetworkError(
+                    provider="eodhd", message="Failed to parse JSON response"
+                ) from err
+            if not data:
+                raise DataNotAvailableError(provider="eodhd", symbol=path)
+            if isinstance(data, dict) and "errors" in data:
+                raise ProviderError(provider="eodhd", message=f"API error: {data['errors']}")
+            if not isinstance(data, dict):
+                raise DataValidationError("eodhd", "Expected JSON object response")
+            return data
+        except (
+            AuthenticationError,
+            RateLimitError,
+            NetworkError,
+            ProviderError,
+            DataNotAvailableError,
+            DataValidationError,
+        ):
+            raise
+        except Exception as err:
+            raise NetworkError(provider="eodhd", message=f"Request failed: {endpoint}") from err
 
     async def _fetch_raw_data_async(
         self,

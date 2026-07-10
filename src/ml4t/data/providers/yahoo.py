@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pandas as pd
 import polars as pl
@@ -26,6 +26,15 @@ from ml4t.data.core.exceptions import (
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.fundamentals import (
+    PeriodType,
+    StatementType,
+    normalize_period_type,
+    normalize_statement_type,
+    numeric_mapping_to_metric_rows,
+    rows_to_company_metrics_frame,
+    wide_pandas_statement_to_financials,
+)
 
 logger = structlog.get_logger()
 
@@ -82,6 +91,17 @@ class YahooFinanceProvider(BaseProvider):
         "1week": "1wk",
         "monthly": "1mo",
         "1month": "1mo",
+    }
+
+    FUNDAMENTAL_PERIOD_MAP: ClassVar[dict[PeriodType, str]] = {
+        "annual": "yearly",
+        "quarterly": "quarterly",
+    }
+
+    FUNDAMENTAL_METHOD_MAP: ClassVar[dict[StatementType, str]] = {
+        "income": "get_income_stmt",
+        "balance": "get_balance_sheet",
+        "cashflow": "get_cash_flow",
     }
 
     def __init__(self, enable_progress: bool = False) -> None:
@@ -379,6 +399,76 @@ class YahooFinanceProvider(BaseProvider):
             )
 
         return result
+
+    def fetch_financials(
+        self,
+        symbol: str,
+        statement: str = "income",
+        period: str = "annual",
+        currency: str | None = None,
+    ) -> pl.DataFrame:
+        """Fetch financial statement data in canonical long form."""
+        try:
+            statement_type = normalize_statement_type(statement)
+            period_type = normalize_period_type(period)
+        except ValueError as err:
+            raise DataValidationError("yahoo", str(err)) from err
+
+        if period_type == "ttm":
+            raise DataValidationError(
+                "yahoo",
+                "Yahoo Finance statement endpoints support annual and quarterly periods",
+                field="period",
+                value=period,
+            )
+
+        try:
+            ticker = yf.Ticker(symbol)
+            method_name = self.FUNDAMENTAL_METHOD_MAP[statement_type]
+            method = getattr(ticker, method_name)
+            pandas_frame = method(freq=self.FUNDAMENTAL_PERIOD_MAP[period_type])
+        except Exception as err:
+            raise DataValidationError(
+                "yahoo",
+                f"Failed to fetch {statement_type} statement for {symbol}: {err}",
+                details={"symbol": symbol, "statement": statement_type, "period": period_type},
+            ) from err
+
+        return wide_pandas_statement_to_financials(
+            pandas_frame,
+            symbol=symbol,
+            provider=self.name,
+            statement_type=statement_type,
+            period_type=period_type,
+            currency=currency,
+            source="yfinance",
+        )
+
+    def fetch_company_metrics(
+        self,
+        symbol: str,
+        metrics: list[str] | None = None,
+        currency: str | None = None,
+    ) -> pl.DataFrame:
+        """Fetch numeric company metrics from Yahoo Finance company info."""
+        try:
+            values: dict[str, Any] = yf.Ticker(symbol).get_info()
+        except Exception as err:
+            raise DataValidationError(
+                "yahoo",
+                f"Failed to fetch company metrics for {symbol}: {err}",
+                details={"symbol": symbol},
+            ) from err
+
+        rows = numeric_mapping_to_metric_rows(
+            values,
+            symbol=symbol,
+            provider=self.name,
+            currency=currency,
+            source="yfinance_info",
+            metrics=metrics,
+        )
+        return rows_to_company_metrics_frame(rows)
 
     def _convert_batch_to_polars(
         self, df_pandas: pd.DataFrame, requested_symbols: list[str]

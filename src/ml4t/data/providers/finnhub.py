@@ -42,6 +42,16 @@ from ml4t.data.core.exceptions import (
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.fundamentals import (
+    PeriodType,
+    StatementType,
+    normalize_period_type,
+    normalize_statement_type,
+    numeric_mapping_to_metric_rows,
+    records_to_financials_rows,
+    rows_to_company_metrics_frame,
+    rows_to_financials_frame,
+)
 
 logger = structlog.get_logger()
 
@@ -85,6 +95,17 @@ class FinnhubProvider(BaseProvider):
         "1M": "M",
         "month": "M",
         "M": "M",
+    }
+
+    FINANCIAL_STATEMENT_MAP: ClassVar[dict[StatementType, str]] = {
+        "income": "ic",
+        "balance": "bs",
+        "cashflow": "cf",
+    }
+
+    FINANCIAL_PERIOD_MAP: ClassVar[dict[PeriodType, str]] = {
+        "annual": "annual",
+        "quarterly": "quarterly",
     }
 
     def __init__(self, api_key: str | None = None, rate_limit: tuple[int, float] | None = None):
@@ -250,3 +271,109 @@ class FinnhubProvider(BaseProvider):
             raise DataValidationError(
                 provider="finnhub", message=f"Failed to transform data for {symbol}"
             ) from err
+
+    def fetch_financials(
+        self,
+        symbol: str,
+        statement: str = "income",
+        period: str = "annual",
+    ) -> pl.DataFrame:
+        """Fetch standardized financial statements from Finnhub."""
+        try:
+            statement_type = normalize_statement_type(statement)
+            period_type = normalize_period_type(period)
+        except ValueError as err:
+            raise DataValidationError("finnhub", str(err)) from err
+
+        if period_type == "ttm":
+            raise DataValidationError(
+                "finnhub",
+                "Finnhub financial statements support annual and quarterly periods",
+                field="period",
+                value=period,
+            )
+
+        data = self._request_json(
+            "/stock/financials",
+            params={
+                "symbol": symbol.upper(),
+                "statement": self.FINANCIAL_STATEMENT_MAP[statement_type],
+                "freq": self.FINANCIAL_PERIOD_MAP[period_type],
+                "token": self.api_key,
+            },
+            symbol=symbol,
+        )
+        rows = records_to_financials_rows(
+            data.get("financials", []),
+            symbol=symbol,
+            provider=self.name,
+            statement_type=statement_type,
+            period_type=period_type,
+            source="stock/financials",
+        )
+        return rows_to_financials_frame(rows)
+
+    def fetch_company_metrics(
+        self,
+        symbol: str,
+        metric: str = "all",
+        metrics: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """Fetch numeric company metrics from Finnhub."""
+        data = self._request_json(
+            "/stock/metric",
+            params={"symbol": symbol.upper(), "metric": metric, "token": self.api_key},
+            symbol=symbol,
+        )
+        rows = numeric_mapping_to_metric_rows(
+            data.get("metric", {}),
+            symbol=symbol,
+            provider=self.name,
+            source="stock/metric",
+            metrics=metrics,
+        )
+        return rows_to_company_metrics_frame(rows)
+
+    def _request_json(
+        self,
+        path: str,
+        params: dict[str, Any],
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch JSON from a Finnhub endpoint."""
+        endpoint = f"{self.base_url}{path}"
+        try:
+            self.rate_limiter.acquire(blocking=True)
+            response = self.session.get(endpoint, params=params)
+            if response.status_code == 429:
+                raise RateLimitError(provider="finnhub", retry_after=60.0)
+            if response.status_code in [401, 403]:
+                raise AuthenticationError(provider="finnhub", message="Invalid API key")
+            if response.status_code == 404:
+                raise DataNotAvailableError(provider="finnhub", symbol=symbol or path)
+            if response.status_code != 200:
+                raise NetworkError(
+                    provider="finnhub", message=f"HTTP {response.status_code}: {response.text}"
+                )
+            try:
+                data = response.json()
+            except Exception as err:
+                raise NetworkError(provider="finnhub", message="Failed to parse JSON") from err
+            if isinstance(data, dict) and data.get("s") == "error":
+                raise ProviderError(provider="finnhub", message=f"API error: {data.get('error')}")
+            if isinstance(data, dict) and data.get("error"):
+                raise ProviderError(provider="finnhub", message=f"API error: {data['error']}")
+            if not isinstance(data, dict):
+                raise DataValidationError("finnhub", "Expected JSON object response")
+            return data
+        except (
+            AuthenticationError,
+            RateLimitError,
+            NetworkError,
+            ProviderError,
+            DataNotAvailableError,
+            DataValidationError,
+        ):
+            raise
+        except Exception as err:
+            raise NetworkError(provider="finnhub", message=f"Request failed: {endpoint}") from err

@@ -27,6 +27,7 @@ def pytest_collection_modifyitems(config, items):
     {
         "cryptocompare": bool(os.getenv("CRYPTOCOMPARE_API_KEY")),
         "databento": bool(os.getenv("DATABENTO_API_KEY")),
+        "fxmacrodata": bool(os.getenv("FXMACRODATA_API_KEY")),
         "oanda": bool(os.getenv("OANDA_API_KEY")),
     }
 
@@ -62,6 +63,8 @@ def setup_test_environment():
         available_providers.append("CryptoCompare")
     if os.getenv("DATABENTO_API_KEY"):
         available_providers.append("Databento")
+    if os.getenv("FXMACRODATA_API_KEY"):
+        available_providers.append("FXMacroData")
     if os.getenv("OANDA_API_KEY"):
         available_providers.append("OANDA")
 
@@ -82,6 +85,7 @@ def api_key_manager() -> dict[str, str | None]:
     keys = {
         "cryptocompare": os.getenv("CRYPTOCOMPARE_API_KEY"),
         "databento": os.getenv("DATABENTO_API_KEY"),
+        "fxmacrodata": os.getenv("FXMACRODATA_API_KEY"),
         "oanda": os.getenv("OANDA_API_KEY"),
     }
 
@@ -103,11 +107,13 @@ def cost_tracker():
             self.costs = {
                 "cryptocompare": 0.0,  # Free tier
                 "databento": 0.0,  # Pay per request
+                "fxmacrodata": 0.0,  # Trial/free endpoints
                 "oanda": 0.0,  # Free practice account
             }
             self.requests = {
                 "cryptocompare": 0,
                 "databento": 0,
+                "fxmacrodata": 0,
                 "oanda": 0,
             }
 

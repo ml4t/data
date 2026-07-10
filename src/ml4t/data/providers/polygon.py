@@ -39,6 +39,16 @@ from ml4t.data.core.exceptions import (
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.fundamentals import (
+    PeriodType,
+    StatementType,
+    nested_mapping_to_metric_rows,
+    normalize_period_type,
+    normalize_statement_type,
+    records_to_financials_rows,
+    rows_to_company_metrics_frame,
+    rows_to_financials_frame,
+)
 
 MassiveAssetClass = Literal["stocks", "options", "futures", "crypto", "forex"]
 
@@ -80,6 +90,17 @@ class MassiveProvider(BaseProvider):
         "minute": "minute",
         "1m": "minute",
         "1minute": "minute",
+    }
+
+    FINANCIAL_STATEMENT_SECTION_MAP: ClassVar[dict[StatementType, tuple[str, ...]]] = {
+        "income": ("income_statement", "income"),
+        "balance": ("balance_sheet", "balance"),
+        "cashflow": ("cash_flow_statement", "cash_flow", "cashflow"),
+    }
+
+    FINANCIAL_PERIOD_MAP: ClassVar[dict[PeriodType, str]] = {
+        "annual": "annual",
+        "quarterly": "quarterly",
     }
 
     def __init__(
@@ -341,6 +362,146 @@ class MassiveProvider(BaseProvider):
             raise DataValidationError(
                 provider=self.name, message=f"Failed to transform data for {symbol}"
             ) from err
+
+    def fetch_financials(
+        self,
+        symbol: str,
+        statement: str = "income",
+        period: str = "annual",
+        limit: int = 100,
+    ) -> pl.DataFrame:
+        """Fetch Massive stock financial statements in canonical long form."""
+        try:
+            statement_type = normalize_statement_type(statement)
+            period_type = normalize_period_type(period)
+        except ValueError as err:
+            raise DataValidationError(self.name, str(err)) from err
+
+        if period_type == "ttm":
+            raise DataValidationError(
+                self.name,
+                "Massive financial statements support annual and quarterly periods",
+                field="period",
+                value=period,
+            )
+
+        data = self._request_json(
+            "/stocks/financials/v1/financials",
+            {
+                "ticker": symbol.upper(),
+                "timeframe": self.FINANCIAL_PERIOD_MAP[period_type],
+                "limit": limit,
+            },
+        )
+        rows: list[dict[str, Any]] = []
+        for record in data.get("results", []):
+            if not isinstance(record, dict):
+                continue
+            financials = record.get("financials", {})
+            if not isinstance(financials, dict):
+                continue
+            section = self._pick_statement_section(financials, statement_type)
+            if not section:
+                continue
+            combined = {
+                **section,
+                "end_date": record.get("end_date"),
+                "filing_date": record.get("filing_date"),
+                "fiscal_period": record.get("fiscal_period"),
+                "fiscal_year": record.get("fiscal_year"),
+            }
+            rows.extend(
+                records_to_financials_rows(
+                    [combined],
+                    symbol=symbol,
+                    provider=self.name,
+                    statement_type=statement_type,
+                    period_type=period_type,
+                    source="stocks/financials/v1/financials",
+                )
+            )
+        return rows_to_financials_frame(rows)
+
+    def fetch_company_metrics(
+        self,
+        symbol: str,
+        limit: int = 100,
+        metrics: list[str] | None = None,
+    ) -> pl.DataFrame:
+        """Fetch Massive stock fundamental ratios in canonical long form."""
+        data = self._request_json(
+            "/stocks/financials/v1/ratios",
+            {"ticker": symbol.upper(), "limit": limit},
+        )
+        rows: list[dict[str, Any]] = []
+        for record in data.get("results", []):
+            if not isinstance(record, dict):
+                continue
+            rows.extend(
+                nested_mapping_to_metric_rows(
+                    record,
+                    symbol=symbol,
+                    provider=self.name,
+                    period=record.get("fiscal_period"),
+                    as_of=record.get("end_date"),
+                    source="stocks/financials/v1/ratios",
+                    metrics=metrics,
+                )
+            )
+        return rows_to_company_metrics_frame(rows)
+
+    def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Fetch JSON from a Massive endpoint."""
+        endpoint = f"{self.base_url}{path}"
+        request_params = {**params, "apiKey": self.api_key}
+        try:
+            self.rate_limiter.acquire(blocking=True)
+            response = self.session.get(endpoint, params=request_params)
+            if response.status_code == 401:
+                raise AuthenticationError(
+                    provider=self.name,
+                    message="Invalid API key. Get your key at: https://massive.com/",
+                )
+            if response.status_code == 429:
+                raise RateLimitError(provider=self.name, retry_after=60.0)
+            if response.status_code != 200:
+                raise NetworkError(
+                    provider=self.name,
+                    message=f"API error (HTTP {response.status_code}): {response.text}",
+                )
+            try:
+                data = response.json()
+            except Exception as err:
+                raise NetworkError(
+                    provider=self.name, message="Failed to parse JSON response"
+                ) from err
+            if isinstance(data, dict) and data.get("status") == "ERROR":
+                raise ProviderError(provider=self.name, message=f"API error: {data.get('error')}")
+            if not isinstance(data, dict):
+                raise DataValidationError(self.name, "Expected JSON object response")
+            return data
+        except (
+            AuthenticationError,
+            RateLimitError,
+            NetworkError,
+            ProviderError,
+            DataValidationError,
+        ):
+            raise
+        except Exception as err:
+            raise NetworkError(provider=self.name, message=f"Request failed: {endpoint}") from err
+
+    @classmethod
+    def _pick_statement_section(
+        cls,
+        financials: dict[str, Any],
+        statement_type: StatementType,
+    ) -> dict[str, Any]:
+        for key in cls.FINANCIAL_STATEMENT_SECTION_MAP[statement_type]:
+            section = financials.get(key)
+            if isinstance(section, dict):
+                return section
+        return {}
 
 
 class PolygonProvider(MassiveProvider):
