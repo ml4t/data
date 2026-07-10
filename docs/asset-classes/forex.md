@@ -1,7 +1,7 @@
 # Foreign Exchange (Forex) Data Guide
 
 **Asset Class**: Currency Pairs (FX)
-**Available Providers**: OANDA (primary), Twelve Data, Alpha Vantage, Polygon
+**Available Providers**: OANDA (primary), FXMacroData, Twelve Data, Alpha Vantage, Polygon
 **Difficulty**: Moderate (requires understanding of forex mechanics)
 **Recommended For**: FX trading strategies, currency risk analysis, global macro research
 
@@ -22,9 +22,36 @@ ML4T Data provides access to **professional-grade forex data** through multiple 
 | Provider | Free Tier | API Key | Pairs | Timeframes | Best For |
 |----------|-----------|---------|-------|------------|----------|
 | **OANDA** | Demo account (practice) | Required | 70+ | Second to monthly | Professional FX trading |
+| **FXMacroData** | Public USD/free endpoints | Optional | Major FX macro context | Release/event time series | Macro-aware FX research |
 | **Twelve Data** | 800/day | Required | 50+ major pairs | Minute to monthly | Multi-asset portfolios |
 | **Alpha Vantage** | 25/day | Required | Major pairs | Daily+ | Research (low volume) |
 | **Polygon** | 5/min | Required | 30+ pairs | Minute to daily | Real-time FX + stocks |
+
+---
+
+## FXMacroData (FX Macro Context)
+
+FXMacroData complements price feeds with release-aware macro data for FX strategies:
+known-at announcement timestamps, release calendars, FX spot history, COT positioning,
+commodities, market sessions, and risk sentiment.
+
+```python
+from ml4t.data.providers import FXMacroDataProvider
+
+provider = FXMacroDataProvider()
+
+inflation, metadata = provider.fetch_announcements(
+    "usd",
+    "inflation",
+    limit=100,
+    include_metadata=True,
+)
+calendar = provider.fetch_calendar("usd")
+eurusd = provider.fetch_forex("eur", "usd", start_date="2024-01-01")
+```
+
+Use this when an FX case study needs point-in-time macro releases or positioning
+context alongside OANDA, Twelve Data, or Massive price data.
 
 ---
 

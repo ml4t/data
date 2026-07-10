@@ -1,6 +1,6 @@
 # Data Providers
 
-ml4t-data provides unified access to **21 financial data providers** through a consistent API. All providers inherit from `BaseProvider` and implement the same `fetch_ohlcv()` interface.
+ml4t-data provides access to **20+ financial data providers**. Most providers implement the unified `fetch_ohlcv()` interface; specialized providers expose domain-specific APIs for factors, macro releases, prediction markets, and tick data.
 
 For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_AUDIT.md).
 
@@ -49,6 +49,7 @@ For detailed pricing, terms, and gap analysis, see [PROVIDER_AUDIT.md](PROVIDER_
 | Provider | API Key | Free Tier | Best For |
 |----------|---------|-----------|----------|
 | [FRED](fred.md) | Yes | 120 req/min | Macro indicators |
+| FXMacroData | Optional | Public USD/free endpoints | FX macro releases, calendars, COT, sentiment |
 | [AQR](aqr.md) | No | Free | Factor research (QMJ, BAB, TSMOM) |
 | [Fama-French](fama_french.md) | No | Free | Academic factors (FF3, FF5) |
 

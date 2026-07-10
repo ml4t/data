@@ -90,6 +90,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Yahoo Finance | US/global equities, ETFs, crypto, forex |
 | CoinGecko | 10,000+ cryptocurrencies |
 | FRED | 850,000 economic series |
+| FXMacroData | FX macro releases, calendars, COT, commodities, sentiment |
 | Fama-French | Academic factor data |
 | AQR | Research factors (QMJ, BAB, HML Devil, VME, more) |
 | Wiki Prices | Frozen US equities history (1962-2018) |

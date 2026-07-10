@@ -2,7 +2,7 @@
 
 This module provides unified access to multiple financial data providers.
 
-Available Providers (21 live + 3 synthetic/testing):
+Available Providers:
     - BaseProvider: Abstract base class for all providers
     - YahooFinanceProvider: Yahoo Finance (free, no API key)
     - AlpacaDataProvider: Alpaca US stocks and crypto (free IEX feed, two-credential auth)
@@ -10,6 +10,7 @@ Available Providers (21 live + 3 synthetic/testing):
     - FinnhubProvider: Finnhub multi-asset data (free tier: 60 req/min)
     - EODHDProvider: EODHD global equities (free tier: 500 req/day, 1 year depth)
     - FREDProvider: FRED economic data (free, 120 req/min)
+    - FXMacroDataProvider: FX macro releases, calendars, COT, commodities, sentiment
     - AQRFactorProvider: AQR research factors (QMJ, BAB, VME)
     - FamaFrenchProvider: Fama-French factors (3-factor, 5-factor, momentum)
     - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
@@ -75,6 +76,11 @@ try:
     from ml4t.data.providers.fred import FREDProvider
 except ImportError:
     FREDProvider = None  # type: ignore
+
+try:
+    from ml4t.data.providers.fxmacrodata import FXMacroDataProvider
+except ImportError:
+    FXMacroDataProvider = None  # type: ignore
 
 # Factor data providers
 try:
@@ -161,6 +167,7 @@ __all__ = [
     "EODHDProvider",
     # Economic data providers
     "FREDProvider",
+    "FXMacroDataProvider",
     # Factor data providers
     "AQRFactorProvider",
     "FamaFrenchProvider",

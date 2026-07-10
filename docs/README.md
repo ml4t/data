@@ -119,7 +119,7 @@ Complete documentation for the ML4T Data market data library.
 
 ## 📊 Provider Comparison
 
-Quick comparison of all 14 providers:
+Quick comparison of common providers:
 
 | Provider | Crypto | Stocks | Forex | Futures | Free Tier | Best For |
 |----------|--------|--------|-------|---------|-----------|----------|
@@ -130,6 +130,7 @@ Quick comparison of all 14 providers:
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Global (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time | Professional stocks |
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo | Professional forex |
+| **FXMacroData** | ❌ | ❌ | ✅ Context | ❌ | Public USD/free | FX macro releases |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Multi-asset |
 | **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Multi-asset (paid) |
 | **Databento** | ❌ | ⚠️ | ❌ | ✅ OPRA | None | Institutional futures/options |
@@ -207,7 +208,7 @@ es = provider.fetch_ohlcv("ES.v.0", "2024-01-01", "2024-12-31")  # S&P 500 futur
 - **Crypto**: [CoinGecko](asset-classes/crypto.md#coingecko-recommended-for-beginners), [CryptoCompare](asset-classes/crypto.md#cryptocompare-advanced-features)
 - **US Stocks**: [Tiingo](asset-classes/equities.md#tiingo-recommended-for-us-stocks), [EODHD](asset-classes/equities.md#eodhd-best-value-for-global-coverage), [Massive](asset-classes/equities.md#massive-real-time--historical)
 - **Global Stocks**: [EODHD](asset-classes/equities.md#eodhd-best-value-for-global-coverage), [Finnhub](asset-classes/equities.md#finnhub-professional-grade---paid-for-historical)
-- **Forex**: [OANDA](asset-classes/forex.md#oanda-recommended-for-forex)
+- **Forex**: [OANDA](asset-classes/forex.md#oanda-recommended-for-forex), [FXMacroData](asset-classes/forex.md#fxmacrodata-fx-macro-context)
 - **Futures**: [Databento](asset-classes/futures.md#databento-recommended-for-futures)
 - **Multi-Asset**: [Twelve Data](asset-classes/equities.md#twelve-data-multi-asset-with-forex), [Massive](providers/massive.md)
 

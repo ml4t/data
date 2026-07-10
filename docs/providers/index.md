@@ -1,6 +1,6 @@
 # Providers
 
-ML4T Data supports 20 live data providers with a unified API (plus synthetic and testing providers).
+ML4T Data supports 20+ live and specialized data providers, plus synthetic and testing providers.
 
 ## Provider Comparison
 
@@ -9,6 +9,7 @@ ML4T Data supports 20 live data providers with a unified API (plus synthetic and
 | [Yahoo Finance](yahoo.md) | Stocks, ETFs, Crypto | Unlimited | Thread | No |
 | [CoinGecko](coingecko.md) | Crypto | 10K+ coins | Native | No |
 | [FRED](fred.md) | Economic Data | 120/min | Thread | Yes |
+| FXMacroData | FX Macro, Forex Context | Public USD/free endpoints | Thread | Optional |
 | [Fama-French](fama_french.md) | Factors | Unlimited | Thread | No |
 | [AQR](aqr.md) | Factors | Unlimited | Thread | No |
 | [Wiki Prices](wiki_prices.md) | Historical | Static | Thread | No |
