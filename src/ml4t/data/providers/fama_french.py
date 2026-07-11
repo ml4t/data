@@ -576,7 +576,11 @@ class FamaFrenchProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
-        self.cache_path = resolve_storage_path(cache_path, "factors", "fama-french")
+        self.cache_path = (
+            Path(cache_path).expanduser().resolve()
+            if cache_path is not None
+            else self.default_cache_path()
+        )
         self.use_cache = use_cache
 
         if use_cache:

@@ -646,7 +646,11 @@ class AQRFactorProvider(BaseProvider):
         """
         super().__init__(rate_limit=None)
 
-        self.data_path = resolve_storage_path(data_path, "factors", "aqr")
+        self.data_path = (
+            Path(data_path).expanduser().resolve()
+            if data_path is not None
+            else self.default_data_path()
+        )
 
         if not self.data_path.exists():
             raise FileNotFoundError(
@@ -848,7 +852,11 @@ class AQRFactorProvider(BaseProvider):
         """
         log = structlog.get_logger()
 
-        output_dir = resolve_storage_path(output_path, "factors", "aqr")
+        output_dir = (
+            resolve_storage_path(output_path, "factors", "aqr")
+            if output_path is not None
+            else cls.default_data_path()
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine which datasets to download

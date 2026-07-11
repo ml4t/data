@@ -138,11 +138,11 @@ class Config(BaseModel):
 
     def __init__(self, **data: Any) -> None:
         """Initialize config with environment variables."""
-        # Override with environment variables
-        if PREFERRED_DATA_ENV_VAR in os.environ:
-            data["data_root"] = os.environ[PREFERRED_DATA_ENV_VAR]
-        elif "QLDM_DATA_ROOT" in os.environ:
-            data["data_root"] = os.environ["QLDM_DATA_ROOT"]
+        if "data_root" not in data and (
+            PREFERRED_DATA_ENV_VAR in os.environ
+            or any(env_var in os.environ for env_var in LEGACY_DATA_ENV_VARS)
+        ):
+            data["data_root"] = resolve_data_root()
         if "QLDM_LOG_LEVEL" in os.environ:
             data["log_level"] = os.environ["QLDM_LOG_LEVEL"]
 

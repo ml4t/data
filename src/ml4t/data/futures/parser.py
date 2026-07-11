@@ -19,9 +19,13 @@ DEFAULT_CHRIS_PATH = resolve_storage_path(None, "futures", "quandl", "chris_futu
 def _resolve_chris_data_path(data_path: str | Path | None) -> Path:
     if data_path is None:
         env_path = os.getenv(DEFAULT_CHRIS_ENV_VAR)
-        resolved = Path(env_path).expanduser() if env_path else DEFAULT_CHRIS_PATH
+        resolved = (
+            Path(env_path).expanduser().resolve()
+            if env_path
+            else resolve_storage_path(None, "futures", "quandl", "chris_futures.parquet")
+        )
     else:
-        resolved = Path(data_path).expanduser()
+        resolved = Path(data_path).expanduser().resolve()
 
     if resolved.exists():
         return resolved

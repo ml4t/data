@@ -62,6 +62,18 @@ def test_config_models_follow_ml4t_data_path(monkeypatch, tmp_path: Path) -> Non
     assert Config().data_root == root.resolve()
 
 
+def test_config_warns_for_legacy_data_root(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "legacy-data"
+    monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
+    monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
+    monkeypatch.setenv("QLDM_DATA_ROOT", str(root))
+
+    with pytest.warns(DeprecationWarning, match="QLDM_DATA_ROOT is deprecated"):
+        config = Config()
+
+    assert config.data_root == root.resolve()
+
+
 def test_provider_default_paths_follow_ml4t_data_path(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "configured-data"
     monkeypatch.setenv("ML4T_DATA_PATH", str(root))
@@ -78,6 +90,35 @@ def test_provider_default_paths_follow_ml4t_data_path(monkeypatch, tmp_path: Pat
     assert ITCHSampleProvider.default_parsed_path() == (
         root.resolve() / "equities" / "nasdaq_itch" / "messages"
     )
+
+
+def test_provider_subclass_default_path_overrides(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
+    aqr_path = tmp_path / "custom-aqr"
+    ff_path = tmp_path / "custom-fama-french"
+    aqr_path.mkdir()
+
+    class CustomAQRProvider(AQRFactorProvider):
+        DEFAULT_PATH = aqr_path
+
+    class CustomFamaFrenchProvider(FamaFrenchProvider):
+        DEFAULT_CACHE_PATH = ff_path
+
+    assert CustomAQRProvider().data_path == aqr_path.resolve()
+    assert CustomFamaFrenchProvider().cache_path == ff_path.resolve()
+
+
+def test_futures_chris_default_path_resolves_after_env_change(monkeypatch, tmp_path: Path) -> None:
+    from ml4t.data.futures.parser import _resolve_chris_data_path
+
+    root = tmp_path / "configured-data"
+    chris_path = root / "futures" / "quandl" / "chris_futures.parquet"
+    chris_path.parent.mkdir(parents=True)
+    chris_path.touch()
+    monkeypatch.setenv("ML4T_DATA_PATH", str(root))
+    monkeypatch.delenv("ML4T_QUANDL_CHRIS_PATH", raising=False)
+
+    assert _resolve_chris_data_path(None) == chris_path.resolve()
 
 
 @pytest.mark.parametrize(
