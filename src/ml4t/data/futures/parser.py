@@ -13,7 +13,6 @@ from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.schema import ContractSpec
 
 DEFAULT_CHRIS_ENV_VAR = "ML4T_QUANDL_CHRIS_PATH"
-DEFAULT_CHRIS_PATH = resolve_storage_path(None, "futures", "quandl", "chris_futures.parquet")
 
 
 def _resolve_chris_data_path(data_path: str | Path | None) -> Path:
