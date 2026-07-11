@@ -113,3 +113,39 @@ datasets:
         initial_end=None,
         initial_load_days=3650,
     )
+
+
+def test_update_all_prefers_path_over_base_path() -> None:
+    """storage.path should win without forwarding base_path into storage options."""
+    runner = CliRunner()
+    config_text = """
+storage:
+  strategy: hive
+  path: ./primary
+  base_path: ./legacy
+datasets:
+  demo:
+    symbols: [SPY]
+    provider: mock
+"""
+
+    with (
+        runner.isolated_filesystem(),
+        patch("ml4t.data.cli.batch.create_storage") as mock_create_storage,
+        patch("ml4t.data.cli.batch.DataManager") as mock_manager_class,
+    ):
+        mock_create_storage.return_value = MagicMock()
+        manager = MagicMock()
+        manager.update.return_value = "equities/daily/SPY"
+        mock_manager_class.return_value = manager
+
+        with open("ml4t-data.yaml", "w") as f:
+            f.write(config_text)
+
+        result = runner.invoke(cli, ["update-all", "-c", "ml4t-data.yaml"])
+
+    assert result.exit_code == 0, result.output
+    storage_path = mock_create_storage.call_args.args[0]
+    assert storage_path.name == "primary"
+    _, kwargs = mock_create_storage.call_args
+    assert "base_path" not in kwargs

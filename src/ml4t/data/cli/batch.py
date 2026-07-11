@@ -31,10 +31,12 @@ def _resolve_config_path(path: str | Path, config_path: Path) -> Path:
 def _build_storage_from_config(config_data: dict[str, Any], config_path: Path):
     """Create storage using the YAML storage section."""
     storage_config = dict(config_data.get("storage", {}))
-    storage_path = _resolve_config_path(
-        storage_config.pop("path", storage_config.pop("base_path", "./data")),
-        config_path,
-    )
+    storage_path_value = storage_config.pop("path", None)
+    if storage_path_value is None:
+        storage_path_value = storage_config.pop("base_path", "./data")
+    else:
+        storage_config.pop("base_path", None)
+    storage_path = _resolve_config_path(storage_path_value, config_path)
     strategy = storage_config.pop("strategy", "hive")
 
     allowed_options = {
