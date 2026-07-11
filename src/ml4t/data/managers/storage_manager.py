@@ -10,7 +10,7 @@ This module handles data storage operations including:
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -156,6 +156,7 @@ class StorageManager:
         existing, new = align_frames_for_concat(
             existing,
             new,
+            left_fill_values={"dividends": 0.0, "splits": 1.0},
             right_fill_values={"dividends": 0.0, "splits": 1.0},
         )
 
@@ -503,14 +504,19 @@ class StorageManager:
 
             # Get the date range from existing data
             last_timestamp = existing_df["timestamp"].max()
+            if isinstance(last_timestamp, datetime):
+                if last_timestamp.tzinfo is None:
+                    last_timestamp = last_timestamp.replace(tzinfo=UTC)
+                else:
+                    last_timestamp = last_timestamp.astimezone(UTC)
+            elif isinstance(last_timestamp, date):
+                last_timestamp = datetime.combine(last_timestamp, datetime.min.time(), tzinfo=UTC)
+            else:
+                raise ValueError(f"Invalid timestamp value for {symbol}: {last_timestamp!r}")
 
             # Calculate fetch range
             fetch_start = last_timestamp - timedelta(days=lookback_days)
             fetch_end = datetime.now(UTC)
-
-            # Normalize timezone: stored timestamps may be naive while now(UTC) is aware
-            if last_timestamp.tzinfo is None and fetch_end.tzinfo is not None:
-                fetch_end = fetch_end.replace(tzinfo=None)
 
             # Skip update if data is already current
             if frequency == "daily" and (fetch_end - last_timestamp).days < 1:

@@ -626,7 +626,7 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
             error = payload.get("error") or payload.get("detail")
             if not error and payload.get("success") is False:
                 error = payload.get("message") or "API request failed"
-            if error:
+            if error and not self._contains_payload_rows(payload):
                 raise ProviderError(provider=self.name, message=str(error))
         return payload
 

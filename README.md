@@ -301,7 +301,7 @@ report = manager.detect(data)
 ## Development
 
 ```bash
-git clone https://github.com/ml4t/data.git
+git clone https://github.com/ml4t/data.git ml4t-data
 cd ml4t-data
 uv sync
 uv run pytest tests/ -q

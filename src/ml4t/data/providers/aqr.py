@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import re
+from calendar import monthrange
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -764,7 +765,10 @@ class AQRFactorProvider(BaseProvider):
             end_date = (
                 datetime.strptime(end[:10], "%Y-%m-%d").date()
                 if len(end) >= 10
-                else datetime.strptime(end + "-28", "%Y-%m-%d").date()
+                else datetime.strptime(
+                    f"{end}-{monthrange(*map(int, end.split('-')))[1]}",
+                    "%Y-%m-%d",
+                ).date()
             )
             df = df.filter(pl.col("timestamp") <= end_date)
 

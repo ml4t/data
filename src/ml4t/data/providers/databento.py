@@ -186,7 +186,15 @@ class DataBentoProvider(BaseProvider):
         elif isinstance(value, date):
             parsed = value
         else:
-            parsed = datetime.strptime(value, "%Y-%m-%d").date()
+            try:
+                parsed = datetime.strptime(value, "%Y-%m-%d").date()
+            except ValueError:
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+                except ValueError as err:
+                    raise ValueError(
+                        "session_date must be a YYYY-MM-DD date or ISO datetime"
+                    ) from err
         return (parsed + timedelta(days=1)).isoformat()
 
     @classmethod
@@ -481,6 +489,10 @@ class DataBentoProvider(BaseProvider):
         Databento's OPRA definitions are requested with parent symbology so callers can
         discover contracts before fetching bars or quotes.
         """
+        right_lower = right.lower()
+        if right_lower not in {"call", "c", "put", "p", "both", "all"}:
+            raise ValueError("right must be 'call', 'put', or 'both'")
+
         raw_data = self._fetch_timeseries(
             dataset=self.OPRA_DATASET,
             symbols=underlying,
@@ -505,14 +517,11 @@ class DataBentoProvider(BaseProvider):
         right_column = self._first_existing_column(
             df, ["right", "put_call", "option_type", "instrument_class"]
         )
-        right_lower = right.lower()
         if right_lower not in {"both", "all"} and right_column is not None:
             if right_lower in {"call", "c"}:
                 right_prefix = "C"
             elif right_lower in {"put", "p"}:
                 right_prefix = "P"
-            else:
-                raise ValueError("right must be 'call', 'put', or 'both'")
             df = df.filter(
                 pl.col(right_column).cast(pl.Utf8).str.to_uppercase().str.starts_with(right_prefix)
             )
@@ -593,7 +602,11 @@ class DataBentoProvider(BaseProvider):
 
     @staticmethod
     def _consolidate_ohlcv_publishers(df: pl.DataFrame) -> pl.DataFrame:
-        """Aggregate per-publisher OPRA OHLCV bars into one row per timestamp/symbol."""
+        """Aggregate per-publisher OPRA OHLCV bars into one row per timestamp/symbol.
+
+        Open and close use the first and last non-null publisher rows in returned
+        order, while high, low, and volume aggregate across publishers.
+        """
         if df.is_empty() or "publisher_id" not in df.columns:
             return df
 

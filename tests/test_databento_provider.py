@@ -412,6 +412,22 @@ class TestDataBentoProvider:
         assert call_args.kwargs["start"] == "2024-01-02"
         assert call_args.kwargs["end"] == "2024-01-03"
 
+    def test_fetch_option_chain_validates_right_before_request(self, provider, mock_client):
+        """Invalid right filters should fail even when the response lacks a right column."""
+        with pytest.raises(ValueError, match="right must be"):
+            provider.fetch_option_chain("SPY", "2024-01-02", right="straddle")
+
+        mock_client.timeseries.get_range.assert_not_called()
+
+    def test_next_date_string_accepts_iso_datetime(self, provider):
+        """OPRA session end helper accepts ISO datetime strings with date semantics."""
+        assert provider._next_date_string("2024-01-02T13:30:00") == "2024-01-03"
+
+    def test_next_date_string_rejects_invalid_value(self, provider):
+        """OPRA session end helper reports invalid date strings clearly."""
+        with pytest.raises(ValueError, match="session_date must be"):
+            provider._next_date_string("2024/01/02")
+
     def test_fetch_option_ohlcv_consolidates_publishers(self, provider, mock_client):
         """Test OPRA OHLCV helper aggregates per-publisher bars."""
         mock_response = Mock()

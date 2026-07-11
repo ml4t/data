@@ -533,6 +533,21 @@ class TestMassiveAssetClassRouting:
         assert len(frame) == 1
         assert fetch_raw_data.call_count == 2
 
+    def test_fetch_ohlcv_does_not_retry_rate_limit_errors(self, provider, monkeypatch):
+        """429 responses should preserve retry_after for the caller."""
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "wait", wait_none())
+
+        with patch.object(
+            provider,
+            "_fetch_raw_data",
+            side_effect=RateLimitError(provider="massive", retry_after=60.0),
+        ) as fetch_raw_data:
+            with pytest.raises(RateLimitError) as exc_info:
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-02")
+
+        assert exc_info.value.retry_after == 60.0
+        assert fetch_raw_data.call_count == 1
+
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_async_forwards_asset_class(self, provider):
         """Test async wrapper preserves Massive-specific asset_class argument."""

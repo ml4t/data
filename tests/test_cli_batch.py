@@ -29,8 +29,8 @@ datasets:
     asset_class: equity
     lookback_days: 14
     fill_gaps: false
-    start: "2010-01-01"
-    end: "2024-12-31"
+    start: 2010-01-01
+    end: 2024-12-31
 """
 
     with (

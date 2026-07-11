@@ -469,8 +469,9 @@ class LearnedSyntheticProvider(BaseProvider):
 
         # Modify RNG state based on symbol for reproducibility.
         if self.seed is not None:
+            normalized_symbol = symbol.upper()
             symbol_hash = int.from_bytes(
-                hashlib.blake2b(symbol.upper().encode(), digest_size=8).digest(),
+                hashlib.blake2b(normalized_symbol.encode(), digest_size=8).digest(),
                 byteorder="big",
             ) % (2**31)
             self._rng = np.random.default_rng(self.seed + symbol_hash)

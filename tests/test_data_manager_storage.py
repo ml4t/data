@@ -286,6 +286,36 @@ class TestDataManagerUpdate:
         # Should not have duplicates
         assert stored_df["timestamp"].is_unique().all()
 
+    def test_merge_fills_optional_equity_columns_on_both_sides(self, manager):
+        """Optional equity columns should get defaults regardless of which frame lacks them."""
+        existing = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1000],
+            }
+        )
+        new = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2, tzinfo=UTC)],
+                "open": [101.0],
+                "high": [102.0],
+                "low": [100.0],
+                "close": [101.5],
+                "volume": [1100],
+                "dividends": [0.25],
+                "splits": [2.0],
+            }
+        )
+
+        merged = manager._storage_manager._merge_data(existing, new)
+
+        assert merged["dividends"].to_list() == [0.0, 0.25]
+        assert merged["splits"].to_list() == [1.0, 2.0]
+
     def test_update_skips_if_current(self, manager, storage):
         """Test that update works even with recent data."""
         # Load some data first

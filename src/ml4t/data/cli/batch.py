@@ -14,6 +14,12 @@ from ml4t.data.storage import create_storage
 from .utils import console, load_symbols_from_file
 
 
+def _as_date_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _resolve_config_path(path: str | Path, config_path: Path) -> Path:
     """Resolve a path from the YAML file."""
     resolved = Path(path).expanduser()
@@ -151,8 +157,8 @@ def update_all(ctx, config, dataset, dry_run):
             asset_class = ds_config.get("asset_class", "equities")
             lookback_days = ds_config.get("lookback_days", 7)
             fill_gaps = ds_config.get("fill_gaps", True)
-            initial_start = ds_config.get("start") or ds_config.get("start_date")
-            initial_end = ds_config.get("end") or ds_config.get("end_date")
+            initial_start = _as_date_string(ds_config.get("start") or ds_config.get("start_date"))
+            initial_end = _as_date_string(ds_config.get("end") or ds_config.get("end_date"))
             initial_load_days = ds_config.get("initial_load_days", 365)
             if initial_load_days is None:
                 initial_load_days = 365

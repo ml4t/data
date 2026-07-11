@@ -248,6 +248,14 @@ class TestFXMacroDataRequests:
 
         assert frame["status"][0] == "open"
 
+    def test_error_payload_with_data_rows_is_returned(self, provider):
+        response = _response(payload={"error": "partial response", "data": [{"status": "open"}]})
+
+        with patch.object(provider.session, "get", return_value=response):
+            frame = provider.fetch_market_sessions()
+
+        assert frame["status"][0] == "open"
+
     def test_explicit_error_message_payload_raises(self, provider):
         response = _response(payload={"message": "bad request", "success": False})
 

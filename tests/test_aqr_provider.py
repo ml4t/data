@@ -201,6 +201,24 @@ class TestFetch:
         assert df["timestamp"][0] == datetime(2024, 1, 1)
         assert df["USA"][0] == 0.01
 
+    def test_fetch_month_filter_uses_actual_month_end(self, tmp_path):
+        """YYYY-MM end filters should include the final calendar day."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 2, 28), datetime(2024, 2, 29)],
+                "USA": [0.01, 0.02],
+            }
+        )
+        df.write_parquet(tmp_path / "qmj_factors.parquet")
+        provider = AQRFactorProvider(data_path=tmp_path)
+
+        filtered = provider.fetch("qmj_factors", start="2024-02", end="2024-02")
+
+        assert filtered["timestamp"].to_list() == [
+            datetime(2024, 2, 28),
+            datetime(2024, 2, 29),
+        ]
+
     def test_fetch_missing_parquet_raises(self, tmp_path):
         """Test fetch for missing parquet raises error."""
         provider = AQRFactorProvider(data_path=tmp_path)

@@ -29,7 +29,7 @@ import warnings
 from typing import Any, ClassVar, Literal
 
 import polars as pl
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,
@@ -65,7 +65,6 @@ class MassiveProvider(BaseProvider):
     """
 
     DEFAULT_BASE_URL: ClassVar[str] = "https://api.massive.com"
-    LEGACY_BASE_URL: ClassVar[str] = "https://api.polygon.io"
     API_KEY_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_API_KEY", "POLYGON_API_KEY")
     BASE_URL_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_BASE_URL", "POLYGON_BASE_URL")
 
@@ -207,7 +206,9 @@ class MassiveProvider(BaseProvider):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((NetworkError, RateLimitError)),
+        retry=retry_if_exception(
+            lambda exc: isinstance(exc, NetworkError) and not isinstance(exc, RateLimitError)
+        ),
         reraise=True,
     )
     def fetch_ohlcv(
@@ -235,13 +236,21 @@ class MassiveProvider(BaseProvider):
         """
         self._validate_inputs(symbol, start, end, frequency)
         self._acquire_rate_limit()
+        self.logger.info(
+            "Fetching Massive OHLCV data",
+            symbol=symbol,
+            frequency=frequency,
+            asset_class=asset_class,
+        )
 
         def _fetch_and_process() -> pl.DataFrame:
             raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=asset_class)
             data = self._transform_data(raw_data, symbol)
             return self._validate_ohlcv(data, self.name)
 
-        return self._with_circuit_breaker(_fetch_and_process)
+        frame = self._with_circuit_breaker(_fetch_and_process)
+        self.logger.info("Fetched Massive OHLCV data", symbol=symbol, rows=len(frame))
+        return frame
 
     async def fetch_ohlcv_async(
         self,
