@@ -1,9 +1,12 @@
 """Tests for Massive/Polygon provider module."""
 
+from datetime import datetime
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+from tenacity import wait_none
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,
@@ -495,3 +498,69 @@ class TestMassiveAssetClassRouting:
         assert params["timespan"] == "day"
         assert params["from"] == "2024-01-01"
         assert params["to"] == "2024-01-02"
+
+    def test_invalid_asset_class_raises_validation_error(self, provider):
+        """Test invalid explicit asset classes fail before routing."""
+        with pytest.raises(DataValidationError, match="Unsupported asset_class"):
+            provider._fetch_raw_data(
+                "AAPL",
+                "2024-01-01",
+                "2024-01-02",
+                "daily",
+                asset_class=cast(Any, "bonds"),
+            )
+
+    def test_fetch_ohlcv_retries_network_errors(self, provider, monkeypatch):
+        """Test Massive override preserves base retry behavior."""
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "wait", wait_none())
+        raw_data = {
+            "status": "OK",
+            "results": [
+                {"t": 1704067200000, "o": 170.0, "h": 172.0, "l": 169.0, "c": 171.0, "v": 1000000},
+            ],
+        }
+
+        with patch.object(
+            provider,
+            "_fetch_raw_data",
+            side_effect=[
+                NetworkError(provider="massive", message="temporary failure"),
+                raw_data,
+            ],
+        ) as fetch_raw_data:
+            frame = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-02")
+
+        assert len(frame) == 1
+        assert fetch_raw_data.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlcv_async_forwards_asset_class(self, provider):
+        """Test async wrapper preserves Massive-specific asset_class argument."""
+        expected = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "symbol": ["ESM6"],
+                "open": [1.0],
+                "high": [1.0],
+                "low": [1.0],
+                "close": [1.0],
+                "volume": [1.0],
+            }
+        )
+
+        with patch.object(provider, "fetch_ohlcv", return_value=expected) as fetch_ohlcv:
+            frame = await provider.fetch_ohlcv_async(
+                "ESM6",
+                "2024-01-01",
+                "2024-01-02",
+                asset_class="futures",
+            )
+
+        assert frame is expected
+        fetch_ohlcv.assert_called_once_with(
+            "ESM6",
+            "2024-01-01",
+            "2024-01-02",
+            "daily",
+            "futures",
+        )

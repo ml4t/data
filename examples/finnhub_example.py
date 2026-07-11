@@ -5,7 +5,7 @@ This script demonstrates:
 2. Real-time quote fetching
 3. Multiple frequency support (daily, weekly, monthly)
 4. Error handling and rate limit management
-5. Provider updater pattern for incremental updates
+5. Fetching a bounded range and storing it locally
 
 Requirements:
     - FINNHUB_API_KEY environment variable (get free key at: https://finnhub.io/register)
@@ -28,7 +28,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ml4t.data.providers import FinnhubProvider, FinnhubUpdater
+from ml4t.data.providers import FinnhubProvider
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 
@@ -230,9 +230,9 @@ def example_4_error_handling():
         provider.close()
 
 
-def example_5_incremental_updates():
-    """Example 5: Using the updater for incremental updates."""
-    print_section("EXAMPLE 5: Incremental Updates with Storage")
+def example_5_storage_workflow():
+    """Example 5: Fetch data and store it locally."""
+    print_section("EXAMPLE 5: Storage Workflow")
 
     api_key = os.getenv("FINNHUB_API_KEY")
     if not api_key:
@@ -246,31 +246,27 @@ def example_5_incremental_updates():
 
     print(f"Storage location: {storage_path}\n")
 
-    # Create provider and updater
+    # Create provider
     provider = FinnhubProvider(api_key=api_key)
-    updater = FinnhubUpdater(provider, storage)
 
     try:
         symbol = "AAPL"
-        print(f"Updating {symbol} data...\n")
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        print(f"Fetching {symbol} data from {start} to {end}...\n")
 
-        # Update symbol (defaults to last 365 days)
-        result = updater.update_symbol(symbol, frequency="daily")
+        data = provider.fetch_ohlcv(symbol, start=start, end=end, frequency="daily")
+        storage.write(data, f"finnhub/{symbol}")
 
-        if result["success"]:
-            print("✅ Update successful")
-            print(f"   Records fetched: {result['records_fetched']}")
-            print(f"   Date range: {result['start_date']} to {result['end_date']}")
-            print()
+        print("✅ Stored data successfully")
+        print(f"   Records fetched: {len(data)}")
+        print()
 
-            # Read back from storage
-            print("Reading data back from storage...")
-            stored_data = storage.read(symbol, "finnhub")
-            print(f"   Stored records: {len(stored_data)}")
-            print()
-
-        else:
-            print(f"❌ Update failed: {result.get('error')}\n")
+        # Read back from storage
+        print("Reading data back from storage...")
+        stored_data = storage.read(f"finnhub/{symbol}").collect()
+        print(f"   Stored records: {len(stored_data)}")
+        print()
 
     except Exception as e:
         print(f"❌ Error: {e}\n")
@@ -278,7 +274,7 @@ def example_5_incremental_updates():
     finally:
         provider.close()
 
-    print("💡 Tip: Run this example multiple times to see incremental updates\n")
+    print("💡 Tip: Use IncrementalUpdater when merging later fetches into existing storage\n")
 
 
 def main():
@@ -304,7 +300,7 @@ def main():
     example_2_real_time_quotes()
     example_3_multiple_frequencies()
     example_4_error_handling()
-    example_5_incremental_updates()
+    example_5_storage_workflow()
 
     print_section("🎉 All examples completed!")
     print("Next steps:")

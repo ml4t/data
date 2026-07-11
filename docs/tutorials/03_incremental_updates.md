@@ -36,14 +36,32 @@ Most free tiers allow 500-1000 calls/day. You'd burn through your quota in secon
 
 ```python
 # ✅ SMART APPROACH - Incremental updates
-from ml4t.data.providers import TiingoProvider, TiingoUpdater
+from datetime import datetime, timedelta
+
+from ml4t.data.provider_updater import ProviderUpdater
+from ml4t.data.providers import TiingoProvider
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.backend import StorageConfig
+
+
+class TiingoDailyUpdater(ProviderUpdater):
+    def __init__(self, provider: TiingoProvider, storage: HiveStorage):
+        super().__init__("tiingo", storage)
+        self.provider = provider
+
+    def _fetch_data(self, symbol, start_time, end_time, **kwargs):
+        return self.provider.fetch_ohlcv(symbol, start_time, end_time, frequency="daily")
+
+    def _transform_data(self, data, symbol, **kwargs):
+        return data
+
+    def _get_default_start_time(self, symbol):
+        return datetime.now() - timedelta(days=365)
 
 # Setup storage and updater
 storage = HiveStorage(StorageConfig(base_path="./data"))
 provider = TiingoProvider(api_key="your_key")
-updater = TiingoUpdater(provider, storage)
+updater = TiingoDailyUpdater(provider, storage)
 
 # Update symbols incrementally
 for symbol in symbols:
@@ -119,14 +137,10 @@ print("Stored successfully")
 
 ## The ProviderUpdater Pattern
 
-Every ML4T Data provider has a corresponding `ProviderUpdater` class:
-
-| Provider | Updater Class |
-|----------|---------------|
-| TiingoProvider | TiingoUpdater |
-| CoinGeckoProvider | CoinGeckoUpdater |
-| EODHDProvider | EODHDUpdater |
-| FinnhubProvider | FinnhubUpdater |
+ML4T Data includes `ProviderUpdater` as an abstract base for provider-specific
+incremental workflows. The library does not ship one `*Updater` class per
+provider; define the small subclass your pipeline needs, or use
+`IncrementalUpdater` directly when you already have the new data frame.
 
 All updaters share the same interface:
 
@@ -154,14 +168,14 @@ class ProviderUpdater:
 ### First Update (Bootstrap)
 
 ```python
-from ml4t.data.providers import TiingoProvider, TiingoUpdater
+from ml4t.data.providers import TiingoProvider
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.backend import StorageConfig
 
 # Setup
 storage = HiveStorage(StorageConfig(base_path="./data"))
 provider = TiingoProvider(api_key="your_key")
-updater = TiingoUpdater(provider, storage)
+updater = TiingoDailyUpdater(provider, storage)
 
 # First update: Downloads default history (30 days for stocks)
 result = updater.update_symbol("AAPL", incremental=True)
@@ -326,7 +340,7 @@ storage = HiveStorage(StorageConfig(base_path="./data"))
 def update_symbol_safe(symbol):
     """Thread-safe update function."""
     # Each thread gets its own updater instance
-    thread_updater = TiingoUpdater(provider, storage)
+    thread_updater = TiingoDailyUpdater(provider, storage)
     return thread_updater.update_symbol(symbol, incremental=True)
 
 # Update in parallel (max 5 concurrent to respect rate limits)
@@ -530,12 +544,12 @@ schedule.every().day.at("16:30").do(update_all_symbols)
 ### Pitfall 4: Not Handling Provider-Specific Limits
 
 ```python
-# ❌ BAD: Updating 1000 symbols with Alpha Vantage (25/day limit)
+# ❌ BAD: Updating 1000 symbols without checking the provider quota
 for symbol in symbols[:1000]:  # Won't work!
     updater.update_symbol(symbol, incremental=True)
 
 # ✅ GOOD: Respect provider limits
-daily_limit = 25  # Alpha Vantage free tier
+daily_limit = provider_daily_limit
 for symbol in symbols[:daily_limit]:
     updater.update_symbol(symbol, incremental=True)
 ```
@@ -572,7 +586,7 @@ print(f"Speedup: {naive_time / incremental_time:.1f}x faster")
 
 **Key Takeaways**:
 1. ✅ **Always use incremental updates** - 100-1000x more efficient
-2. ✅ **ProviderUpdater pattern** - Consistent across all providers
+2. ✅ **ProviderUpdater pattern** - Shared base for provider-specific workflows
 3. ✅ **Automatic gap filling** - Handles missing days gracefully
 4. ✅ **Dry run mode** - Test before storing
 5. ✅ **Check return values** - Monitor success and debug failures

@@ -447,6 +447,7 @@ class YahooFinanceProvider(BaseProvider):
     def fetch_company_metrics(
         self,
         symbol: str,
+        *,
         metrics: list[str] | None = None,
         currency: str | None = None,
     ) -> pl.DataFrame:

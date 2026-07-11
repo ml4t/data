@@ -1,7 +1,7 @@
 # Foreign Exchange (Forex) Data Guide
 
 **Asset Class**: Currency Pairs (FX)
-**Available Providers**: OANDA (primary), FXMacroData, Twelve Data, Alpha Vantage, Polygon
+**Available Providers**: OANDA (primary), FXMacroData, Twelve Data, Massive
 **Difficulty**: Moderate (requires understanding of forex mechanics)
 **Recommended For**: FX trading strategies, currency risk analysis, global macro research
 
@@ -24,8 +24,7 @@ ML4T Data provides access to **professional-grade forex data** through multiple 
 | **OANDA** | Demo account (practice) | Required | 70+ | Second to monthly | Professional FX trading |
 | **FXMacroData** | Public USD/free endpoints | Optional | Major FX macro context | Release/event time series | Macro-aware FX research |
 | **Twelve Data** | 800/day | Required | 50+ major pairs | Minute to monthly | Multi-asset portfolios |
-| **Alpha Vantage** | 25/day | Required | Major pairs | Daily+ | Research (low volume) |
-| **Polygon** | 5/min | Required | 30+ pairs | Minute to daily | Real-time FX + stocks |
+| **Massive** | 5/min | Required | 30+ pairs | Minute to daily | Real-time FX + stocks |
 
 ---
 
@@ -221,8 +220,7 @@ print(f"Fetched 50 pairs in {elapsed:.2f} seconds")
 |----------|------------|-------|
 | OANDA | 120/second | ⭐ Best for high-frequency |
 | Twelve Data | ~13/second (800/minute) | Good |
-| Alpha Vantage | 5/minute | Very restrictive |
-| Polygon | 5/minute (free) | Restrictive |
+| Massive | 5/minute (free) | Restrictive |
 
 ### Practice vs Live Accounts
 
@@ -406,34 +404,6 @@ df = provider.fetch_ohlcv(
 - ⚠️ Less granular than OANDA (no 5-second bars)
 
 **When to use**: Need FX + equities + crypto data from single source
-
----
-
-### Alpha Vantage (Low-Volume Research)
-
-**Best for**: Research projects with minimal FX data needs
-
-```python
-from ml4t.data.providers import AlphaVantageProvider
-
-provider = AlphaVantageProvider(api_key="your_key")
-
-# Fetch daily FX data
-df = provider.fetch_ohlcv(
-    symbol="EUR/USD",
-    start="2024-01-01",
-    end="2024-12-31",
-    frequency="daily"
-)
-```
-
-**Features**:
-- ✅ Major currency pairs
-- ✅ Daily, weekly, monthly intervals
-- ⚠️ **Only 25 API calls/day** (very restrictive)
-- ⚠️ No intraday data on free tier
-
-**When to use**: Very low-volume FX research (5-10 pairs, monthly updates)
 
 ---
 
@@ -655,24 +625,13 @@ Positions held overnight incur **rollover interest**:
 Forex data accumulates quickly at intraday frequencies:
 
 ```python
-from ml4t.data.provider_updater import ProviderUpdater
-
-updater = ProviderUpdater(provider="oanda")
-
 # First run: Fetch 1 year of hourly data
-df = updater.update(
-    symbol="EUR_USD",
-    frequency="H1",
-    lookback_days=365
-)
+history = provider.fetch_ohlcv("EUR_USD", start="2024-01-01", end="2024-12-31", frequency="H1")
+storage.write(history, "oanda/EUR_USD")
 # 365 days × 24 hours = 8,760 bars
 
 # Daily runs: Only fetch last 24 hours
-df = updater.update(
-    symbol="EUR_USD",
-    frequency="H1",
-    lookback_days=1
-)
+new_data = provider.fetch_ohlcv("EUR_USD", start=last_stored_date, end=today, frequency="H1")
 # Only 24 bars fetched, merged with existing data
 # 365x fewer API calls on subsequent runs!
 ```

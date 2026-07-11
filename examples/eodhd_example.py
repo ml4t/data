@@ -5,7 +5,7 @@ This script demonstrates:
 2. Global exchange support (US, London, Frankfurt)
 3. Multiple frequency support (daily, weekly, monthly)
 4. Error handling and rate limit management
-5. Provider updater pattern for incremental updates
+5. Fetching bounded ranges and storing them locally
 
 Requirements:
     - EODHD_API_KEY environment variable (get free key at: https://eodhd.com/register)
@@ -29,7 +29,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from ml4t.data.providers import EODHDProvider, EODHDUpdater
+from ml4t.data.providers import EODHDProvider
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 
@@ -253,9 +253,9 @@ def example_4_error_handling():
         provider.close()
 
 
-def example_5_incremental_updates():
-    """Example 5: Incremental updates with storage."""
-    print_section("EXAMPLE 5: Incremental Updates with Storage")
+def example_5_storage_workflow():
+    """Example 5: Fetch data and store it locally."""
+    print_section("EXAMPLE 5: Storage Workflow")
 
     api_key = os.getenv("EODHD_API_KEY")
     if not api_key:
@@ -272,42 +272,33 @@ def example_5_incremental_updates():
     provider = EODHDProvider(api_key=api_key)
     storage = HiveStorage(StorageConfig(base_path=str(storage_path)))
 
-    # Create updater
-    updater = EODHDUpdater(provider, storage)
-
     try:
         symbols = ["AAPL", "MSFT"]
 
-        print(f"Updating {len(symbols)} symbols with incremental pattern...\n")
+        print(f"Fetching {len(symbols)} symbols and writing them to storage...\n")
 
         for symbol in symbols:
-            print(f"📈 Updating {symbol}...")
+            print(f"📈 Fetching {symbol}...")
 
-            # Update with last 30 days
             end = datetime.now().strftime("%Y-%m-%d")
             start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-            result = updater.update_symbol(
+            data = provider.fetch_ohlcv(
                 symbol=symbol,
-                start_time=start,
-                end_time=end,
-                frequency="daily",
+                start=start,
+                end=end,
                 exchange="US",
-                dry_run=False,
             )
+            storage.write(data, f"eodhd/{symbol}")
 
-            if result["success"]:
-                print(f"   ✅ Updated: {result['records_fetched']} records")
-                print(f"   Date range: {result['start_date']} to {result['end_date']}")
-            else:
-                print(f"   ❌ Failed: {result.get('error', 'Unknown error')}")
+            print(f"   ✅ Stored {len(data)} records")
 
             print()
 
             # Rate limiting
             time.sleep(2)
 
-        print("✅ Successfully updated symbols with incremental pattern\n")
+        print("✅ Successfully stored symbol data\n")
         print(f"Data stored at: {storage_path}")
 
     except Exception as e:
@@ -336,7 +327,7 @@ def main():
     example_2_global_exchanges()
     example_3_multiple_frequencies()
     example_4_error_handling()
-    example_5_incremental_updates()
+    example_5_storage_workflow()
 
     print("\n" + "=" * 80)
     print("  All Examples Complete!")

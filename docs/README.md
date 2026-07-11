@@ -126,13 +126,12 @@ Quick comparison of common providers:
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Crypto (beginners) |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/mo | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | US stocks |
-| **Alpha Vantage** | ⚠️ | ✅ | ⚠️ | ❌ | 25/day | Low-volume research |
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Global (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time | Professional stocks |
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo | Professional forex |
 | **FXMacroData** | ❌ | ❌ | ✅ Context | ❌ | Public USD/free | FX macro releases |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Multi-asset |
-| **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Multi-asset (paid) |
+| **Massive** | ✅ | ✅ | ✅ | ✅ | 5/min | Multi-asset (paid) |
 | **Databento** | ❌ | ⚠️ | ❌ | ✅ OPRA | None | Institutional futures/options |
 | **Yahoo** | ❌ | ✅ | ❌ | ❌ | Unlimited | Free stocks (unreliable) |
 | **Binance** | ✅ | ❌ | ❌ | ✅ | 1200/min | Crypto exchange data |

@@ -1,7 +1,7 @@
 # Equities (Stocks) Data Guide
 
 **Asset Classes**: US Stocks, Global Stocks, ETFs, Indices
-**Available Providers**: 7 providers (5 US, 2 Global, 3 Multi-asset)
+**Available Providers**: Tiingo, Yahoo Finance, EODHD, Finnhub, Twelve Data, Massive
 **Difficulty**: Moderate (requires API keys, understanding of market hours)
 **Recommended For**: Stock trading strategies, portfolio backtesting, factor research
 
@@ -22,11 +22,10 @@ ML4T Data provides **multiple free-tier providers** for equity data, ranging fro
 |----------|-----------|--------|-----------|---------|----------|
 | **Tiingo** | ✅ | ❌ | 1000/day | Required | High-quality US stocks |
 | **Yahoo Finance** | ✅ | ⚠️ Limited | Unofficial | No | Quick experiments |
-| **Alpha Vantage** | ✅ | ⚠️ Limited | 25/day | Required | Research (low volume) |
 | **EODHD** | ✅ | ✅ 60+ exchanges | 500/day | Required | Global coverage |
 | **Finnhub** | ✅ | ✅ 70+ exchanges | Real-time only | Required | Professional (paid OHLCV) |
 | **Twelve Data** | ✅ | ✅ | 800/day | Required | Multi-asset flexibility |
-| **Polygon** | ✅ | ✅ | 5 calls/min | Required | Real-time + historical |
+| **Massive** | ✅ | ✅ | 5 calls/min | Required | Real-time + historical |
 
 ---
 
@@ -139,27 +138,16 @@ for symbol in sp500_symbols:
 #### Incremental Updates
 
 ```python
-from ml4t.data.provider_updater import ProviderUpdater
+from ml4t.data.update_manager import IncrementalUpdater
 
-# Initialize updater
-updater = ProviderUpdater(provider="tiingo")
+# First run: Fetch and store the initial history
+history = provider.fetch_ohlcv("AAPL", start="2024-01-01", end="2024-12-31")
+storage.write(history, "tiingo/AAPL")
 
-# First run: Fetch all history
-df = updater.update(
-    symbol="AAPL",
-    frequency="daily",
-    lookback_days=365  # 1 year of data
-)
-# Uses 1 API call
-
-# Subsequent runs: Only fetch new data
-df = updater.update(
-    symbol="AAPL",
-    frequency="daily",
-    lookback_days=7  # Only check last 7 days
-)
-# Uses 1 API call, merges with existing data
-# 100-1000x more efficient than re-fetching history!
+# Subsequent runs: Fetch only the missing range and merge
+new_data = provider.fetch_ohlcv("AAPL", start=last_stored_date, end=today)
+updater = IncrementalUpdater()
+updater.update_incremental(storage, tracker, "tiingo/AAPL", new_data, provider="tiingo")
 ```
 
 #### When to Use Tiingo
@@ -176,79 +164,6 @@ df = updater.update(
 - Intraday strategies (free tier)
 - High-frequency trading
 - Real-time quotes
-
----
-
-### Alpha Vantage (Low-Volume Research)
-
-#### Why Alpha Vantage?
-
-- ✅ **Multi-asset support** - Stocks, forex, crypto
-- ✅ **Fundamentals available** - Company overviews, earnings
-- ✅ **Technical indicators** - Built-in SMA, EMA, RSI, etc.
-- ⚠️ **Very restrictive free tier** - Only 25 calls/day
-
-**Best for**: Research projects with low API usage, multi-asset portfolios
-
-#### Quick Start
-
-```python
-from ml4t.data.providers import AlphaVantageProvider
-
-# Get free API key from: https://www.alphavantage.co/support/#api-key
-provider = AlphaVantageProvider(api_key="your_alpha_vantage_api_key")
-
-# Fetch daily data
-df = provider.fetch_ohlcv(
-    symbol="AAPL",
-    start="2024-01-01",
-    end="2024-12-31",
-    frequency="daily"
-)
-```
-
-#### Rate Limits
-
-**Free Tier** (Very Restrictive):
-- 5 API calls per minute
-- 25 API calls per day
-- No intraday data
-
-**Paid Tier** ($49.99/month):
-- 75 API calls per minute
-- Intraday data (1min, 5min, 15min, 30min, 60min)
-- Extended historical data
-
-**Critical: Use with ProviderUpdater**:
-```python
-from ml4t.data.provider_updater import ProviderUpdater
-
-# DON'T: Fetch full history every time (wastes API quota)
-for symbol in symbols:
-    df = provider.fetch_ohlcv(symbol, start="2020-01-01", end="2024-12-31")
-    # 100 symbols = 100 API calls = 4 days on free tier!
-
-# DO: Use incremental updates
-updater = ProviderUpdater(provider="alpha_vantage")
-for symbol in symbols:
-    df = updater.update(symbol, frequency="daily", lookback_days=7)
-    # Only fetch last 7 days, merge with cached data
-    # 100 symbols = 100 API calls = 1 day batch, but then only 100 calls/month
-```
-
-#### When to Use Alpha Vantage
-
-✅ **Good for**:
-- Research projects with minimal API usage
-- Multi-asset portfolios (stocks + forex + crypto)
-- Technical indicator exploration
-- Small symbol universes (5-10 symbols)
-
-❌ **Not ideal for**:
-- Production systems (too restrictive)
-- Large symbol universes
-- Daily batch updates (will hit 25/day limit)
-- Time-sensitive applications
 
 ---
 
@@ -367,7 +282,7 @@ EODHD uses **SYMBOL.EXCHANGE** notation:
 |----------|-----------------|-----------|-----------|
 | EODHD | 60+ exchanges | 500/day | €19.99/month |
 | Finnhub | 70+ exchanges | Real-time only | $59.99/month |
-| Polygon | Limited global | 5/min | $199/month |
+| Massive | Limited global | 5/min | $199/month |
 | **Winner** | EODHD | EODHD | **EODHD** (cheapest) |
 
 #### Rate Limiting Strategy
@@ -383,19 +298,15 @@ for symbol in symbols:
     df = provider.fetch_ohlcv(symbol, start="2024-01-01", end="2024-12-31")
     # 500 API calls = 1 day's quota (perfect fit!)
 
-# Example 2: Use incremental updates to reduce calls
-from ml4t.data.provider_updater import ProviderUpdater
-
-updater = ProviderUpdater(provider="eodhd")
-
-# First run: 500 calls (fetch full history)
+# Example 2: Use date-windowed fetches to reduce repeated work
 for symbol in symbols:
-    df = updater.update(symbol, frequency="daily", lookback_days=365)
+    df = provider.fetch_ohlcv(symbol, start="2024-01-01", end="2024-12-31")
+    storage.write(df, f"eodhd/{symbol}")
 
-# Daily runs: Only fetch new data (much fewer calls)
+# Daily runs: fetch only the missing range
 for symbol in symbols:
-    df = updater.update(symbol, frequency="daily", lookback_days=7)
-    # Only 1 API call per symbol if data is current
+    df = provider.fetch_ohlcv(symbol, start=last_stored_date(symbol), end=today)
+    # Merge with existing storage using IncrementalUpdater or your storage workflow.
 ```
 
 #### Multi-Exchange Portfolio Example
@@ -576,17 +487,8 @@ for symbol in symbols:
     # 4+ years × 252 days = 1000+ records per symbol
     # 100 symbols = 100 API calls for redundant data
 
-# ✅ Good: Only fetch new data
-from ml4t.data.provider_updater import ProviderUpdater
-
-updater = ProviderUpdater(provider="tiingo")
-
-# First run: Fetch all history (once)
-df = updater.update("AAPL", frequency="daily", lookback_days=365)
-
-# Daily runs: Only fetch last week, merge with cache
-df = updater.update("AAPL", frequency="daily", lookback_days=7)
-# 100-1000x fewer API calls!
+# ✅ Good: only fetch the missing range and merge with cached storage
+df = provider.fetch_ohlcv("AAPL", start=last_stored_date, end=today)
 ```
 
 **See**: [Tutorial 03: Incremental Updates](../tutorials/03_incremental_updates.md)
@@ -720,13 +622,8 @@ iex.fetch_ohlcv(symbol="AAPL", ...)          # SYMBOL only
 ### 2. Free Tier Limitations
 
 ```python
-# Alpha Vantage: Only 25 calls/day
-# ❌ This will fail on day 1:
-for symbol in sp500_symbols:  # 500 symbols
-    df = provider.fetch_ohlcv(symbol, ...)
-    # Hits limit at symbol #25
-
-# ✅ Spread over 20 days or upgrade to paid tier
+# Free tiers vary by provider and plan.
+# For large universes, verify current provider quotas before scheduling jobs.
 ```
 
 ### 3. Market Hours Matter
@@ -771,17 +668,17 @@ START: What markets do you need?
 │  │  → Tiingo (1000/day free) ✅
 │  │
 │  ├─ Need fundamentals too?
-│  │  → Planned ML4T fundamentals API; use provider-native APIs for now
+│  │  → Yahoo, EODHD, Finnhub, or Massive fundamentals helpers
 │  │
 │  └─ Low volume research (<10 symbols)?
-│     → Alpha Vantage (25/day free) ✅
+│     → Yahoo Finance for experiments, Tiingo or EODHD for API-backed workflows
 │
 ├─ Global stocks (60+ exchanges)?
 │  ├─ Budget-conscious?
 │  │  → EODHD (€19.99/month unlimited) ✅ BEST VALUE
 │  │
 │  └─ Professional real-time needs?
-│     → Finnhub ($59.99/month) or Polygon ($199/month)
+│     → Finnhub ($59.99/month) or Massive ($199/month)
 │
 └─ Multi-asset (stocks + forex + crypto)?
    → Twelve Data (800/day free) ✅

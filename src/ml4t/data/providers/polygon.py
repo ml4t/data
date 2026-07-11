@@ -29,6 +29,7 @@ import warnings
 from typing import Any, ClassVar, Literal
 
 import polars as pl
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,
@@ -51,6 +52,7 @@ from ml4t.data.providers.fundamentals import (
 )
 
 MassiveAssetClass = Literal["stocks", "options", "futures", "crypto", "forex"]
+SUPPORTED_MASSIVE_ASSET_CLASSES = {"stocks", "options", "futures", "crypto", "forex"}
 
 
 class MassiveProvider(BaseProvider):
@@ -170,6 +172,14 @@ class MassiveProvider(BaseProvider):
     def _infer_asset_class(symbol: str, asset_class: MassiveAssetClass | None = None) -> str:
         """Infer Massive asset class from symbol prefix when not explicit."""
         if asset_class:
+            if asset_class not in SUPPORTED_MASSIVE_ASSET_CLASSES:
+                supported = ", ".join(sorted(SUPPORTED_MASSIVE_ASSET_CLASSES))
+                raise DataValidationError(
+                    provider="massive",
+                    message=f"Unsupported asset_class '{asset_class}'. Supported: {supported}",
+                    field="asset_class",
+                    value=asset_class,
+                )
             return asset_class
 
         upper = symbol.upper()
@@ -194,6 +204,12 @@ class MassiveProvider(BaseProvider):
                 return upper[2:]
         return upper
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((NetworkError, RateLimitError)),
+        reraise=True,
+    )
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -226,6 +242,21 @@ class MassiveProvider(BaseProvider):
             return self._validate_ohlcv(data, self.name)
 
         return self._with_circuit_breaker(_fetch_and_process)
+
+    async def fetch_ohlcv_async(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        asset_class: MassiveAssetClass | None = None,
+    ) -> pl.DataFrame:
+        """Async wrapper around fetch_ohlcv that preserves Massive options."""
+        import asyncio
+
+        if asset_class is None:
+            return await asyncio.to_thread(self.fetch_ohlcv, symbol, start, end, frequency)
+        return await asyncio.to_thread(self.fetch_ohlcv, symbol, start, end, frequency, asset_class)
 
     def _fetch_raw_data(
         self,
@@ -425,6 +456,7 @@ class MassiveProvider(BaseProvider):
     def fetch_company_metrics(
         self,
         symbol: str,
+        *,
         limit: int = 100,
         metrics: list[str] | None = None,
     ) -> pl.DataFrame:

@@ -122,7 +122,7 @@ Each provider has sensible defaults:
 ```python
 # Providers have DEFAULT_RATE_LIMIT class variable
 TiingoProvider.DEFAULT_RATE_LIMIT  # (1000, 86400.0) = 1000 per day
-AlphaVantageProvider.DEFAULT_RATE_LIMIT  # (5, 60.0) = 5 per minute
+TwelveDataProvider.DEFAULT_RATE_LIMIT  # 800 per day on the free tier
 CoinGeckoProvider.DEFAULT_RATE_LIMIT  # (50, 60.0) = 50 per minute
 ```
 
@@ -138,9 +138,9 @@ provider = TiingoProvider(
 )
 
 # Or set very conservative limit for testing
-provider = AlphaVantageProvider(
+provider = TwelveDataProvider(
     api_key="key",
-    rate_limit=(3, 60.0)  # Only 3/min instead of 5/min (safer)
+    rate_limit=(3, 60.0)  # Only 3/min for cautious testing
 )
 ```
 
@@ -157,17 +157,17 @@ for symbol in symbols:
     # 1000+ days × 100 symbols = 100,000+ API calls!
 
 # ✅ GOOD: Incremental updates
-from ml4t.data.providers import TiingoUpdater
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.backend import StorageConfig
+from ml4t.data.update_manager import IncrementalUpdater
 
 storage = HiveStorage(StorageConfig(base_path="./data"))
-updater = TiingoUpdater(provider, storage)
+updater = IncrementalUpdater()
 
 for symbol in symbols:
-    updater.update_symbol(symbol, incremental=True)
-    # Only fetches NEW data since last update
-    # 1 day × 100 symbols = 100 API calls (1000x reduction!)
+    data = provider.fetch_ohlcv(symbol, start=last_stored_date, end=today)
+    updater.update_incremental(storage, tracker, f"{symbol}/daily", data, provider="tiingo")
+    # Fetch and merge only the missing date range.
 ```
 
 ### 2. Batch Requests When Possible

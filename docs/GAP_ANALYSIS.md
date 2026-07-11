@@ -221,11 +221,11 @@ financials = provider.fetch_financials(
 3. Add Yahoo Finance options (yfinance)
 4. Storage strategy for options chains
 
-### Phase 2: Fundamentals (Q2 2025)
-1. Design financials schema
-2. Implement Yahoo Finance financials
-3. Add Finnhub company metrics
-4. Quarterly update scheduling
+### Phase 2: Fundamentals
+1. Canonical financials and company metrics schema: implemented
+2. Yahoo Finance financials and metrics: implemented
+3. EODHD, Finnhub, and Massive fundamentals helpers: implemented
+4. Remaining work: live-provider hardening and earnings/event data
 
 ### Phase 3: Earnings & Events (Q3 2025)
 1. Earnings calendar integration
@@ -236,14 +236,14 @@ financials = provider.fetch_financials(
 
 ## Provider Capability Matrix
 
-| Feature | Yahoo | Databento | Polygon | EODHD | Finnhub |
+| Feature | Yahoo | Databento | Massive | EODHD | Finnhub |
 |---------|-------|-----------|---------|-------|---------|
 | OHLCV Daily | ✅ | ✅ | ✅ | ✅ | ✅ |
 | OHLCV Minute | ✅ (7d) | ✅ | ✅ | ❌ | ✅ |
 | Options Chains | ❌* | ✅ OPRA | ❌* | ❌* | ❌ |
-| Financials | ❌* | ❌ | ❌* | ❌* | ❌* |
+| Financials | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Earnings | ❌* | ❌ | ❌* | ❌* | ❌* |
-| Company Metrics | ❌ | ❌ | ❌* | ❌* | ❌* |
+| Company Metrics | ✅ | ❌ | ✅ | ✅ | ✅ |
 | Tick Data | ❌ | ❌* | ❌* | ❌ | ❌ |
 
 ✅ = Implemented | ❌* = Available but not implemented | ❌ = Not available
@@ -258,9 +258,9 @@ financials = provider.fetch_financials(
 - **ROI**: High for options-focused researchers
 
 ### Fundamentals
-- **Cost**: ~20 hours development
-- **Benefit**: Enable value investing, fundamental analysis
-- **ROI**: High for fundamental/quant researchers
+- **Status**: Canonical helpers implemented for Yahoo, EODHD, Finnhub, and Massive
+- **Remaining work**: Provider-specific live-data edge cases, pagination depth, and earnings/events
+- **Benefit**: Enables value investing and fundamental factor research
 
 ### Tick Data
 - **Cost**: ~80 hours development + significant storage
@@ -273,16 +273,16 @@ financials = provider.fetch_financials(
 
 ### Immediate (Next 3 Months)
 1. **Document options gap clearly** - Users should know this is planned
-2. **Add Yahoo financials** - Free, high value, low effort
-3. **Create fundamentals schema** - Prepare for multi-provider support
+2. **Harden fundamentals live coverage** - Validate EODHD, Finnhub, and Massive payload variants
+3. **Document fundamentals examples** - Show financial statements and company metrics workflows
 
 ### Short-Term (Next 6 Months)
 1. **Implement options chains** - Start with Polygon
-2. **Add company metrics** - Finnhub free tier
+2. **Add earnings calendar** - Event-driven research
 3. **Earnings calendar** - Event-driven research
 
 ### Long-Term (Next 12 Months)
-1. **Multi-provider fundamentals** - Yahoo + EODHD + Finnhub
+1. **Extend fundamentals depth** - Additional providers and pagination where plans support it
 2. **Options analytics** - IV surface, Greeks calculation
 3. **Tick data** - Evaluate based on user demand
 
@@ -290,7 +290,7 @@ financials = provider.fetch_financials(
 
 ## Conclusion
 
-ml4t-data provides comprehensive OHLCV coverage across 21 providers. The primary gaps are in **options data** and **fundamentals**, which are the highest-value additions for quantitative research.
+ml4t-data provides comprehensive OHLCV coverage across 21 providers and now includes an initial multi-provider fundamentals layer. The primary remaining gap is deeper **options and event data**, plus continued hardening of provider-specific fundamentals payloads.
 
 The library intentionally does NOT support streaming or real-time data, maintaining focus on batch historical data for backtesting and research.
 

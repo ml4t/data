@@ -23,7 +23,6 @@ flowchart TD
     USChoice -->|FREE only| USFree{Call volume?}
     USChoice -->|Can pay| USPaid{Budget?}
 
-    USFree -->|Low 25/day| AlphaVantage[Alpha Vantage<br/>FREE 25/day]
     USFree -->|Medium 1000/day| Tiingo[Tiingo<br/>FREE 1000/day]
     USFree -->|No API key| Yahoo[Yahoo Finance<br/>FREE unofficial]
 
@@ -36,7 +35,7 @@ flowchart TD
     GlobalChoice -->|Professional| FinnhubGlobal[Finnhub<br/>$59.99+/mo<br/>70+ exchanges]
 
     %% Forex Path
-    ForexChoice -->|Research only| AlphaVantageForex[Alpha Vantage<br/>FREE 25/day]
+    ForexChoice -->|Macro context| FXMacroData[FXMacroData<br/>Public USD/free endpoints]
     ForexChoice -->|Trading/Production| OANDA[OANDA<br/>Professional]
     ForexChoice -->|Multi-asset| TwelveDataForex[Twelve Data<br/>800/day]
 
@@ -46,15 +45,15 @@ flowchart TD
     %% Multi-Asset Path
     MultiChoice -->|Stocks+Forex+Crypto| TwelveData[Twelve Data<br/>FREE 800/day]
     MultiChoice -->|US Stocks+Global| EODHDMulti[EODHD<br/>€19.99/mo]
-    MultiChoice -->|Professional all| PolygonMulti[Polygon<br/>Paid]
+    MultiChoice -->|Professional all| MassiveMulti[Massive<br/>Paid]
 
     %% Style definitions
     classDef freeProvider fill:#90EE90,stroke:#228B22,stroke-width:2px
     classDef paidProvider fill:#FFB6C1,stroke:#DC143C,stroke-width:2px
     classDef decision fill:#87CEEB,stroke:#4682B4,stroke-width:2px
 
-    class CoinGecko,AlphaVantage,Tiingo,Yahoo,EODHDFree,AlphaVantageForex,TwelveData,CryptoCompare freeProvider
-    class EODHD,Finnhub,EODHDPaid,FinnhubGlobal,OANDA,Databento,TwelveDataForex,EODHDMulti,PolygonMulti paidProvider
+    class CoinGecko,Tiingo,Yahoo,EODHDFree,TwelveData,CryptoCompare,FXMacroData freeProvider
+    class EODHD,Finnhub,EODHDPaid,FinnhubGlobal,OANDA,Databento,TwelveDataForex,EODHDMulti,MassiveMulti paidProvider
     class AssetType,CryptoChoice,USChoice,GlobalChoice,ForexChoice,USFree,USPaid,GlobalChoice,ForexChoice,MultiChoice decision
 ```
 
@@ -67,13 +66,12 @@ flowchart TD
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | ❌ | No | Unlimited | Crypto historical |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | ❌ | Optional | Good | Crypto real-time |
 | **Tiingo** | ✅ | ✅ | ❌ | ❌ | ❌ | Yes | 1000/day | High-quality stocks |
-| **Alpha Vantage** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | 25/day | Multi-asset research |
 | **EODHD** | ❌ | ✅ | ✅ | ❌ | ❌ | Yes | 500/day | Global stocks, best value |
 | **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | Paid only | Professional grade |
 | **Twelve Data** | ✅ | ✅ | ❌ | ✅ | ❌ | Yes | 800/day | Multi-asset + indicators |
 | **OANDA** | ❌ | ❌ | ❌ | ✅ | ❌ | Yes | No | Professional forex |
 | **Databento** | ❌ | ✅ | ❌ | ❌ | ✅ | Yes | Paid only | Institutional futures |
-| **Polygon** | ✅ | ✅ | ❌ | ✅ | ❌ | Yes | Paid only | Professional multi-asset |
+| **Massive** | ✅ | ✅ | ❌ | ✅ | ✅ | Yes | Paid only | Professional multi-asset |
 
 ### By Pricing
 
@@ -83,7 +81,6 @@ flowchart TD
 |----------|-------------|---------------|---------------|
 | **CoinGecko** | 10-50 calls/min | Unlimited | Crypto research |
 | **Tiingo** | 1000 calls | 500 symbols | Daily stock updates |
-| **Alpha Vantage** | 25 calls | 750 calls | Conservative research |
 | **EODHD** | 500 calls | ~15K calls | Global stock testing |
 | **Twelve Data** | 800 calls | ~24K calls | Multi-asset research |
 | **CryptoCompare** | Varies | Varies | Crypto real-time |
@@ -95,14 +92,13 @@ flowchart TD
 | **EODHD** | €19.99/mo | 150K+ global tickers, unlimited calls |
 | **Twelve Data** | $9.99/mo | 800 calls/min, multi-asset |
 | **Tiingo** | $30/mo | 20K calls/hour, news, fundamentals |
-| **Alpha Vantage** | $49.99/mo | 75 calls/min, all features |
 
 #### Professional Tiers
 
 | Provider | Starting Price | What You Get |
 |----------|----------------|--------------|
 | **Finnhub** | $59.99/mo | Historical OHLCV, 70+ exchanges |
-| **Polygon** | $99/mo | Multi-asset, professional-grade |
+| **Massive** | $99/mo | Multi-asset, professional-grade |
 | **Databento** | Custom | Institutional futures and OPRA options |
 
 ## Decision Guidelines
@@ -114,8 +110,8 @@ flowchart TD
 
 ### For Researchers
 1. **Tiingo** - High-quality stock data with generous limits
-2. **Alpha Vantage** - Multi-asset but limited (25/day)
-3. **EODHD** - Global coverage, excellent value (€19.99/mo)
+2. **EODHD** - Global coverage, excellent value (€19.99/mo)
+3. **Twelve Data** - Multi-asset research with a usable free tier
 
 ### For Traders
 1. **EODHD** - Best value for global stocks (€19.99/mo)
@@ -124,7 +120,7 @@ flowchart TD
 
 ### For Institutions
 1. **Databento** - Tick-level futures data
-2. **Polygon** - Multi-asset professional data
+2. **Massive** - Multi-asset professional data
 3. **Finnhub** - Global exchange coverage
 
 ## Quick Recommendations
@@ -139,7 +135,7 @@ flowchart TD
 → **EODHD** (€19.99/mo for 60+ exchanges)
 
 ### "I want stocks + forex + crypto"
-→ **Twelve Data** (800/day free) or **Alpha Vantage** (25/day free)
+→ **Twelve Data** (800/day free)
 
 ### "I'm building a trading system"
 → **Finnhub** ($59.99+/mo) or **EODHD** (€19.99/mo)
@@ -150,7 +146,6 @@ flowchart TD
 ## Rate Limit Considerations
 
 ### Conservative (Good for testing)
-- **Alpha Vantage**: 25/day
 - **EODHD Free**: 500/day
 - **Twelve Data Free**: 800/day
 

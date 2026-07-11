@@ -163,6 +163,20 @@ class TestFXMacroDataRequests:
         assert get.call_args.args[0] == "https://api.fxmacrodata.com/v1/forex/eur/usd"
         assert get.call_args.kwargs["params"]["limit"] == 10
 
+    def test_fetch_endpoint_rejects_extra_params_for_no_param_endpoint(self, provider):
+        with pytest.raises(ValueError, match="does not accept parameters"):
+            provider.fetch_endpoint("calendar", currency="usd", start_date="2026-01-01")
+
+    def test_slug_preserves_underscore_indicator_names(self, provider):
+        response = _response(payload={"data": [{"date": "2026-01-01", "value": 4.5}]})
+
+        with patch.object(provider.session, "get", return_value=response) as get:
+            provider.fetch_announcements("usd", "policy_rate")
+
+        assert get.call_args.args[0] == (
+            "https://api.fxmacrodata.com/v1/announcements/usd/policy_rate"
+        )
+
     def test_health_returns_payload(self, provider):
         response = _response(payload={"status": "ok", "service": "fxmacrodata-api"})
 
@@ -226,7 +240,32 @@ class TestFXMacroDataRequests:
             with pytest.raises(ProviderError, match="bad request"):
                 provider.fetch_risk_sentiment()
 
+    def test_success_message_payload_is_not_treated_as_error(self, provider):
+        response = _response(payload={"message": "ok", "data": [{"status": "open"}]})
+
+        with patch.object(provider.session, "get", return_value=response):
+            frame = provider.fetch_market_sessions()
+
+        assert frame["status"][0] == "open"
+
+    def test_explicit_error_message_payload_raises(self, provider):
+        response = _response(payload={"message": "bad request", "success": False})
+
+        with patch.object(provider.session, "get", return_value=response):
+            with pytest.raises(ProviderError, match="bad request"):
+                provider.fetch_market_sessions()
+
     def test_request_error(self, provider):
         with patch.object(provider.session, "get", side_effect=httpx.RequestError("boom")):
             with pytest.raises(NetworkError, match="Request failed"):
                 provider.fetch_risk_sentiment()
+
+    def test_add_metadata_columns_skips_none_metadata(self, provider):
+        frame = provider._add_metadata_columns(
+            pl.DataFrame({"date": ["2026-01-01"], "value": [1.0]}),
+            {"source": None, "data_quality": {"is_proxy": None, "row_count": 1}},
+        )
+
+        assert "source" not in frame.columns
+        assert "data_quality_is_proxy" not in frame.columns
+        assert frame["data_quality_row_count"][0] == 1

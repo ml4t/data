@@ -1,16 +1,15 @@
-"""Example usage of Phase 1 providers (CoinGecko, IEX Cloud, Twelve Data).
+"""Example usage of Phase 1 providers (CoinGecko, Yahoo Finance, Twelve Data).
 
 This script demonstrates:
 1. Basic provider usage for direct data fetching
-2. Provider updater pattern for incremental updates
+2. Storage workflow for fetched data
 3. Error handling and rate limit management
 4. Storage and data retrieval
 5. Comparison of multiple providers for same symbol
 
 Requirements:
-    - IEX_CLOUD_API_KEY environment variable (get at: https://iexcloud.io/)
     - TWELVE_DATA_API_KEY environment variable (get at: https://twelvedata.com/)
-    - CoinGecko requires no API key
+    - CoinGecko and Yahoo Finance require no API key
 
 Usage:
     python examples/phase1_providers.py
@@ -27,11 +26,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from ml4t.data.providers import (
     CoinGeckoProvider,
-    CoinGeckoUpdater,
-    IEXCloudProvider,
-    IEXCloudUpdater,
     TwelveDataProvider,
-    TwelveDataUpdater,
+    YahooFinanceProvider,
 )
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
@@ -76,20 +72,17 @@ def example_1_basic_provider_usage():
     except Exception as e:
         print(f"❌ CoinGecko error: {e}\n")
 
-    # 2. IEX Cloud - API key required
-    print("2️⃣  IEX Cloud (Stocks - API key required)")
+    # 2. Yahoo Finance - No API key needed
+    print("2️⃣  Yahoo Finance (Stocks - No API key)")
     print("-" * 80)
-    if os.getenv("IEX_CLOUD_API_KEY"):
-        try:
-            iex = IEXCloudProvider()
-            aapl_data = iex.fetch_ohlcv("AAPL", start, end)
-            print_dataframe_sample(aapl_data, "AAPL OHLCV", 3)
-            iex.close()
-            time.sleep(1)
-        except Exception as e:
-            print(f"❌ IEX Cloud error: {e}\n")
-    else:
-        print("⚠️  IEX_CLOUD_API_KEY not set - skipping\n")
+    try:
+        yahoo = YahooFinanceProvider()
+        aapl_data = yahoo.fetch_ohlcv("AAPL", start, end)
+        print_dataframe_sample(aapl_data, "AAPL OHLCV", 3)
+        yahoo.close()
+        time.sleep(1)
+    except Exception as e:
+        print(f"❌ Yahoo Finance error: {e}\n")
 
     # 3. Twelve Data - API key required
     print("3️⃣  Twelve Data (Multi-asset - API key required)")
@@ -107,9 +100,9 @@ def example_1_basic_provider_usage():
         print("⚠️  TWELVE_DATA_API_KEY not set - skipping\n")
 
 
-def example_2_incremental_updates():
-    """Example 2: Incremental updates with ProviderUpdater pattern."""
-    print_section("EXAMPLE 2: Incremental Updates with ProviderUpdater")
+def example_2_storage_workflow():
+    """Example 2: Store fetched provider data."""
+    print_section("EXAMPLE 2: Storage Workflow")
 
     # Setup storage
     storage_path = Path("./example_data")
@@ -117,36 +110,14 @@ def example_2_incremental_updates():
 
     print(f"Storage path: {storage_path.absolute()}\n")
 
-    # CoinGecko incremental update
-    print("1️⃣  CoinGecko Incremental Update")
+    # CoinGecko storage example
+    print("1️⃣  CoinGecko Storage")
     print("-" * 80)
     try:
         provider = CoinGeckoProvider()
-        updater = CoinGeckoUpdater(provider, storage)
-
-        # First update - will download default 90 days of history
-        print("First update (initial download)...")
-        result1 = updater.update_symbol("ethereum", incremental=True, dry_run=False)
-
-        if result1["success"]:
-            print(f"  ✅ Success: Downloaded {result1['records_fetched']} records")
-            print(f"  📅 Date range: {result1['start_time']} to {result1['end_time']}")
-        else:
-            print(f"  ❌ Failed: {result1.get('error', 'Unknown error')}")
-
-        time.sleep(2)
-
-        # Second update - will only fetch new data
-        print("\nSecond update (incremental)...")
-        result2 = updater.update_symbol("ethereum", incremental=True, dry_run=False)
-
-        if result2["success"]:
-            if result2.get("skip_reason") == "already_up_to_date":
-                print("  ✅ Already up to date - no new data to fetch")
-            else:
-                print(f"  ✅ Added {result2['records_added']} new records")
-        else:
-            print(f"  ❌ Failed: {result2.get('error', 'Unknown error')}")
+        data = provider.fetch_ohlcv("ethereum", start="2024-01-01", end="2024-01-31")
+        storage.write(data, "coingecko/ethereum")
+        print(f"  ✅ Stored {len(data)} Ethereum records")
 
         # Read data from storage
         print("\nReading stored data...")
@@ -159,35 +130,6 @@ def example_2_incremental_updates():
         print(f"❌ Error: {e}\n")
 
     time.sleep(2)
-
-    # IEX Cloud incremental update
-    if os.getenv("IEX_CLOUD_API_KEY"):
-        print("2️⃣  IEX Cloud Incremental Update")
-        print("-" * 80)
-        try:
-            provider = IEXCloudProvider()
-            updater = IEXCloudUpdater(provider, storage)
-
-            print("Updating GOOGL...")
-            result = updater.update_symbol("GOOGL", incremental=True, dry_run=False)
-
-            if result["success"]:
-                print(f"  ✅ Success: {result['records_fetched']} records")
-
-                # Read and display
-                data = storage.read_data("GOOGL", "iex_cloud")
-                print_dataframe_sample(data, "GOOGL data", 3)
-            else:
-                print(f"  ❌ Failed: {result.get('error', 'Unknown error')}")
-
-            provider.close()
-
-        except Exception as e:
-            print(f"❌ Error: {e}\n")
-
-        time.sleep(1)
-    else:
-        print("2️⃣  IEX Cloud - Skipped (no API key)\n")
 
 
 def example_3_error_handling():
@@ -251,44 +193,28 @@ def example_4_comparing_providers():
     symbol = "AAPL"
     results = {}
 
-    # Fetch from IEX Cloud
-    if os.getenv("IEX_CLOUD_API_KEY"):
-        print("1️⃣  Fetching from IEX Cloud...")
-        try:
-            provider = IEXCloudProvider()
-            updater = IEXCloudUpdater(provider, storage)
-            result = updater.update_symbol(symbol, incremental=True, dry_run=False)
-
-            if result["success"]:
-                data = storage.read_data(symbol, "iex_cloud")
-                results["IEX Cloud"] = data
-                print(f"  ✅ IEX Cloud: {len(data)} records")
-            else:
-                print("  ❌ IEX Cloud failed")
-
-            provider.close()
-            time.sleep(1)
-
-        except Exception as e:
-            print(f"  ❌ IEX Cloud error: {e}")
-    else:
-        print("1️⃣  IEX Cloud - skipped (no API key)")
+    # Fetch from Yahoo Finance
+    print("1️⃣  Fetching from Yahoo Finance...")
+    try:
+        provider = YahooFinanceProvider()
+        data = provider.fetch_ohlcv(symbol, "2024-01-01", "2024-01-31")
+        storage.write(data, f"yahoo/{symbol}")
+        results["Yahoo Finance"] = data
+        print(f"  ✅ Yahoo Finance: {len(data)} records")
+        provider.close()
+        time.sleep(1)
+    except Exception as e:
+        print(f"  ❌ Yahoo Finance error: {e}")
 
     # Fetch from Twelve Data
     if os.getenv("TWELVE_DATA_API_KEY"):
         print("2️⃣  Fetching from Twelve Data...")
         try:
             provider = TwelveDataProvider()
-            updater = TwelveDataUpdater(provider, storage)
-            result = updater.update_symbol(symbol, incremental=True, dry_run=False)
-
-            if result["success"]:
-                data = storage.read_data(symbol, "twelve_data")
-                results["Twelve Data"] = data
-                print(f"  ✅ Twelve Data: {len(data)} records")
-            else:
-                print("  ❌ Twelve Data failed")
-
+            data = provider.fetch_ohlcv(symbol, "2024-01-01", "2024-01-31")
+            storage.write(data, f"twelve_data/{symbol}")
+            results["Twelve Data"] = data
+            print(f"  ✅ Twelve Data: {len(data)} records")
             provider.close()
             time.sleep(8)
 
@@ -326,7 +252,6 @@ def example_5_dry_run():
 
     try:
         provider = CoinGeckoProvider()
-        updater = CoinGeckoUpdater(provider, storage)
 
         # Get current state
         try:
@@ -337,20 +262,13 @@ def example_5_dry_run():
 
         print(f"Records in storage before: {before_count}")
 
-        # Dry run
-        print("\nRunning dry run update for cardano...")
-        result = updater.update_symbol(
+        print("\nPreviewing fetch for cardano without writing...")
+        preview = provider.fetch_ohlcv(
             "cardano",
-            start_time=datetime.now() - timedelta(days=30),
-            end_time=datetime.now(),
-            dry_run=True,  # Won't save to storage
+            start=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"),
+            end=datetime.now().strftime("%Y-%m-%d"),
         )
-
-        if result["success"]:
-            print(f"  ✅ Would download {result['records_fetched']} records")
-            print(f"  📅 Date range: {result['start_time']} to {result['end_time']}")
-        else:
-            print(f"  ❌ Failed: {result.get('error', 'Unknown')}")
+        print(f"  ✅ Would write {len(preview)} records")
 
         # Check storage again
         try:
@@ -372,26 +290,24 @@ def main():
     """Run all examples."""
     print("=" * 80)
     print("  Phase 1 Providers - Example Usage")
-    print("  CoinGecko + IEX Cloud + Twelve Data")
+    print("  CoinGecko + Yahoo Finance + Twelve Data")
     print("=" * 80)
     print()
     print("This script demonstrates the usage of Phase 1 data providers.")
     print()
     print("API Keys needed:")
     coingecko_ok = "✅" if True else "❌"
-    iex_ok = "✅" if os.getenv("IEX_CLOUD_API_KEY") else "❌"
     twelve_ok = "✅" if os.getenv("TWELVE_DATA_API_KEY") else "❌"
 
     print(f"  {coingecko_ok} CoinGecko (no key needed)")
-    print(f"  {iex_ok} IEX Cloud (IEX_CLOUD_API_KEY)")
+    print("  ✅ Yahoo Finance (no key needed)")
     print(f"  {twelve_ok} Twelve Data (TWELVE_DATA_API_KEY)")
     print()
 
-    if not os.getenv("IEX_CLOUD_API_KEY") and not os.getenv("TWELVE_DATA_API_KEY"):
-        print("⚠️  WARNING: No API keys set. Only CoinGecko examples will run.")
+    if not os.getenv("TWELVE_DATA_API_KEY"):
+        print("⚠️  WARNING: TWELVE_DATA_API_KEY not set. Twelve Data examples will be skipped.")
         print()
         print("To get API keys:")
-        print("  - IEX Cloud: https://iexcloud.io/ (free tier available)")
         print("  - Twelve Data: https://twelvedata.com/ (free tier: 800 req/day)")
         print()
         input("Press Enter to continue with limited examples...")
@@ -399,7 +315,7 @@ def main():
     # Run examples
     try:
         example_1_basic_provider_usage()
-        example_2_incremental_updates()
+        example_2_storage_workflow()
         example_3_error_handling()
         example_4_comparing_providers()
         example_5_dry_run()

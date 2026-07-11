@@ -316,13 +316,14 @@ class FinnhubProvider(BaseProvider):
     def fetch_company_metrics(
         self,
         symbol: str,
-        metric: str = "all",
+        *,
+        metric_group: str = "all",
         metrics: list[str] | None = None,
     ) -> pl.DataFrame:
         """Fetch numeric company metrics from Finnhub."""
         data = self._request_json(
             "/stock/metric",
-            params={"symbol": symbol.upper(), "metric": metric, "token": self.api_key},
+            params={"symbol": symbol.upper(), "metric": metric_group, "token": self.api_key},
             symbol=symbol,
         )
         rows = numeric_mapping_to_metric_rows(

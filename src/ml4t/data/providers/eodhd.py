@@ -380,6 +380,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
     def fetch_company_metrics(
         self,
         symbol: str,
+        *,
         exchange: str | None = None,
         metrics: list[str] | None = None,
     ) -> pl.DataFrame:

@@ -548,6 +548,19 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
         **params: Any,
     ) -> pl.DataFrame | PayloadResult:
         """Fetch any supported endpoint by name."""
+        endpoints_without_params = {
+            "calendar",
+            "catalogue",
+            "commodities_latest",
+            "market_sessions",
+            "risk_sentiment",
+            "news",
+            "press_releases",
+        }
+        if endpoint in endpoints_without_params and params:
+            unsupported = ", ".join(sorted(params))
+            raise ValueError(f"Endpoint '{endpoint}' does not accept parameters: {unsupported}")
+
         if endpoint == "announcements":
             return self.fetch_announcements(
                 currency, indicator, include_metadata=include_metadata, **params
@@ -610,8 +623,10 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
             raise NetworkError(provider=self.name, message="Failed to parse JSON response") from err
 
         if isinstance(payload, dict):
-            error = payload.get("error") or payload.get("detail") or payload.get("message")
-            if error and not self._contains_payload_rows(payload):
+            error = payload.get("error") or payload.get("detail")
+            if not error and payload.get("success") is False:
+                error = payload.get("message") or "API request failed"
+            if error:
                 raise ProviderError(provider=self.name, message=str(error))
         return payload
 
@@ -626,7 +641,7 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
 
     @staticmethod
     def _slug(value: str) -> str:
-        return value.strip().lower().replace("_", "-")
+        return value.strip().lower().replace(" ", "-")
 
     @staticmethod
     def _parse_retry_after(value: str | None) -> float | None:
@@ -709,18 +724,26 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
             if key not in metadata:
                 continue
             value = metadata.get(key)
-            if FXMacroDataProvider._is_scalar(value) and key not in frame.columns:
+            if (
+                value is not None
+                and FXMacroDataProvider._is_scalar(value)
+                and key not in frame.columns
+            ):
                 expressions.append(pl.lit(value).alias(key))
 
         data_quality = metadata.get("data_quality")
         if isinstance(data_quality, dict):
             for key, value in data_quality.items():
                 column = f"data_quality_{key}"
-                if FXMacroDataProvider._is_scalar(value) and column not in frame.columns:
+                if (
+                    value is not None
+                    and FXMacroDataProvider._is_scalar(value)
+                    and column not in frame.columns
+                ):
                     expressions.append(pl.lit(value).alias(column))
 
         return frame.with_columns(expressions) if expressions else frame
 
     @staticmethod
     def _is_scalar(value: Any) -> bool:
-        return value is None or isinstance(value, str | int | float | bool)
+        return isinstance(value, str | int | float | bool)

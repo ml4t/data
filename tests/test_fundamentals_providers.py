@@ -1,5 +1,6 @@
 """Tests for provider fundamentals helpers and endpoints."""
 
+import inspect
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -8,8 +9,37 @@ import pytest
 from ml4t.data.core.exceptions import DataValidationError
 from ml4t.data.providers.eodhd import EODHDProvider
 from ml4t.data.providers.finnhub import FinnhubProvider
+from ml4t.data.providers.fundamentals import rows_to_company_metrics_frame
 from ml4t.data.providers.polygon import MassiveProvider
 from ml4t.data.providers.yahoo import YahooFinanceProvider
+
+
+class TestFundamentalsHelpers:
+    def test_rows_to_company_metrics_frame_infers_schema_beyond_first_100_rows(self):
+        rows = [
+            {
+                "symbol": "AAPL",
+                "provider": "test",
+                "metric": f"metric_{index}",
+                "value": float(index),
+                "source": None,
+            }
+            for index in range(100)
+        ]
+        rows.append(
+            {
+                "symbol": "AAPL",
+                "provider": "test",
+                "metric": "metric_100",
+                "value": 100.0,
+                "source": "late_source",
+            }
+        )
+
+        frame = rows_to_company_metrics_frame(rows)
+
+        assert len(frame) == 101
+        assert frame["source"][-1] == "late_source"
 
 
 class TestYahooFundamentals:
@@ -44,15 +74,18 @@ class TestYahooFundamentals:
         ticker = MagicMock()
         ticker.get_info.return_value = {
             "marketCap": 3_000_000_000.0,
+            "enterpriseValue": "3,100,000,000",
             "longName": "Apple Inc.",
             "trailingPE": 31.5,
+            "isEsgPopulated": True,
         }
 
         with patch("ml4t.data.providers.yahoo.yf.Ticker", return_value=ticker):
             frame = provider.fetch_company_metrics("AAPL")
 
-        assert len(frame) == 2
-        assert set(frame["metric"]) == {"marketCap", "trailingPE"}
+        assert len(frame) == 3
+        assert set(frame["metric"]) == {"enterpriseValue", "marketCap", "trailingPE"}
+        assert "isEsgPopulated" not in frame["metric"].to_list()
 
 
 class TestFinnhubFundamentals:
@@ -96,6 +129,12 @@ class TestFinnhubFundamentals:
         assert len(frame) == 1
         assert frame["metric"][0] == "peBasicExclExtraTTM"
 
+    def test_fetch_company_metrics_provider_options_are_keyword_only(self, provider):
+        signature = inspect.signature(provider.fetch_company_metrics)
+
+        assert signature.parameters["metric_group"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["metrics"].kind is inspect.Parameter.KEYWORD_ONLY
+
 
 class TestEODHDFundamentals:
     @pytest.fixture
@@ -128,12 +167,39 @@ class TestEODHDFundamentals:
         assert set(frame["line_item"]) == {"totalRevenue", "netIncome"}
         assert "fundamentals/AAPL.US" in get.call_args.args[0]
 
+    def test_fetch_financials_accepts_string_values(self, provider):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "General": {"CurrencyCode": "USD"},
+            "Financials": {
+                "Income_Statement": {
+                    "yearly": {
+                        "2024-12-31": {
+                            "date": "2024-12-31",
+                            "totalRevenue": "100.5",
+                            "netIncome": "20",
+                            "isAudited": True,
+                        }
+                    }
+                }
+            },
+        }
+
+        with patch.object(provider.rate_limiter, "acquire"):
+            with patch.object(provider.session, "get", return_value=response):
+                frame = provider.fetch_financials("AAPL")
+
+        assert len(frame) == 2
+        assert set(frame["line_item"]) == {"totalRevenue", "netIncome"}
+        assert frame.filter(frame["line_item"] == "totalRevenue")["value"][0] == 100.5
+
     def test_fetch_company_metrics(self, provider):
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {
             "General": {"CurrencyCode": "USD"},
-            "Highlights": {"MarketCapitalization": 3000.0, "Name": "Apple"},
+            "Highlights": {"MarketCapitalization": "3000.0", "Name": "Apple"},
             "Valuation": {"TrailingPE": 30.0},
         }
 
@@ -143,6 +209,12 @@ class TestEODHDFundamentals:
 
         assert len(frame) == 2
         assert set(frame["metric"]) == {"Highlights.MarketCapitalization", "Valuation.TrailingPE"}
+
+    def test_fetch_company_metrics_provider_options_are_keyword_only(self, provider):
+        signature = inspect.signature(provider.fetch_company_metrics)
+
+        assert signature.parameters["exchange"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["metrics"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 class TestMassiveFundamentals:
@@ -203,3 +275,9 @@ class TestMassiveFundamentals:
             "valuation.price_to_earnings",
             "profitability.return_on_equity",
         }
+
+    def test_fetch_company_metrics_provider_options_are_keyword_only(self, provider):
+        signature = inspect.signature(provider.fetch_company_metrics)
+
+        assert signature.parameters["limit"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["metrics"].kind is inspect.Parameter.KEYWORD_ONLY

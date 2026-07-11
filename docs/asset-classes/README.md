@@ -48,9 +48,9 @@ df = provider.fetch_ohlcv("BTC", start="2024-01-01", end="2024-12-31")
 ### [📊 Equities Data Guide](./equities.md)
 
 **Asset Classes**: US Stocks, Global Stocks, ETFs, Indices
-**Providers**: Tiingo, Yahoo, EODHD, Finnhub, Twelve Data, Massive, Polygon
+**Providers**: Tiingo, Yahoo, EODHD, Finnhub, Twelve Data, Massive
 **Difficulty**: 🟡 Moderate
-**Free Tier**: ⚠️ Varies (25/day to 1000/day depending on provider)
+**Free Tier**: ⚠️ Varies by provider
 
 **Best for**:
 - US stock backtesting
@@ -82,7 +82,7 @@ df_uk = provider.fetch_ohlcv("VOD.LSE", start="2024-01-01", end="2024-12-31")
 ### [💱 Forex Data Guide](./forex.md)
 
 **Asset Class**: Currency Pairs (FX)
-**Providers**: OANDA (primary), Twelve Data, Alpha Vantage, Polygon
+**Providers**: OANDA (primary), FXMacroData, Twelve Data, Massive
 **Difficulty**: 🟡 Moderate
 **Free Tier**: ⚠️ OANDA requires demo account (free), others have limits
 
@@ -141,7 +141,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | **Forex strategies** | Forex | OANDA (professional-grade) |
 | **Futures trading** | Futures | Databento (institutional quality) |
 | **Multi-asset portfolio** | Mixed | Twelve Data (stocks+forex+crypto) |
-| **Research (low volume)** | Any | Alpha Vantage (25/day free) |
+| **Research (low volume)** | Any | Yahoo, Tiingo, EODHD, or Twelve Data depending on asset class |
 
 ### By Budget
 
@@ -158,7 +158,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 
 **$100+/month (Professional)**:
 - ✅ **Global Stocks**: Finnhub ($59.99/month)
-- ✅ **Multi-asset**: Polygon ($199-399/month)
+- ✅ **Multi-asset**: Massive ($199-399/month)
 - ✅ **Futures**: Databento ($50-100/month professional)
 
 ### By Market Hours
@@ -184,12 +184,11 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Optional | Crypto (beginners) |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Optional | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | Required | US stocks |
-| **Alpha Vantage** | ⚠️ | ✅ | ⚠️ | ❌ | 25/day | Required | Low-volume research |
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Required | Global stocks (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time only | Required | Professional stocks |
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo account | Required | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Required | Multi-asset |
-| **Polygon** | ✅ | ✅ | ✅ | ✅ | 5/min | Required | Multi-asset (paid) |
+| **Massive** | ✅ | ✅ | ✅ | ✅ | 5/min | Required | Multi-asset (paid) |
 | **Databento** | ❌ | ⚠️ | ❌ | ✅ OPRA | None | Required | Institutional futures/options |
 
 **Legend**:
@@ -206,16 +205,16 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 **All asset classes** benefit from incremental updates to reduce API calls:
 
 ```python
-from ml4t.data.provider_updater import ProviderUpdater
+from ml4t.data.update_manager import IncrementalUpdater
 
-# Works with any provider
-updater = ProviderUpdater(provider="tiingo")  # or coingecko, oanda, etc.
+# Fetch the missing range with a provider, then merge into storage.
+updater = IncrementalUpdater()
 
 # First run: Fetch all history
-df = updater.update("AAPL", frequency="daily", lookback_days=365)
+df = provider.fetch_ohlcv("AAPL", start="2024-01-01", end="2024-12-31")
 
 # Subsequent runs: Only fetch new data
-df = updater.update("AAPL", frequency="daily", lookback_days=7)
+result = updater.update_incremental(storage, tracker, "AAPL/daily", df, provider="tiingo")
 # 100-1000x fewer API calls!
 ```
 
@@ -282,7 +281,7 @@ def fetch_data_robust(symbol: str, asset_class: str):
 
 # CoinGecko: 50 calls/min
 # Tiingo: 1000 calls/day
-# Alpha Vantage: 5 calls/min, 25 calls/day
+# Free-tier providers can have restrictive daily quotas.
 # OANDA: 120 calls/second (very generous)
 
 # Use incremental updates to minimize calls

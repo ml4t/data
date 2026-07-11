@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from numbers import Real
 from typing import Any, Literal
@@ -173,7 +174,8 @@ def wide_pandas_statement_to_financials(
     rows: list[dict[str, Any]] = []
     for line_item in frame.index:
         for period_end, value in frame.loc[line_item].items():
-            if not _is_number(value):
+            numeric_value = _to_float(value)
+            if numeric_value is None:
                 continue
             rows.append(
                 {
@@ -183,7 +185,7 @@ def wide_pandas_statement_to_financials(
                     "period_type": period_type,
                     "period_end": _date_string(period_end),
                     "line_item": str(line_item),
-                    "value": float(value),
+                    "value": numeric_value,
                     "currency": currency,
                     "source": source,
                 }
@@ -253,14 +255,15 @@ def numeric_mapping_to_metric_rows(
     for metric, value in values.items():
         if requested is not None and metric not in requested:
             continue
-        if not _is_number(value):
+        numeric_value = _to_float(value)
+        if numeric_value is None:
             continue
         rows.append(
             {
                 "symbol": symbol.upper(),
                 "provider": provider,
                 "metric": metric,
-                "value": float(value),
+                "value": numeric_value,
                 "period": period,
                 "as_of": as_of,
                 "currency": currency,
@@ -322,7 +325,7 @@ def _rows_to_frame(
     if not row_list:
         return pl.DataFrame(schema=schema)
 
-    frame = pl.DataFrame(row_list)
+    frame = pl.DataFrame(row_list, infer_schema_length=None)
     for column, dtype in schema.items():
         if column not in frame.columns:
             frame = frame.with_columns(pl.lit(None).cast(dtype).alias(column))
@@ -332,13 +335,29 @@ def _rows_to_frame(
 
 
 def _is_number(value: Any) -> bool:
+    return _to_float(value) is not None
+
+
+def _to_float(value: Any) -> float | None:
     if isinstance(value, bool):
-        return False
+        return None
     if value is None:
-        return False
-    if not isinstance(value, Real):
-        return False
-    return not pd.isna(value)
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace(",", "")
+        if not text:
+            return None
+        try:
+            numeric_value = float(text)
+        except ValueError:
+            return None
+    elif isinstance(value, Real):
+        numeric_value = float(value)
+    else:
+        return None
+    if pd.isna(numeric_value) or not math.isfinite(numeric_value):
+        return None
+    return numeric_value
 
 
 def _date_string(value: Any) -> str | None:
@@ -369,14 +388,18 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
-def _iter_numeric_leaves(record: Mapping[str, Any], prefix: str = "") -> Iterable[tuple[str, Real]]:
+def _iter_numeric_leaves(
+    record: Mapping[str, Any], prefix: str = ""
+) -> Iterable[tuple[str, float]]:
     for key, value in record.items():
         line_item = f"{prefix}.{key}" if prefix else str(key)
-        if _is_number(value):
-            yield line_item, value
+        numeric_value = _to_float(value)
+        if numeric_value is not None:
+            yield line_item, numeric_value
             continue
         if isinstance(value, Mapping):
-            if "value" in value and _is_number(value["value"]):
-                yield line_item, value["value"]
+            nested_value = _to_float(value.get("value"))
+            if nested_value is not None:
+                yield line_item, nested_value
             else:
                 yield from _iter_numeric_leaves(value, line_item)

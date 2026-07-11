@@ -616,15 +616,12 @@ print(f"Contract roll gaps: {len(gaps)}")  # Should be 3-4 per year
 ### 5. Use Incremental Updates
 
 ```python
-from ml4t.data.provider_updater import ProviderUpdater
-
-updater = ProviderUpdater(provider="databento")
-
 # First run: Fetch 1 year of data
-df = updater.update("ES.v.0", frequency="daily", lookback_days=365)
+history = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")
+storage.write(history, "databento/ES.v.0")
 
 # Daily runs: Only fetch last 1-2 days
-df = updater.update("ES.v.0", frequency="daily", lookback_days=2)
+new_data = provider.fetch_ohlcv("ES.v.0", start=last_stored_date, end=today)
 # Saves API quota and reduces costs
 ```
 

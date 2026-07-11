@@ -509,23 +509,12 @@ df = provider.fetch_ohlcv(symbol="BTC/USD", start="2023-01-01", end="2023-12-31"
 Don't re-fetch entire history every time:
 
 ```python
-from ml4t.data.provider_updater import ProviderUpdater
-
 # First run: Fetch all history
-updater = ProviderUpdater(provider="coingecko")
-df = updater.update(
-    symbol="BTC",
-    frequency="daily",
-    lookback_days=365  # Initial: 1 year of data
-)
+history = provider.fetch_ohlcv("BTC", start="2024-01-01", end="2024-12-31")
+storage.write(history, "coingecko/BTC")
 
-# Subsequent runs: Only fetch new data
-df = updater.update(
-    symbol="BTC",
-    frequency="daily",
-    lookback_days=7  # Only fetch last 7 days, merge with existing
-)
-# Automatically detects gaps and fills them!
+# Subsequent runs: Only fetch new data, then merge into storage
+new_data = provider.fetch_ohlcv("BTC", start=last_stored_date, end=today)
 ```
 
 **See**: [Tutorial 03: Incremental Updates](../tutorials/03_incremental_updates.md)
