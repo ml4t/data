@@ -58,6 +58,22 @@ from ml4t.data.providers.base import BaseProvider
 logger = structlog.get_logger()
 _DEFAULT_DATA_SUBPATH = Path("factors/aqr")
 
+# Characters NTFS reserves. A downloaded name containing one of these cannot be
+# written on Windows at all, and if it is ever committed it makes the whole
+# repository unclonable there.
+_WINDOWS_RESERVED = '<>:"|?*\\'
+
+
+def _filename_from_url_path(url_path: str) -> str:
+    """Reduce a URL path to a filename that is legal on every platform.
+
+    AQR serves `esg_frontier` as `...vF.xlsx?sc_lang=en`, so the query string has
+    to be dropped rather than carried onto disk.
+    """
+    name = url_path.split("?", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
+    name = "".join("_" if c in _WINDOWS_RESERVED or ord(c) < 32 else c for c in name)
+    return name.rstrip(" .")
+
 
 # Available AQR datasets - organized by category
 AQRDataset = Literal[
@@ -886,8 +902,14 @@ class AQRFactorProvider(BaseProvider):
                     log.warning(f"Unknown dataset: {dataset}")
                     continue
 
-                filename = cls.DOWNLOAD_URLS[dataset]
-                url = cls.BASE_URL + filename
+                url_path = cls.DOWNLOAD_URLS[dataset]
+                url = cls.BASE_URL + url_path
+                # The URL path is not a filename: `esg_frontier` carries a
+                # `?sc_lang=en` query string, and `?` cannot exist on NTFS. Saving
+                # it verbatim produced a file that made the book repository
+                # unclonable on Windows, and fails outright when a Windows reader
+                # runs the download.
+                filename = _filename_from_url_path(url_path)
                 log.info(f"Downloading {dataset}...", url=url)
 
                 try:

@@ -11,7 +11,11 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from ml4t.data.providers.aqr import AQR_CATEGORIES, AQRFactorProvider
+from ml4t.data.providers.aqr import (
+    AQR_CATEGORIES,
+    AQRFactorProvider,
+    _filename_from_url_path,
+)
 
 
 class TestDataPathValidation:
@@ -270,3 +274,40 @@ class TestFetchDateRange:
         """Test fetch without date filter returns all."""
         df = provider_with_data.fetch("qmj_factors")
         assert len(df) == 4
+
+
+class TestSourceFilenamesArePortable:
+    """A URL path is not a filename (see the `esg_frontier` query string).
+
+    `?` is reserved on NTFS, so writing the URL path verbatim fails outright for a
+    Windows reader, and a file that did get committed made the book repository
+    unclonable on Windows.
+    """
+
+    WINDOWS_RESERVED = '<>:"|?*\\'
+
+    def test_query_string_is_dropped(self):
+        assert (
+            _filename_from_url_path("ESG_efficient_frontier_portfolios_vF.xlsx?sc_lang=en")
+            == "ESG_efficient_frontier_portfolios_vF.xlsx"
+        )
+
+    def test_plain_filename_is_untouched(self):
+        name = "Quality-Minus-Junk-Factors-Monthly.xlsx"
+        assert _filename_from_url_path(name) == name
+
+    def test_fragment_and_directories_are_dropped(self):
+        assert _filename_from_url_path("sub/dir/Name.xlsx?a=1#frag") == "Name.xlsx"
+
+    def test_trailing_dot_and_space_are_stripped(self):
+        # Windows silently strips these, so the file on disk would not be the
+        # file the caller asked for.
+        assert _filename_from_url_path("Name.xlsx. ") == "Name.xlsx"
+
+    @pytest.mark.parametrize("dataset,url_path", sorted(AQRFactorProvider.DOWNLOAD_URLS.items()))
+    def test_every_download_url_yields_a_windows_legal_name(self, dataset, url_path):
+        name = _filename_from_url_path(url_path)
+        offenders = sorted({c for c in name if c in self.WINDOWS_RESERVED or ord(c) < 32})
+        assert not offenders, f"{dataset} would write {name!r}, illegal on Windows: {offenders}"
+        assert name == name.rstrip(" .")
+        assert name, f"{dataset} produced an empty filename from {url_path!r}"
