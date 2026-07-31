@@ -55,6 +55,30 @@ class TestAQRFactorProviderInit:
             with pytest.raises(FileNotFoundError):
                 AQRFactorProvider()
 
+    def test_missing_data_message_names_a_command_a_reader_can_run(self, monkeypatch):
+        """The old message named `AQRFactorProvider.download()` and nothing else.
+
+        That is a Python API call, so a reader who hits this has nothing to type,
+        and a reader who *has* the data and is looking at the wrong path is told to
+        download it again. The message has to say where it looked, why there, and
+        what to run.
+        """
+        monkeypatch.setenv("ML4T_DATA_PATH", "/mnt/big/data")
+        with pytest.raises(FileNotFoundError) as exc:
+            AQRFactorProvider(data_path="/nonexistent/path")
+
+        message = str(exc.value)
+        assert "/nonexistent/path" in message
+        assert "ML4T_DATA_PATH=/mnt/big/data" in message
+        assert "uv run python data/factors/aqr_download.py" in message
+
+    def test_missing_data_message_says_when_the_root_is_unset(self, monkeypatch):
+        monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
+        with pytest.raises(FileNotFoundError) as exc:
+            AQRFactorProvider(data_path="/nonexistent/path")
+
+        assert "ML4T_DATA_PATH is not set" in str(exc.value)
+
 
 class TestNameProperty:
     """Tests for name property."""

@@ -39,6 +39,7 @@ All data from AQR's public research library: https://www.aqr.com/Insights/Datase
 from __future__ import annotations
 
 import json
+import os
 import re
 from calendar import monthrange
 from datetime import datetime
@@ -51,12 +52,36 @@ import pandas as pd
 import polars as pl
 import structlog
 
-from ml4t.data.core.config import resolve_storage_path
+from ml4t.data.core.config import PREFERRED_DATA_ENV_VAR, resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
 _DEFAULT_DATA_SUBPATH = Path("factors/aqr")
+
+# The download command a reader of the book actually has. `download()` below is a
+# Python API call, so naming it alone leaves a reader with nothing to type; a reader
+# who has the data and is looking at the wrong path needs the path explained instead.
+_DOWNLOAD_COMMAND = "uv run python data/factors/aqr_download.py"
+
+
+def _missing_data_message(path: Path, *, what: str = "AQR data directory") -> str:
+    """Say where the data was looked for, why there, and what to run."""
+    configured = os.getenv(PREFERRED_DATA_ENV_VAR)
+    where = (
+        f"{PREFERRED_DATA_ENV_VAR}={configured}"
+        if configured
+        else f"{PREFERRED_DATA_ENV_VAR} is not set, so the data root defaults to ./data "
+        f"relative to the working directory"
+    )
+    return (
+        f"{what} not found at {path}\n"
+        f"  Resolved from: {where}\n"
+        f"  If the data is somewhere else, point {PREFERRED_DATA_ENV_VAR} at it.\n"
+        f"  To download it, from the repository root: {_DOWNLOAD_COMMAND}\n"
+        f"  In your own code: AQRFactorProvider.download()"
+    )
+
 
 # Characters NTFS reserves. A downloaded name containing one of these cannot be
 # written on Windows at all, and if it is ever committed it makes the whole
@@ -669,10 +694,7 @@ class AQRFactorProvider(BaseProvider):
         )
 
         if not self.data_path.exists():
-            raise FileNotFoundError(
-                f"AQR data directory not found at {self.data_path}. "
-                f"Run AQRFactorProvider.download() to fetch data from AQR."
-            )
+            raise FileNotFoundError(_missing_data_message(self.data_path))
 
         self.logger.info("Initialized AQR factor provider", data_path=str(self.data_path))
 
@@ -762,7 +784,7 @@ class AQRFactorProvider(BaseProvider):
                 symbol=dataset,
                 details={
                     "reason": f"Parquet file not found: {parquet_path}",
-                    "suggestion": "Run AQRFactorProvider.download() to fetch data",
+                    "suggestion": _missing_data_message(parquet_path, what=f"{dataset}.parquet"),
                 },
             )
 
