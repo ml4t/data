@@ -300,20 +300,21 @@ report = manager.detect(data)
 
 ## Documentation
 
-- [Getting Started](docs/user-guide/getting-started.md) — quick start guide
-- [Configuration](docs/user-guide/configuration.md) — YAML config reference
-- [Storage](docs/user-guide/storage.md) — Hive partitioning and backends
-- [Incremental Updates](docs/user-guide/incremental-updates.md) — update strategies and gap detection
-- [Data Quality](docs/user-guide/data-quality.md) — validation and anomaly detection
-- [CLI Reference](docs/user-guide/cli-reference.md) — command-line interface
-- [Provider Selection Guide](docs/provider-selection-guide.md) — choosing providers
-- [Creating a Provider](docs/creating_a_provider.md) — extending with new sources
+- [Getting Started](docs/user-guide/getting-started.md) - quick start guide
+- [Configuration](docs/user-guide/configuration.md) - YAML config reference
+- [Storage](docs/user-guide/storage.md) - Hive partitioning and backends
+- [Incremental Updates](docs/user-guide/incremental-updates.md) - update strategies and gap detection
+- [Data Quality](docs/user-guide/data-quality.md) - validation and anomaly detection
+- [CLI Reference](docs/user-guide/cli-reference.md) - command-line interface
+- [Provider Selection Guide](docs/getting-started/provider-selection.md) - choosing providers
+- [Creating a Provider](docs/contributing/creating-a-provider.md) - extending with new sources
 
 ## Technical Characteristics
 
 - **Polars-based**: Native Polars DataFrames throughout
-- **Consistent schema**: All providers return the same column structure
-- **Async support**: Async providers and batch operations for parallel downloads
+- **Capability-specific schemas**: OHLCV, economic-series, factor, and specialized providers
+  expose contracts suited to their data
+- **Async support**: OHLCV providers implementing the async protocol can use parallel batch operations
 - **Metadata tracking**: Last update timestamps, row counts, date ranges
 - **Resilience**: Rate limiting, retry with exponential backoff, gap detection
 - **Storage layouts**: Partitioned Hive and single-file Parquet storage

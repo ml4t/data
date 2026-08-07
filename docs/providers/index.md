@@ -30,7 +30,7 @@ ML4T Data supports 20+ live and specialized data providers, plus synthetic and t
 
 ## Async Support
 
-All providers support async via `async_batch_load()`:
+OHLCV providers that implement `fetch_ohlcv_async()` can use `async_batch_load()`:
 
 - **Native async**: Uses `httpx.AsyncClient` for true non-blocking I/O
 - **Thread-wrapped**: Uses `asyncio.to_thread()` for sync SDKs
@@ -47,9 +47,9 @@ async with YahooFinanceProvider() as provider:
     )
 ```
 
-## Unified API
+## Provider APIs
 
-All providers implement the same interface:
+OHLCV providers use the following interface:
 
 ```python
 provider.fetch_ohlcv(
@@ -62,3 +62,8 @@ provider.fetch_ohlcv(
 
 Returns a Polars DataFrame with columns:
 `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`
+
+Other providers expose capability-specific methods. Economic providers use methods such as
+`fetch_series()`, factor providers use `fetch()`, and specialized providers document their own
+contracts on their provider pages. Check the provider's capabilities before passing it to
+`DataManager` or `async_batch_load()`.

@@ -1,6 +1,6 @@
 """Tests for provider_updater module."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -166,6 +166,44 @@ class TestProviderUpdater:
         assert result["success"] is True
         # Should use default start time
         assert updater.fetch_call_count == 1
+
+    def test_full_refresh_without_start_uses_default(self):
+        """A full refresh without an explicit start uses the provider default."""
+        storage = MockStorage()
+        updater = MockProviderUpdater(storage)
+
+        result = updater.update_symbol("AAPL", incremental=False, dry_run=True)
+
+        assert result["success"] is True
+        assert updater.fetch_call_count == 1
+
+    def test_incremental_aware_timestamp_uses_aware_end(self):
+        """The implicit end time preserves the stored timestamp's timezone."""
+        latest = datetime.now(UTC) - timedelta(hours=12)
+        storage = MockStorage(latest_timestamp=latest)
+        updater = MockProviderUpdater(storage)
+
+        start, end = updater._get_time_range("AAPL", None, None, incremental=True)
+
+        assert start is not None
+        assert end is not None
+        assert start.tzinfo is UTC
+        assert end.tzinfo is UTC
+
+    def test_mixed_timezone_awareness_is_rejected(self):
+        """Explicit ranges cannot mix aware and naive datetimes."""
+        storage = MockStorage()
+        updater = MockProviderUpdater(storage)
+
+        result = updater.update_symbol(
+            "AAPL",
+            start_time=datetime(2024, 1, 1, tzinfo=UTC),
+            end_time=datetime(2024, 1, 2),
+            incremental=False,
+        )
+
+        assert result["success"] is False
+        assert "timezone-aware or both naive" in result["errors"][0]
 
     def test_update_symbol_incremental_with_existing_data(self):
         """Test incremental update with existing data."""

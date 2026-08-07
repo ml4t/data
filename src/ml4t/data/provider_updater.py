@@ -115,6 +115,9 @@ class ProviderUpdater(ABC):
                 stats["skip_reason"] = "already_up_to_date"
                 return stats
 
+            if start_time is None or end_time is None:
+                raise RuntimeError("time range resolution returned an incomplete range")
+
             stats["start_time"] = start_time
             stats["end_time"] = end_time
 
@@ -208,7 +211,7 @@ class ProviderUpdater(ABC):
             max_workers=max_workers,
         )
 
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
 
         if max_workers == 1 or len(symbols) == 1:
             # Sequential processing
@@ -258,7 +261,7 @@ class ProviderUpdater(ABC):
 
         # Log summary
         successful = sum(1 for r in results.values() if r.get("success", False))
-        total_added = sum(r.get("records_added", 0) for r in results.values())
+        total_added = sum(int(r.get("records_added", 0)) for r in results.values())
 
         self.logger.info(
             "Concurrent updates completed",
@@ -289,11 +292,14 @@ class ProviderUpdater(ABC):
             Tuple of (start_time, end_time), or (None, None) if no update needed
         """
         # Determine start time
-        if incremental and start_time is None:
-            # Get latest existing timestamp
-            latest_ts = self.storage.get_latest_timestamp(symbol, self.provider_name)
+        if start_time is None:
+            latest_ts = (
+                self.storage.get_latest_timestamp(symbol, self.provider_name)
+                if incremental
+                else None
+            )
 
-            if latest_ts:
+            if latest_ts is not None:
                 # Start from after latest, with safety margin
                 start_time = latest_ts - self.safety_margin + timedelta(minutes=1)
 
@@ -304,17 +310,21 @@ class ProviderUpdater(ABC):
                     start=start_time,
                 )
             else:
-                # No existing data - use subclass default
+                # No existing data or a full refresh - use subclass default
                 start_time = self._get_default_start_time(symbol)
                 self.logger.info(
-                    "No existing data, starting from default",
+                    "Using default start time",
                     symbol=symbol,
                     start=start_time,
+                    incremental=incremental,
                 )
 
         # Determine end time
         if end_time is None:
-            end_time = datetime.now().replace(microsecond=0)
+            end_time = datetime.now(tz=start_time.tzinfo).replace(microsecond=0)
+
+        if (start_time.tzinfo is None) != (end_time.tzinfo is None):
+            raise ValueError("start_time and end_time must both be timezone-aware or both naive")
 
         # Validate range
         if start_time >= end_time:
