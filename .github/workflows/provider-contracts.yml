@@ -18,7 +18,7 @@ on:
           - databento
           - oanda
       allow-paid-requests:
-        description: Authorize requests that Databento may bill
+        description: Authorize requests that may be billed (Databento, Finnhub, Massive)
         required: false
         default: false
         type: boolean
@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: provider-contract-${{ github.ref }}
+  group: provider-contract-${{ github.ref }}-${{ inputs.provider }}
   cancel-in-progress: false
 
 env:

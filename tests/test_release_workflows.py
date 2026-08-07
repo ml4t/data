@@ -102,9 +102,50 @@ def test_provider_contract_jobs_isolate_credentials() -> None:
             assert other_credential not in serialized
 
 
+def test_provider_contract_guards_prevent_skipped_green_runs() -> None:
+    workflow = _load("provider-contracts.yml")
+    jobs = workflow["jobs"]
+    guarded_credentials = {
+        "alpaca": {"PROVIDER_API_KEY", "PROVIDER_API_SECRET"},
+        "cryptocompare": {"PROVIDER_API_KEY"},
+        "databento": {"PROVIDER_API_KEY"},
+        "finnhub": {"PROVIDER_API_KEY"},
+        "fred": {"PROVIDER_API_KEY"},
+        "massive": {"PROVIDER_API_KEY"},
+        "oanda": {"PROVIDER_API_KEY"},
+        "tiingo": {"PROVIDER_API_KEY"},
+    }
+    paid_providers = {"databento", "finnhub", "massive"}
+
+    for provider, expected_env in guarded_credentials.items():
+        guard = next(
+            step for step in jobs[provider]["steps"] if step.get("name", "").startswith("Require")
+        )
+        assert set(guard["env"]) >= expected_env
+        for variable in expected_env:
+            assert f"os.environ.get('{variable}')" in guard["run"]
+        if provider in paid_providers:
+            assert "ALLOW_PAID_REQUESTS" in guard["env"]
+            assert "os.environ.get('ALLOW_PAID_REQUESTS') == 'true'" in guard["run"]
+
+
+def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
+    workflow = _load("provider-contracts.yml")
+    jobs = workflow["jobs"]
+    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    options = inputs["provider"]["options"]
+
+    assert set(options) == set(jobs)
+    for option in options:
+        assert jobs[option]["if"] == f"inputs.provider == '{option}'"
+
+    assert "Databento" in inputs["allow-paid-requests"]["description"]
+    assert "Finnhub" in inputs["allow-paid-requests"]["description"]
+    assert "Massive" in inputs["allow-paid-requests"]["description"]
+
+
 def test_public_provider_integrations_are_manually_reachable() -> None:
     workflow = _load("provider-contracts.yml")
-    options = workflow["on"]["workflow_dispatch"]["inputs"]["provider"]["options"]
     public_job = workflow["jobs"]["public"]
     command = next(
         step["run"]
@@ -112,17 +153,6 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
         if step.get("name") == "Run public live integrations"
     )
 
-    assert set(options) == {
-        "alpaca",
-        "cryptocompare",
-        "databento",
-        "finnhub",
-        "fred",
-        "massive",
-        "oanda",
-        "public",
-        "tiingo",
-    }
     for contract in (
         "test_binance_public.py::TestBinancePublicProvider::test_fetch_daily_spot_btc",
         "test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc",
