@@ -86,8 +86,8 @@ See [EODHD Exchange List](https://eodhd.com/financial-apis/exchanges-api-list-of
 ## API Key Setup
 
 ```bash
-# .env file
-EODHD_API_KEY=your_api_key_here
+# Environment variable
+export EODHD_API_KEY=your_api_key_here
 ```
 
 Get your API key at [eodhd.com/register](https://eodhd.com/register).

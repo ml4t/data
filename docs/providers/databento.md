@@ -147,8 +147,8 @@ df = provider.fetch_continuous_futures(
 ## API Key Setup
 
 ```bash
-# .env file
-DATABENTO_API_KEY=your_api_key_here
+# Environment variable
+export DATABENTO_API_KEY=your_api_key_here
 ```
 
 Get your API key at [databento.com](https://databento.com).

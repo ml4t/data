@@ -52,8 +52,8 @@ Use Oanda's instrument format with underscore:
 ## API Key Setup
 
 ```bash
-# .env file
-OANDA_API_KEY=your_api_key_here
+# Environment variable
+export OANDA_API_KEY=your_api_key_here
 ```
 
 Get credentials by opening a practice account at [oanda.com](https://www.oanda.com).

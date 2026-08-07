@@ -111,9 +111,9 @@ provider = AlpacaDataProvider(feed="sip", adjustment="all")
 ## API Key Setup
 
 ```bash
-# .env file (project convention)
-ALPACA_API_KEY=your_key_here
-ALPACA_API_SECRET=your_secret_here
+# Environment variables (project convention)
+export ALPACA_API_KEY=your_key_here
+export ALPACA_API_SECRET=your_secret_here
 ```
 
 Alpaca's own SDK/CLI names `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` are also

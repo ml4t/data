@@ -50,8 +50,8 @@ provider.close()
 ## API Key Setup
 
 ```bash
-# .env file
-FINNHUB_API_KEY=your_api_key_here
+# Environment variable
+export FINNHUB_API_KEY=your_api_key_here
 ```
 
 Get your API key at [finnhub.io/register](https://finnhub.io/register).

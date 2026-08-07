@@ -109,8 +109,8 @@ or pass `asset_class="futures"` when calling `fetch_ohlcv()`.
 ## API Key Setup
 
 ```bash
-# .env file
-MASSIVE_API_KEY=your_api_key_here
+# Environment variable
+export MASSIVE_API_KEY=your_api_key_here
 ```
 
 Get your API key at [massive.com](https://massive.com).

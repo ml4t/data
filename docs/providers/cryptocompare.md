@@ -50,8 +50,8 @@ Quote currency defaults to USD.
 ## API Key Setup
 
 ```bash
-# .env file
-CRYPTOCOMPARE_API_KEY=your_api_key_here
+# Environment variable
+export CRYPTOCOMPARE_API_KEY=your_api_key_here
 ```
 
 Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptocompare.com/cryptopian/api-keys).

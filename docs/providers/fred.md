@@ -57,8 +57,8 @@ See [FRED Categories](https://fred.stlouisfed.org/categories) for all 800,000+ s
 ## API Key Setup
 
 ```bash
-# .env file
-FRED_API_KEY=your_api_key_here
+# Environment variable
+export FRED_API_KEY=your_api_key_here
 ```
 
 Get your free API key at [fred.stlouisfed.org/docs/api/fred](https://fred.stlouisfed.org/docs/api/fred/).
