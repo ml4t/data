@@ -100,6 +100,8 @@ class ProviderConfig(BaseModel):
 
     _api_key_reference: str | None = PrivateAttr(default=None)
     _api_secret_reference: str | None = PrivateAttr(default=None)
+    _api_key_reference_value: str | None = PrivateAttr(default=None)
+    _api_secret_reference_value: str | None = PrivateAttr(default=None)
 
     name: str = Field(description="Provider name")
     type: ProviderType = Field(description="Provider type")
@@ -144,12 +146,18 @@ class ProviderConfig(BaseModel):
         """Serialize environment references without serializing resolved credentials."""
         data = handler(self)
         api_key_reference = (
-            self.api_key if _is_environment_reference(self.api_key) else self._api_key_reference
+            self.api_key
+            if _is_environment_reference(self.api_key)
+            else self._api_key_reference
+            if self.api_key == self._api_key_reference_value
+            else None
         )
         api_secret_reference = (
             self.api_secret
             if _is_environment_reference(self.api_secret)
             else self._api_secret_reference
+            if self.api_secret == self._api_secret_reference_value
+            else None
         )
         if api_key_reference is not None:
             data["api_key"] = api_key_reference
@@ -161,8 +169,10 @@ class ProviderConfig(BaseModel):
         """Retain a raw environment reference for safe configuration serialization."""
         if field == "api_key":
             self._api_key_reference = reference
+            self._api_key_reference_value = self.api_key
         elif field == "api_secret":
             self._api_secret_reference = reference
+            self._api_secret_reference_value = self.api_secret
         else:
             raise ValueError(f"Unsupported credential field: {field}")
 

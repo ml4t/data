@@ -398,6 +398,73 @@ class TestConfigLoader:
         assert "resolved-key-value" not in target.read_text(encoding="utf-8")
         assert "resolved-secret-value" not in target.read_text(encoding="utf-8")
 
+    def test_load_save_preserves_embedded_credential_references(self, tmp_path, monkeypatch):
+        """Credential templates survive interpolation without persisting their resolutions."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key")
+        monkeypatch.setenv("TEST_TENANT", "tenant")
+        monkeypatch.setenv("TEST_PROVIDER_SECRET", "resolved-secret")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: Bearer ${TEST_PROVIDER_KEY}\n"
+            "    api_secret: ${TEST_TENANT}-${TEST_PROVIDER_SECRET}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        config = loader.load()
+        loader.save(config, target)
+
+        saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+        assert saved["providers"][0]["api_key"] == "Bearer ${TEST_PROVIDER_KEY}"
+        assert saved["providers"][0]["api_secret"] == ("${TEST_TENANT}-${TEST_PROVIDER_SECRET}")
+        assert "resolved-key" not in target.read_text(encoding="utf-8")
+        assert "resolved-secret" not in target.read_text(encoding="utf-8")
+
+    def test_credential_assignment_invalidates_retained_reference(self, tmp_path, monkeypatch):
+        """A later literal assignment cannot serialize an obsolete environment reference."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: ${TEST_PROVIDER_KEY}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+        config = loader.load()
+
+        config.providers[0].api_key = "replacement-literal"
+        loader.save(config, target)
+
+        saved_provider = yaml.safe_load(target.read_text(encoding="utf-8"))["providers"][0]
+        assert "api_key" not in saved_provider
+        assert "resolved-key" not in target.read_text(encoding="utf-8")
+        assert "replacement-literal" not in target.read_text(encoding="utf-8")
+
+    def test_plain_literal_credential_is_not_reserialized(self, tmp_path):
+        """A source literal is excluded from every saved configuration."""
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: source-literal-credential\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        loader.save(loader.load(), target)
+
+        assert "api_key" not in yaml.safe_load(target.read_text(encoding="utf-8"))["providers"][0]
+        assert "source-literal-credential" not in target.read_text(encoding="utf-8")
+
     def test_write_yaml_failure_preserves_target_and_removes_temporary_file(self, tmp_path):
         """A serialization failure neither clobbers the target nor leaves a temp file."""
         from ml4t.data.config._serialization import write_yaml

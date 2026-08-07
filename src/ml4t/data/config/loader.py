@@ -109,24 +109,24 @@ class ConfigLoader:
 
         return result
 
-    @staticmethod
-    def _retain_credential_references(config: DataConfig, raw_data: dict[str, Any]) -> None:
+    def _retain_credential_references(self, config: DataConfig, raw_data: dict[str, Any]) -> None:
         """Attach raw environment references without retaining resolved values."""
         raw_providers = raw_data.get("providers", [])
-        if not isinstance(raw_providers, list):
+        if isinstance(raw_providers, dict):
+            provider_entries = [
+                {"name": name, **(entry if isinstance(entry, dict) else {})}
+                for name, entry in raw_providers.items()
+            ]
+        elif isinstance(raw_providers, list):
+            provider_entries = raw_providers
+        else:
             return
-        for raw_provider in raw_providers:
+        for provider, raw_provider in zip(config.providers, provider_entries, strict=False):
             if not isinstance(raw_provider, dict):
-                continue
-            provider_name = raw_provider.get("name")
-            if not isinstance(provider_name, str):
-                continue
-            provider = config.get_provider(provider_name)
-            if provider is None:
                 continue
             for field in ("api_key", "api_secret"):
                 value = raw_provider.get(field)
-                if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                if isinstance(value, str) and self.env_pattern.search(value):
                     provider._set_credential_reference(field, value)
 
     def _load_yaml(self, path: Path) -> dict[str, Any]:
