@@ -1,5 +1,6 @@
 """Tests for configuration management."""
 
+import os
 from datetime import time as datetime_time
 from pathlib import Path
 
@@ -212,6 +213,7 @@ class TestDataConfig:
         assert len(loaded.universes) == 1
         assert loaded.universes[0].name == "sp500"
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
     def test_yaml_serialization_excludes_credentials_and_restricts_permissions(self, tmp_path):
         """Saving a runtime configuration cannot disclose resolved credentials."""
         credential = "canary-runtime-credential"
@@ -354,6 +356,7 @@ class TestConfigLoader:
         assert len(data["providers"]) == 1
         assert data["providers"][0]["name"] == "test"
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
     def test_save_config_excludes_credentials_and_restricts_permissions(self, tmp_path):
         """ConfigLoader applies the same secure serialization contract."""
         credential = "canary-runtime-credential"
@@ -373,6 +376,47 @@ class TestConfigLoader:
 
         assert credential not in save_path.read_text()
         assert save_path.stat().st_mode & 0o777 == 0o600
+
+    def test_load_save_preserves_environment_credential_references(self, tmp_path, monkeypatch):
+        """A load-save cycle retains references while keeping resolved values out of YAML."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key-value")
+        monkeypatch.setenv("TEST_PROVIDER_SECRET", "resolved-secret-value")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: yahoo\n"
+            "    api_key: ${TEST_PROVIDER_KEY}\n"
+            "    api_secret: ${TEST_PROVIDER_SECRET}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        config = loader.load()
+        assert config.providers[0].api_key == "resolved-key-value"
+        assert config.providers[0].api_secret == "resolved-secret-value"
+        loader.save(config, target)
+
+        saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+        assert saved["providers"][0]["api_key"] == "${TEST_PROVIDER_KEY}"
+        assert saved["providers"][0]["api_secret"] == "${TEST_PROVIDER_SECRET}"
+        assert "resolved-key-value" not in target.read_text(encoding="utf-8")
+        assert "resolved-secret-value" not in target.read_text(encoding="utf-8")
+
+    def test_write_yaml_failure_preserves_target_and_removes_temporary_file(self, tmp_path):
+        """A serialization failure neither clobbers the target nor leaves a temp file."""
+        from ml4t.data.config._serialization import write_yaml
+
+        target = tmp_path / "config.yaml"
+        target.write_text("original: true\n", encoding="utf-8")
+        original_entries = set(tmp_path.iterdir())
+
+        with pytest.raises(yaml.representer.RepresenterError):
+            write_yaml(target, {"unsupported": object()})
+
+        assert target.read_text(encoding="utf-8") == "original: true\n"
+        assert set(tmp_path.iterdir()) == original_entries
 
 
 class TestScheduleConfig:

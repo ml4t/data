@@ -8,7 +8,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ml4t.data.assets.asset_class import AssetClass
@@ -16,9 +24,14 @@ from ml4t.data.core.config import resolve_data_root
 from ml4t.data.core.models import Frequency
 
 
+def _is_environment_reference(value: str | None) -> bool:
+    """Return whether a value is a complete environment-variable reference."""
+    return value is not None and value.startswith("${") and value.endswith("}")
+
+
 def _exclude_resolved_credential(value: str | None) -> bool:
     """Exclude runtime credentials while retaining environment references."""
-    return value is not None and not (value.startswith("${") and value.endswith("}"))
+    return value is not None and not _is_environment_reference(value)
 
 
 # Storage configuration enums
@@ -145,6 +158,9 @@ class RateLimitConfig(BaseModel):
 class ProviderConfig(BaseModel):
     """Base provider configuration."""
 
+    _api_key_reference: str | None = PrivateAttr(default=None)
+    _api_secret_reference: str | None = PrivateAttr(default=None)
+
     name: str = Field(description="Provider name")
     type: ProviderType = Field(description="Provider type")
     enabled: bool = Field(default=True, description="Whether provider is enabled")
@@ -168,6 +184,35 @@ class ProviderConfig(BaseModel):
     cache_enabled: bool = Field(default=True, description="Enable response caching")
     cache_ttl: int = Field(default=3600, ge=0, description="Cache TTL in seconds")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific settings")
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_credential_references(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        """Serialize environment references without serializing resolved credentials."""
+        data = handler(self)
+        api_key_reference = (
+            self.api_key if _is_environment_reference(self.api_key) else self._api_key_reference
+        )
+        api_secret_reference = (
+            self.api_secret
+            if _is_environment_reference(self.api_secret)
+            else self._api_secret_reference
+        )
+        if api_key_reference is not None:
+            data["api_key"] = api_key_reference
+        if api_secret_reference is not None:
+            data["api_secret"] = api_secret_reference
+        return data
+
+    def _set_credential_reference(self, field: str, reference: str) -> None:
+        """Retain a raw environment reference for safe configuration serialization."""
+        if field == "api_key":
+            self._api_key_reference = reference
+        elif field == "api_secret":
+            self._api_secret_reference = reference
+        else:
+            raise ValueError(f"Unsupported credential field: {field}")
 
     @field_validator("rate_limit", mode="before")
     @classmethod
@@ -392,28 +437,9 @@ class DataConfig(BaseSettings):
     @classmethod
     def from_yaml(cls, path: str | Path) -> DataConfig:
         """Load configuration from YAML file with environment variable support."""
-        import os
-        import re
+        from ml4t.data.config.loader import ConfigLoader
 
-        import yaml
-
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {path}")
-
-        with open(path) as f:
-            content = f.read()
-
-        # Expand environment variables in format ${VAR_NAME}
-        def expand_env_vars(match):
-            var_name = match.group(1)
-            return os.environ.get(var_name, match.group(0))
-
-        content = re.sub(r"\$\{([^}]+)\}", expand_env_vars, content)
-        data = yaml.safe_load(content)
-
-        # Create instance with merged config
-        return cls(**data)
+        return ConfigLoader(Path(path)).load()
 
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML file."""

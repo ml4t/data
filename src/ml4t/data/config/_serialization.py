@@ -22,7 +22,9 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
     temporary_path = Path(temporary_name)
     try:
         temporary_path.chmod(0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as temporary_file:
+        temporary_file = os.fdopen(fd, "w", encoding="utf-8")
+        fd = -1
+        with temporary_file:
             yaml.safe_dump(
                 data,
                 temporary_file,
@@ -35,9 +37,10 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
         os.replace(temporary_path, path)
         path.chmod(0o600)
     except BaseException:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         temporary_path.unlink(missing_ok=True)
         raise
