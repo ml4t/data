@@ -14,11 +14,11 @@ from functools import cache
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 import polars as pl
 import structlog
 
 from ml4t.data.core.exceptions import ProviderRoutingError
+from ml4t.data.utils.conversion import polars_to_pandas
 
 if TYPE_CHECKING:
     from ml4t.data.managers.provider_manager import ProviderManager, ProviderRouter
@@ -104,7 +104,7 @@ class FetchManager:
             return df.lazy()
         if self.output_format == "pandas":
             if not _has_pyarrow():
-                return pd.DataFrame(df.to_dict(as_series=False))
+                return polars_to_pandas(df)
             return df.to_pandas()
         return df
 

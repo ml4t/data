@@ -109,3 +109,30 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
             )
 
     return pl.DataFrame(columns, strict=False, nan_to_null=True)
+
+
+def _polars_series_to_pandas(series: pl.Series) -> pd.Series:
+    """Convert one Polars series without Arrow while retaining its logical dtype."""
+    dtype = series.dtype
+    name = series.name
+    values = series.to_numpy()
+
+    if isinstance(dtype, pl.Datetime):
+        if dtype.time_zone is not None:
+            timestamps = pd.to_datetime(values, utc=True).tz_convert(dtype.time_zone)
+            return pd.Series(timestamps, name=name)
+        return pd.Series(values, name=name)
+    if dtype == pl.Date:
+        return pd.Series(values.astype("datetime64[ms]"), name=name)
+    if isinstance(dtype, pl.Duration):
+        return pd.Series(values, name=name)
+    if dtype == pl.Categorical or isinstance(dtype, pl.Enum):
+        return pd.Series(pd.Categorical(series.to_list()), name=name)
+    if dtype == pl.String:
+        return pd.Series(series.to_list(), name=name, dtype="str")
+    return pd.Series(values, name=name)
+
+
+def polars_to_pandas(df: pl.DataFrame) -> pd.DataFrame:
+    """Convert Polars data to pandas without requiring PyArrow."""
+    return pd.DataFrame({name: _polars_series_to_pandas(df[name]) for name in df.columns})

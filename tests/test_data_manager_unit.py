@@ -5,6 +5,7 @@ These tests focus on methods that don't require full integration setup.
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
@@ -270,15 +271,41 @@ class TestDataManagerConvertOutput:
 
     @patch("ml4t.data.managers.fetch_manager._has_pyarrow", return_value=False)
     def test_convert_to_pandas_without_pyarrow(self, mock_has_pyarrow):
-        """Fall back to Python values only when Arrow cannot be imported."""
+        """The Arrow-free fallback preserves empty public-result schemas."""
         dm = DataManager(output_format="pandas")
-        df = pl.DataFrame({"a": [1, None]})
+        df = pl.DataFrame(
+            schema={
+                "timestamp": pl.Datetime("us", "UTC"),
+                "count": pl.Int32,
+                "value": pl.Float32,
+                "state": pl.Categorical,
+            }
+        )
 
         result = dm._convert_output(df)
 
-        assert result["a"].iloc[0] == 1
-        assert result["a"].isna().iloc[1]
+        assert str(result["timestamp"].dtype) == "datetime64[us, UTC]"
+        assert str(result["count"].dtype) == "int32"
+        assert str(result["value"].dtype) == "float32"
+        assert str(result["state"].dtype) == "category"
         mock_has_pyarrow.assert_called_once_with()
+
+    @patch("ml4t.data.managers.fetch_manager._has_pyarrow", return_value=False)
+    def test_convert_to_pandas_without_pyarrow_preserves_timezone_instants(self, _):
+        """Named timezones retain their displayed time and absolute instant."""
+        dm = DataManager(output_format="pandas")
+        source = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2024, 1, 1, tzinfo=ZoneInfo("America/New_York"))],
+                    dtype=pl.Datetime("us", "America/New_York"),
+                )
+            }
+        )
+
+        result = dm._convert_output(source)
+
+        assert result["timestamp"].iloc[0].isoformat() == "2024-01-01T00:00:00-05:00"
 
     def test_convert_to_lazy(self):
         """Test lazy output format."""
