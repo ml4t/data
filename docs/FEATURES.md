@@ -137,8 +137,8 @@ manager = DataManager(storage=storage)
 # Store data
 manager.store("AAPL", data)
 
-# Retrieve later
-retrieved = manager.fetch("AAPL")
+# Retrieve later from the canonical storage key
+retrieved = storage.read("equities/daily/AAPL").collect()
 ```
 
 ### Validate Data

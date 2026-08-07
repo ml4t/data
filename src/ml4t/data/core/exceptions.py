@@ -280,6 +280,10 @@ class ConfigurationError(ML4TDataError):
         self.parameter = parameter
 
 
+class ProviderRoutingError(ConfigurationError, ValueError):
+    """A request cannot be assigned to a provider without guessing."""
+
+
 class CircuitBreakerOpenError(ML4TDataError):
     """Circuit breaker is open and preventing calls."""
 

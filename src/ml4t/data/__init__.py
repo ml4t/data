@@ -17,6 +17,7 @@ from ml4t.data.assets.contracts import (
     load_contract_specs,
     register_contract_spec,
 )
+from ml4t.data.core.exceptions import ProviderRoutingError
 
 __all__ = [
     # Contract specifications
@@ -26,6 +27,7 @@ __all__ = [
     "load_contract_specs",
     "register_contract_spec",
     "AssetClass",
+    "ProviderRoutingError",
 ]
 
 # Core imports (may have additional dependencies)

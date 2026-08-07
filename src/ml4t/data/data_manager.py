@@ -249,6 +249,10 @@ class DataManager:
 
         Returns:
             Dictionary mapping symbols to data (or None if fetch failed)
+
+        Raises:
+            ProviderRoutingError: If any symbol has no explicit or unambiguous route. The
+                entire batch is rejected before the first provider request.
         """
         return self._fetch_manager.fetch_batch(symbols, start, end, frequency, **kwargs)
 

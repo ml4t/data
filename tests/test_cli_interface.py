@@ -156,7 +156,8 @@ class TestFetchCommand:
         """A batch with no successful result is not reported as successful."""
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
-        mock_dm.fetch_batch.return_value = {"AAPL": None, "MSFT": None}
+        mock_dm.router.get_provider.return_value = "mock"
+        mock_dm.fetch.side_effect = RuntimeError("provider unavailable")
 
         result = CliRunner().invoke(
             cli,
@@ -174,7 +175,7 @@ class TestFetchCommand:
         )
 
         assert result.exit_code == 1
-        assert "No symbols were fetched" in result.output
+        assert "No symbols were fetched: provider unavailable" in result.output
         assert "Successfully fetched 0" not in result.output
 
     def test_fetch_invalid_dates(self):
@@ -529,7 +530,7 @@ class TestBatchOperations:
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
         mock_dm.fetch.return_value = mock_df
-        mock_dm.fetch_batch.return_value = {"BTC": mock_df, "ETH": mock_df}
+        mock_dm.router.get_provider.return_value = "cryptocompare"
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -555,13 +556,15 @@ class TestBatchOperations:
 
             assert result.exit_code == 0
             assert "Loading configuration from config.json" in result.output
-            mock_dm.fetch_batch.assert_called_once_with(
-                ["BTC", "ETH"],
-                "2024-01-01",
-                "2024-01-31",
-                frequency="hourly",
-                provider="cryptocompare",
-            )
+            assert mock_dm.fetch.call_count == 2
+            for symbol in ["BTC", "ETH"]:
+                mock_dm.fetch.assert_any_call(
+                    symbol,
+                    "2024-01-01",
+                    "2024-01-31",
+                    frequency="hourly",
+                    provider="cryptocompare",
+                )
 
 
 class TestProgressAndOutput:
@@ -1386,8 +1389,8 @@ datasets: {}
         # Should not crash
         assert result.exit_code == 0
 
-    def test_list_uses_storage_strategy_from_config(self):
-        """The CLI opens a configured flat store with the flat backend."""
+    def test_list_reads_configured_flat_store(self):
+        """The CLI lists a dataset from a config-selected flat store."""
         from ml4t.data import DataManager
         from ml4t.data.storage import create_storage
 

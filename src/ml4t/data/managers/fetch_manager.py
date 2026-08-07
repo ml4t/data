@@ -18,14 +18,12 @@ import pandas as pd
 import polars as pl
 import structlog
 
+from ml4t.data.core.exceptions import ProviderRoutingError
+
 if TYPE_CHECKING:
     from ml4t.data.managers.provider_manager import ProviderManager, ProviderRouter
 
 logger = structlog.get_logger()
-
-
-class ProviderRoutingError(ValueError):
-    """Raised when a request has no explicit or unambiguous provider route."""
 
 
 @cache
@@ -191,14 +189,30 @@ class FetchManager:
 
         Returns:
             Dictionary mapping symbols to data (or None if fetch failed)
+
+        Raises:
+            ProviderRoutingError: If any symbol has no explicit or unambiguous route. The
+                entire batch is rejected before the first provider request.
         """
         results: dict[str, pl.DataFrame | pl.LazyFrame | Any | None] = {}
+        provider = kwargs.get("provider")
+        unroutable = [
+            symbol
+            for symbol in symbols
+            if self.router.get_provider(symbol, override=provider) is None
+        ]
+        if unroutable:
+            joined = ", ".join(unroutable)
+            raise ProviderRoutingError(
+                f"No provider found for symbols: {joined}. "
+                "Configure routing patterns or specify provider explicitly.",
+                parameter="provider",
+                details={"symbols": unroutable},
+            )
 
         for symbol in symbols:
             try:
                 results[symbol] = self.fetch(symbol, start, end, frequency, **kwargs)
-            except ProviderRoutingError:
-                raise
             except Exception as e:
                 logger.warning(f"Failed to fetch {symbol}: {e}")
                 results[symbol] = None

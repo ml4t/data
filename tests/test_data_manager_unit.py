@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from ml4t.data import ProviderRoutingError
 from ml4t.data.data_manager import DataManager, ProviderRouter
 from ml4t.data.managers.config_manager import ConfigManager
 from ml4t.data.managers.provider_manager import ProviderManager
@@ -532,8 +533,20 @@ class TestDataManagerFetchBatch:
         """A batch routing error fails the operation instead of returning all None."""
         dm = DataManager()
 
-        with pytest.raises(ValueError, match="specify provider explicitly"):
+        with pytest.raises(ProviderRoutingError, match="specify provider explicitly"):
             dm.fetch_batch(["AAPL", "MSFT"], "2024-01-01", "2024-01-31")
+
+    def test_fetch_batch_validates_every_route_before_fetching(self):
+        """One missing route rejects the batch before any provider request."""
+        dm = DataManager()
+
+        with (
+            patch.object(dm._fetch_manager, "fetch") as fetch,
+            pytest.raises(ValueError, match="AAPL"),
+        ):
+            dm.fetch_batch(["EUR_USD", "AAPL"], "2024-01-01", "2024-01-31")
+
+        fetch.assert_not_called()
 
 
 class TestDataManagerDetectProviders:
