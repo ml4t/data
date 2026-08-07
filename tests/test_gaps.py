@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
+import pytest
 
 from ml4t.data.utils.gaps import DataGap, GapDetector
 
@@ -207,6 +208,24 @@ class TestGapDetector:
             ][0]
             == 101.0
         )
+
+    def test_fill_gaps_rejects_all_null_timestamps(self) -> None:
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC")),
+                "value": [100.0],
+            }
+        )
+        gap = DataGap(
+            start=datetime(2024, 1, 1, tzinfo=UTC),
+            end=datetime(2024, 1, 3, tzinfo=UTC),
+            missing_periods=1,
+            duration=timedelta(days=2),
+            frequency="daily",
+        )
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            GapDetector().fill_gaps(df, [gap])
 
     def test_empty_dataframe(self) -> None:
         """Test gap detection on empty DataFrame."""

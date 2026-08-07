@@ -282,6 +282,8 @@ class GapDetector:
         # Create a complete time index
         min_ts = df[timestamp_col].min()
         max_ts = df[timestamp_col].max()
+        if not isinstance(min_ts, datetime) or not isinstance(max_ts, datetime):
+            raise TypeError(f"'{timestamp_col}' must contain non-null Datetime values")
 
         if gaps:
             frequency = gaps[0].frequency

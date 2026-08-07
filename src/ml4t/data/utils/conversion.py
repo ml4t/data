@@ -16,11 +16,9 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
         unit = dtype.unit
         series = series.dt.tz_convert("UTC")
         time_zone = "UTC"
-        values = series.array.asi8
     elif isinstance(dtype, np.dtype):
         unit = np.datetime_data(dtype)[0]
         time_zone = None
-        values = series.array.asi8
     else:
         arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
         unit = getattr(arrow_dtype, "unit", None)
@@ -41,6 +39,10 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
             dtype=pl.Datetime(target_unit, time_zone),
             strict=False,
         )
+
+    values = getattr(series.array, "asi8", None)
+    if not isinstance(values, np.ndarray):
+        raise TypeError(f"Cannot access integer datetime values for column '{name}'")
 
     target_unit = unit if unit in {"ms", "us", "ns"} else "ms"
     nat = np.iinfo(np.int64).min
@@ -63,7 +65,7 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
     )
 
 
-def _all_null_dtype(dtype: Any) -> pl.DataType | None:
+def _all_null_dtype(dtype: Any) -> pl.DataType | type[pl.DataType] | None:
     """Map typed all-null pandas columns to their Polars scalar dtype."""
     arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
     if arrow_dtype is not None and str(arrow_dtype).startswith("duration["):
