@@ -30,6 +30,7 @@ else:
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
     DataValidationError,
+    NetworkError,
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
@@ -198,6 +199,10 @@ class YahooFinanceProvider(BaseProvider):
 
         except (DataNotAvailableError, SymbolNotFoundError):
             raise
+
+        except OSError as e:
+            logger.error("Yahoo transport failed", symbol=symbol, error=str(e))
+            raise NetworkError("yahoo", f"Failed to fetch {symbol}: {e}") from e
 
         except Exception as e:
             logger.error("Error fetching data", symbol=symbol, error=str(e))

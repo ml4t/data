@@ -255,6 +255,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 raise RateLimitError(self.name, retry_after=60.0) from e
             elif e.response.status_code == 404:
                 raise SymbolNotFoundError(self.name, coin_id) from e
+            elif e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             else:
                 raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
         except httpx.RequestError as e:
@@ -341,6 +343,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 raise RateLimitError(self.name, retry_after=60.0) from e
             if e.response.status_code == 404:
                 raise SymbolNotFoundError(self.name, coin_id) from e
+            if e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
         except httpx.RequestError as e:
             raise NetworkError(self.name, str(e)) from e
@@ -489,6 +493,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 raise RateLimitError(self.name, retry_after=60.0) from e
+            if e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             else:
                 raise DataNotAvailableError(
                     self.name, "coin_list", details={"error": str(e)}
@@ -537,6 +543,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 raise RateLimitError(self.name, retry_after=60.0) from e
+            if e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             else:
                 raise DataNotAvailableError(self.name, "prices", details={"error": str(e)}) from e
         except httpx.RequestError as e:
@@ -598,6 +606,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 raise RateLimitError(self.name, retry_after=60.0) from e
             elif e.response.status_code == 404:
                 raise SymbolNotFoundError(self.name, coin_id) from e
+            elif e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             else:
                 raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
         except httpx.RequestError as e:
@@ -659,6 +669,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 raise RateLimitError(self.name, retry_after=60.0) from e
             if e.response.status_code == 404:
                 raise SymbolNotFoundError(self.name, coin_id) from e
+            if e.response.status_code >= 500:
+                raise NetworkError(self.name, f"HTTP {e.response.status_code}") from e
             raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
         except httpx.RequestError as e:
             raise NetworkError(self.name, str(e)) from e

@@ -166,16 +166,14 @@ class TestYahooFinanceProvider:
 
     @patch("ml4t.data.providers.yahoo.yf.download")
     def test_error_handling(self, mock_download: MagicMock) -> None:
-        """Test error handling in provider."""
-        # Mock network error
-        mock_download.side_effect = Exception("Network error")
+        """Transport failures remain visible to retry and circuit policies."""
+        mock_download.side_effect = OSError("Network error")
 
         provider = YahooFinanceProvider()
 
-        from ml4t.data.core.exceptions import DataValidationError, NetworkError
+        from ml4t.data.core.exceptions import NetworkError
 
-        # Provider may raise NetworkError or DataValidationError
-        with pytest.raises((NetworkError, DataValidationError)) as exc_info:
+        with pytest.raises(NetworkError) as exc_info:
             provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-03")
 
         assert "Network error" in str(exc_info.value)

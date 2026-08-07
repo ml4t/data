@@ -50,7 +50,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.config import resolve_storage_path
-from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.core.exceptions import DataNotAvailableError, NetworkError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -830,7 +830,11 @@ class FamaFrenchProvider(BaseProvider):
             with httpx.Client(timeout=60.0) as client:
                 response = client.get(url)
                 response.raise_for_status()
-        except httpx.HTTPError as e:
+        except httpx.RequestError as e:
+            raise NetworkError("fama_french", str(e)) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                raise NetworkError("fama_french", f"HTTP {e.response.status_code}") from e
             raise DataNotAvailableError(
                 provider="fama_french",
                 symbol=dataset,

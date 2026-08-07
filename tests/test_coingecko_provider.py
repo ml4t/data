@@ -313,14 +313,14 @@ class TestFetchOhlc:
             with pytest.raises(SymbolNotFoundError):
                 provider._fetch_ohlc("invalid_coin", 7)
 
-    def test_fetch_ohlc_other_http_error(self, provider):
-        """Test other HTTP errors raise DataNotAvailableError."""
+    def test_fetch_ohlc_server_error_is_transient(self, provider):
+        """HTTP 5xx failures count as transient provider outages."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         error = httpx.HTTPStatusError("Server error", request=MagicMock(), response=mock_response)
 
         with patch.object(provider.session, "get", side_effect=error):
-            with pytest.raises(DataNotAvailableError):
+            with pytest.raises(NetworkError):
                 provider._fetch_ohlc("bitcoin", 7)
 
     def test_fetch_ohlc_network_error(self, provider):
@@ -715,13 +715,13 @@ class TestGetCoinList:
                 provider.get_coin_list()
 
     def test_get_coin_list_http_error(self, provider):
-        """Test HTTP error raises DataNotAvailableError."""
+        """A coin-list server outage is transient."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         error = httpx.HTTPStatusError("Server error", request=MagicMock(), response=mock_response)
 
         with patch.object(provider.session, "get", side_effect=error):
-            with pytest.raises(DataNotAvailableError):
+            with pytest.raises(NetworkError):
                 provider.get_coin_list()
 
     def test_get_coin_list_network_error(self, provider):
@@ -790,13 +790,13 @@ class TestGetPrice:
                 provider.get_price(["bitcoin"])
 
     def test_get_price_http_error(self, provider):
-        """Test HTTP error raises DataNotAvailableError."""
+        """A price endpoint server outage is transient."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         error = httpx.HTTPStatusError("Server error", request=MagicMock(), response=mock_response)
 
         with patch.object(provider.session, "get", side_effect=error):
-            with pytest.raises(DataNotAvailableError):
+            with pytest.raises(NetworkError):
                 provider.get_price(["bitcoin"])
 
     def test_get_price_network_error(self, provider):
