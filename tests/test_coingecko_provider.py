@@ -1,7 +1,7 @@
 """Tests for CoinGecko provider module."""
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import polars as pl
@@ -261,6 +261,70 @@ class TestFetchOhlc:
         with patch.object(provider.session, "get", side_effect=error):
             with pytest.raises(NetworkError):
                 provider._fetch_ohlc("bitcoin", 7)
+
+    def test_aggregate_daily_ohlcv_uses_utc_ohlc_rules(self, provider):
+        """Test intraday candles become one correctly aggregated UTC daily bar."""
+        source = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, 0, tzinfo=UTC),
+                    datetime(2024, 1, 1, 4, tzinfo=UTC),
+                ],
+                "open": [100.0, 102.0],
+                "high": [103.0, 106.0],
+                "low": [99.0, 101.0],
+                "close": [102.0, 105.0],
+                "volume": [10.0, 20.0],
+            }
+        )
+
+        result = provider._aggregate_daily_ohlcv(source)
+
+        assert result.to_dicts() == [
+            {
+                "timestamp": datetime(2024, 1, 1, tzinfo=UTC),
+                "open": 100.0,
+                "high": 106.0,
+                "low": 99.0,
+                "close": 105.0,
+                "volume": 20.0,
+            }
+        ]
+
+    def test_fetch_daily_volumes_requests_explicit_daily_interval(self, provider):
+        """Test daily volume comes from the bounded market-chart range endpoint."""
+        response = MagicMock()
+        response.json.return_value = {
+            "total_volumes": [[1704067200000, 1234.5], [1704153600000, 2345.6]]
+        }
+
+        with patch.object(provider.session, "get", return_value=response) as get:
+            result = provider._fetch_daily_volumes("bitcoin", "2024-01-01", "2024-01-02")
+
+        get.assert_called_once_with(
+            "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range",
+            params={
+                "vs_currency": "usd",
+                "from": "2024-01-01",
+                "to": "2024-01-02",
+                "interval": "daily",
+            },
+        )
+        assert result["volume"].to_list() == [1234.5, 2345.6]
+
+    @pytest.mark.asyncio
+    async def test_fetch_daily_volumes_async_uses_async_transport(self, provider):
+        """Test async daily volume retrieval uses the shared async request path."""
+        response = MagicMock()
+        response.json.return_value = {"total_volumes": [[1704067200000, 1234.5]]}
+
+        with patch.object(provider, "_aget", new=AsyncMock(return_value=response)) as get:
+            result = await provider._fetch_daily_volumes_async(
+                "bitcoin", "2024-01-01", "2024-01-01"
+            )
+
+        assert result["volume"].to_list() == [1234.5]
+        get.assert_awaited_once()
 
 
 class TestFetchAndTransformData:

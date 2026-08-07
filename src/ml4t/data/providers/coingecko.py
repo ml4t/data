@@ -16,6 +16,7 @@ Async Example:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import datetime
 from typing import ClassVar
@@ -181,7 +182,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         )
 
         # Fetch OHLC data (CoinGecko provides this in one endpoint)
-        df = self._fetch_ohlc(coin_id, days=valid_days)
+        df = self._fetch_ohlc(coin_id, days=valid_days, start=start, end=end)
+        df = self._aggregate_daily_ohlcv(df)
 
         # Filter to requested date range
         df = df.filter(
@@ -201,13 +203,22 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
 
         return df
 
-    def _fetch_ohlc(self, coin_id: str, days: int | str, vs_currency: str = "usd") -> pl.DataFrame:
+    def _fetch_ohlc(
+        self,
+        coin_id: str,
+        days: int | str,
+        vs_currency: str = "usd",
+        start: str | None = None,
+        end: str | None = None,
+    ) -> pl.DataFrame:
         """Fetch OHLC data from CoinGecko.
 
         Args:
             coin_id: CoinGecko coin ID (e.g., "bitcoin")
             days: Number of days back from now
             vs_currency: Target currency (default: usd)
+            start: Requested start date, used to retrieve daily volume
+            end: Requested end date, used to retrieve daily volume
 
         Returns:
             DataFrame with OHLCV data
@@ -245,14 +256,110 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             pl.col("timestamp_ms").cast(pl.Datetime("ms", "UTC")).alias("timestamp")
         )
 
-        # Add volume column (CoinGecko OHLC endpoint doesn't provide volume)
-        # Set to 0 as placeholder - use market_chart endpoint if volume needed
         df = df.with_columns(pl.lit(0.0).alias("volume"))
-
-        # Select and order columns
         df = df.select(["timestamp", "open", "high", "low", "close", "volume"])
 
+        df = self._aggregate_daily_ohlcv(df)
+        if start is not None and end is not None:
+            start_date = datetime.strptime(start, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end, "%Y-%m-%d").date()
+            df = df.filter(
+                pl.col("timestamp").dt.date().is_between(start_date, end_date, closed="both")
+            )
+            self._acquire_rate_limit()
+            volumes = self._fetch_daily_volumes(coin_id, start, end, vs_currency)
+            df = self._join_daily_volumes(df, volumes, coin_id)
+
         return df
+
+    def _fetch_daily_volumes(
+        self,
+        coin_id: str,
+        start: str,
+        end: str,
+        vs_currency: str = "usd",
+    ) -> pl.DataFrame:
+        """Fetch CoinGecko's 24-hour volume observations at UTC daily boundaries."""
+        endpoint = f"{self.base_url}/coins/{coin_id}/market_chart/range"
+        params = {
+            "vs_currency": vs_currency,
+            "from": start,
+            "to": end,
+            "interval": "daily",
+        }
+        try:
+            response = self.session.get(endpoint, params=params)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                raise RateLimitError(self.name, retry_after=60.0) from e
+            if e.response.status_code == 404:
+                raise SymbolNotFoundError(self.name, coin_id) from e
+            raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
+        except httpx.RequestError as e:
+            raise NetworkError(self.name, str(e)) from e
+
+        return self._parse_daily_volumes(payload, coin_id)
+
+    def _parse_daily_volumes(self, payload: object, coin_id: str) -> pl.DataFrame:
+        """Validate and normalize a market-chart volume response."""
+        if not isinstance(payload, dict) or not payload.get("total_volumes"):
+            raise DataNotAvailableError(
+                self.name,
+                coin_id,
+                details={"error": "CoinGecko returned no daily volume data"},
+            )
+        return (
+            pl.DataFrame(
+                payload["total_volumes"],
+                schema={"timestamp_ms": pl.Int64, "volume": pl.Float64},
+                orient="row",
+            )
+            .with_columns(
+                pl.col("timestamp_ms")
+                .cast(pl.Datetime("ms", "UTC"))
+                .dt.truncate("1d")
+                .alias("timestamp")
+            )
+            .group_by("timestamp")
+            .agg(pl.col("volume").last())
+            .sort("timestamp")
+        )
+
+    def _aggregate_daily_ohlcv(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Aggregate CoinGecko's automatically sized candles to UTC calendar days."""
+        if df.is_empty():
+            return df
+        return (
+            df.sort("timestamp")
+            .with_columns(pl.col("timestamp").dt.truncate("1d"))
+            .group_by("timestamp")
+            .agg(
+                pl.col("open").first(),
+                pl.col("high").max(),
+                pl.col("low").min(),
+                pl.col("close").last(),
+                pl.col("volume").last(),
+            )
+            .sort("timestamp")
+        )
+
+    def _join_daily_volumes(
+        self,
+        ohlc: pl.DataFrame,
+        volumes: pl.DataFrame,
+        coin_id: str,
+    ) -> pl.DataFrame:
+        """Replace placeholder volume with the matching daily observation."""
+        result = ohlc.drop("volume").join(volumes, on="timestamp", how="left")
+        if result["volume"].null_count():
+            raise DataNotAvailableError(
+                self.name,
+                coin_id,
+                details={"error": "CoinGecko daily volume does not cover all OHLC days"},
+            )
+        return result
 
     def _round_to_valid_days(self, days: int) -> str | int:
         """Round days to valid CoinGecko API parameter.
@@ -402,7 +509,12 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         )
 
     async def _fetch_ohlc_async(
-        self, coin_id: str, days: int | str, vs_currency: str = "usd"
+        self,
+        coin_id: str,
+        days: int | str,
+        vs_currency: str = "usd",
+        start: str | None = None,
+        end: str | None = None,
     ) -> pl.DataFrame:
         """Async fetch OHLC data from CoinGecko."""
         endpoint = f"{self.base_url}/coins/{coin_id}/ohlc"
@@ -436,7 +548,48 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         df = df.with_columns(pl.lit(0.0).alias("volume"))
         df = df.select(["timestamp", "open", "high", "low", "close", "volume"])
 
+        df = self._aggregate_daily_ohlcv(df)
+        if start is not None and end is not None:
+            start_date = datetime.strptime(start, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end, "%Y-%m-%d").date()
+            df = df.filter(
+                pl.col("timestamp").dt.date().is_between(start_date, end_date, closed="both")
+            )
+            await asyncio.to_thread(self._acquire_rate_limit)
+            volumes = await self._fetch_daily_volumes_async(coin_id, start, end, vs_currency)
+            df = self._join_daily_volumes(df, volumes, coin_id)
+
         return df
+
+    async def _fetch_daily_volumes_async(
+        self,
+        coin_id: str,
+        start: str,
+        end: str,
+        vs_currency: str = "usd",
+    ) -> pl.DataFrame:
+        """Fetch UTC daily volume observations without blocking the event loop."""
+        endpoint = f"{self.base_url}/coins/{coin_id}/market_chart/range"
+        params = {
+            "vs_currency": vs_currency,
+            "from": start,
+            "to": end,
+            "interval": "daily",
+        }
+        try:
+            response = await self._aget(endpoint, params=params)
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                raise RateLimitError(self.name, retry_after=60.0) from e
+            if e.response.status_code == 404:
+                raise SymbolNotFoundError(self.name, coin_id) from e
+            raise DataNotAvailableError(self.name, coin_id, details={"error": str(e)}) from e
+        except httpx.RequestError as e:
+            raise NetworkError(self.name, str(e)) from e
+
+        return self._parse_daily_volumes(payload, coin_id)
 
     async def fetch_ohlcv_async(
         self,
@@ -483,7 +636,13 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             end=end,
         )
 
-        df = await self._fetch_ohlc_async(coin_id, days=valid_days)
+        df = await self._fetch_ohlc_async(
+            coin_id,
+            days=valid_days,
+            start=start,
+            end=end,
+        )
+        df = self._aggregate_daily_ohlcv(df)
 
         df = df.filter(
             (pl.col("timestamp").dt.truncate("1d") >= start_dt.date())
