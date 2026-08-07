@@ -11,6 +11,7 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
+from ml4t.data.config._serialization import write_yaml
 from ml4t.data.config.models import DataConfig
 
 logger = structlog.get_logger()
@@ -246,10 +247,7 @@ class ConfigLoader:
         # Convert to dictionary with JSON-compatible types
         data = config.model_dump(exclude_none=True, exclude_defaults=False, mode="json")
 
-        # Save to YAML
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        write_yaml(save_path, data)
 
         logger.info(f"Configuration saved to: {save_path}")
 

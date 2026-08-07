@@ -16,6 +16,11 @@ from ml4t.data.core.config import resolve_data_root
 from ml4t.data.core.models import Frequency
 
 
+def _exclude_resolved_credential(value: str | None) -> bool:
+    """Exclude runtime credentials while retaining environment references."""
+    return value is not None and not (value.startswith("${") and value.endswith("}"))
+
+
 # Storage configuration enums
 class StorageStrategy(str, Enum):
     """Storage backend strategy options."""
@@ -143,8 +148,18 @@ class ProviderConfig(BaseModel):
     name: str = Field(description="Provider name")
     type: ProviderType = Field(description="Provider type")
     enabled: bool = Field(default=True, description="Whether provider is enabled")
-    api_key: str | None = Field(default=None, description="API key (can use ${ENV_VAR})")
-    api_secret: str | None = Field(default=None, description="API secret (can use ${ENV_VAR})")
+    api_key: str | None = Field(
+        default=None,
+        description="API key (can use ${ENV_VAR})",
+        repr=False,
+        exclude_if=_exclude_resolved_credential,
+    )
+    api_secret: str | None = Field(
+        default=None,
+        description="API secret (can use ${ENV_VAR})",
+        repr=False,
+        exclude_if=_exclude_resolved_credential,
+    )
     rate_limit: RateLimitConfig = Field(
         default_factory=RateLimitConfig, description="Rate limiting configuration"
     )
@@ -402,16 +417,13 @@ class DataConfig(BaseSettings):
 
     def to_yaml(self, path: str | Path) -> None:
         """Save configuration to YAML file."""
-        import yaml
+        from ml4t.data.config._serialization import write_yaml
 
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
 
         # Exclude None values for cleaner YAML, mode="json" for compatibility
         data = self.model_dump(exclude_none=True, exclude_defaults=False, mode="json")
-
-        with open(path, "w") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        write_yaml(path, data)
 
     def get_provider(self, name: str) -> ProviderConfig | None:
         """Get provider configuration by name."""

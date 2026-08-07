@@ -212,6 +212,29 @@ class TestDataConfig:
         assert len(loaded.universes) == 1
         assert loaded.universes[0].name == "sp500"
 
+    def test_yaml_serialization_excludes_credentials_and_restricts_permissions(self, tmp_path):
+        """Saving a runtime configuration cannot disclose resolved credentials."""
+        credential = "canary-runtime-credential"
+        config = DataConfig(
+            providers=[
+                ProviderConfig(
+                    name="private_provider",
+                    type=ProviderType.YAHOO,
+                    api_key=credential,
+                    api_secret=credential,
+                )
+            ]
+        )
+        yaml_file = tmp_path / "config.yaml"
+
+        config.to_yaml(yaml_file)
+
+        content = yaml_file.read_text()
+        assert credential not in content
+        assert "api_key" not in content
+        assert "api_secret" not in content
+        assert yaml_file.stat().st_mode & 0o777 == 0o600
+
 
 class TestConfigLoader:
     """Test configuration loader."""
@@ -330,6 +353,26 @@ class TestConfigLoader:
         assert data["log_level"] == "WARNING"
         assert len(data["providers"]) == 1
         assert data["providers"][0]["name"] == "test"
+
+    def test_save_config_excludes_credentials_and_restricts_permissions(self, tmp_path):
+        """ConfigLoader applies the same secure serialization contract."""
+        credential = "canary-runtime-credential"
+        config = DataConfig(
+            providers=[
+                ProviderConfig(
+                    name="private_provider",
+                    type=ProviderType.YAHOO,
+                    api_key=credential,
+                    api_secret=credential,
+                )
+            ]
+        )
+        save_path = tmp_path / "saved.yaml"
+
+        ConfigLoader().save(config, save_path)
+
+        assert credential not in save_path.read_text()
+        assert save_path.stat().st_mode & 0o777 == 0o600
 
 
 class TestScheduleConfig:

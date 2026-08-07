@@ -51,6 +51,34 @@ class TestProviderConfig:
         # rate_limit float auto-converts to RateLimitConfig
         assert provider.rate_limit.requests_per_second == 10.0
 
+    def test_resolved_credentials_are_not_represented_or_serialized(self):
+        """Runtime credentials remain usable without leaking through model output."""
+        credential = "canary-runtime-credential"
+        provider = ProviderConfig(
+            name="private_provider",
+            type=ProviderType.YAHOO,
+            api_key=credential,
+            api_secret=credential,
+        )
+
+        assert provider.api_key == credential
+        assert provider.api_secret == credential
+        assert credential not in repr(provider)
+        assert "api_key" not in provider.model_dump()
+        assert "api_secret" not in provider.model_dump()
+
+    def test_environment_references_remain_serializable(self):
+        """Serializable configuration retains credential references, not values."""
+        provider = ProviderConfig(
+            name="private_provider",
+            type=ProviderType.YAHOO,
+            api_key="${PROVIDER_API_KEY}",
+            api_secret="${PROVIDER_API_SECRET}",
+        )
+
+        assert provider.model_dump()["api_key"] == "${PROVIDER_API_KEY}"
+        assert provider.model_dump()["api_secret"] == "${PROVIDER_API_SECRET}"
+
     def test_provider_extra_settings(self):
         """Test provider with extra settings."""
         provider = ProviderConfig(
