@@ -215,6 +215,7 @@ markers = [
     "real_api: marks tests that use real API calls (deprecated, use integration)",
     "requires_api_key: marks tests requiring specific API keys",
     "expensive: marks tests with high API costs",
+    "network_guard_probe: exercises the offline network guard itself",
 ]
 
 filterwarnings = [
