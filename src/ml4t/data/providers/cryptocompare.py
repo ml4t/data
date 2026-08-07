@@ -11,6 +11,7 @@ import httpx
 import polars as pl
 import structlog
 
+from ml4t.data.core.exceptions import RateLimitError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -53,6 +54,8 @@ class CryptoCompareProvider(BaseProvider):
         10,
         60.0,
     )  # 10 requests per minute for free tier
+    MAX_RATE_LIMIT_ATTEMPTS: ClassVar[int] = 3
+    MAX_RETRY_AFTER: ClassVar[float] = 60.0
 
     def __init__(
         self,
@@ -126,6 +129,17 @@ class CryptoCompareProvider(BaseProvider):
 
         return parts[0], parts[1] if len(parts) > 1 else "USD"
 
+    def _retry_after_seconds(self, response: httpx.Response) -> float:
+        """Return a non-negative server delay capped by the provider policy."""
+        value = response.headers.get("Retry-After")
+        if not isinstance(value, str | int | float):
+            return self.MAX_RETRY_AFTER
+        try:
+            delay = float(value)
+        except ValueError:
+            return self.MAX_RETRY_AFTER
+        return min(max(delay, 0.0), self.MAX_RETRY_AFTER)
+
     def _fetch_raw_data(self, symbol: str, start: str, end: str, frequency: str) -> Any:
         """
         Fetch raw data from CryptoCompare API.
@@ -195,6 +209,7 @@ class CryptoCompareProvider(BaseProvider):
 
         # Fetch data in chunks if needed
         all_data = []
+        rate_limit_attempts = 0
 
         while current_time >= start_dt.timestamp():
             # Prepare request parameters
@@ -215,6 +230,7 @@ class CryptoCompareProvider(BaseProvider):
             try:
                 response = self.client.get(url, params=params)
                 response.raise_for_status()
+                rate_limit_attempts = 0
                 data = response.json()
 
                 if data.get("Response") != "Success":
@@ -244,8 +260,20 @@ class CryptoCompareProvider(BaseProvider):
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    logger.warning("Rate limit hit, waiting 60 seconds")
-                    time.sleep(60)
+                    rate_limit_attempts += 1
+                    retry_after = self._retry_after_seconds(e.response)
+                    if rate_limit_attempts >= self.MAX_RATE_LIMIT_ATTEMPTS:
+                        raise RateLimitError(
+                            provider=self.name,
+                            retry_after=retry_after,
+                        ) from e
+                    logger.warning(
+                        "Rate limit hit",
+                        attempt=rate_limit_attempts,
+                        max_attempts=self.MAX_RATE_LIMIT_ATTEMPTS,
+                        retry_after=retry_after,
+                    )
+                    time.sleep(retry_after)
                     continue
                 raise
 
@@ -415,6 +443,7 @@ class CryptoCompareProvider(BaseProvider):
             limit = min(max(1, int(total_seconds / 86400)), self.FREQUENCY_LIMITS[endpoint])
 
         all_data = []
+        rate_limit_attempts = 0
 
         while current_time >= start_dt.timestamp():
             params: dict[str, str | int] = {
@@ -433,6 +462,7 @@ class CryptoCompareProvider(BaseProvider):
             try:
                 response = await self._async_session.get(url, params=params)
                 response.raise_for_status()
+                rate_limit_attempts = 0
                 data = response.json()
 
                 if data.get("Response") != "Success":
@@ -458,8 +488,20 @@ class CryptoCompareProvider(BaseProvider):
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    logger.warning("Rate limit hit, waiting 60 seconds")
-                    await asyncio.sleep(60)
+                    rate_limit_attempts += 1
+                    retry_after = self._retry_after_seconds(e.response)
+                    if rate_limit_attempts >= self.MAX_RATE_LIMIT_ATTEMPTS:
+                        raise RateLimitError(
+                            provider=self.name,
+                            retry_after=retry_after,
+                        ) from e
+                    logger.warning(
+                        "Rate limit hit",
+                        attempt=rate_limit_attempts,
+                        max_attempts=self.MAX_RATE_LIMIT_ATTEMPTS,
+                        retry_after=retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
                     continue
                 raise
 

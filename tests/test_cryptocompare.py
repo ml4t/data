@@ -1,11 +1,12 @@
 """Tests for CryptoCompare provider."""
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
+from ml4t.data.core.exceptions import RateLimitError
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 
 
@@ -228,6 +229,66 @@ class TestCryptoCompareProvider:
 
         # Should have made 2 requests
         assert mock_client.get.call_count == 2
+
+    def test_persistent_rate_limit_stops_after_declared_attempts(self) -> None:
+        """Persistent sync 429 responses terminate without an unbounded sleep loop."""
+        provider = CryptoCompareProvider()
+        provider.MAX_RATE_LIMIT_ATTEMPTS = 3
+        response = MagicMock(status_code=429, headers={"Retry-After": "120"})
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Rate limited", request=MagicMock(), response=response
+        )
+        calls = 0
+
+        def rate_limited_response(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > provider.MAX_RATE_LIMIT_ATTEMPTS:
+                raise AssertionError("rate-limit retries did not terminate")
+            return response
+
+        with (
+            patch.object(provider.client, "get", side_effect=rate_limited_response) as mock_get,
+            patch("ml4t.data.providers.cryptocompare.time.sleep") as mock_sleep,
+        ):
+            with pytest.raises(RateLimitError) as exc_info:
+                provider._fetch_raw_data("BTC", "2024-01-01", "2024-01-02", "daily")
+
+        assert mock_get.call_count == provider.MAX_RATE_LIMIT_ATTEMPTS
+        assert mock_sleep.call_count == provider.MAX_RATE_LIMIT_ATTEMPTS - 1
+        assert exc_info.value.retry_after == provider.MAX_RETRY_AFTER
+
+    @pytest.mark.asyncio
+    async def test_persistent_rate_limit_stops_after_declared_attempts_async(self) -> None:
+        """Persistent async 429 responses use the same finite retry contract."""
+        provider = CryptoCompareProvider()
+        provider.MAX_RATE_LIMIT_ATTEMPTS = 3
+        response = MagicMock(status_code=429, headers={"Retry-After": "120"})
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Rate limited", request=MagicMock(), response=response
+        )
+        calls = 0
+
+        def rate_limited_response(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > provider.MAX_RATE_LIMIT_ATTEMPTS:
+                raise AssertionError("rate-limit retries did not terminate")
+            return response
+
+        async_client = MagicMock()
+        async_client.get = AsyncMock(side_effect=rate_limited_response)
+        provider._async_client = async_client
+
+        with patch(
+            "ml4t.data.providers.cryptocompare.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            with pytest.raises(RateLimitError) as exc_info:
+                await provider._fetch_raw_data_async("BTC", "2024-01-01", "2024-01-02", "daily")
+
+        assert async_client.get.await_count == provider.MAX_RATE_LIMIT_ATTEMPTS
+        assert mock_sleep.await_count == provider.MAX_RATE_LIMIT_ATTEMPTS - 1
+        assert exc_info.value.retry_after == provider.MAX_RETRY_AFTER
 
     @patch("ml4t.data.providers.cryptocompare.httpx.Client")
     def test_empty_data_handling(self, mock_client_class: MagicMock) -> None:
