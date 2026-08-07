@@ -14,6 +14,8 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.storage.keys import storage_key_path
+
 logger = structlog.get_logger()
 
 
@@ -123,7 +125,7 @@ class MetadataManager:
             return None
 
         try:
-            metadata_file = self.storage.metadata_dir / f"{key.replace('/', '_')}.json"
+            metadata_file = storage_key_path(self.storage.metadata_dir, key, ".json")
             if not metadata_file.exists():
                 return None
 

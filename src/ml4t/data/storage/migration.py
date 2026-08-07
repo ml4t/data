@@ -15,6 +15,8 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.storage.keys import contained_path, validate_path_component
+
 logger = structlog.get_logger()
 
 
@@ -388,7 +390,7 @@ class BackupManager:
             data_root: Root directory for data storage
         """
         self.data_root = Path(data_root)
-        self.backups_dir = self.data_root / ".backups"
+        self.backups_dir = contained_path(self.data_root, ".backups")
         self.backups_dir.mkdir(parents=True, exist_ok=True)
 
     def create_backup(
@@ -409,8 +411,9 @@ class BackupManager:
         if not backup_name:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_name = f"backup_{timestamp}"
+        validate_path_component(backup_name, "backup name")
 
-        backup_file = self.backups_dir / f"{backup_name}.tar"
+        backup_file = contained_path(self.backups_dir, f"{backup_name}.tar")
         if compression:
             backup_file = backup_file.with_suffix(".tar.gz")
 

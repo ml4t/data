@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from ml4t.data.storage.keys import storage_key_path
 from ml4t.data.storage.metadata_tracker import (
     DatasetMetadata,
     MetadataTracker,
@@ -393,13 +394,15 @@ class TestMetadataTracker:
         """Test metadata path generation."""
         path = tracker._get_metadata_path("equities/daily/AAPL")
 
-        assert path.name == "equities_daily_AAPL_metadata.json"
+        assert path == storage_key_path(
+            tracker.metadata_dir, "equities/daily/AAPL", "_metadata.json"
+        )
 
     def test_get_history_path(self, tracker: MetadataTracker) -> None:
         """Test history path generation."""
         path = tracker._get_history_path("crypto/hourly/BTC")
 
-        assert path.name == "crypto_hourly_BTC_history.json"
+        assert path == storage_key_path(tracker.metadata_dir, "crypto/hourly/BTC", "_history.json")
 
     def test_get_metadata_nonexistent(self, tracker: MetadataTracker) -> None:
         """Test getting metadata for nonexistent dataset returns None."""

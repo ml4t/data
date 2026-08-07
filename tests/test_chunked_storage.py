@@ -473,6 +473,31 @@ class TestChunkedStorage:
         assert len(equity_keys) == 2
         assert all(k.startswith("equities/") for k in equity_keys)
 
+    def test_list_keys_preserves_underscores(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        metadata = Metadata(
+            provider="test",
+            symbol="BRK_B",
+            asset_class="equities",
+            bar_type="time",
+            bar_params={"frequency": "daily"},
+        )
+        data = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1_000],
+            }
+        )
+
+        storage.write(DataObject(data=data, metadata=metadata))
+
+        assert storage.list_keys() == ["equities/daily/BRK_B"]
+        assert storage.read("equities/daily/BRK_B").data["close"].item() == 100.5
+
     def test_chunk_info_properties(self) -> None:
         """Test ChunkInfo class properties."""
         chunk = ChunkInfo(

@@ -8,6 +8,7 @@ import pytest
 
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage.keys import storage_key_path
 
 
 class TestHiveStorageInit:
@@ -102,7 +103,7 @@ class TestHiveStorageWrite:
 
         storage.write(df, "test_key")
 
-        metadata_file = storage.metadata_dir / "test_key.json"
+        metadata_file = storage_key_path(storage.metadata_dir, "test_key", ".json")
         assert metadata_file.exists()
 
         with open(metadata_file) as f:
@@ -384,7 +385,7 @@ class TestHiveStorageIncrementalMethods:
     def test_get_combined_file_path(self, storage):
         """Test getting combined file path."""
         path = storage.get_combined_file_path("AAPL", "yahoo")
-        assert "yahoo_AAPL" in str(path)
+        assert path == storage_key_path(storage.base_path, "yahoo/AAPL")
 
     def test_read_data_no_data(self, storage):
         """Test reading data when no data exists."""
@@ -509,7 +510,7 @@ class TestHiveStorageSlashInKey:
     """Tests for keys with slashes (hierarchy)."""
 
     def test_write_with_slash_key(self, tmp_path):
-        """Test writing with slash in key converts to underscore."""
+        """Test writing with a hierarchical logical key."""
         config = StorageConfig(base_path=tmp_path)
         storage = HiveStorage(config)
 
@@ -519,10 +520,11 @@ class TestHiveStorageSlashInKey:
                 "close": [100.0],
             }
         )
-        storage.write(df, "provider/symbol")
+        path = storage.write(df, "provider/symbol")
 
-        # Directory name should use underscore
-        assert (tmp_path / "provider_symbol").exists()
+        assert path.exists()
+        assert path.parent == tmp_path
+        assert path.name.startswith("k1_")
 
     def test_exists_with_slash_key(self, tmp_path):
         """Test exists handles slash in key."""

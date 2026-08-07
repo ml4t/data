@@ -15,6 +15,7 @@ from ml4t.data.storage import (
     StorageConfig,
     create_storage,
 )
+from ml4t.data.storage.keys import storage_key_path
 
 
 @pytest.fixture
@@ -123,6 +124,31 @@ class TestStorageBackends:
         assert "key2" in keys
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_logical_keys_do_not_alias(self, temp_dir, strategy):
+        """Separators and underscores retain distinct physical identities."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        first = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "close": [1.0]})
+        second = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "close": [2.0]})
+
+        first_path = storage.write(first, "a/b_c")
+        second_path = storage.write(second, "a_b/c")
+
+        assert first_path != second_path
+        assert storage.read("a/b_c").collect()["close"].item() == 1.0
+        assert storage.read("a_b/c").collect()["close"].item() == 2.0
+        assert storage.list_keys() == ["a/b_c", "a_b/c"]
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    @pytest.mark.parametrize("key", ["../../../escaped", "a/../escaped", "a\\..\\escaped"])
+    def test_storage_keys_cannot_escape_base_path(self, temp_dir, sample_data, strategy, key):
+        storage = create_storage(temp_dir, strategy=strategy)
+
+        with pytest.raises(ValueError):
+            storage.write(sample_data, key)
+
+        assert not (temp_dir.parent / "escaped").exists()
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_exists(self, temp_dir, sample_data, strategy):
         """Test key existence check."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -152,7 +178,7 @@ class TestStorageBackends:
         storage.write(sample_data.lazy(), "test_key")
 
         # Check partition structure
-        key_path = temp_dir / "test_key"
+        key_path = storage_key_path(temp_dir, "test_key")
         assert key_path.exists()
 
         # Should have year directories

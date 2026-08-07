@@ -17,6 +17,13 @@ import polars as pl
 from ml4t.data.core.schemas import align_frames_for_concat
 
 from .backend import StorageBackend, StorageConfig
+from .keys import (
+    KEY_ENCODING_PREFIX,
+    contained_path,
+    decode_storage_key,
+    encode_path_component,
+    storage_key_path,
+)
 
 if TYPE_CHECKING:
     from ml4t.data.core.models import DataObject
@@ -297,7 +304,7 @@ class HiveStorage(StorageBackend):
         df = self._add_partition_columns(df, partition_cols)
 
         # Create key directory
-        key_path = self.base_path / key.replace("/", "_")
+        key_path = storage_key_path(self.base_path, key)
         key_path.mkdir(exist_ok=True)
 
         # Group by partitions and write
@@ -349,7 +356,7 @@ class HiveStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        key_path = self.base_path / key.replace("/", "_")
+        key_path = storage_key_path(self.base_path, key)
 
         if not key_path.exists():
             raise KeyError(f"Key '{key}' not found in storage")
@@ -392,10 +399,9 @@ class HiveStorage(StorageBackend):
             List of storage keys
         """
         keys = []
-        for path in self.base_path.iterdir():
-            if path.is_dir() and not path.name.startswith("."):
-                # Convert back from filesystem-safe name
-                keys.append(path.name.replace("_", "/"))
+        for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
+            if path.is_dir():
+                keys.append(decode_storage_key(path.name))
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -407,7 +413,7 @@ class HiveStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        key_path = self.base_path / key.replace("/", "_")
+        key_path = storage_key_path(self.base_path, key)
         return key_path.exists()
 
     def delete(self, key: str) -> bool:
@@ -419,12 +425,12 @@ class HiveStorage(StorageBackend):
         Returns:
             True if successful
         """
-        key_path = self.base_path / key.replace("/", "_")
+        key_path = storage_key_path(self.base_path, key)
         if key_path.exists():
             shutil.rmtree(key_path)
 
             # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+            metadata_file = storage_key_path(self.metadata_dir, key, ".json")
             if metadata_file.exists():
                 metadata_file.unlink()
 
@@ -477,7 +483,11 @@ class HiveStorage(StorageBackend):
             Path to the saved chunk file
         """
         # Create chunks directory
-        chunks_dir = self.base_path / ".chunks" / provider / symbol
+        chunks_dir = contained_path(
+            self.base_path / ".chunks",
+            encode_path_component(provider, "provider"),
+            encode_path_component(symbol, "symbol"),
+        )
         chunks_dir.mkdir(parents=True, exist_ok=True)
 
         # Create chunk filename with timestamp range
@@ -538,7 +548,7 @@ class HiveStorage(StorageBackend):
             Path to combined data directory
         """
         key = f"{provider}/{symbol}"
-        return self.base_path / key.replace("/", "_")
+        return storage_key_path(self.base_path, key)
 
     def read_data(
         self,
@@ -583,7 +593,7 @@ class HiveStorage(StorageBackend):
             chunk_file: Name of the chunk file saved
         """
         key = f"{provider}/{symbol}"
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = storage_key_path(self.metadata_dir, key, ".json")
 
         # Load existing metadata or create new
         if metadata_file.exists():

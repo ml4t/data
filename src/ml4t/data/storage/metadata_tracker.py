@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 
+from ml4t.data.storage.keys import storage_key_path
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -147,13 +148,11 @@ class MetadataTracker:
 
     def _get_metadata_path(self, key: str) -> Path:
         """Get path to metadata file for a dataset."""
-        safe_key = key.replace("/", "_")
-        return self.metadata_dir / f"{safe_key}_metadata.json"
+        return storage_key_path(self.metadata_dir, key, "_metadata.json")
 
     def _get_history_path(self, key: str) -> Path:
         """Get path to update history file for a dataset."""
-        safe_key = key.replace("/", "_")
-        return self.metadata_dir / f"{safe_key}_history.json"
+        return storage_key_path(self.metadata_dir, key, "_history.json")
 
     def get_metadata(self, key: str) -> DatasetMetadata | None:
         """

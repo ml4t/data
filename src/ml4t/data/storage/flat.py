@@ -13,6 +13,7 @@ from typing import Any
 import polars as pl
 
 from .backend import StorageBackend, StorageConfig
+from .keys import KEY_ENCODING_PREFIX, decode_storage_key, storage_key_path
 
 
 class FlatStorage(StorageBackend):
@@ -51,7 +52,7 @@ class FlatStorage(StorageBackend):
         lazy_data = self._ensure_lazy(data)
 
         # Create file path
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
+        file_path = storage_key_path(self.base_path, key, ".parquet")
 
         # Collect and write atomically
         df = lazy_data.collect()
@@ -91,7 +92,7 @@ class FlatStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
+        file_path = storage_key_path(self.base_path, key, ".parquet")
 
         if not file_path.exists():
             raise KeyError(f"Key '{key}' not found in storage")
@@ -104,7 +105,7 @@ class FlatStorage(StorageBackend):
             lf = lf.select(columns)
 
         # Apply date filters if timestamp column exists
-        schema = lf.schema
+        schema = lf.collect_schema()
         if "timestamp" in schema:
             if start_date:
                 lf = lf.filter(pl.col("timestamp") >= start_date)
@@ -120,10 +121,8 @@ class FlatStorage(StorageBackend):
             List of storage keys
         """
         keys = []
-        for path in self.base_path.glob("*.parquet"):
-            # Convert from filesystem-safe name
-            key = path.stem.replace("_", "/")
-            keys.append(key)
+        for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*.parquet"):
+            keys.append(decode_storage_key(path.stem))
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -135,7 +134,7 @@ class FlatStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
+        file_path = storage_key_path(self.base_path, key, ".parquet")
         return file_path.exists()
 
     def delete(self, key: str) -> bool:
@@ -147,12 +146,12 @@ class FlatStorage(StorageBackend):
         Returns:
             True if successful
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
+        file_path = storage_key_path(self.base_path, key, ".parquet")
         if file_path.exists():
             file_path.unlink()
 
             # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+            metadata_file = storage_key_path(self.metadata_dir, key, ".json")
             if metadata_file.exists():
                 metadata_file.unlink()
 

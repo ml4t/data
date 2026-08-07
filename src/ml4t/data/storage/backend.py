@@ -18,6 +18,8 @@ from typing import Any, Literal
 import polars as pl
 from filelock import FileLock
 
+from ml4t.data.storage.keys import storage_key_path
+
 # Type alias for partition granularity
 PartitionGranularityType = Literal["year", "month", "day", "hour"]
 
@@ -159,7 +161,7 @@ class StorageBackend(ABC):
         Returns:
             Metadata dict or None
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = storage_key_path(self.metadata_dir, key, ".json")
         if metadata_file.exists():
             with open(metadata_file) as f:
                 return json.load(f)
@@ -190,10 +192,10 @@ class StorageBackend(ABC):
             key: Storage key
             metadata: Metadata to store
         """
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
+        metadata_file = storage_key_path(self.metadata_dir, key, ".json")
 
         if self.config.enable_locking:
-            lock_file = self.metadata_dir / f"{key.replace('/', '_')}.lock"
+            lock_file = storage_key_path(self.metadata_dir, key, ".lock")
             lock = FileLock(lock_file, timeout=10)
 
             with lock:

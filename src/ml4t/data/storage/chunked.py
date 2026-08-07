@@ -11,6 +11,11 @@ import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.storage.keys import (
+    KEY_ENCODING_PREFIX,
+    decode_storage_key,
+    storage_key_path,
+)
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -72,6 +77,11 @@ class ChunkedStorage:
         # Metadata storage
         self.metadata_path = self.base_path / "metadata"
         self.metadata_path.mkdir(parents=True, exist_ok=True)
+
+    def _chunk_path(self, key: str, chunk_id: str) -> Path:
+        """Return a chunk path without repeating the full key in one filename."""
+        key_directory = storage_key_path(self.chunks_path, key)
+        return storage_key_path(key_directory, chunk_id, ".parquet")
 
     def _get_chunk_id(
         self,
@@ -227,7 +237,7 @@ class ChunkedStorage:
         Returns:
             Dictionary mapping chunk_id to ChunkInfo
         """
-        index_file = self.metadata_path / f"{key.replace('/', '_')}_index.json"
+        index_file = storage_key_path(self.metadata_path, key, "_index.json")
 
         if not index_file.exists():
             return {}
@@ -264,7 +274,7 @@ class ChunkedStorage:
             key: Storage key
             chunks: Chunk information dictionary
         """
-        index_file = self.metadata_path / f"{key.replace('/', '_')}_index.json"
+        index_file = storage_key_path(self.metadata_path, key, "_index.json")
 
         # Convert to JSON-serializable format
         index_data = {}
@@ -294,7 +304,7 @@ class ChunkedStorage:
         Returns:
             True if data exists
         """
-        index_file = self.metadata_path / f"{key.replace('/', '_')}_index.json"
+        index_file = storage_key_path(self.metadata_path, key, "_index.json")
         return index_file.exists()
 
     def read(
@@ -366,8 +376,7 @@ class ChunkedStorage:
         # Read and combine chunks
         dfs = []
         for chunk_info in relevant_chunks:
-            chunk_key = f"{key}/{chunk_info.chunk_id}"
-            chunk_path = self.chunks_path / f"{chunk_key.replace('/', '_')}.parquet"
+            chunk_path = self._chunk_path(key, chunk_info.chunk_id)
 
             # Read Parquet file with file locking
             with file_lock(chunk_path):
@@ -433,8 +442,6 @@ class ChunkedStorage:
         # Write each chunk
         chunk_index = {}
         for chunk_df, chunk_id in chunks_data:
-            chunk_key = f"{key}/{chunk_id}"
-
             # Check if chunk exists and merge if needed
             if chunk_id in existing_chunks:
                 logger.info(
@@ -444,7 +451,7 @@ class ChunkedStorage:
                 )
 
                 # Read existing chunk
-                chunk_path = self.chunks_path / f"{chunk_key.replace('/', '_')}.parquet"
+                chunk_path = self._chunk_path(key, chunk_id)
                 with file_lock(chunk_path):
                     existing_df = pl.read_parquet(chunk_path)
 
@@ -465,7 +472,7 @@ class ChunkedStorage:
             # (chunk_df is already the DataFrame to write)
 
             # Write chunk directly using Parquet
-            chunk_path = self.chunks_path / f"{chunk_key.replace('/', '_')}.parquet"
+            chunk_path = self._chunk_path(key, chunk_id)
             chunk_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Write Parquet file with file locking
@@ -520,8 +527,7 @@ class ChunkedStorage:
 
         # Delete each chunk file
         for chunk_id in chunks:
-            chunk_key = f"{key}/{chunk_id}"
-            chunk_path = self.chunks_path / f"{chunk_key.replace('/', '_')}.parquet"
+            chunk_path = self._chunk_path(key, chunk_id)
             try:
                 if chunk_path.exists():
                     chunk_path.unlink()
@@ -532,7 +538,7 @@ class ChunkedStorage:
                 )
 
         # Delete index file
-        index_file = self.metadata_path / f"{key.replace('/', '_')}_index.json"
+        index_file = storage_key_path(self.metadata_path, key, "_index.json")
         if index_file.exists():
             index_file.unlink()
 
@@ -551,9 +557,9 @@ class ChunkedStorage:
         keys = []
 
         # List all index files
-        for index_file in self.metadata_path.glob("*_index.json"):
-            # Extract key from filename
-            key = index_file.stem.replace("_index", "").replace("_", "/")
+        for index_file in self.metadata_path.glob(f"{KEY_ENCODING_PREFIX}*_index.json"):
+            encoded_key = index_file.name.removesuffix("_index.json")
+            key = decode_storage_key(encoded_key)
 
             if not prefix or key.startswith(prefix):
                 keys.append(key)
