@@ -60,17 +60,12 @@ class TestRateLimitConfig:
         config = RateLimitConfig()
         assert config.requests_per_second == 10.0
         assert config.burst_size == 1
-        assert config.retry_max_attempts == 3
-        assert config.retry_backoff_factor == 2.0
-        assert config.circuit_breaker_threshold == 5
-        assert config.circuit_breaker_timeout == 60
 
     def test_custom_rate_limit(self):
         """Test custom rate limit values."""
-        config = RateLimitConfig(requests_per_second=5.0, burst_size=10, retry_max_attempts=5)
+        config = RateLimitConfig(requests_per_second=5.0, burst_size=10)
         assert config.requests_per_second == 5.0
         assert config.burst_size == 10
-        assert config.retry_max_attempts == 5
 
 
 class TestProviderConfig:
@@ -195,7 +190,7 @@ class TestDataConfig:
         """Test saving and loading from YAML."""
         config = DataConfig(
             storage=StorageConfig(strategy=StorageStrategy.HIVE, base_path=tmp_path / "data"),
-            providers=[ProviderConfig(name="yahoo", type=ProviderType.YAHOO, api_key="test_key")],
+            providers=[ProviderConfig(name="tiingo", type=ProviderType.TIINGO, api_key="test_key")],
             universes=[SymbolUniverse(name="sp500", symbols=["AAPL", "MSFT"])],
         )
 
@@ -208,7 +203,7 @@ class TestDataConfig:
         loaded = DataConfig.from_yaml(yaml_file)
         assert loaded.storage.strategy == StorageStrategy.HIVE
         assert len(loaded.providers) == 1
-        assert loaded.providers[0].name == "yahoo"
+        assert loaded.providers[0].name == "tiingo"
         assert len(loaded.universes) == 1
         assert loaded.universes[0].name == "sp500"
 
@@ -220,7 +215,7 @@ class TestDataConfig:
             providers=[
                 ProviderConfig(
                     name="private_provider",
-                    type=ProviderType.YAHOO,
+                    type=ProviderType.ALPACA,
                     api_key=credential,
                     api_secret=credential,
                 )
@@ -274,7 +269,7 @@ class TestConfigLoader:
         monkeypatch.setenv("TEST_LOG_LEVEL", "WARNING")
 
         config_data = {
-            "providers": [{"name": "test", "type": "yahoo", "api_key": "${TEST_API_KEY}"}],
+            "providers": [{"name": "test", "type": "tiingo", "api_key": "${TEST_API_KEY}"}],
             "log_level": "${TEST_LOG_LEVEL}",
         }
 
@@ -292,7 +287,7 @@ class TestConfigLoader:
         """Test environment variables with default values."""
         config_data = {
             "providers": [
-                {"name": "test", "type": "yahoo", "api_key": "${MISSING_VAR:default_value}"}
+                {"name": "test", "type": "tiingo", "api_key": "${MISSING_VAR:default_value}"}
             ]
         }
 
@@ -363,7 +358,7 @@ class TestConfigLoader:
             providers=[
                 ProviderConfig(
                     name="private_provider",
-                    type=ProviderType.YAHOO,
+                    type=ProviderType.ALPACA,
                     api_key=credential,
                     api_secret=credential,
                 )
@@ -384,7 +379,7 @@ class TestConfigLoader:
         source.write_text(
             "providers:\n"
             "  - name: private_provider\n"
-            "    type: yahoo\n"
+            "    type: alpaca\n"
             "    api_key: ${TEST_PROVIDER_KEY}\n"
             "    api_secret: ${TEST_PROVIDER_SECRET}\n",
             encoding="utf-8",

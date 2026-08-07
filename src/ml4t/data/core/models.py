@@ -35,6 +35,8 @@ class Frequency(StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
     MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    ANNUAL = "annual"
 
 
 class BarType(StrEnum):

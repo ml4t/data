@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     PrivateAttr,
     SerializerFunctionWrapHandler,
@@ -17,11 +18,11 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ml4t.data.assets.asset_class import AssetClass
 from ml4t.data.core.config import resolve_data_root
 from ml4t.data.core.models import Frequency
+from ml4t.data.providers.registry import get_provider_spec
 
 
 def _is_environment_reference(value: str | None) -> bool:
@@ -111,6 +112,8 @@ class ScheduleType(StrEnum):
 class StorageConfig(BaseModel):
     """Storage backend configuration."""
 
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
     strategy: StorageStrategy = Field(
         default=StorageStrategy.HIVE,
         description="Storage strategy (hive for partitioned, flat for single file)",
@@ -136,6 +139,20 @@ class StorageConfig(BaseModel):
         description="Deprecated: Use partition_granularity instead. Kept for backward compatibility.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_beta_backend(cls, value: Any) -> Any:
+        """Normalize the former filesystem backend name to Hive storage."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        backend = data.pop("backend", None)
+        if backend is not None:
+            if str(backend).lower() != "filesystem":
+                raise ValueError(f"Unsupported storage backend: {backend}")
+            data.setdefault("strategy", "hive")
+        return data
+
     @field_validator("base_path")
     @classmethod
     def expand_path(cls, v: Path) -> Path:
@@ -153,24 +170,18 @@ class StorageConfig(BaseModel):
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration for API providers."""
 
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
     requests_per_second: float = Field(
         default=10.0, gt=0, description="Maximum requests per second"
     )
     burst_size: int = Field(default=1, ge=1, description="Burst size for rate limiter")
-    retry_max_attempts: int = Field(default=3, ge=1, description="Maximum retry attempts")
-    retry_backoff_factor: float = Field(
-        default=2.0, gt=1.0, description="Exponential backoff factor"
-    )
-    circuit_breaker_threshold: int = Field(
-        default=5, ge=1, description="Failures before circuit breaker opens"
-    )
-    circuit_breaker_timeout: int = Field(
-        default=60, ge=1, description="Circuit breaker timeout in seconds"
-    )
 
 
 class ProviderConfig(BaseModel):
     """Base provider configuration."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     _api_key_reference: str | None = PrivateAttr(default=None)
     _api_secret_reference: str | None = PrivateAttr(default=None)
@@ -193,11 +204,23 @@ class ProviderConfig(BaseModel):
     rate_limit: RateLimitConfig = Field(
         default_factory=RateLimitConfig, description="Rate limiting configuration"
     )
-    timeout: int = Field(default=30, description="Request timeout in seconds")
-    retry_count: int = Field(default=3, description="Number of retries on failure")
-    cache_enabled: bool = Field(default=True, description="Enable response caching")
-    cache_ttl: int = Field(default=3600, ge=0, description="Cache TTL in seconds")
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider-specific settings")
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_type(cls, value: Any) -> Any:
+        """Accept enum member names without making configuration case-sensitive."""
+        return value.lower() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_extra_fields(self) -> ProviderConfig:
+        """Keep structural and credential fields out of provider-specific settings."""
+        reserved = {"name", "type", "enabled", "api_key", "api_secret"}
+        conflicts = reserved.intersection(self.extra)
+        if conflicts:
+            names = ", ".join(sorted(conflicts))
+            raise ValueError(f"Provider extra contains reserved fields: {names}")
+        return self
 
     @model_serializer(mode="wrap")
     def _serialize_with_credential_references(
@@ -234,6 +257,12 @@ class ProviderConfig(BaseModel):
         """Convert float rate_limit to RateLimitConfig for backward compatibility."""
         if isinstance(v, int | float):
             return RateLimitConfig(requests_per_second=float(v))
+        if isinstance(v, tuple) and len(v) == 2:
+            calls, period = v
+            return RateLimitConfig(
+                requests_per_second=float(calls) / float(period),
+                burst_size=int(calls),
+            )
         return v
 
     @field_validator("api_key", "api_secret", mode="before")
@@ -254,11 +283,21 @@ class ProviderConfig(BaseModel):
 class SymbolUniverse(BaseModel):
     """Symbol universe definition for data collection."""
 
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
     name: str = Field(description="Universe name")
     symbols: list[str] = Field(default_factory=list, description="Symbol list")
     file: Path | None = Field(default=None, description="File with symbols (one per line)")
     provider: str | None = Field(default=None, description="Preferred provider")
     asset_class: AssetClass = Field(default=AssetClass.EQUITY, description="Asset class")
+
+    @field_validator("asset_class", mode="before")
+    @classmethod
+    def normalize_asset_class(cls, value: Any) -> Any:
+        """Normalize legacy enum spellings at the configuration boundary."""
+        if not isinstance(value, str):
+            return value
+        return {"fx": "forex"}.get(value.lower(), value.lower())
 
     @model_validator(mode="after")
     def load_from_file(self) -> SymbolUniverse:
@@ -275,9 +314,12 @@ class SymbolUniverse(BaseModel):
 class DatasetConfig(BaseModel):
     """Dataset configuration."""
 
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
     name: str = Field(description="Dataset name")
     universe: str | None = Field(default=None, description="Symbol universe name")
     symbols: list[str] = Field(default_factory=list, description="Direct symbol list (legacy)")
+    symbols_file: Path | None = Field(default=None, description="File containing symbols")
     provider: str = Field(description="Provider name to use")
     frequency: Frequency = Field(default=Frequency.DAILY, description="Data frequency")
     asset_class: AssetClass = Field(default=AssetClass.EQUITY, description="Asset class")
@@ -290,6 +332,23 @@ class DatasetConfig(BaseModel):
     anomaly_detection: bool = Field(default=False, description="Enable anomaly detection")
     validation: dict[str, Any] = Field(default_factory=dict, description="Validation settings")
     storage: dict[str, Any] = Field(default_factory=dict, description="Storage settings")
+    lookback_days: int = Field(default=7, ge=0, description="Days to revisit during updates")
+    fill_gaps: bool = Field(default=True, description="Fill gaps during updates")
+    initial_load_days: int = Field(default=365, ge=1, description="Initial history length")
+    extra: dict[str, Any] = Field(default_factory=dict, description="Dataset-specific settings")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_beta_dates(cls, value: Any) -> Any:
+        """Normalize beta start/end field names."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if "start" in data and "start_date" not in data:
+            data["start_date"] = data.pop("start")
+        if "end" in data and "end_date" not in data:
+            data["end_date"] = data.pop("end")
+        return data
 
     @field_validator("symbols", mode="before")
     @classmethod
@@ -299,12 +358,21 @@ class DatasetConfig(BaseModel):
             return [v]
         return v
 
+    @field_validator("frequency", "asset_class", mode="before")
+    @classmethod
+    def normalize_enums(cls, value: Any) -> Any:
+        """Accept enum member names without making configuration case-sensitive."""
+        return value.lower() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_universe_or_symbols(self) -> DatasetConfig:
         """Ensure either universe or symbols is provided with content."""
         # Reject empty symbols list (no actual symbols)
-        if (not self.universe and not self.symbols) or (
-            self.symbols is not None and len(self.symbols) == 0 and not self.universe
+        if (not self.universe and not self.symbols and not self.symbols_file) or (
+            self.symbols is not None
+            and len(self.symbols) == 0
+            and not self.universe
+            and not self.symbols_file
         ):
             raise ValueError(f"Dataset {self.name} has no symbols and no universe")
         return self
@@ -312,6 +380,8 @@ class DatasetConfig(BaseModel):
 
 class ScheduleConfig(BaseModel):
     """Schedule configuration."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     type: ScheduleType = Field(description="Schedule type")
     cron: str | None = Field(default=None, description="Cron expression (for cron type)")
@@ -330,6 +400,12 @@ class ScheduleConfig(BaseModel):
         default=None, description="Minutes before market close (for market_hours type)"
     )
 
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_type(cls, value: Any) -> Any:
+        """Accept enum member names without making configuration case-sensitive."""
+        return value.lower() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_schedule_fields(self):
         """Validate schedule fields based on schedule type."""
@@ -344,6 +420,8 @@ class ScheduleConfig(BaseModel):
 
 class WorkflowConfig(BaseModel):
     """Workflow configuration."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     name: str = Field(description="Workflow name")
     description: str | None = Field(default=None, description="Workflow description")
@@ -360,7 +438,7 @@ class WorkflowConfig(BaseModel):
     notifications: dict[str, Any] = Field(default_factory=dict, description="Notification settings")
 
 
-class DataConfig(BaseSettings):
+class DataConfig(BaseModel):
     """Main ML4T Data configuration with environment variable support."""
 
     # Config metadata
@@ -369,10 +447,7 @@ class DataConfig(BaseSettings):
         default_factory=resolve_data_root, description="Base directory for project"
     )
 
-    # Storage configuration (supports both dict and StorageConfig)
-    storage: StorageConfig | dict[str, Any] = Field(
-        default_factory=dict, description="Storage settings"
-    )
+    storage: StorageConfig = Field(default_factory=StorageConfig, description="Storage settings")
 
     # Defaults for datasets
     defaults: dict[str, Any] = Field(
@@ -425,28 +500,106 @@ class DataConfig(BaseSettings):
     validation: dict[str, Any] = Field(
         default_factory=dict, description="Global validation settings"
     )
+    routing: dict[str, Any] = Field(default_factory=dict, description="Provider routing settings")
 
-    # Environment configuration for .env support
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    @field_validator("storage", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def convert_storage(cls, v):
-        """Try to convert dict to StorageConfig, fallback to dict if incompatible."""
-        if isinstance(v, dict):
-            try:
-                # Try to construct StorageConfig - if keys match, it will succeed
-                return StorageConfig(**v)
-            except Exception:
-                # If it fails (e.g., unknown fields), keep as dict
-                return v
-        return v
+    def normalize_beta_mappings(cls, value: Any) -> Any:
+        """Normalize beta mapping syntax into the canonical named-object lists."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+
+        def named_list(field: str, *, provider: bool = False) -> None:
+            entries = data.get(field)
+            if not isinstance(entries, dict):
+                return
+            normalized = []
+            for name, entry in entries.items():
+                item = dict(entry or {})
+                item.setdefault("name", name)
+                if provider:
+                    item.setdefault("type", name)
+                normalized.append(item)
+            data[field] = normalized
+
+        named_list("providers", provider=True)
+        named_list("universes")
+        named_list("datasets")
+        named_list("workflows")
+
+        api_keys = data.pop("api_keys", None)
+        if isinstance(api_keys, dict):
+            providers = data.setdefault("providers", [])
+            by_name = {item["name"]: item for item in providers if isinstance(item, dict)}
+            for name, api_key in api_keys.items():
+                provider_config = by_name.get(name)
+                if provider_config is None:
+                    provider_config = {"name": name, "type": name}
+                    providers.append(provider_config)
+                provider_config.setdefault("api_key", api_key)
+
+        storage = data.get("storage")
+        if isinstance(storage, dict) and "path" in storage:
+            data["storage"] = {**storage, "base_path": storage["path"]}
+            data["storage"].pop("path")
+        return data
+
+    def to_runtime_dict(self) -> dict[str, Any]:
+        """Return the validated configuration shape consumed by DataManager."""
+        providers: dict[str, dict[str, Any]] = {}
+        for provider in self.providers:
+            spec = get_provider_spec(provider.type.value)
+            provider_config: dict[str, Any] = {
+                "type": provider.type.value,
+                "enabled": provider.enabled,
+                **provider.extra,
+            }
+            for requirement in spec.credentials:
+                value = getattr(provider, requirement.config_field, None)
+                if value is not None:
+                    provider_config[requirement.config_field] = value
+            if (
+                spec.optional_credential_environment
+                and provider.api_key is not None
+                and not _is_environment_reference(provider.api_key)
+            ):
+                provider_config["api_key"] = provider.api_key
+            if "rate_limit" in provider.model_fields_set:
+                rate = provider.rate_limit
+                provider_config["rate_limit"] = (
+                    rate.burst_size,
+                    rate.burst_size / rate.requests_per_second,
+                )
+            providers[provider.name] = provider_config
+
+        defaults = dict(self.defaults)
+        defaults.setdefault("output_format", "polars")
+        defaults.setdefault("frequency", "daily")
+        defaults.setdefault("timezone", "UTC")
+        return {
+            "providers": providers,
+            "routing": self.routing,
+            "defaults": defaults,
+        }
+
+    @model_validator(mode="after")
+    def validate_provider_credentials(self) -> DataConfig:
+        """Reject credentials that the selected provider implementation cannot use."""
+        for provider in self.providers:
+            spec = get_provider_spec(provider.type.value)
+            supported = {requirement.config_field for requirement in spec.credentials}
+            if spec.optional_credential_environment:
+                supported.add("api_key")
+            for field in ("api_key", "api_secret"):
+                if getattr(provider, field) is not None and field not in supported:
+                    raise ValueError(
+                        f"Provider '{provider.name}' of type '{provider.type.value}' "
+                        f"does not accept {field}"
+                    )
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> DataConfig:

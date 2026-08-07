@@ -165,17 +165,17 @@ The configuration file defines datasets with inline symbols or file references:
 
 ```yaml
 storage:
-  path: ~/ml4t-data
+  base_path: ~/ml4t-data
   partition_granularity: year
 
 datasets:
-  equities:
+  - name: equities
     provider: yahoo
     symbols: [AAPL, MSFT, GOOGL]
     frequency: daily
-    asset_class: equities
+    asset_class: equity
     initial_load_days: 3650
-  sp500:
+  - name: sp500
     provider: yahoo
     symbols_file: sp500.txt
     start_date: "2010-01-01"

@@ -236,16 +236,16 @@ Configuration-driven batch updates:
 
 ```yaml
 storage:
-  path: ~/data/market
+  base_path: ~/data/market
 
 datasets:
-  sp500_daily:
+  - name: sp500_daily
     provider: yahoo
     symbols_file: symbols/sp500.txt
     frequency: daily
     start_date: 2015-01-01
 
-  crypto:
+  - name: crypto
     provider: coingecko
     symbols: [bitcoin, ethereum, solana]
     frequency: daily

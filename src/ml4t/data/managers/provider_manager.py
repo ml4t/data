@@ -158,6 +158,8 @@ class ProviderManager:
         self.config = config
         self.providers: dict[str, BaseProvider] = {}
         self._provider_classes = dict(self._get_provider_classes())
+        self._provider_specs = dict(PROVIDER_REGISTRY)
+        self._register_configured_aliases()
         self._available_providers: list[str] = []
         self._detect_available_providers()
 
@@ -192,14 +194,30 @@ class ProviderManager:
         cls._PROVIDER_CLASSES = provider_classes
         return provider_classes
 
+    def _register_configured_aliases(self) -> None:
+        """Bind configured instance names to their registered provider types."""
+        for name, config in self.config.get("providers", {}).items():
+            provider_type = config.get("type", name)
+            if not isinstance(provider_type, str) or provider_type == name:
+                continue
+            spec = get_provider_spec(provider_type)
+            if not spec.manager_compatible:
+                raise ValueError(
+                    f"Provider '{name}' uses type '{provider_type}', which is direct-API only"
+                )
+            provider_class = self._provider_classes.get(provider_type)
+            if provider_class is None:
+                raise ValueError(f"Provider '{name}' requires unavailable type '{provider_type}'")
+            self._provider_classes[name] = provider_class
+            self._provider_specs[name] = spec
+
     def _detect_available_providers(self) -> None:
         """Detect which providers are available based on configuration."""
         providers_config = self.config.get("providers", {})
         self._available_providers = [
-            spec.name
-            for spec in PROVIDER_REGISTRY.values()
-            if spec.name in self._provider_classes
-            and spec.is_configured(providers_config.get(spec.name, {}))
+            name
+            for name, spec in self._provider_specs.items()
+            if name in self._provider_classes and spec.is_configured(providers_config.get(name, {}))
         ]
 
     @property
@@ -238,11 +256,7 @@ class ProviderManager:
         Raises:
             ValueError: If provider is not available or initialization fails
         """
-        spec: ProviderSpec | None
-        try:
-            spec = get_provider_spec(provider_name)
-        except ValueError:
-            spec = None
+        spec: ProviderSpec | None = self._provider_specs.get(provider_name)
 
         if required_capability is not None and spec is not None:
             if required_capability not in spec.capabilities:
@@ -301,10 +315,9 @@ class ProviderManager:
         Raises:
             ValueError: If provider is not available
         """
-        try:
-            spec = get_provider_spec(provider_name)
-        except ValueError as error:
-            raise ValueError(f"Provider '{provider_name}' not available: not registered") from error
+        spec = self._provider_specs.get(provider_name)
+        if spec is None:
+            raise ValueError(f"Provider '{provider_name}' not available: not registered")
         config = self.config.get("providers", {}).get(provider_name, {})
         sanitized_config = {
             key: (
@@ -326,7 +339,7 @@ class ProviderManager:
             "available": provider_name in self._available_providers,
             "configured": provider_name in self.config.get("providers", {}),
             "has_api_key": spec.has_api_key(config),
-            "is_free": provider_name in self.FREE_PROVIDERS,
+            "is_free": not spec.credentials and not spec.required_configuration,
             "capabilities": sorted(spec.capabilities),
             "credential_environment": list(spec.credential_environment),
             "extra": spec.extra,

@@ -67,7 +67,7 @@ class TestConfigLoader:
             "providers": [
                 {
                     "name": "test",
-                    "type": "yahoo",
+                    "type": "tiingo",
                     "api_key": "${TEST_API_KEY}",
                 }
             ],
@@ -282,11 +282,10 @@ class TestConfigLoader:
             loader = ConfigLoader(config_file)
             config = loader.load()
 
-            # Check that env vars were set
-            assert os.environ["TEST_ENV_VAR"] == "test_value"
-            assert os.environ["TEST_NUMBER"] == "42"
-            # Check that interpolation worked
-            assert config.base_dir == Path("test_value")
+            # File-local values participate in interpolation without mutating the process.
+            assert "TEST_ENV_VAR" not in os.environ
+            assert "TEST_NUMBER" not in os.environ
+            assert config.base_dir == (tmp_path / "test_value").resolve()
         finally:
             # Clean up
             os.environ.pop("TEST_ENV_VAR", None)

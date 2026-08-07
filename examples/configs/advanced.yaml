@@ -20,11 +20,6 @@ providers:
     enabled: true
     rate_limit:
       requests_per_second: ${QDATA_YAHOO_RATE_LIMIT:2.0}
-      retry_max_attempts: 3
-      circuit_breaker_threshold: 5
-    timeout: 30
-    cache_enabled: true
-    cache_ttl: 3600
 
   - name: databento
     type: databento
@@ -35,15 +30,13 @@ providers:
       burst_size: 10
     extra:
       dataset: "XNAS.ITCH"
-      schema: "ohlcv-1m"
 
   - name: oanda
     type: oanda
     enabled: true
     api_key: ${OANDA_API_KEY}
     extra:
-      account_id: ${OANDA_ACCOUNT_ID}
-      environment: "practice"
+      practice: true
     rate_limit:
       requests_per_second: 120.0  # OANDA's limit
       burst_size: 5
@@ -54,19 +47,18 @@ providers:
     api_key: ${CRYPTOCOMPARE_API_KEY}
     rate_limit:
       requests_per_second: ${QDATA_CRYPTO_RATE_LIMIT:10.0}
-      retry_backoff_factor: 3.0  # More aggressive backoff
     extra:
-      default_market: "CCCAGG"
+      exchange: "CCCAGG"
 
 # Symbol universes organized by asset class
 universes:
   - name: sp500
-    file: examples/symbols/sp500.txt  # Load from file
+    file: ../symbols/sp500.txt  # Load from file
     asset_class: EQUITY
     provider: yahoo
 
   - name: nasdaq100
-    file: examples/symbols/nasdaq100.txt
+    file: ../symbols/nasdaq100_2025-11-24.txt
     asset_class: EQUITY
     provider: databento
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
 
 from ml4t.data import providers as provider_namespace
@@ -78,17 +79,23 @@ def test_oanda_environment_configuration_only_passes_constructor_arguments(monke
     manager._get_provider("oanda")
 
 
-def test_provider_info_redacts_credentials_from_nested_extra():
-    manager = DataManager(
-        providers={
-            "tiingo": {
-                "api_key": "outer-secret",
-                "extra": {"api_key": "nested-secret", "exchange": "US"},
+def test_provider_configuration_rejects_credentials_in_nested_extra():
+    with pytest.raises(ValueError, match="extra contains reserved fields: api_key"):
+        DataManager(
+            providers={
+                "tiingo": {
+                    "api_key": "outer-secret",
+                    "extra": {"api_key": "nested-secret", "exchange": "US"},
+                }
             }
-        }
-    )
+        )
 
-    assert manager.get_provider_info("tiingo")["config"] == {"extra": {"exchange": "US"}}
+
+def test_unresolved_environment_reference_does_not_enable_provider(monkeypatch):
+    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
+    manager = DataManager(providers={"databento": {"api_key": "${DATABENTO_API_KEY}"}})
+
+    assert "databento" not in manager.list_providers()
 
 
 def test_custom_registration_is_scoped_to_one_manager_instance():

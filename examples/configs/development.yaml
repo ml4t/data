@@ -9,16 +9,12 @@ log_level: DEBUG  # Verbose logging for development
 providers:
   - name: mock
     type: mock
-    rate_limit: 1000
     extra:
       seed: 42  # Deterministic data for testing
-      noise_level: 0.1
 
   - name: yahoo_test
     type: yahoo
     rate_limit: 0.2  # Slower rate to avoid hitting limits
-    timeout: 60
-    retry_count: 1
 
 # Small test datasets
 datasets:
@@ -92,8 +88,6 @@ validation:
 storage:
   backend: filesystem
   compression: none  # No compression for easier debugging
-  cache:
-    enabled: false  # Disable cache in development
 
 # Development-only settings
 env:

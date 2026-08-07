@@ -33,8 +33,6 @@ class TestProviderConfig:
 
         assert provider.name == "test_provider"
         assert provider.type == ProviderType.YAHOO
-        assert provider.timeout == 30  # Default
-        assert provider.retry_count == 3  # Default
 
     def test_provider_with_api_key(self):
         """Test provider with API key."""

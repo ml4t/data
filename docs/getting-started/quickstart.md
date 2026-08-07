@@ -63,10 +63,10 @@ Create `ml4t-data.yaml` for automated updates:
 
 ```yaml
 storage:
-  path: ~/ml4t-data
+  base_path: ~/ml4t-data
 
 datasets:
-  sp500:
+  - name: sp500
     provider: yahoo
     symbols_file: sp500.txt
     frequency: daily

@@ -50,10 +50,10 @@ providers:
     rate_limit: 10
   databento:
     api_key: ${DATABENTO_API_KEY}
-    dataset: GLBX.MDP3
+    extra:
+      dataset: GLBX.MDP3
   oanda:
     api_key: ${OANDA_API_KEY}
-    account_id: test_account
 
 routing:
   patterns:
@@ -103,7 +103,7 @@ providers:
                 providers={"cryptocompare": {"rate_limit": 20}},
             )
             assert dm.output_format == "lazy"  # Parameter overrides YAML
-            assert dm.config["providers"]["cryptocompare"]["rate_limit"] == 20
+            assert dm.config["providers"]["cryptocompare"]["rate_limit"] == (1, 0.05)
         finally:
             Path(config_path).unlink()
 

@@ -20,6 +20,7 @@ class AssetClass(StrEnum):
     FOREX = "forex"
     COMMODITY = "commodity"
     FIXED_INCOME = "fixed_income"
+    ECONOMIC = "economic"
     INDEX = "index"
     ETF = "etf"
     OPTION = "option"

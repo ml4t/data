@@ -48,7 +48,7 @@ class ConfigLoader:
 
         return None
 
-    def _interpolate_env_vars(self, data: Any) -> Any:
+    def _interpolate_env_vars(self, data: Any, environment: dict[str, str] | None = None) -> Any:
         """
         Recursively interpolate environment variables in configuration.
 
@@ -58,10 +58,13 @@ class ConfigLoader:
         Returns:
             Data with environment variables interpolated
         """
+        environment = environment or dict(os.environ)
         if isinstance(data, dict):
-            return {key: self._interpolate_env_vars(value) for key, value in data.items()}
+            return {
+                key: self._interpolate_env_vars(value, environment) for key, value in data.items()
+            }
         if isinstance(data, list):
-            return [self._interpolate_env_vars(item) for item in data]
+            return [self._interpolate_env_vars(item, environment) for item in data]
         if isinstance(data, str):
             # Replace ${VAR} with environment variable value
             def replace_env(match):
@@ -69,8 +72,8 @@ class ConfigLoader:
                 # Support default values: ${VAR:default}
                 if ":" in var_name:
                     var_name, default = var_name.split(":", 1)
-                    return os.environ.get(var_name, default)
-                value = os.environ.get(var_name)
+                    return environment.get(var_name, default)
+                value = environment.get(var_name)
                 if value is None:
                     logger.warning(f"Environment variable not found: {var_name}")
                     return match.group(0)  # Keep original if not found
@@ -186,6 +189,33 @@ class ConfigLoader:
 
         return data
 
+    @staticmethod
+    def _resolve_path(value: str | Path, base_dir: Path) -> str:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        return str(path.resolve())
+
+    def _resolve_config_paths(self, data: dict[str, Any], base_dir: Path) -> None:
+        """Resolve supported relative paths against the declaring config file."""
+        if "base_dir" in data:
+            data["base_dir"] = self._resolve_path(data["base_dir"], base_dir)
+        storage = data.get("storage")
+        if isinstance(storage, dict):
+            for field in ("base_path", "path"):
+                if field in storage:
+                    storage[field] = self._resolve_path(storage[field], base_dir)
+        for field in ("universes", "datasets"):
+            entries = data.get(field, [])
+            if isinstance(entries, dict):
+                entries = entries.values()
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                path_field = "file" if field == "universes" else "symbols_file"
+                if path_field in entry:
+                    entry[path_field] = self._resolve_path(entry[path_field], base_dir)
+
     def load(self, override_path: Path | None = None) -> DataConfig:
         """
         Load and validate configuration.
@@ -219,22 +249,26 @@ class ConfigLoader:
         # Process includes
         data = self._process_includes(data, config_path.parent)
 
-        # Set environment variables defined in config
-        if "env" in data:
-            for key, value in data["env"].items():
-                if key not in os.environ:
-                    os.environ[key] = str(value)
-                    logger.debug(f"Set environment variable: {key}")
-
         raw_data = data
 
         # Interpolate environment variables
-        data = self._interpolate_env_vars(data)
+        local_environment = dict(os.environ)
+        configured_environment = data.get("env", {})
+        if isinstance(configured_environment, dict):
+            local_environment.update(
+                {key: str(value) for key, value in configured_environment.items()}
+            )
+        data = self._interpolate_env_vars(data, local_environment)
+        self._resolve_config_paths(data, config_path.parent)
 
         # Apply defaults to datasets
-        if "defaults" in data and "datasets" in data:
+        if isinstance(data.get("defaults"), dict) and isinstance(data.get("datasets"), list | dict):
             defaults = data["defaults"]
-            for dataset in data["datasets"]:
+            datasets = data["datasets"]
+            dataset_entries = datasets.values() if isinstance(datasets, dict) else datasets
+            for dataset in dataset_entries:
+                if not isinstance(dataset, dict):
+                    continue
                 # Apply defaults that aren't already set
                 for key, value in defaults.items():
                     if key not in dataset:
@@ -252,8 +286,13 @@ class ConfigLoader:
             )
             return config
         except ValidationError as e:
-            logger.error("Configuration validation failed", errors=e.errors())
-            raise ValueError(f"Invalid configuration: {e}") from e
+            errors = e.errors(include_input=False, include_context=False)
+            logger.error("Configuration validation failed", errors=errors)
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc']) or 'configuration'}: {error['msg']}"
+                for error in errors
+            )
+            raise ValueError(f"Invalid configuration: {details}") from e
 
     def save(self, config: DataConfig, path: Path | None = None) -> None:
         """

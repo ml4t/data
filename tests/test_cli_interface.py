@@ -562,11 +562,16 @@ class TestBatchOperations:
         with runner.isolated_filesystem():
             # Create config file
             config = {
-                "symbols": ["BTC", "ETH"],
-                "start": "2024-01-01",
-                "end": "2024-01-31",
-                "frequency": "hourly",
-                "provider": "cryptocompare",
+                "datasets": [
+                    {
+                        "name": "crypto",
+                        "symbols": ["BTC", "ETH"],
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-01-31",
+                        "frequency": "hourly",
+                        "provider": "cryptocompare",
+                    }
+                ]
             }
             with open("config.json", "w") as f:
                 json.dump(config, f)
@@ -591,6 +596,7 @@ class TestBatchOperations:
                     frequency="hourly",
                     provider="cryptocompare",
                 )
+            mock_dm_class.assert_called_once_with(config_path="config.json")
 
 
 class TestProgressAndOutput:

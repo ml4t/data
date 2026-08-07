@@ -18,8 +18,8 @@ class CredentialRequirement:
     environment: tuple[str, ...]
 
     def is_satisfied(self, config: Mapping[str, Any], environ: Mapping[str, str]) -> bool:
-        return bool(config.get(self.config_field)) or any(
-            environ.get(name) for name in self.environment
+        return _has_value(config.get(self.config_field)) or any(
+            _has_value(environ.get(name)) for name in self.environment
         )
 
 
@@ -88,8 +88,8 @@ class ProviderSpec:
             )
             + self.optional_credential_environment
         )
-        return bool(provider_config.get("api_key")) or any(
-            environment.get(name) for name in api_key_environment
+        return _has_value(provider_config.get("api_key")) or any(
+            _has_value(environment.get(name)) for name in api_key_environment
         )
 
     def load_class(self) -> type:
@@ -103,6 +103,13 @@ class ProviderSpec:
 
 def _credential(config_field: str, *environment: str) -> CredentialRequirement:
     return CredentialRequirement(config_field, environment)
+
+
+def _has_value(value: Any) -> bool:
+    """Return whether a configured value is resolved and non-empty."""
+    return bool(value) and not (
+        isinstance(value, str) and value.startswith("${") and value.endswith("}")
+    )
 
 
 def _spec(

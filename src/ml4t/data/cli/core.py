@@ -5,7 +5,6 @@ Commands: fetch, update, validate, status, export, info, list
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
+from ml4t.data.config import load_config
 from ml4t.data.data_manager import DataManager
 from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
@@ -22,10 +22,11 @@ from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.metadata_tracker import MetadataTracker
 from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 
-from .batch import _build_storage_from_config
+from .batch import _as_date_string, _build_storage_from_config
 from .utils import (
     console,
     create_progress_bar,
+    load_symbols_from_file,
     print_error,
     print_success,
     save_batch_results,
@@ -46,16 +47,29 @@ from .utils import (
 @click.option("--end", callback=validate_date, help="End date (YYYY-MM-DD)")
 @click.option(
     "--frequency",
-    default="daily",
+    default=None,
     type=click.Choice(["daily", "hourly", "weekly"]),
-    help="Data frequency",
+    help="Data frequency (default: configured value or daily)",
 )
 @click.option("--provider", "-p", help="Specific provider to use")
 @click.option("--output", "-o", type=click.Path(), help="Output file path (.parquet or .csv)")
-@click.option("--config", "-c", type=click.Path(exists=True), help="Configuration file (JSON)")
+@click.option("--config", "-c", type=click.Path(exists=True), help="Configuration file")
+@click.option("--dataset", help="Dataset from the configuration file")
 @click.option("--progress", is_flag=True, help="Show progress bar")
 @click.pass_context
-def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, config, progress):
+def fetch(
+    ctx,
+    symbol,
+    symbols_file,
+    start,
+    end,
+    frequency,
+    provider,
+    output,
+    config,
+    dataset,
+    progress,
+):
     """Fetch financial data from providers.
 
     Examples:
@@ -70,13 +84,34 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
     if config:
         if not quiet:
             console.print(f"Loading configuration from {config}")
-        with open(config) as f:
-            config_data = json.load(f)
-            symbol = config_data.get("symbols", list(symbol))
-            start = config_data.get("start", start)
-            end = config_data.get("end", end)
-            frequency = config_data.get("frequency", frequency)
-            provider = config_data.get("provider", provider)
+        configured = load_config(Path(config))
+        if dataset:
+            configured_dataset = configured.get_dataset(dataset)
+            if configured_dataset is None:
+                raise click.UsageError(f"Dataset '{dataset}' not found in {config}.")
+        elif len(configured.datasets) == 1:
+            configured_dataset = configured.datasets[0]
+        else:
+            raise click.UsageError("Use --dataset when the configuration has multiple datasets.")
+
+        if not symbol and not symbols_file:
+            symbol = list(configured_dataset.symbols)
+            if configured_dataset.symbols_file:
+                symbol.extend(load_symbols_from_file(configured_dataset.symbols_file))
+            if configured_dataset.universe:
+                universe = configured.get_universe(configured_dataset.universe)
+                if universe is None:
+                    raise click.UsageError(
+                        f"Dataset '{configured_dataset.name}' references unknown universe "
+                        f"'{configured_dataset.universe}'."
+                    )
+                symbol.extend(universe.symbols)
+        start = start or _as_date_string(configured_dataset.start_date)
+        end = end or _as_date_string(configured_dataset.end_date)
+        frequency = frequency or configured_dataset.frequency.value
+        provider = provider or configured_dataset.provider
+
+    frequency = frequency or "daily"
 
     missing_options = [name for name, value in (("--start", start), ("--end", end)) if not value]
     if missing_options:
@@ -97,7 +132,7 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
         ctx.exit(1)
 
     try:
-        dm = DataManager()
+        dm = DataManager(config_path=config)
 
         if len(symbols) == 1:
             sym = symbols[0]
@@ -567,13 +602,12 @@ def info(symbol, storage_path):
 @click.pass_context
 def list_data(_ctx, config, storage_path):
     """List all stored datasets."""
-    import yaml
-
     try:
         if config:
+            from ml4t.data.config import load_config
+
             config_path = Path(config).resolve()
-            with open(config_path) as f:
-                cfg = yaml.safe_load(f)
+            cfg = load_config(config_path)
             storage, storage_path = _build_storage_from_config(cfg, config_path)
         elif storage_path:
             storage_path = Path(storage_path).expanduser()

@@ -38,8 +38,3 @@ storage:
   backend: filesystem
   base_path: ${QLDM_DATA_DIR}
   compression: zstd
-  cache:
-    enabled: true
-    path: ${QLDM_CACHE_DIR}
-    size_mb: 1000
-    ttl_seconds: 3600

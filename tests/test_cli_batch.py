@@ -103,7 +103,7 @@ datasets:
     manager.update.assert_called_once_with(
         "AAPL",
         frequency="daily",
-        asset_class="equities",
+        asset_class="equity",
         provider="mock",
         lookback_days=7,
         fill_gaps=True,

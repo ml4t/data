@@ -12,13 +12,13 @@ Configuration hierarchy (lowest to highest priority):
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 import structlog
-import yaml
 
+from ml4t.data.config.loader import ConfigLoader
+from ml4t.data.config.models import DataConfig
 from ml4t.data.providers.registry import PROVIDER_REGISTRY
 
 logger = structlog.get_logger()
@@ -122,7 +122,7 @@ class ConfigManager:
         return self.config.get("defaults", {}).get("timezone", "UTC")
 
     def _load_config(self, config_path: str | None) -> dict[str, Any]:
-        """Load configuration from YAML file.
+        """Load and validate configuration through the canonical typed loader.
 
         Args:
             config_path: Path to YAML configuration file
@@ -130,23 +130,9 @@ class ConfigManager:
         Returns:
             Configuration dictionary with defaults applied
         """
-        config = self._deep_copy_config(self.DEFAULT_CONFIG)
-
-        if config_path and Path(config_path).exists():
-            with open(config_path) as f:
-                content = f.read()
-
-                # Environment variable substitution: ${VAR_NAME}
-                for env_var in re.findall(r"\$\{([^}]+)\}", content):
-                    value = os.getenv(env_var, "")
-                    content = content.replace(f"${{{env_var}}}", value)
-
-                yaml_config = yaml.safe_load(content)
-                if yaml_config:
-                    config = self._merge_configs(config, yaml_config)
-                    logger.info(f"Loaded configuration from {config_path}")
-
-        return config
+        if config_path is None:
+            return self._deep_copy_config(self.DEFAULT_CONFIG)
+        return ConfigLoader(Path(config_path)).load().to_runtime_dict()
 
     def _deep_copy_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Create a deep copy of a configuration dictionary.
@@ -214,9 +200,10 @@ class ConfigManager:
             **kwargs: Additional default overrides
         """
         if providers:
+            validated_providers = DataConfig(providers=providers).to_runtime_dict()["providers"]
             self.config["providers"] = self._merge_configs(
                 self.config.get("providers", {}),
-                providers,
+                validated_providers,
             )
 
         if output_format and output_format != "polars":  # Only override if not default
