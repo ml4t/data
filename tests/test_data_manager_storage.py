@@ -755,6 +755,21 @@ class TestDataManagerImportData:
                 provider="databento",
             )
 
+    def test_import_data_rejects_all_null_timestamps(self, manager):
+        data = pl.DataFrame(
+            {
+                "timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC")),
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1000.0],
+            }
+        )
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            manager.import_data(data=data, symbol="AAPL", provider="test")
+
     def test_import_data_different_asset_classes(self, manager, storage, sample_data):
         """Test importing different asset classes."""
         # Crypto

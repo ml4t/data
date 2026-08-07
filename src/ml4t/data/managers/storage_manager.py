@@ -26,6 +26,14 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _timestamp_bounds(df: pl.DataFrame) -> tuple[datetime, datetime]:
+    start = df.get_column("timestamp").min()
+    end = df.get_column("timestamp").max()
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise TypeError("'timestamp' must contain non-null Datetime values")
+    return start, end
+
+
 class StorageManager:
     """Manages data storage operations.
 
@@ -263,8 +271,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = df["timestamp"].min()
-            max_ts = df["timestamp"].max()
+            min_ts, max_ts = _timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -283,10 +290,9 @@ class StorageManager:
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
-                frequency=frequency,
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
             )
 
@@ -383,8 +389,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = df["timestamp"].min()
-            max_ts = df["timestamp"].max()
+            min_ts, max_ts = _timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -403,10 +408,9 @@ class StorageManager:
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
-                frequency=frequency,
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
             )
 
