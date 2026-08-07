@@ -72,7 +72,7 @@ class TestNameProperty:
         capabilities = CoinGeckoProvider().capabilities()
 
         assert capabilities.supports_crypto
-        assert capabilities.max_history_days == 30
+        assert capabilities.max_history_days == 29
 
 
 class TestSymbolToId:
@@ -156,14 +156,23 @@ class TestRoundToValidDays:
         """Test 20 days rounds up to 30."""
         assert provider._round_to_valid_days(20) == 30
 
-    def test_utc_30_day_boundary_is_accepted(self, provider):
-        """A start exactly 30 UTC calendar days ago uses the 30-day endpoint window."""
-        start = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
+    def test_utc_29_day_history_uses_complete_30_day_source_window(self, provider):
+        """Twenty-nine complete UTC days fit inside the rolling 30-day source window."""
+        start = (datetime.now(UTC).date() - timedelta(days=29)).isoformat()
 
         days = provider._round_to_valid_days(provider._days_from_today(start))
 
         assert days == 30
         provider._validate_daily_window(days)
+
+    def test_utc_30_day_history_is_rejected(self, provider):
+        """Thirty completed UTC days would require a coarse CoinGecko source window."""
+        start = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
+
+        days = provider._round_to_valid_days(provider._days_from_today(start))
+
+        with pytest.raises(DataValidationError, match="29 completed UTC days"):
+            provider._validate_daily_window(days)
 
     def test_round_60_days(self, provider):
         """Test 60 days rounds up to 90."""
@@ -241,10 +250,30 @@ class TestFetchOhlc:
 
         assert df.is_empty()
 
-    def test_fetch_ohlc_empty_range_skips_volume_request(self, provider):
-        """An empty OHLC response does not consume a second API request."""
+    def test_fetch_ohlc_out_of_range_skips_volume_request(self, provider):
+        """A filtered-empty OHLC result does not consume a second API request."""
         response = MagicMock()
         response.json.return_value = [[1704153600000, 100.0, 101.0, 99.0, 100.5]]
+
+        with (
+            patch.object(provider.session, "get", return_value=response) as get,
+            patch.object(provider, "_acquire_rate_limit") as acquire,
+        ):
+            result = provider._fetch_ohlc(
+                "bitcoin",
+                7,
+                start="2024-02-01",
+                end="2024-02-02",
+            )
+
+        assert result.is_empty()
+        assert get.call_count == 1
+        acquire.assert_not_called()
+
+    def test_fetch_ohlc_empty_payload_skips_volume_request(self, provider):
+        """An empty source response returns before requesting volume."""
+        response = MagicMock()
+        response.json.return_value = []
 
         with (
             patch.object(provider.session, "get", return_value=response) as get,

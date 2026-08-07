@@ -2,7 +2,7 @@
 
 import json
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -278,8 +278,43 @@ class TestDataManagerUpdate:
         call = mock_load.call_args.kwargs
         start = datetime.strptime(call["start"], "%Y-%m-%d").date()
         end = datetime.strptime(call["end"], "%Y-%m-%d").date()
-        assert (end - start).days == 30
+        assert (end - start).days == 29
         assert call["provider"] == "coingecko"
+
+    def test_update_resumes_within_provider_history_without_filling_unavailable_gap(
+        self,
+        manager,
+        storage,
+    ):
+        """A stale dataset resumes accurately without synthesizing unavailable history."""
+        old_date = datetime.now(UTC) - timedelta(days=60)
+        recent_date = datetime.now(UTC) - timedelta(days=1)
+        columns = {
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [1_000.0],
+        }
+        manager.import_data(
+            pl.DataFrame({"timestamp": [old_date], **columns}),
+            symbol="BTC",
+            provider="coingecko",
+            asset_class="crypto",
+        )
+        recent = pl.DataFrame({"timestamp": [recent_date], **columns})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=recent) as fetch,
+            patch("ml4t.data.utils.gaps.GapDetector.fill_gaps") as fill_gaps,
+        ):
+            key = manager.update("BTC", asset_class="crypto", provider="coingecko")
+
+        call = fetch.call_args.kwargs
+        effective_start = datetime.strptime(call["start"], "%Y-%m-%d").date()
+        assert (datetime.now(UTC).date() - effective_start).days == 29
+        fill_gaps.assert_not_called()
+        assert len(storage.read(key).collect()) == 2
 
     def test_update_incremental(self, manager, storage):
         """Test incremental update with new data."""

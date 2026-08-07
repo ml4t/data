@@ -57,9 +57,10 @@ Find IDs at [coingecko.com/api/documentation](https://www.coingecko.com/api/docu
 | `daily` | ✅ |
 | Intraday | ❌ |
 
-The OHLC endpoint supplies daily source candles only for the most recent 30 days. Older
-requests fail with `DataValidationError` because CoinGecko returns four-day candles,
-which cannot be converted into correct daily OHLC values.
+The OHLC endpoint can supply 29 complete UTC daily bars. Its 30-day response starts and
+ends partway through a UTC day, so the partial boundary days are excluded. Older requests
+fail with `DataValidationError` because CoinGecko returns four-day candles, which cannot
+be converted into correct daily OHLC values.
 
 ---
 

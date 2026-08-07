@@ -48,9 +48,9 @@ from ml4t.data.providers import CoinGeckoProvider
 # Get your key from: https://www.coingecko.com/en/api/pricing
 provider = CoinGeckoProvider()  # Reads COINGECKO_API_KEY from environment
 end = datetime.now(UTC).date() - timedelta(days=1)
-start = end - timedelta(days=29)
+start = end - timedelta(days=28)
 
-# Fetch Bitcoin daily data (last 30 days)
+# Fetch Bitcoin daily data (last 29 completed UTC days)
 df = provider.fetch_ohlcv(
     symbol="BTC",  # Uses symbol_to_id mapping internally
     start=str(start),
@@ -119,7 +119,7 @@ df = provider.fetch_ohlcv(symbol="BTC", frequency="daily")
 df = provider.fetch_ohlcv(symbol="BTC", frequency="hourly")  # Error!
 ```
 
-Daily OHLCV is limited to the most recent 30 completed UTC days. CoinGecko returns
+Daily OHLCV is limited to the most recent 29 completed UTC days. CoinGecko returns
 four-day OHLC candles for older windows, so this provider rejects those requests instead
 of labeling coarse values as daily bars.
 

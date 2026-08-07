@@ -138,7 +138,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         """Return the bounded daily-history contract for managed loads."""
         return ProviderCapabilities(
             supports_crypto=True,
-            max_history_days=30,
+            max_history_days=29,
             rate_limit=(self.rate_limiter.max_calls, self.rate_limiter.period),
         )
 
@@ -146,7 +146,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
     def _days_from_today(start: str) -> int:
         """Return the UTC calendar-day distance needed by the OHLC endpoint."""
         start_date = datetime.strptime(start, "%Y-%m-%d").date()
-        return max(1, (datetime.now(UTC).date() - start_date).days)
+        return max(1, (datetime.now(UTC).date() - start_date).days + 1)
 
     def _fetch_and_transform_data(
         self,
@@ -408,7 +408,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 provider=self.name,
                 message=(
                     "CoinGecko's OHLC endpoint returns four-day candles beyond 30 days; "
-                    "daily OHLCV is limited to the most recent 30 days"
+                    "daily OHLCV is limited to the most recent 29 completed UTC days"
                 ),
                 field="days",
                 value=days,

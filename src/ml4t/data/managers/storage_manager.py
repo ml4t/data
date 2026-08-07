@@ -522,6 +522,20 @@ class StorageManager:
             # Calculate fetch range
             fetch_start = last_timestamp - timedelta(days=lookback_days)
             fetch_end = datetime.now(UTC)
+            provider_history_limited = False
+            max_history_days = self.fetch_manager.get_max_history_days(symbol, provider)
+            if max_history_days is not None:
+                earliest_fetch_start = fetch_end - timedelta(days=max_history_days)
+                if fetch_start < earliest_fetch_start:
+                    logger.warning(
+                        "Incremental update limited by provider history",
+                        provider=provider,
+                        requested_start=fetch_start,
+                        effective_start=earliest_fetch_start,
+                        max_history_days=max_history_days,
+                    )
+                    fetch_start = earliest_fetch_start
+                    provider_history_limited = True
 
             # Skip update if data is already current
             if frequency == "daily" and (fetch_end - last_timestamp).days < 1:
@@ -560,7 +574,7 @@ class StorageManager:
 
             # Detect and optionally fill gaps
             gaps = []
-            if fill_gaps:
+            if fill_gaps and not provider_history_limited:
                 self._report_progress(f"Checking for gaps in {symbol}", 0.6)
 
                 from ml4t.data.utils.gaps import GapDetector
@@ -579,6 +593,13 @@ class StorageManager:
 
                     merged_df = gap_detector.fill_gaps(merged_df, gaps, method="forward")
                     logger.info("Filled gaps using forward fill", final_rows=len(merged_df))
+            elif fill_gaps and provider_history_limited:
+                logger.warning(
+                    "Gap filling skipped because provider history cannot cover the missing range",
+                    provider=provider,
+                    last_timestamp=last_timestamp,
+                    resumed_at=fetch_start,
+                )
 
             self._report_progress(f"Storing updated data for {symbol}", 0.8)
 
@@ -602,6 +623,7 @@ class StorageManager:
                     "last_update": datetime.now().isoformat(),
                     "update_type": "incremental",
                     "gaps_filled": fill_gaps and len(gaps) > 0,
+                    "provider_history_limited": provider_history_limited,
                 },
             )
 

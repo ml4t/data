@@ -100,7 +100,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Provider | Coverage |
 |----------|----------|
 | Yahoo Finance | US/global equities, ETFs, crypto, forex |
-| CoinGecko | 10,000+ cryptocurrencies; daily OHLCV for the most recent 30 days |
+| CoinGecko | 10,000+ cryptocurrencies; daily OHLCV for 29 completed UTC days |
 | FRED | 850,000 economic series |
 | FXMacroData | FX macro releases, calendars, COT, commodities, sentiment |
 | Fama-French | Academic factor data |
@@ -233,7 +233,7 @@ datasets:
     provider: coingecko
     symbols: [bitcoin, ethereum, solana]
     frequency: daily
-    initial_load_days: 30
+    initial_load_days: 29
 ```
 
 ## Storage Format
