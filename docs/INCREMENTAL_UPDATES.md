@@ -56,13 +56,13 @@ Check health status of all datasets:
 
 ```bash
 # Basic health check
-ml4t-data health
+ml4t-data status
 
 # Detailed health check
-ml4t-data health --verbose
+ml4t-data --verbose status
 
 # Custom staleness threshold
-ml4t-data health --stale-days 3 --verbose
+ml4t-data --verbose status --stale-days 3
 ```
 
 Output shows:
@@ -83,7 +83,7 @@ ml4t-data load -p yahoo -s AAPL --start 2023-01-01 --end 2024-01-01
 ml4t-data update -s AAPL --show-status
 
 # Check health weekly
-ml4t-data health --verbose
+ml4t-data --verbose status
 ```
 
 ### Example 2: Multiple Symbol Management
@@ -100,7 +100,7 @@ for symbol in AAPL GOOGL MSFT NVDA; do
 done
 
 # Check overall health
-ml4t-data health
+ml4t-data status
 ```
 
 ### Example 3: Crypto Data (24/7 Trading)
@@ -234,11 +234,11 @@ def _fetch_data_with_retry(...)
 
 ### Monitoring
 
-Set up monitoring using the health command:
+Set up monitoring using the status command:
 
 ```bash
 # Cron job for daily health check
-0 9 * * * ml4t-data health --stale-days 2 >> /var/log/ml4t-data-health.log
+0 9 * * * ml4t-data status --stale-days 2 >> /var/log/ml4t-data-status.log
 ```
 
 ### Storage Management

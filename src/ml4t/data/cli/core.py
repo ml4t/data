@@ -5,13 +5,12 @@ Commands: fetch, update, validate, status, export, info, list
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
 import polars as pl
 from rich import box
-from rich.panel import Panel
 from rich.table import Table
 
 from ml4t.data.config import load_config
@@ -442,69 +441,113 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
         ctx.exit(1)
 
 
+def _metadata_datetime(value: object) -> datetime | None:
+    """Parse one storage metadata timestamp as an aware UTC datetime."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _metadata_health(metadata: dict[str, object], stale_days: int) -> str:
+    """Classify a dataset from its canonical observation or update timestamp."""
+    observed_through = _metadata_datetime(metadata.get("end_date") or metadata.get("last_updated"))
+    if observed_through is None:
+        return "error"
+    return (
+        "stale" if observed_through < datetime.now(UTC) - timedelta(days=stale_days) else "healthy"
+    )
+
+
 @click.command()
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed status")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--stale-days", default=7, type=click.IntRange(min=0), show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def status(ctx, detailed, storage_path):
+def status(ctx, detailed, stale_days, config_path, storage_path):
     """Show system overview and health status."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
+        if config_path and storage_path:
+            raise click.UsageError("Use either --config or --storage-path, not both.")
+        if config_path:
+            resolved_config = Path(config_path).resolve()
+            cfg = load_config(resolved_config)
+            storage, resolved_storage_path = _build_storage_from_config(cfg, resolved_config)
+        else:
+            resolved_storage_path = Path(storage_path or "./data").expanduser()
+            storage = HiveStorage(StorageConfig(base_path=resolved_storage_path))
 
-        summary = tracker.get_summary()
+        metadata_manager = MetadataManager(storage)
+        datasets: list[tuple[str, dict[str, object], str]] = []
+        total_rows = 0
+        for key in storage.list_keys():
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            health = _metadata_health(metadata, stale_days)
+            try:
+                total_rows += int(metadata.get("row_count") or 0)
+            except (TypeError, ValueError):
+                health = "error"
+            datasets.append((key, metadata, health))
+
+        status_counts = {
+            name: sum(health == name for _, _, health in datasets)
+            for name in ("healthy", "stale", "error")
+        }
 
         if not quiet:
             table = Table(title="System Status", box=box.ROUNDED)
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="white")
 
-            table.add_row("Total Datasets", str(summary.get("total_datasets", 0)))
-            table.add_row("Healthy", f"[green]{summary.get('healthy', 0)}[/green]")
-            table.add_row("Stale", f"[yellow]{summary.get('stale', 0)}[/yellow]")
-            table.add_row("Error", f"[red]{summary.get('error', 0)}[/red]")
-            table.add_row("Total Rows", f"{summary.get('total_rows', 0):,}")
-            table.add_row("Total Updates", str(summary.get("total_updates", 0)))
+            table.add_row("Total Datasets", str(len(datasets)))
+            table.add_row("Healthy", f"[green]{status_counts['healthy']}[/green]")
+            table.add_row("Stale", f"[yellow]{status_counts['stale']}[/yellow]")
+            table.add_row("Error", f"[red]{status_counts['error']}[/red]")
+            table.add_row("Total Rows", f"{total_rows:,}")
 
             console.print(table)
 
-            if summary.get("by_asset_class"):
-                asset_table = Table(title="By Asset Class", box=box.SIMPLE)
-                asset_table.add_column("Asset Class", style="cyan")
-                asset_table.add_column("Count", style="white")
-
-                for asset_class, count in summary["by_asset_class"].items():
-                    asset_table.add_row(asset_class or "unknown", str(count))
-
-                console.print(asset_table)
-
         if detailed:
-            console.print("\n[bold]Detailed Dataset Information:[/bold]")
-
-            for sym in storage.list_keys():
-                metadata = tracker.get_metadata(sym)
-                if metadata:
-                    status_color = {"healthy": "green", "stale": "yellow", "error": "red"}.get(
-                        metadata.health_status, "white"
-                    )
-
-                    panel_content = f"""Provider: {metadata.provider}
-Frequency: {metadata.frequency}
-Rows: {metadata.total_rows:,}
-Date Range: {metadata.date_range_start.date()} to {metadata.date_range_end.date()}
-Last Update: {metadata.last_update}
-Updates: {metadata.update_count}
-Status: [{status_color}]{metadata.health_status}[/{status_color}]""".strip()
-
-                    panel = Panel(panel_content, title=f"Dataset: {sym}", border_style="cyan")
-                    console.print(panel)
+            detail_table = Table(title="Dataset Status", box=box.ROUNDED)
+            detail_table.add_column("Status")
+            detail_table.add_column("Key", style="dim")
+            detail_table.add_column("Symbol", style="cyan")
+            detail_table.add_column("Provider")
+            detail_table.add_column("Rows", justify="right")
+            detail_table.add_column("Data Through")
+            detail_table.add_column("Last Updated")
+            colors = {"healthy": "green", "stale": "yellow", "error": "red"}
+            for key, metadata, health in datasets:
+                row_count = metadata.get("row_count")
+                try:
+                    rows = f"{int(row_count):,}"
+                except (TypeError, ValueError):
+                    rows = "-"
+                detail_table.add_row(
+                    f"[{colors[health]}]{health.title()}[/{colors[health]}]",
+                    key,
+                    str(metadata.get("symbol") or key.rsplit("/", 1)[-1]),
+                    str(metadata.get("provider") or ""),
+                    rows,
+                    str(metadata.get("end_date") or "")[:10],
+                    str(metadata.get("last_updated") or "")[:19],
+                )
+            console.print(detail_table)
 
         if verbose:
-            console.print(f"\n[dim]Storage path: {storage_path}[/dim]")
+            console.print(f"\n[dim]Storage path: {resolved_storage_path}[/dim]")
 
     except Exception as e:
         print_error(str(e), verbose, e)

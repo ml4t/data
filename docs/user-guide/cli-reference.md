@@ -109,11 +109,12 @@ Show system overview and health status of stored datasets.
 
 ```bash
 ml4t-data status --storage-path ./data
-ml4t-data status --detailed --storage-path ./data
+ml4t-data status --detailed --stale-days 7 --storage-path ./data
+ml4t-data status --config config.yaml --detailed
 ```
 
-The `--detailed` flag shows per-symbol panels with provider, frequency, row count,
-date range, last update, and health status.
+The `--detailed` flag shows each dataset's provider, row count, observation date,
+last update, and health status. Use `--config` to select a configured Hive or flat store.
 
 ### export
 
@@ -215,8 +216,8 @@ ml4t-data download-cot -c cot-config.yaml -o ~/ml4t-data/cot
 | `ml4t-data version` | Show version and Python information |
 | `ml4t-data providers` | List available data providers with API key requirements |
 | `ml4t-data config` | Show current configuration |
-| `ml4t-data health` | Check health status of all datasets |
-| `ml4t-data health --detailed --stale-days 7` | Show per-symbol staleness |
+| `ml4t-data status --storage-path ./data` | Check stored dataset health |
+| `ml4t-data status --config config.yaml --detailed` | Show configured dataset status |
 | `ml4t-data show-completion bash` | Print shell completion script |
 
 ## Shell Completion

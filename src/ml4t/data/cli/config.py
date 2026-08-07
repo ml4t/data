@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import click
@@ -12,7 +11,6 @@ from rich.table import Table
 
 from ml4t.data import __version__
 from ml4t.data.providers.registry import advertised_provider_specs
-from ml4t.data.storage.metadata_tracker import MetadataTracker
 
 from .utils import console
 
@@ -55,60 +53,6 @@ def show_config(ctx):
     table.add_row("Version", __version__)
 
     console.print(table)
-
-
-@click.command()
-@click.option("--storage-path", default=None, help="Storage directory")
-@click.option("--stale-days", "-d", default=7, type=int, help="Days before data considered stale")
-@click.option("--detailed", is_flag=True, help="Show detailed information")
-def health(storage_path, stale_days, detailed):
-    """Check health status of all datasets."""
-    try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
-        tracker = MetadataTracker(base_path=storage_path)
-
-        summary = tracker.get_summary()
-
-        if summary["total_datasets"] == 0:
-            console.print("[yellow]No datasets found[/yellow]")
-            return
-
-        # Display summary
-        table = Table(title="Dataset Health Summary", box=box.ROUNDED)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="white")
-
-        table.add_row("Total Datasets", str(summary["total_datasets"]))
-        table.add_row("Total Updates", str(summary["total_updates"]))
-        table.add_row("Unique Providers", str(summary["unique_providers"]))
-        table.add_row("Unique Symbols", str(summary["unique_symbols"]))
-
-        console.print(table)
-
-        if detailed:
-            # Show per-symbol status
-            updates = tracker.list_updates()
-            symbol_table = Table(title="Per-Symbol Status", box=box.SIMPLE)
-            symbol_table.add_column("Symbol", style="cyan")
-            symbol_table.add_column("Provider", style="white")
-            symbol_table.add_column("Last Updated", style="yellow")
-            symbol_table.add_column("Status", style="white")
-
-            now = datetime.now()
-            stale_threshold = now - timedelta(days=stale_days)
-
-            for update in sorted(updates, key=lambda x: x.symbol):
-                status = "OK Fresh" if update.timestamp > stale_threshold else "! Stale"
-                symbol_table.add_row(
-                    update.symbol, update.provider, update.timestamp.strftime("%Y-%m-%d"), status
-                )
-
-            console.print("\n")
-            console.print(symbol_table)
-
-    except Exception as e:
-        console.print(f"[red]Error checking health: {e}[/red]")
-        raise click.Abort()
 
 
 @click.command("show-completion")

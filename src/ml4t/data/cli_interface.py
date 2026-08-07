@@ -9,7 +9,7 @@ The CLI has been refactored into focused modules:
     - cli/batch.py: Batch operations (update-all)
     - cli/futures.py: Futures commands (download-futures, update-futures)
     - cli/cot.py: COT data commands (download-cot)
-    - cli/config.py: Configuration commands (version, providers, config, health)
+    - cli/config.py: Configuration commands (version, providers, config)
 """
 
 from __future__ import annotations

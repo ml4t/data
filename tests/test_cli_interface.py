@@ -442,78 +442,72 @@ class TestStatusCommand:
         assert result.exit_code == 0
         assert "Show system overview and health status" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_status_overview(self, mock_storage_class, mock_tracker_class):
-        """Test status overview display."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock storage list
-        mock_storage.list_keys.return_value = ["BTC", "ETH", "EURUSD"]
-
-        # Mock metadata summary
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 3,
-            "healthy": 2,
-            "stale": 1,
-            "error": 0,
-            "total_rows": 10000,
-            "total_updates": 50,
-            "by_asset_class": {"crypto": 2, "forex": 1},
-        }
+    def test_status_overview_reads_committed_metadata(self):
+        """Status reports data written through the public storage API."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["status"])
+        with runner.isolated_filesystem():
+            storage = create_storage("data")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime.now()],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(cli, ["status", "--storage-path", "data"])
 
         assert result.exit_code == 0
         assert "System Status" in result.output
-        # Table format uses │ separator instead of :
-        assert "Total Datasets" in result.output and "3" in result.output
-        assert "Healthy" in result.output and "2" in result.output
-        assert "Stale" in result.output and "1" in result.output
-        assert "Total Rows" in result.output and "10,000" in result.output
+        assert "Total Datasets" in result.output and "1" in result.output
+        assert "Healthy" in result.output and "1" in result.output
+        assert "Total Rows" in result.output and "1" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_status_detailed(self, mock_storage_class, mock_tracker_class):
-        """Test detailed status with --detailed flag."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {}
-
-        mock_storage.list_keys.return_value = ["BTC"]
-
-        # Mock detailed metadata
-        from ml4t.data.storage.metadata_tracker import DatasetMetadata
-
-        mock_metadata = DatasetMetadata(
-            symbol="BTC",
-            asset_class="crypto",
-            frequency="daily",
-            provider="cryptocompare",
-            first_update=datetime(2024, 1, 1),
-            last_update=datetime(2024, 1, 10),
-            total_rows=10,
-            date_range_start=datetime(2024, 1, 1),
-            date_range_end=datetime(2024, 1, 10),
-            update_count=1,
-            health_status="healthy",
-        )
-        mock_tracker.get_metadata.return_value = mock_metadata
+    def test_status_detailed_reads_configured_flat_store_and_marks_stale(self):
+        """Detailed status honors storage configuration and observation age."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["status", "--detailed"])
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+            result = runner.invoke(
+                cli,
+                ["status", "--config", "config.yaml", "--detailed", "--stale-days", "7"],
+            )
 
         assert result.exit_code == 0, result.output
-        assert "Dataset: BTC" in result.output
-        assert "Provider: cryptocompare" in result.output
-        assert "Rows: 10" in result.output
-        assert "Status: healthy" in result.output
+        assert "Dataset Status" in result.output
+        assert "AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "Stale" in result.output
 
 
 class TestBatchOperations:
@@ -639,25 +633,23 @@ class TestProgressAndOutput:
         assert "Fetching 5 symbols" in result.output
         assert mock_dm.fetch.call_count == 5
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.HiveStorage")
-    def test_quiet_mode(self, _mock_storage_class, mock_tracker_class):
+    def test_quiet_mode(self, mock_storage_class):
         """Test quiet mode suppresses output."""
-        mock_tracker_class.return_value.get_summary.return_value = {}
+        mock_storage_class.return_value.list_keys.return_value = []
         runner = CliRunner()
         result = runner.invoke(cli, ["--quiet", "status"])
         assert result.exit_code == 0
         assert result.output == ""
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.HiveStorage")
-    def test_verbose_mode(self, _mock_storage_class, mock_tracker_class):
+    def test_verbose_mode(self, mock_storage_class):
         """Test verbose mode shows detailed information."""
-        mock_tracker_class.return_value.get_summary.return_value = {}
+        mock_storage_class.return_value.list_keys.return_value = []
         runner = CliRunner()
         result = runner.invoke(cli, ["--verbose", "status"])
         assert result.exit_code == 0
-        assert "Storage path: ./data" in result.output
+        assert "Storage path: data" in result.output
 
 
 class TestShellCompletion:
@@ -1283,113 +1275,6 @@ class TestShowCompletionCommand:
 # =============================================================================
 # Additional Tests for Coverage Improvement
 # =============================================================================
-
-
-class TestHealthCommand:
-    """Test the health command."""
-
-    def test_health_help(self):
-        """Test health command help."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["health", "--help"])
-        assert result.exit_code == 0
-        assert "Check health status" in result.output
-        assert "--storage-path" in result.output
-        assert "--stale-days" in result.output
-        assert "--detailed" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_no_datasets(self, mock_tracker_class):
-        """Test health command with no datasets."""
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {"total_datasets": 0}
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", "."])
-
-        assert result.exit_code == 0
-        assert "No datasets found" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_with_datasets(self, mock_tracker_class):
-        """Test health command with datasets."""
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 5,
-            "total_updates": 10,
-            "unique_providers": 2,
-            "unique_symbols": 5,
-        }
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", "."])
-
-        assert result.exit_code == 0
-        assert "5" in result.output  # total_datasets
-        assert "Dataset Health Summary" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_detailed(self, mock_tracker_class):
-        """Test health command with detailed flag."""
-        from datetime import datetime, timedelta
-
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 1,
-            "total_updates": 1,
-            "unique_providers": 1,
-            "unique_symbols": 1,
-        }
-
-        # Create mock update record
-        mock_update = MagicMock()
-        mock_update.symbol = "AAPL"
-        mock_update.provider = "yahoo"
-        mock_update.timestamp = datetime.now() - timedelta(days=2)
-        mock_tracker.list_updates.return_value = [mock_update]
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", ".", "--detailed"])
-
-        assert result.exit_code == 0
-        assert "Per-Symbol Status" in result.output
-        assert "AAPL" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_stale_detection(self, mock_tracker_class):
-        """Test health command detects stale data."""
-        from datetime import datetime, timedelta
-
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 1,
-            "total_updates": 1,
-            "unique_providers": 1,
-            "unique_symbols": 1,
-        }
-
-        # Create stale update record
-        mock_update = MagicMock()
-        mock_update.symbol = "AAPL"
-        mock_update.provider = "yahoo"
-        mock_update.timestamp = datetime.now() - timedelta(days=30)  # Very stale
-        mock_tracker.list_updates.return_value = [mock_update]
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(
-                cli, ["health", "--storage-path", ".", "--detailed", "--stale-days", "7"]
-            )
-
-        assert result.exit_code == 0
-        assert "Stale" in result.output
 
 
 class TestListCommand:
