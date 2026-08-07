@@ -1,11 +1,13 @@
 """Tests for futures data parser."""
 
+from dataclasses import replace
 from datetime import date
 
 import polars as pl
 import pytest
 
 from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
+from ml4t.data.futures.schema import MAJOR_CONTRACTS
 
 
 @pytest.fixture
@@ -95,3 +97,48 @@ class TestParseQuandlCHRIS:
         missing = tmp_path / "missing.parquet"
         with pytest.raises(FileNotFoundError, match="legacy CHRIS dataset is no longer available"):
             parse_quandl_chris("ES", data_path=missing)
+
+    def test_large_index_price_is_not_reinterpreted_as_cents(self, tmp_path):
+        data = pl.DataFrame(
+            {
+                "ticker": ["ES"],
+                "date": [date(2026, 1, 2)],
+                "open": [5000.0],
+                "high": [5010.0],
+                "low": [4990.0],
+                "close": [5004.0],
+                "last": [5004.0],
+                "settle": [5004.0],
+                "volume": [100_000.0],
+                "open_interest": [1_000.0],
+            }
+        )
+        path = tmp_path / "large-index-price.parquet"
+        data.write_parquet(path)
+
+        parsed = parse_quandl_chris("ES", data_path=path)
+
+        assert parsed["close"].item() == 5004.0
+
+    def test_declared_cents_unit_is_applied_without_magnitude_guessing(self, tmp_path):
+        data = pl.DataFrame(
+            {
+                "ticker": ["ES", "ES"],
+                "date": [date(2026, 1, 2), date(2026, 1, 3)],
+                "open": [5004.0, 99.0],
+                "high": [5004.0, 99.0],
+                "low": [5004.0, 99.0],
+                "close": [5004.0, 99.0],
+                "last": [5004.0, 99.0],
+                "settle": [5004.0, 99.0],
+                "volume": [100_000.0, 100_000.0],
+                "open_interest": [1_000.0, 1_000.0],
+            }
+        )
+        path = tmp_path / "declared-cents.parquet"
+        data.write_parquet(path)
+        cents_spec = replace(MAJOR_CONTRACTS["ES"], price_quote_unit="cents")
+
+        parsed = parse_quandl_chris("ES", data_path=path, contract_spec=cents_spec)
+
+        assert parsed["close"].to_list() == [50.04, 0.99]

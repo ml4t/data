@@ -13,8 +13,9 @@ Key features:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
@@ -62,22 +63,27 @@ class ContractInfo:
         return hash(self.raw_symbol)
 
 
-def parse_contract_symbol(symbol: str) -> ContractInfo:
+def parse_contract_symbol(symbol: str, *, reference_year: int | None = None) -> ContractInfo:
     """
     Parse Databento contract symbol into components.
 
-    Supports two formats:
+    Supports three formats:
     - 2-digit year: {PRODUCT}{MONTH}{YY} (e.g., ESH25 -> ES + H + 2025)
-    - 1-digit year: {PRODUCT}{MONTH}{Y} (e.g., ZMK9 -> ZM + K + 2019)
+    - 1-digit year: {PRODUCT}{MONTH}{Y} (e.g., ZMK9)
+    - 4-digit year: {PRODUCT}{MONTH}{YYYY} (e.g., ESH2025)
+
+    One- and two-digit years require ``reference_year`` and resolve to the
+    nearest matching year. Four-digit years are unambiguous.
 
     Examples:
-        - ESH25 -> ES (E-mini S&P), H (March), 25 (2025)
-        - CLZ24 -> CL (Crude), Z (December), 24 (2024)
-        - ZMK9 -> ZM (Soybean Meal), K (May), 9 (2019)
-        - 6EH25 -> 6E (Euro FX), H (March), 25 (2025)
+        - ESH25 with reference 2025 -> ES (E-mini S&P), H (March), 2025
+        - CLZ24 with reference 2024 -> CL (Crude), Z (December), 2024
+        - ZMK9 with reference 2019 -> ZM (Soybean Meal), K (May), 2019
+        - ESH2025 -> ES (E-mini S&P), H (March), 2025
 
     Args:
         symbol: Raw contract symbol (e.g., "ESH25" or "ZMK9")
+        reference_year: Reference used to resolve a one- or two-digit year
 
     Returns:
         ContractInfo with parsed components
@@ -87,44 +93,22 @@ def parse_contract_symbol(symbol: str) -> ContractInfo:
     """
     if len(symbol) < 4:
         raise ValueError(f"Invalid symbol format: {symbol}")
-
-    # Try 2-digit year format first (more common in newer data)
-    # Check if last char is a month code - if so, it's 1-digit year format
-    if symbol[-2] in MONTH_CODES:
-        # 1-digit year format: {PRODUCT}{MONTH}{Y}
-        year_str = symbol[-1]
-        try:
-            year_short = int(year_str)
-        except ValueError:
-            raise ValueError(f"Invalid year in symbol: {symbol}")
-
-        # Single digit year - assume 2010s or 2020s based on context
-        # 0-5 = 2020-2025, 6-9 = 2016-2019 (reasonable for current trading)
-        year = 2020 + year_short if year_short <= 5 else 2010 + year_short
-
-        month_code = symbol[-2]
-        product = symbol[:-2]
-    else:
-        # 2-digit year format: {PRODUCT}{MONTH}{YY}
-        year_str = symbol[-2:]
-        try:
-            year_short = int(year_str)
-        except ValueError:
-            raise ValueError(f"Invalid year in symbol: {symbol}")
-
-        # Convert 2-digit year to 4-digit
-        # Assume 00-29 = 2000-2029, 30-99 = 1930-1999
-        year = 2000 + year_short if year_short < 30 else 1900 + year_short
-
-        month_code = symbol[-3]
-        product = symbol[:-3]
-
+    match = re.fullmatch(r"(.+?)(\d{1,2}|\d{4})", symbol)
+    if match is None:
+        raise ValueError(f"Invalid year in symbol: {symbol}")
+    prefix, year_text = match.groups()
+    product, month_code = prefix[:-1], prefix[-1]
     if month_code not in MONTH_CODES:
         raise ValueError(f"Invalid month code '{month_code}' in symbol: {symbol}")
-    month = MONTH_CODES[month_code]
-
     if not product:
         raise ValueError(f"No product symbol in: {symbol}")
+    if len(year_text) == 4:
+        year = int(year_text)
+    else:
+        if reference_year is None:
+            raise ValueError(f"Ambiguous year in symbol '{symbol}'; reference_year is required")
+        year = _nearest_matching_year(int(year_text), len(year_text), reference_year)
+    month = MONTH_CODES[month_code]
 
     return ContractInfo(
         raw_symbol=symbol,
@@ -133,6 +117,27 @@ def parse_contract_symbol(symbol: str) -> ContractInfo:
         month=month,
         year=year,
     )
+
+
+def _nearest_matching_year(short_year: int, digits: int, reference_year: int) -> int:
+    """Resolve a truncated year to the nearest year around an explicit reference."""
+    if reference_year < 1:
+        raise ValueError("reference_year must be positive")
+    period = 10**digits
+    base = reference_year - (reference_year % period) + short_year
+    candidates = [base - period, base, base + period]
+    distances = [abs(candidate - reference_year) for candidate in candidates]
+    minimum = min(distances)
+    nearest = [
+        candidate
+        for candidate, distance in zip(candidates, distances, strict=True)
+        if distance == minimum
+    ]
+    if len(nearest) != 1:
+        raise ValueError(
+            f"Truncated year is equally close to two years around reference_year={reference_year}"
+        )
+    return nearest[0]
 
 
 def load_databento_definitions(
@@ -365,12 +370,15 @@ def get_expiration_dates(
 
             # Convert to date if needed
             if isinstance(exp, datetime):
-                expirations[symbol] = exp.date()
+                expiration_utc = (
+                    exp.replace(tzinfo=UTC) if exp.tzinfo is None else exp.astimezone(UTC)
+                )
+                expirations[symbol] = expiration_utc.date()
             elif isinstance(exp, date):
                 expirations[symbol] = exp
             elif isinstance(exp, int | float):
                 # Unix nanoseconds
-                expirations[symbol] = datetime.fromtimestamp(exp / 1e9).date()
+                expirations[symbol] = datetime.fromtimestamp(exp / 1e9, tz=UTC).date()
 
     return expirations
 
@@ -550,7 +558,7 @@ def get_contract_chain(
     contracts = []
     for symbol, exp_date in expirations.items():
         try:
-            info = parse_contract_symbol(symbol)
+            info = parse_contract_symbol(symbol, reference_year=exp_date.year)
             info.expiration = exp_date
             contracts.append(info)
         except ValueError:

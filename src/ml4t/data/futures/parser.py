@@ -10,7 +10,7 @@ from pathlib import Path
 import polars as pl
 
 from ml4t.data.core.config import resolve_storage_path
-from ml4t.data.futures.schema import ContractSpec
+from ml4t.data.futures.schema import ContractSpec, get_contract_spec
 
 DEFAULT_CHRIS_ENV_VAR = "ML4T_QUANDL_CHRIS_PATH"
 
@@ -39,7 +39,7 @@ def _resolve_chris_data_path(data_path: str | Path | None) -> Path:
 def parse_quandl_chris_raw(
     ticker: str,
     data_path: str | Path | None = None,
-    _contract_spec: ContractSpec | None = None,
+    contract_spec: ContractSpec | None = None,
 ) -> pl.DataFrame:
     """
     Parse Quandl CHRIS futures data without deduplication (keeps all contracts).
@@ -77,7 +77,7 @@ def parse_quandl_chris_raw(
     ticker_data = _standardize_price_columns(ticker_data)
 
     # Normalize price units (cents → dollars)
-    ticker_data = _normalize_price_units(ticker_data, ticker)
+    ticker_data = _normalize_price_units(ticker_data, _resolve_contract_spec(ticker, contract_spec))
 
     # Select relevant columns (NO deduplication)
     result = ticker_data.select(
@@ -96,7 +96,7 @@ def parse_quandl_chris_raw(
 def parse_quandl_chris(
     ticker: str,
     data_path: str | Path | None = None,
-    _contract_spec: ContractSpec | None = None,
+    contract_spec: ContractSpec | None = None,
 ) -> pl.DataFrame:
     """
     Parse Quandl CHRIS futures data for a specific ticker.
@@ -150,7 +150,7 @@ def parse_quandl_chris(
     ticker_data = _standardize_price_columns(ticker_data)
 
     # Normalize price units (cents → dollars)
-    ticker_data = _normalize_price_units(ticker_data, ticker)
+    ticker_data = _normalize_price_units(ticker_data, _resolve_contract_spec(ticker, contract_spec))
 
     # Handle duplicate dates - select front month (highest volume)
     ticker_data = _select_front_month_by_volume(ticker_data)
@@ -213,44 +213,44 @@ def _standardize_price_columns(data: pl.DataFrame) -> pl.DataFrame:
     return result
 
 
-def _normalize_price_units(data: pl.DataFrame, _ticker: str) -> pl.DataFrame:
+def _resolve_contract_spec(ticker: str, contract_spec: ContractSpec | None) -> ContractSpec:
+    """Return explicit price-unit metadata for a CHRIS dataset."""
+    resolved = contract_spec or get_contract_spec(ticker)
+    if resolved is None:
+        raise ValueError(
+            f"Contract specification required for ticker '{ticker}'; price units cannot be guessed"
+        )
+    if resolved.ticker != ticker:
+        raise ValueError(
+            f"Contract specification ticker '{resolved.ticker}' does not match requested '{ticker}'"
+        )
+    return resolved
+
+
+def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> pl.DataFrame:
     """
     Normalize price units to consistent standard.
 
-    Quandl CHRIS has inconsistent price units across rows:
-    - Some rows have prices in cents (e.g., 6348¢ for CL)
-    - Some rows have prices in dollars (e.g., $103 for CL)
-
-    This function detects and converts to standard units:
-    - CL (Crude Oil): $/barrel (divide cents by 100)
-    - Energy contracts: Generally $/unit
-    - Threshold: Prices > 1000 are assumed to be in cents
+    The contract specification declares the source unit. Values are never
+    reinterpreted from their magnitude.
 
     Args:
         data: DataFrame with OHLC columns
-        ticker: Contract ticker (for unit determination)
+        contract_spec: Contract metadata declaring the source price unit
 
     Returns:
         DataFrame with normalized prices in standard units
     """
-    # Heuristic: If open or close > 1000, likely in cents, divide by 100
-    # This threshold works for most energy contracts (CL, NG, etc.)
-    # Won't work for high-priced instruments, but Quandl CHRIS is mostly commodities
-
-    # Use close price to detect unit (most reliable)
-    is_cents = pl.col("close") > 1000
-
-    # Convert cents to dollars for all OHLC columns
-    result = data.with_columns(
-        [
-            pl.when(is_cents).then(pl.col("open") / 100).otherwise(pl.col("open")).alias("open"),
-            pl.when(is_cents).then(pl.col("high") / 100).otherwise(pl.col("high")).alias("high"),
-            pl.when(is_cents).then(pl.col("low") / 100).otherwise(pl.col("low")).alias("low"),
-            pl.when(is_cents).then(pl.col("close") / 100).otherwise(pl.col("close")).alias("close"),
-        ]
+    if contract_spec.price_quote_unit in {"dollars", "index_points"}:
+        return data
+    if contract_spec.price_quote_unit != "cents":
+        raise ValueError(
+            f"Unsupported price quote unit '{contract_spec.price_quote_unit}' for "
+            f"ticker '{contract_spec.ticker}'"
+        )
+    return data.with_columns(
+        (pl.col(column) / 100).alias(column) for column in ("open", "high", "low", "close")
     )
-
-    return result
 
 
 def _select_front_month_by_volume(data: pl.DataFrame) -> pl.DataFrame:
