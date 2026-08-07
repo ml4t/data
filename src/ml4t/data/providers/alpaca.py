@@ -153,6 +153,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
     # Maximum bars per page accepted by both bars endpoints; pagination follows
     # next_page_token beyond this.
     PAGE_LIMIT: ClassVar[int] = 10000
+    MAX_PAGES: ClassVar[int] = 10000
 
     # Asset classes a request can be routed to.
     ASSET_CLASSES: ClassVar[frozenset[str]] = frozenset({"stock", "crypto"})
@@ -503,6 +504,28 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         merged_list.extend(page_bars or [])
         return merged_list
 
+    def _next_page_token(
+        self,
+        payload: dict[str, Any],
+        seen_tokens: set[str],
+        page_count: int,
+    ) -> str | None:
+        """Validate that an upstream pagination cursor is bounded and progressing."""
+        token = payload.get("next_page_token")
+        if token in (None, ""):
+            return None
+        if not isinstance(token, str):
+            raise NetworkError(provider="alpaca", message="received an invalid pagination token")
+        if token in seen_tokens:
+            raise NetworkError(provider="alpaca", message="received a repeated pagination token")
+        if page_count >= self.MAX_PAGES:
+            raise NetworkError(
+                provider="alpaca",
+                message=f"reached pagination page limit of {self.MAX_PAGES}",
+            )
+        seen_tokens.add(token)
+        return token
+
     def _check_response_status(self, response: Any, symbol: str) -> None:
         """Map an HTTP error response to a typed provider exception.
 
@@ -688,14 +711,17 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
         accumulated: Any = None
         token: str | None = None
+        seen_tokens: set[str] = set()
+        page_count = 0
         while True:
             # A fresh dict per page keeps each request's params independent;
             # mutating one shared dict would otherwise rewrite the token on
             # earlier requests that already went out.
             page_params = {**params, "page_token": token} if token else params
             payload = self._get_page(endpoint, page_params, symbol)
+            page_count += 1
             accumulated = self._merge_bars(accumulated, payload.get("bars"))
-            token = payload.get("next_page_token")
+            token = self._next_page_token(payload, seen_tokens, page_count)
             if not token:
                 return {"bars": accumulated}
 
@@ -737,14 +763,17 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
         accumulated: Any = None
         token: str | None = None
+        seen_tokens: set[str] = set()
+        page_count = 0
         while True:
             # A fresh dict per page keeps each request's params independent;
             # mutating one shared dict would otherwise rewrite the token on
             # earlier requests that already went out.
             page_params = {**params, "page_token": token} if token else params
             payload = await self._get_page_async(endpoint, page_params, symbol)
+            page_count += 1
             accumulated = self._merge_bars(accumulated, payload.get("bars"))
-            token = payload.get("next_page_token")
+            token = self._next_page_token(payload, seen_tokens, page_count)
             if not token:
                 return {"bars": accumulated}
 

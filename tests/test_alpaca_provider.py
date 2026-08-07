@@ -557,6 +557,72 @@ class TestTransformDataCrypto:
 class TestPagination:
     """Tests for following next_page_token across multiple pages."""
 
+    def test_repeated_page_token_terminates_public_fetch(self, provider):
+        """A repeated upstream cursor fails instead of looping indefinitely."""
+        repeated_page = _page_response([], "same-token")
+        calls = 0
+
+        def repeat_with_probe_limit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 3:
+                raise AssertionError("pagination did not terminate")
+            return repeated_page
+
+        with (
+            patch.object(provider.session, "get", side_effect=repeat_with_probe_limit) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError, match="repeated pagination token"):
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert mock_get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_repeated_page_token_terminates_public_fetch_async(self, provider):
+        """The async public path rejects the same non-progressing cursor."""
+        repeated_page = _page_response([], "same-token")
+        calls = 0
+
+        def repeat_with_probe_limit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 3:
+                raise AssertionError("pagination did not terminate")
+            return repeated_page
+
+        with (
+            patch.object(
+                provider, "_aget", new=AsyncMock(side_effect=repeat_with_probe_limit)
+            ) as mock_aget,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError, match="repeated pagination token"):
+                await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert mock_aget.call_count == 2
+
+    def test_page_limit_terminates_public_fetch(self, provider):
+        """A unique but endless cursor sequence stops at the declared page limit."""
+        provider.MAX_PAGES = 2
+        calls = 0
+
+        def endless_pages(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > provider.MAX_PAGES:
+                raise AssertionError("pagination exceeded its page limit")
+            return _page_response([], f"token-{calls}")
+
+        with (
+            patch.object(provider.session, "get", side_effect=endless_pages) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError, match="pagination page limit"):
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
+
+        assert mock_get.call_count == provider.MAX_PAGES
+
     def test_follows_next_page_token(self, provider):
         """Two stock pages are merged and page 2 is requested with the token."""
         page1 = _page_response([STOCK_BARS[0]], "abc")
