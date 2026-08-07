@@ -316,7 +316,7 @@ report = manager.detect(data)
 - **Async support**: Async providers and batch operations for parallel downloads
 - **Metadata tracking**: Last update timestamps, row counts, date ranges
 - **Resilience**: Rate limiting, retry with exponential backoff, gap detection
-- **Multiple backends**: File system, S3, and in-memory storage
+- **Storage layouts**: Partitioned Hive and single-file Parquet storage
 - **Type-safe**: Full type annotations throughout
 
 ## Related Libraries

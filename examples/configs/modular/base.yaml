@@ -35,6 +35,6 @@ validation:
 
 # Storage configuration
 storage:
-  backend: filesystem
+  strategy: hive
   base_path: ${QLDM_DATA_DIR}
   compression: zstd

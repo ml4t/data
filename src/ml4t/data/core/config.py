@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import warnings
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from ml4t.data.storage.config import StorageConfig
 
 PREFERRED_DATA_ENV_VAR = "ML4T_DATA_PATH"
 LEGACY_DATA_ENV_VARS = ("ML4T_DATA_DIR", "QLDM_DATA_ROOT")
@@ -65,41 +66,6 @@ def resolve_storage_path(
     return resolve_data_path(*default_parts, data_root=data_root)
 
 
-class StorageBackendType(StrEnum):
-    """Supported storage backend types."""
-
-    FILESYSTEM = "filesystem"
-    S3 = "s3"
-    MEMORY = "memory"
-
-
-class CompressionType(StrEnum):
-    """Supported compression types."""
-
-    NONE = "none"
-    SNAPPY = "snappy"
-    GZIP = "gzip"
-    LZ4 = "lz4"
-
-
-class StorageConfig(BaseModel):
-    """Storage configuration."""
-
-    backend: StorageBackendType = StorageBackendType.FILESYSTEM
-    compression: CompressionType = CompressionType.SNAPPY
-
-    @field_validator("backend", mode="before")
-    @classmethod
-    def validate_backend(cls, v: str) -> StorageBackendType:
-        """Validate storage backend."""
-        if isinstance(v, str):
-            try:
-                return StorageBackendType(v.lower())
-            except ValueError as e:
-                raise ValueError(f"Invalid storage backend: {v}") from e
-        return v
-
-
 class RetryConfig(BaseModel):
     """Retry configuration."""
 
@@ -145,6 +111,8 @@ class Config(BaseModel):
             data["data_root"] = resolve_data_root()
         if "QLDM_LOG_LEVEL" in os.environ:
             data["log_level"] = os.environ["QLDM_LOG_LEVEL"]
+        if "storage" not in data:
+            data["storage"] = {"base_path": data.get("data_root", resolve_data_root())}
 
         super().__init__(**data)
 

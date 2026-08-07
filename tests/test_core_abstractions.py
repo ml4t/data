@@ -19,7 +19,8 @@ class TestConfig:
         """Test default configuration values."""
         config = Config()
         assert config.data_root == resolve_data_root()
-        assert config.storage.backend == "filesystem"
+        assert config.storage.strategy == "hive"
+        assert config.storage.base_path == config.data_root
         assert config.log_level == "INFO"
 
     def test_config_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,7 +38,7 @@ class TestConfig:
         assert config.compression == "snappy"
 
         with pytest.raises(ValidationError):
-            StorageConfig(backend="invalid", compression="snappy")
+            StorageConfig(backend="s3", compression="snappy")
 
 
 class TestDataModels:

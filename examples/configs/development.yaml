@@ -86,7 +86,7 @@ validation:
 
 # Simple storage for development
 storage:
-  backend: filesystem
+  strategy: hive
   compression: none  # No compression for easier debugging
 
 # Development-only settings

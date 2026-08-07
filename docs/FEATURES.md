@@ -9,7 +9,7 @@
 | **Test Files** | 73 (50+ unit, 10 integration, 5+ acceptance) |
 | **Lines of Code** | ~18,900 in src/ |
 | **Python Version** | 3.9+ |
-| **Performance** | 7x faster queries (Hive storage) |
+| **Storage** | Hive-partitioned and flat Parquet layouts |
 | **Maturity** | 70-75% complete |
 
 ---
@@ -28,7 +28,7 @@
 - [x] Synthetic and mock providers for testing
 
 ### Storage (Complete)
-- [x] Hive-partitioned Parquet (7x faster)
+- [x] Hive-partitioned Parquet with date partition pruning
 - [x] Metadata tracking (last updates, row counts)
 - [x] Atomic writes with file locking
 - [x] Transaction support with rollback
@@ -224,7 +224,7 @@ for symbol in symbols:
 ### Benchmark Results
 - **Provider Init**: 30-35ms (httpx.Client setup)
 - **Per-call Overhead**: ~5ms (negligible)
-- **Storage Query**: 7x faster with Hive partitioning
+- **Storage Query**: Hive storage prunes partitions for date-filtered reads
 - **Metadata Lookup**: O(1) efficiency
 
 ---

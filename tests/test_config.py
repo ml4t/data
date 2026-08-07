@@ -33,7 +33,7 @@ class TestStorageConfig:
         config = StorageConfig()
         assert config.strategy == StorageStrategy.HIVE
         assert config.compression == CompressionType.ZSTD
-        assert config.atomic_writes is True
+        assert config.lock_timeout == 30
         assert config.metadata_tracking is True
         assert config.partition_cols == ["year", "month"]
 

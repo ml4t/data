@@ -37,7 +37,7 @@ storage:
   base_path: ~/ml4t-data
   compression: zstd         # zstd, lz4, snappy, or none
   partition_granularity: month  # year, month, day, or hour
-  atomic_writes: true
+  lock_timeout: 30
   metadata_tracking: true
 
 # Data providers
@@ -128,8 +128,11 @@ Provider-specific environment variables such as `MASSIVE_API_KEY` are read by
 | `base_path` | platform data directory | Base directory (supports `~` expansion) |
 | `compression` | `zstd` | Parquet compression: `zstd`, `lz4`, `snappy`, `none` |
 | `partition_granularity` | `month` | Hive partition level: `year`, `month`, `day`, `hour` |
-| `atomic_writes` | `true` | Write to temp file then rename |
+| `lock_timeout` | `30` | Seconds to wait for another writer on the same key |
 | `metadata_tracking` | `true` | JSON manifest files alongside data |
+
+Writes are always staged and published atomically. Profiling is an explicit operation, not a
+storage write option.
 
 ### Providers
 

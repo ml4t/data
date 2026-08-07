@@ -9,7 +9,6 @@ storage:
   strategy: hive
   base_path: /var/lib/ml4t-data/market-data
   compression: zstd
-  atomic_writes: true
   metadata_tracking: true
   partition_granularity: month
 

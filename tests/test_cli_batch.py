@@ -18,7 +18,7 @@ storage:
   path: ./marketdata
   compression: zstd
   partition_granularity: year
-  atomic_writes: true
+  lock_timeout: 45
   metadata_tracking: true
 datasets:
   taa:
@@ -55,7 +55,7 @@ datasets:
         "strategy": "hive",
         "compression": "zstd",
         "partition_granularity": "year",
-        "atomic_writes": True,
+        "lock_timeout": 45.0,
         "metadata_tracking": True,
     }
     manager.update.assert_called_once_with(

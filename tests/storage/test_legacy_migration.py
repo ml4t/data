@@ -69,7 +69,7 @@ def test_flat_migration_verifies_data_and_preserves_legacy_backup(tmp_path: Path
         {"equities_daily_BRK_B": "equities/daily/BRK_B"},
     )
 
-    storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
+    storage = FlatStorage(StorageConfig(base_path=tmp_path, strategy="flat"))
     actual = storage.read("equities/daily/BRK_B").collect()
     migrated_metadata = storage.get_metadata("equities/daily/BRK_B")
     assert_frame_equal(actual, expected)
@@ -127,7 +127,7 @@ def test_hive_migration_uses_caller_partition_granularity(tmp_path: Path) -> Non
     expected.head(1).write_parquet(january / "data.parquet")
     expected.tail(1).write_parquet(february / "data.parquet")
 
-    config = StorageConfig(tmp_path, strategy="hive", partition_granularity="day")
+    config = StorageConfig(base_path=tmp_path, strategy="hive", partition_granularity="day")
     migrate_legacy_storage(
         tmp_path,
         "hive",
@@ -212,12 +212,14 @@ def test_verification_failure_removes_destination_and_preserves_source(
         )
 
     assert source.is_file()
-    assert not FlatStorage(StorageConfig(tmp_path, strategy="flat")).exists("equities/daily/AAPL")
+    assert not FlatStorage(StorageConfig(base_path=tmp_path, strategy="flat")).exists(
+        "equities/daily/AAPL"
+    )
 
 
 def test_migration_refuses_to_overwrite_existing_destination(tmp_path: Path) -> None:
     destination = "equities/daily/AAPL"
-    storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
+    storage = FlatStorage(StorageConfig(base_path=tmp_path, strategy="flat"))
     storage.write(_market_frame(), destination)
     source = tmp_path / "ambiguous_key.parquet"
     _market_frame().write_parquet(source)
@@ -257,7 +259,7 @@ def test_backup_move_failure_restores_sources_and_removes_destinations(
 
     assert first.is_file()
     assert second.is_file()
-    storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
+    storage = FlatStorage(StorageConfig(base_path=tmp_path, strategy="flat"))
     assert not storage.exists("equities/daily/AAPL")
     assert not storage.exists("equities/daily/MSFT")
 

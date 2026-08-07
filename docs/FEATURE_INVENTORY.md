@@ -1021,7 +1021,7 @@ ml4t-data export [options]
 ### Storage Performance
 
 **Hive Partitioning**:
-- 7x faster for time-based queries
+- Partition pruning for time-based queries
 - Atomic writes with temp file pattern
 - File locking for concurrent access
 
@@ -1159,7 +1159,7 @@ None identified
 | Category | Status | Confidence | Notes |
 |----------|--------|------------|-------|
 | **Providers** | ✅ Complete | High | 13 providers, 12 live + 1 historical |
-| **Storage** | ✅ Complete | High | Hive-partitioned, 7x faster |
+| **Storage** | ✅ Complete | High | Hive-partitioned and flat Parquet layouts |
 | **Validation** | ✅ Complete | High | Full OHLC invariant checks |
 | **Updates** | ✅ Complete | High | Incremental, gap detection |
 | **CLI** | ✅ Complete | High | fetch, update-all, list, validate, export |

@@ -392,7 +392,7 @@ class TestStorageConfig:
         config = StorageConfig(base_path=temp_dir)
         assert config.strategy == "hive"
         assert config.compression == "zstd"
-        assert config.atomic_writes
+        assert config.lock_timeout == 30
         assert config.metadata_tracking
         assert config.partition_cols == ["year", "month"]
 
@@ -404,6 +404,6 @@ class TestStorageConfig:
 
     def test_custom_config(self, temp_dir):
         """Test custom configuration."""
-        config = StorageConfig(base_path=temp_dir, compression="lz4", atomic_writes=False)
+        config = StorageConfig(base_path=temp_dir, compression="lz4", lock_timeout=12)
         assert config.compression == "lz4"
-        assert not config.atomic_writes
+        assert config.lock_timeout == 12

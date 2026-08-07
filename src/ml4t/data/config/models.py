@@ -23,6 +23,12 @@ from ml4t.data.assets.asset_class import AssetClass
 from ml4t.data.core.config import resolve_data_root
 from ml4t.data.core.models import Frequency
 from ml4t.data.providers.registry import get_provider_spec
+from ml4t.data.storage import config as _storage_config
+
+CompressionType = _storage_config.CompressionType
+PartitionGranularity = _storage_config.PartitionGranularity
+StorageConfig = _storage_config.StorageConfig
+StorageStrategy = _storage_config.StorageStrategy
 
 
 def _is_environment_reference(value: str | None) -> bool:
@@ -33,39 +39,6 @@ def _is_environment_reference(value: str | None) -> bool:
 def _exclude_resolved_credential(value: str | None) -> bool:
     """Exclude runtime credentials while retaining environment references."""
     return value is not None and not _is_environment_reference(value)
-
-
-# Storage configuration enums
-class StorageStrategy(StrEnum):
-    """Storage backend strategy options."""
-
-    HIVE = "hive"
-    FLAT = "flat"
-
-
-class CompressionType(StrEnum):
-    """Supported compression types for Parquet."""
-
-    ZSTD = "zstd"
-    LZ4 = "lz4"
-    SNAPPY = "snappy"
-    NONE = "none"
-
-
-class PartitionGranularity(StrEnum):
-    """Partition granularity for Hive storage.
-
-    Choose based on data frequency:
-    - YEAR: Best for daily data (~252 rows/partition for stocks)
-    - MONTH: Best for hourly data (~720 rows/partition)
-    - DAY: Best for minute data (~1,440 rows/partition)
-    - HOUR: Best for second/tick data (~3,600 rows/partition)
-    """
-
-    YEAR = "year"
-    MONTH = "month"
-    DAY = "day"
-    HOUR = "hour"
 
 
 class ProviderType(StrEnum):
@@ -107,64 +80,6 @@ class ScheduleType(StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
     MARKET_HOURS = "market_hours"
-
-
-class StorageConfig(BaseModel):
-    """Storage backend configuration."""
-
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    strategy: StorageStrategy = Field(
-        default=StorageStrategy.HIVE,
-        description="Storage strategy (hive for partitioned, flat for single file)",
-    )
-    base_path: Path = Field(
-        default_factory=resolve_data_root, description="Base directory for data storage"
-    )
-    compression: CompressionType = Field(
-        default=CompressionType.ZSTD, description="Compression type for Parquet files"
-    )
-    atomic_writes: bool = Field(default=True, description="Use atomic writes with temp file rename")
-    lock_timeout: int = Field(default=30, ge=1, description="File lock timeout in seconds")
-    metadata_tracking: bool = Field(default=True, description="Track metadata in manifest files")
-    partition_granularity: PartitionGranularity = Field(
-        default=PartitionGranularity.MONTH,
-        description=(
-            "Partition granularity for Hive storage. "
-            "Use YEAR for daily, MONTH for hourly, DAY for minute, HOUR for second data."
-        ),
-    )
-    partition_cols: list[str] = Field(
-        default_factory=lambda: ["year", "month"],
-        description="Deprecated: Use partition_granularity instead. Kept for backward compatibility.",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_beta_backend(cls, value: Any) -> Any:
-        """Normalize the former filesystem backend name to Hive storage."""
-        if not isinstance(value, dict):
-            return value
-        data = dict(value)
-        backend = data.pop("backend", None)
-        if backend is not None:
-            if str(backend).lower() != "filesystem":
-                raise ValueError(f"Unsupported storage backend: {backend}")
-            data.setdefault("strategy", "hive")
-        return data
-
-    @field_validator("base_path")
-    @classmethod
-    def expand_path(cls, v: Path) -> Path:
-        """Expand user home directory and make absolute."""
-        return v.expanduser().resolve()
-
-    @model_validator(mode="after")
-    def validate_partitions(self) -> StorageConfig:
-        """Ensure partition columns are valid for strategy."""
-        if self.strategy == StorageStrategy.FLAT and self.partition_cols:
-            self.partition_cols = []  # No partitions for flat storage
-        return self
 
 
 class RateLimitConfig(BaseModel):

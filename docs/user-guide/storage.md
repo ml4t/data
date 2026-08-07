@@ -10,7 +10,7 @@ share atomic writes, file locking, metadata tracking, and Polars lazy evaluation
 |---|------|------|
 | **Best for** | Large datasets, time-range queries | Small datasets, simple access |
 | **Layout** | Directory tree with `year=.../month=.../data.parquet` | Single `.parquet` file per key |
-| **Query speed** | 7x faster for date-filtered reads (partition pruning) | Reads entire file every time |
+| **Date filtering** | Prunes partitions before reading | Reads the single file and filters rows |
 | **Write cost** | Higher (one file per partition) | Lower (single file) |
 | **Default** | Yes | No |
 
@@ -181,9 +181,11 @@ meta = storage.get_metadata("AAPL")
 | `strategy` | `"hive"` | `"hive"` or `"flat"` |
 | `compression` | `"zstd"` | Parquet compression: `zstd`, `lz4`, `snappy`, or `None` |
 | `partition_granularity` | `"month"` | `year`, `month`, `day`, `hour` (Hive only) |
-| `atomic_writes` | `True` | Write to temp file then rename |
+| `lock_timeout` | `30` | Seconds to wait for another writer on the same key |
 | `metadata_tracking` | `True` | JSON manifest files in `.metadata/` |
-| `generate_profile` | `True` | Column-level statistics on write |
+
+Writes are always staged and published atomically. Generate profiles explicitly with the
+profiling API described below.
 
 ## Incremental Updates
 

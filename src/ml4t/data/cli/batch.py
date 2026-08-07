@@ -42,8 +42,7 @@ def _build_storage_from_config(config_data: DataConfig, config_path: Path):
     for field in (
         "compression",
         "partition_granularity",
-        "partition_cols",
-        "atomic_writes",
+        "lock_timeout",
         "metadata_tracking",
     ):
         if field in configured.model_fields_set:

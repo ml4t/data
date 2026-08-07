@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -280,6 +280,17 @@ def _create_backend(
     storage_config: StorageConfig | None,
     chunk_size_days: int,
 ) -> FlatStorage | HiveStorage | ChunkedStorage:
+    if strategy == "chunked":
+        if storage_config is not None:
+            raise LegacyStorageMigrationError(
+                "Chunked legacy migration does not accept a Hive or Flat storage config"
+            )
+        return ChunkedStorage(
+            root,
+            chunk_size_days=chunk_size_days,
+            compression="snappy",
+        )
+
     if storage_config is not None:
         configured_root = storage_config.base_path.expanduser().resolve()
         if configured_root != root:
@@ -290,7 +301,7 @@ def _create_backend(
             raise LegacyStorageMigrationError(
                 f"Storage config strategy '{storage_config.strategy}' does not match '{strategy}'"
             )
-        config = replace(storage_config, base_path=root)
+        config = storage_config
     else:
         config = StorageConfig(base_path=root, strategy=strategy)
 
@@ -298,12 +309,7 @@ def _create_backend(
         return FlatStorage(config)
     if strategy == "hive":
         return HiveStorage(config)
-    compression = "snappy" if storage_config is None else storage_config.compression
-    return ChunkedStorage(
-        root,
-        chunk_size_days=chunk_size_days,
-        compression=compression or "uncompressed",
-    )
+    raise AssertionError(f"Unhandled storage strategy: {strategy}")
 
 
 def _write_migrated(
