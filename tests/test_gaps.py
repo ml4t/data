@@ -1,6 +1,6 @@
 """Tests for gap detection utilities."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import polars as pl
 import pytest
@@ -224,8 +224,31 @@ class TestGapDetector:
             frequency="daily",
         )
 
-        with pytest.raises(TypeError, match="non-null Datetime"):
+        with pytest.raises(TypeError, match="non-null Date or Datetime"):
             GapDetector().fill_gaps(df, [gap])
+
+    def test_fill_daily_gaps_supports_date_columns(self) -> None:
+        df = pl.DataFrame(
+            {
+                "timestamp": [date(2024, 1, 1), date(2024, 1, 3)],
+                "value": [100.0, 103.0],
+            }
+        )
+        gap = DataGap(
+            start=datetime(2024, 1, 1),
+            end=datetime(2024, 1, 3),
+            missing_periods=1,
+            duration=timedelta(days=2),
+            frequency="daily",
+        )
+
+        filled = GapDetector().fill_gaps(df, [gap], method="forward")
+
+        assert filled.get_column("timestamp").to_list() == [
+            date(2024, 1, 1),
+            date(2024, 1, 2),
+            date(2024, 1, 3),
+        ]
 
     def test_empty_dataframe(self) -> None:
         """Test gap detection on empty DataFrame."""
