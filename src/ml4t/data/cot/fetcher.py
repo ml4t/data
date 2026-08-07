@@ -288,11 +288,16 @@ class COTConfig:
     def __post_init__(self):
         if self.end_year is None:
             self.end_year = datetime.now().year
+        if self.end_year < self.start_year:
+            raise ValueError("end_year must be greater than or equal to start_year")
         self.storage_path = resolve_storage_path(self.storage_path, "cot")
 
     def get_years(self) -> list[int]:
         """Get list of years to download."""
-        return list(range(self.start_year, self.end_year + 1))
+        end_year = self.end_year
+        if end_year is None:
+            raise RuntimeError("COTConfig.end_year was not initialized")
+        return list(range(self.start_year, end_year + 1))
 
 
 def load_cot_config(config_path: str | Path) -> COTConfig:
@@ -496,12 +501,19 @@ class COTFetcher:
         mapping = PRODUCT_MAPPINGS[product_code]
         start_year = start_year or self.config.start_year
         end_year = end_year or self.config.end_year
+        if end_year is None:
+            raise RuntimeError("COTConfig.end_year was not initialized")
         years = list(range(start_year, end_year + 1))
 
         # Determine report type (use *_futopt if include_options)
         report_type = mapping.report_type
         if self.config.include_options and report_type.endswith("_fut"):
-            report_type = report_type + "opt"
+            option_report_types: dict[COTReportType, COTReportType] = {
+                "legacy_fut": "legacy_futopt",
+                "disaggregated_fut": "disaggregated_futopt",
+                "traders_in_financial_futures_fut": "traders_in_financial_futures_futopt",
+            }
+            report_type = option_report_types[report_type]
 
         # Get raw COT data
         df = self._get_report_for_years(report_type, years)

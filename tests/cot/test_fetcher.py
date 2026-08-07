@@ -107,6 +107,11 @@ class TestCOTConfig:
         years = config.get_years()
         assert years == [2023]
 
+    def test_rejects_reversed_year_range(self):
+        """A reversed range fails instead of silently downloading no reports."""
+        with pytest.raises(ValueError, match="end_year must be greater"):
+            COTConfig(start_year=2024, end_year=2023)
+
     def test_storage_path_string_conversion(self):
         """Test storage_path string to Path conversion."""
         config = COTConfig(storage_path="~/test/path")

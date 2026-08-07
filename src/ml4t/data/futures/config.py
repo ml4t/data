@@ -64,13 +64,15 @@ class FuturesDownloadConfig:
     start: str = "2016-01-01"
     end: str = "2025-12-13"
     storage_path: str | Path = field(default_factory=lambda: resolve_storage_path(None, "futures"))
+    resolved_storage_path: Path = field(init=False, repr=False)
     dataset: str = "GLBX.MDP3"
     schemas: list[str] = field(default_factory=lambda: ["ohlcv-1d", "definition", "statistics"])
     api_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = resolve_storage_path(self.storage_path, "futures")
+        self.resolved_storage_path = resolve_storage_path(self.storage_path, "futures")
+        self.storage_path = self.resolved_storage_path
 
     def get_product_list(self) -> list[str]:
         """Get flat list of all products."""

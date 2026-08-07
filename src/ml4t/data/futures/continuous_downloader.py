@@ -39,7 +39,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import polars as pl
 import structlog
@@ -80,6 +80,7 @@ class ContinuousDownloadConfig:
     storage_path: str | Path = field(
         default_factory=lambda: resolve_storage_path(None, "futures", "continuous")
     )
+    resolved_storage_path: Path = field(init=False, repr=False)
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1h"
     roll_type: str = "v"  # "v" = volume-based, "c" = calendar-based
@@ -88,7 +89,10 @@ class ContinuousDownloadConfig:
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = resolve_storage_path(self.storage_path, "futures", "continuous")
+        self.resolved_storage_path = resolve_storage_path(
+            self.storage_path, "futures", "continuous"
+        )
+        self.storage_path = self.resolved_storage_path
 
 
 @dataclass
@@ -207,7 +211,7 @@ class ContinuousDownloader:
         self.progress = ContinuousDownloadProgress()
 
         # Ensure storage directory exists
-        self.config.storage_path.mkdir(parents=True, exist_ok=True)
+        self.config.resolved_storage_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(
             "Initialized ContinuousDownloader",
@@ -220,7 +224,12 @@ class ContinuousDownloader:
 
     def _get_output_path(self, product: str, year: int) -> Path:
         """Get output path for a product-year partition."""
-        return self.config.storage_path / f"product={product}" / f"year={year}" / "data.parquet"
+        return (
+            self.config.resolved_storage_path
+            / f"product={product}"
+            / f"year={year}"
+            / "data.parquet"
+        )
 
     def _year_exists(self, product: str, year: int) -> bool:
         """Check if product-year data already exists and has rows."""
@@ -533,7 +542,7 @@ class ContinuousDownloader:
             "estimated_total_usd": round(total_years * self.COST_PER_PRODUCT_YEAR, 2),
         }
 
-    def list_status(self) -> dict[str, dict]:
+    def list_status(self) -> dict[str, dict[str, Any]]:
         """List download status for all products.
 
         Returns:

@@ -117,7 +117,7 @@ class FuturesDownloader:
 
     def _ensure_storage_dirs(self) -> None:
         """Create storage directory structure."""
-        base = self.config.storage_path
+        base = self.config.resolved_storage_path
         base.mkdir(parents=True, exist_ok=True)
 
         for schema in self.config.schemas:
@@ -127,7 +127,7 @@ class FuturesDownloader:
     def _get_product_dir(self, schema: str, product: str) -> Path:
         """Get storage directory for a product and schema."""
         schema_dir = schema.replace("-", "_")
-        return self.config.storage_path / schema_dir / f"product={product}"
+        return self.config.resolved_storage_path / schema_dir / f"product={product}"
 
     def _product_exists(self, product: str) -> bool:
         """Check if product data already exists for all schemas."""
@@ -623,7 +623,7 @@ class FuturesDownloader:
             products=test_products,
             start="2024-11-01",
             end="2024-11-30",
-            storage_path=self.config.storage_path / "test",
+            storage_path=self.config.resolved_storage_path / "test",
             dataset=self.config.dataset,
             schemas=self.config.schemas,
             api_key=self.api_key,
@@ -641,7 +641,7 @@ class FuturesDownloader:
         result: dict[str, list[str]] = {}
 
         for schema in self.config.schemas:
-            schema_dir = self.config.storage_path / schema.replace("-", "_")
+            schema_dir = self.config.resolved_storage_path / schema.replace("-", "_")
             if not schema_dir.exists():
                 result[schema] = []
                 continue
@@ -667,7 +667,7 @@ class FuturesDownloader:
         Returns:
             Latest date found, or None if no data exists.
         """
-        ohlcv_dir = self.config.storage_path / "ohlcv_1d"
+        ohlcv_dir = self.config.resolved_storage_path / "ohlcv_1d"
         if not ohlcv_dir.exists():
             return None
 

@@ -462,18 +462,18 @@ def load_combined_futures_data(
         ['timestamp', 'open', 'high', 'low', 'close', 'volume',
          'open_interest', 'cot_open_interest', 'lev_money_net', ...]
     """
-    ohlcv_path = resolve_storage_path(ohlcv_path, "futures", "ohlcv-1d")
-    cot_path = resolve_storage_path(cot_path, "cot")
+    resolved_ohlcv_path = resolve_storage_path(ohlcv_path, "futures", "ohlcv-1d")
+    resolved_cot_path = resolve_storage_path(cot_path, "cot")
 
     # Load OHLCV data
-    ohlcv_file = ohlcv_path / f"product={product}" / "data.parquet"
+    ohlcv_file = resolved_ohlcv_path / f"product={product}" / "data.parquet"
     if not ohlcv_file.exists():
         raise FileNotFoundError(f"OHLCV data not found: {ohlcv_file}")
 
     ohlcv = pl.read_parquet(ohlcv_file)
 
     # Load COT data
-    cot_file = cot_path / f"product={product}" / "data.parquet"
+    cot_file = resolved_cot_path / f"product={product}" / "data.parquet"
     if not cot_file.exists():
         raise FileNotFoundError(f"COT data not found: {cot_file}")
 
