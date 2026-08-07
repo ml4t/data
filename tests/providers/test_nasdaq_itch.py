@@ -143,29 +143,48 @@ class TestDownload:
         with pytest.raises(ValueError, match="Unknown ITCH file"):
             provider.download("99999999")
 
-    def test_skip_existing_file(self, tmp_path):
+    def test_skip_existing_file(self, monkeypatch, tmp_path):
         """Skip download if file already exists with correct size."""
-        # Create file with approximate expected size
         itch_file = tmp_path / "01302019.NASDAQ_ITCH50.gz"
-        # Create file slightly larger than 5GB to match expected size check
-        itch_file.write_bytes(b"x" * 5_112_000_000)
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, itch_file.name, 4)
+        itch_file.write_bytes(b"data")
 
         provider = ITCHSampleProvider(download_path=tmp_path)
         result = provider.download("01302019")
 
         assert result == itch_file
-        # File should not have been modified (no actual download)
+        assert itch_file.read_bytes() == b"data"
 
-    def test_custom_output_path(self, tmp_path):
+    def test_custom_output_path(self, monkeypatch, tmp_path):
         """Allow custom output path."""
         custom_path = tmp_path / "custom" / "output.gz"
         custom_path.parent.mkdir(parents=True, exist_ok=True)
-        custom_path.write_bytes(b"x" * 5_112_000_000)
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, "01302019.NASDAQ_ITCH50.gz", 4)
+        custom_path.write_bytes(b"data")
 
         provider = ITCHSampleProvider(download_path=tmp_path)
         result = provider.download("01302019", output_path=custom_path)
 
         assert result == custom_path
+
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_existing_file_requires_exact_size(self, mock_stream, monkeypatch, tmp_path):
+        """Replace a truncated destination even when its size is close to the expected size."""
+        filename = "01302019.NASDAQ_ITCH50.gz"
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 4)
+        destination = tmp_path / filename
+        destination.write_bytes(b"old")
+
+        response = MagicMock(status_code=200)
+        response.headers = {"content-length": "4"}
+        response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = response
+
+        provider = ITCHSampleProvider(download_path=tmp_path)
+        result = provider.download("01302019")
+
+        assert result == destination
+        assert destination.read_bytes() == b"data"
 
     @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
     def test_download_creates_directory(self, mock_stream, tmp_path):

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import polars as pl
 
 from ml4t.data.providers import (
@@ -10,6 +11,7 @@ from ml4t.data.providers import (
     EODHDProvider,
     FamaFrenchProvider,
     FXMacroDataProvider,
+    ITCHSampleProvider,
     OKXProvider,
     TwelveDataProvider,
 )
@@ -92,3 +94,13 @@ def test_twelve_data_demo_contract() -> None:
 
     _assert_ohlcv(frame, "AAPL")
     assert frame.schema["timestamp"].time_zone == "UTC"
+
+
+def test_nasdaq_itch_sample_catalogue_contract(tmp_path) -> None:
+    provider = ITCHSampleProvider(download_path=tmp_path / "raw", parsed_path=tmp_path / "parsed")
+
+    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        for sample in provider.list_available_files():
+            response = client.head(sample["url"])
+            response.raise_for_status()
+            assert int(response.headers["content-length"]) == provider.KNOWN_FILES[sample["name"]]

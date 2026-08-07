@@ -63,7 +63,7 @@ class ITCHSampleProvider:
     - Requires parsing (binary format)
     - No guaranteed long-term availability
 
-    ## Available Files (as of 2024)
+    ## Available Files (verified August 2026)
 
     | File | Date | Compressed Size |
     |------|------|-----------------|
@@ -132,13 +132,13 @@ class ITCHSampleProvider:
 
     # Known sample files (filename: expected_size_bytes)
     KNOWN_FILES: ClassVar[dict[str, int]] = {
-        "01302019.NASDAQ_ITCH50.gz": 5_112_000_000,  # ~4.76 GB
-        "01302020.NASDAQ_ITCH50.gz": 6_012_000_000,  # ~5.60 GB
-        "03272019.NASDAQ_ITCH50.gz": 5_916_000_000,  # ~5.51 GB
-        "07302019.NASDAQ_ITCH50.gz": 3_929_000_000,  # ~3.66 GB
-        "08302019.NASDAQ_ITCH50.gz": 4_380_000_000,  # ~4.08 GB
-        "10302019.NASDAQ_ITCH50.gz": 4_155_000_000,  # ~3.87 GB
-        "12302019.NASDAQ_ITCH50.gz": 3_780_000_000,  # ~3.52 GB
+        "01302019.NASDAQ_ITCH50.gz": 4_764_426_091,
+        "01302020.NASDAQ_ITCH50.gz": 5_597_158_940,
+        "03272019.NASDAQ_ITCH50.gz": 5_510_131_732,
+        "07302019.NASDAQ_ITCH50.gz": 3_662_140_094,
+        "08302019.NASDAQ_ITCH50.gz": 4_075_649_457,
+        "10302019.NASDAQ_ITCH50.gz": 3_872_931_242,
+        "12302019.NASDAQ_ITCH50.gz": 3_524_013_057,
     }
     CONNECT_TIMEOUT: ClassVar[float] = 30.0
     READ_TIMEOUT: ClassVar[float] = 60.0
@@ -298,7 +298,7 @@ class ITCHSampleProvider:
         if out_path.exists():
             existing_size = out_path.stat().st_size
             expected_size = self.KNOWN_FILES[filename]
-            if abs(existing_size - expected_size) < 1e8:  # Within 100MB
+            if existing_size == expected_size:
                 self.logger.info(
                     "File already exists, skipping download",
                     path=str(out_path),
@@ -375,7 +375,7 @@ class ITCHSampleProvider:
         actual_size = partial_path.stat().st_size
         if verify_size:
             expected_size = self.KNOWN_FILES[filename]
-            if abs(actual_size - expected_size) > 1e8:  # More than 100MB difference
+            if actual_size != expected_size:
                 raise RuntimeError(
                     "Downloaded file size differs from expected: "
                     f"actual={actual_size}, expected={expected_size}; "
