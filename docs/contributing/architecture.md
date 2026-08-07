@@ -42,7 +42,7 @@ ML4T Data Architecture
 
 1. **Separation of Concerns** - Each layer has single responsibility
 2. **Template Method Pattern** - Common workflow, provider-specific implementation
-3. **Type Safety** - Full type hints, mypy strict mode
+3. **Type Safety** - Public interface type hints checked with ty
 4. **Performance First** - Polars, not pandas
 5. **Production Ready** - Error handling, retry logic, monitoring
 

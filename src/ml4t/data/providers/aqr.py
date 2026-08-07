@@ -55,6 +55,7 @@ import structlog
 from ml4t.data.core.config import PREFERRED_DATA_ENV_VAR, resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.utils.conversion import pandas_to_polars
 
 logger = structlog.get_logger()
 _DEFAULT_DATA_SUBPATH = Path("factors/aqr")
@@ -1083,7 +1084,7 @@ class AQRFactorProvider(BaseProvider):
             if converted.notna().sum() == df_pd[col].notna().sum():
                 df_pd[col] = converted.astype(float)
 
-        df = pl.from_pandas(df_pd).rename({"date": "timestamp"})
+        df = pandas_to_polars(df_pd).rename({"date": "timestamp"})
 
         if info.get("frequency") == "monthly":
             df = df.with_columns(pl.col("timestamp").dt.month_start().alias("timestamp"))

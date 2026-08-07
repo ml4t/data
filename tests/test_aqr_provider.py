@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 from openpyxl import Workbook
@@ -351,9 +352,7 @@ class TestExcelParsing:
     def test_parse_dates_handles_mixed_strings_without_warning(self):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            parsed = AQRFactorProvider._parse_dates(
-                pl.Series(["2024-01-31", "02/29/2024"]).to_pandas()
-            )
+            parsed = AQRFactorProvider._parse_dates(pd.Series(["2024-01-31", "02/29/2024"]))
 
         assert parsed.dt.strftime("%Y-%m-%d").tolist() == ["2024-01-31", "2024-02-29"]
         assert not [

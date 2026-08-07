@@ -20,10 +20,12 @@ The project includes comprehensive CI/CD workflows:
 #### 1. Continuous Integration (`ci.yml`)
 - **Triggers**: Push to `main`/`develop`, Pull Requests
 - **Jobs**:
-  - **Test**: Runs on Python 3.12-3.14 across Linux, macOS, and Windows
-  - **Lint**: Code quality checks with ruff and mypy
-  - **Security**: Bandit security scanning and dependency vulnerability checks
-  - **Build**: Package building and validation
+  - **Compatibility**: Runs Python 3.12-3.14 and the Python 3.15 prerelease across Linux,
+    macOS, and Windows
+  - **Lint**: Code quality checks with ruff
+  - **Type check**: Public package checks with ty on every supported platform
+  - **Security**: Audits the complete locked dependency environment
+  - **Build**: Builds and installs the wheel and source distribution on every matrix entry
   - **Integration**: API and CLI testing
 
 #### 2. Release Pipeline (`release.yml`)

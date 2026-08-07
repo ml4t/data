@@ -698,7 +698,7 @@ Before submitting your provider, verify:
 - [ ] Has type hints on all public methods
 - [ ] Has Google-style docstrings
 - [ ] Passes `ruff` linting
-- [ ] Passes `mypy` type checking
+- [ ] Passes `uv run ty check`
 
 ### Testing
 - [ ] Integration tests created

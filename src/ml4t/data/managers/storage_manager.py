@@ -18,6 +18,7 @@ import structlog
 from tenacity import RetryError
 
 from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.utils.conversion import pandas_to_polars
 
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
@@ -184,8 +185,8 @@ class StorageManager:
             return df
         if hasattr(df, "collect"):  # LazyFrame
             return df.collect()
-        if hasattr(df, "to_polars"):  # pandas
-            return pl.from_pandas(df)
+        if hasattr(df, "columns"):
+            return pandas_to_polars(df)
         return df
 
     def load(

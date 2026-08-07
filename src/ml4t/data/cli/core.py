@@ -40,8 +40,8 @@ from .utils import (
     type=click.Path(exists=True),
     help="File containing symbols (one per line)",
 )
-@click.option("--start", callback=validate_date, required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", callback=validate_date, required=True, help="End date (YYYY-MM-DD)")
+@click.option("--start", callback=validate_date, help="Start date (YYYY-MM-DD)")
+@click.option("--end", callback=validate_date, help="End date (YYYY-MM-DD)")
 @click.option(
     "--frequency",
     default="daily",
@@ -75,6 +75,11 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
             end = config_data.get("end", end)
             frequency = config_data.get("frequency", frequency)
             provider = config_data.get("provider", provider)
+
+    missing_options = [name for name, value in (("--start", start), ("--end", end)) if not value]
+    if missing_options:
+        options = " and ".join(f"'{name}'" for name in missing_options)
+        raise click.UsageError(f"Missing option {options} unless supplied by --config.")
 
     # Collect symbols
     symbols = list(symbol)
@@ -128,7 +133,9 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
                             results[sym] = None
                             progress_bar.update(task, advance=1)
             else:
-                results = dm.fetch_batch(symbols, start, end, frequency=frequency)
+                results = dm.fetch_batch(
+                    symbols, start, end, frequency=frequency, provider=provider
+                )
 
             successful = sum(1 for v in results.values() if v is not None)
             if not quiet:

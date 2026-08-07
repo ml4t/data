@@ -260,7 +260,7 @@ Expected result: Only 1-3 errors (cache, integration tests)
 ### Current Core Dependencies (Installed)
 
 ✅ All working:
-- polars, pandas, numpy, pyarrow
+- polars, pandas, numpy
 - httpx, tenacity, pybreaker
 - pyyaml, click, python-dotenv, pydantic-settings
 - structlog, platformdirs, filelock, rich

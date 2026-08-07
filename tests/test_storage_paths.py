@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -11,13 +12,18 @@ from ml4t.data.crypto.downloader import CryptoConfig
 from ml4t.data.etfs.downloader import ETFConfig
 from ml4t.data.futures.book_downloader import FuturesConfig
 from ml4t.data.futures.config import FuturesDownloadConfig
-from ml4t.data.futures.continuous_downloader import ContinuousDownloadConfig
-from ml4t.data.futures.individual_downloader import IndividualDownloadConfig
 from ml4t.data.macro.downloader import MacroConfig
 from ml4t.data.providers.aqr import AQRFactorProvider
 from ml4t.data.providers.fama_french import FamaFrenchProvider
 from ml4t.data.providers.nasdaq_itch import ITCHSampleProvider
 from ml4t.data.providers.wiki_prices import WikiPricesProvider
+
+if importlib.util.find_spec("databento") is not None:
+    from ml4t.data.futures.continuous_downloader import ContinuousDownloadConfig
+    from ml4t.data.futures.individual_downloader import IndividualDownloadConfig
+else:
+    ContinuousDownloadConfig = None
+    IndividualDownloadConfig = None
 
 
 def test_resolve_data_root_prefers_ml4t_data_path(monkeypatch, tmp_path: Path) -> None:
@@ -48,8 +54,9 @@ def test_default_storage_paths_follow_ml4t_data_path(monkeypatch, tmp_path: Path
     assert MacroConfig().storage_path == root.resolve() / "macro"
     assert FuturesConfig().storage_path == root.resolve() / "futures"
     assert FuturesDownloadConfig().storage_path == root.resolve() / "futures"
-    assert ContinuousDownloadConfig().storage_path == root.resolve() / "futures" / "continuous"
-    assert IndividualDownloadConfig().storage_path == root.resolve() / "futures" / "individual"
+    if ContinuousDownloadConfig is not None and IndividualDownloadConfig is not None:
+        assert ContinuousDownloadConfig().storage_path == root.resolve() / "futures" / "continuous"
+        assert IndividualDownloadConfig().storage_path == root.resolve() / "futures" / "individual"
     assert COTConfig(products=["ES"]).storage_path == root.resolve() / "cot"
 
 

@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import structlog
 
+from ml4t.data.utils.conversion import pandas_to_polars
+
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
 
@@ -111,8 +113,8 @@ class BatchManager:
                 if not isinstance(df, pl.DataFrame):
                     if hasattr(df, "collect"):
                         df = df.collect()
-                    elif hasattr(df, "to_polars"):
-                        df = pl.from_pandas(df)
+                    elif hasattr(df, "columns"):
+                        df = pandas_to_polars(df)
 
                 # Add symbol column
                 df_with_symbol = MultiAssetSchema.add_symbol_column(df, symbol)

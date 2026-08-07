@@ -1,0 +1,108 @@
+name: Provider Contract Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Credentialed provider contract to run
+        required: true
+        type: choice
+        options:
+          - cryptocompare
+          - databento
+          - oanda
+      allow-paid-requests:
+        description: Authorize requests that Databento may bill
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-contract-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.10.9"
+  UV_NO_MANAGED_PYTHON: "1"
+
+jobs:
+  cryptocompare:
+    name: CryptoCompare Contract
+    if: inputs.provider == 'cryptocompare'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'CRYPTOCOMPARE_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          CRYPTOCOMPARE_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
+        run: uv run pytest tests/integration/test_cryptocompare.py -q -m integration
+
+  databento:
+    name: Databento Contract
+    if: inputs.provider == 'databento'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require cost authorization and the provider credential
+        env:
+          ALLOW_PAID_REQUESTS: ${{ inputs.allow-paid-requests }}
+          PROVIDER_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+        run: >-
+          python -c "import os; assert os.environ.get('ALLOW_PAID_REQUESTS') == 'true',
+          'Databento requests require allow-paid-requests'; assert os.environ.get('PROVIDER_API_KEY'),
+          'DATABENTO_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+          ML4T_RUN_DATABENTO_LIVE: "1"
+        run: uv run pytest tests/test_databento_acceptance.py -q -m integration
+
+  oanda:
+    name: OANDA Contract
+    if: inputs.provider == 'oanda'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the practice credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.OANDA_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'OANDA_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+        run: uv run pytest tests/integration/test_oanda.py -q -m integration

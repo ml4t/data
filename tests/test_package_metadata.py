@@ -1,5 +1,8 @@
 """Release metadata contract tests."""
 
+import subprocess
+import sys
+import textwrap
 import tomllib
 from pathlib import Path
 
@@ -40,3 +43,28 @@ def test_oanda_extra_declares_undeclared_client_dependency() -> None:
 
     assert any(dependency.startswith("oandapyV20") for dependency in dependencies)
     assert any(dependency.startswith("requests") for dependency in dependencies)
+
+
+def test_core_futures_import_does_not_require_databento_extra() -> None:
+    """Core futures algorithms remain importable without the optional SDK."""
+    script = textwrap.dedent(
+        """
+        import builtins
+
+        original_import = builtins.__import__
+
+        def block_databento(name, *args, **kwargs):
+            if name == "databento" or name.startswith("databento."):
+                raise ModuleNotFoundError("blocked optional dependency", name="databento")
+            return original_import(name, *args, **kwargs)
+
+        builtins.__import__ = block_databento
+
+        import ml4t.data.futures as futures
+
+        assert hasattr(futures, "ContinuousContractBuilder")
+        assert not hasattr(futures, "FuturesDownloader")
+        """
+    )
+
+    subprocess.run([sys.executable, "-c", script], cwd=PROJECT_ROOT, check=True)

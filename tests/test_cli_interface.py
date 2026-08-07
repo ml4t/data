@@ -79,7 +79,7 @@ class TestFetchCommand:
                 ],
             )
 
-            assert result.exit_code == 0
+            assert result.exit_code == 0, result.output
             assert "Fetching BTC" in result.output
             assert "✅ Fetched 1 rows" in result.output
             mock_dm.fetch.assert_called_once_with(
@@ -147,7 +147,7 @@ class TestFetchCommand:
             ],
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "Fetching 2 symbols" in result.output
         assert "✅ Successfully fetched 2 symbols" in result.output
 
@@ -216,7 +216,6 @@ class TestUpdateCommand:
     @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.IncrementalUpdater")
     @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_update_incremental(
         self, mock_dm_class, mock_updater_class, mock_tracker_class, mock_storage_class
     ):
@@ -247,6 +246,7 @@ class TestUpdateCommand:
         mock_result.success = True
         mock_result.rows_added = 5
         mock_result.rows_updated = 0
+        mock_result.gaps_filled = 0
         mock_updater.update_incremental.return_value = mock_result
 
         runner = CliRunner()
@@ -264,7 +264,7 @@ class TestUpdateCommand:
                 ],
             )
 
-            assert result.exit_code == 0
+            assert result.exit_code == 0, result.output
             assert "Incremental update from" in result.output
             assert "✅ Update successful" in result.output
             assert "Added 5 rows" in result.output
@@ -422,13 +422,13 @@ class TestStatusCommand:
 
     @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.HiveStorage")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_status_detailed(self, mock_storage_class, mock_tracker_class):
         """Test detailed status with --detailed flag."""
         mock_storage = MagicMock()
         mock_storage_class.return_value = mock_storage
         mock_tracker = MagicMock()
         mock_tracker_class.return_value = mock_tracker
+        mock_tracker.get_summary.return_value = {}
 
         mock_storage.list_keys.return_value = ["BTC"]
 
@@ -453,7 +453,7 @@ class TestStatusCommand:
         runner = CliRunner()
         result = runner.invoke(cli, ["status", "--detailed"])
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "Dataset: BTC" in result.output
         assert "Provider: cryptocompare" in result.output
         assert "Rows: 10" in result.output
@@ -497,7 +497,6 @@ class TestBatchOperations:
             assert "Fetching 2 symbols from file" in result.output
 
     @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_fetch_with_config(self, mock_dm_class):
         """Test fetching with configuration file."""
         mock_dm = MagicMock()
@@ -529,6 +528,13 @@ class TestBatchOperations:
 
             assert result.exit_code == 0
             assert "Loading configuration from config.json" in result.output
+            mock_dm.fetch_batch.assert_called_once_with(
+                ["BTC", "ETH"],
+                "2024-01-01",
+                "2024-01-31",
+                frequency="hourly",
+                provider="cryptocompare",
+            )
 
 
 class TestProgressAndOutput:
@@ -573,42 +579,38 @@ class TestProgressAndOutput:
         # Progress indicators should be in output
         assert "Fetching 5 symbols" in result.output
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
-    def test_quiet_mode(self):
+    @patch("ml4t.data.cli.core.MetadataTracker")
+    @patch("ml4t.data.cli.core.HiveStorage")
+    def test_quiet_mode(self, _mock_storage_class, mock_tracker_class):
         """Test quiet mode suppresses output."""
+        mock_tracker_class.return_value.get_summary.return_value = {}
         runner = CliRunner()
-        result = runner.invoke(cli, ["status", "--quiet"])
+        result = runner.invoke(cli, ["--quiet", "status"])
         assert result.exit_code == 0
-        # Only essential output, no decorative elements
-        assert "═" not in result.output  # No box drawing
+        assert result.output == ""
 
-    @pytest.mark.skip(reason="Verbose output format is implementation-specific")
-    def test_verbose_mode(self):
+    @patch("ml4t.data.cli.core.MetadataTracker")
+    @patch("ml4t.data.cli.core.HiveStorage")
+    def test_verbose_mode(self, _mock_storage_class, mock_tracker_class):
         """Test verbose mode shows detailed information."""
+        mock_tracker_class.return_value.get_summary.return_value = {}
         runner = CliRunner()
         result = runner.invoke(cli, ["--verbose", "status"])
         assert result.exit_code == 0
-        # Should show debug information
-        assert "Configuration" in result.output or "Debug" in result.output
+        assert "Storage path: ./data" in result.output
 
 
 class TestShellCompletion:
     """Test shell completion support."""
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_completion_installation(self):
         """Test shell completion installation command."""
         runner = CliRunner()
 
         # Test bash completion
-        result = runner.invoke(cli, ["--show-completion", "bash"])
+        result = runner.invoke(cli, ["show-completion", "bash"])
         assert result.exit_code == 0
-        assert "_QDATA_COMPLETE" in result.output
-
-    def test_completion_symbols(self):
-        """Test symbol completion suggestions."""
-        # This would require more complex setup with click's completion context
-        # Marking as a placeholder for manual testing
+        assert "_ML4T_DATA_COMPLETE" in result.output
 
 
 class TestErrorHandling:
@@ -1385,7 +1387,7 @@ class TestDownloadFuturesCommand:
         assert result.exit_code != 0
         # Missing required option
 
-    @patch("ml4t.data.futures.FuturesDownloader")
+    @patch("ml4t.data.futures.FuturesDownloader", create=True)
     @patch("ml4t.data.futures.load_yaml_config")
     def test_download_futures_dry_run(self, mock_load_config, mock_downloader_class):
         """Test download-futures dry run."""

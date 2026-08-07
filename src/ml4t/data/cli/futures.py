@@ -64,7 +64,7 @@ def download_futures(ctx, config, dry_run, force, product, parallel):
     """
     from dotenv import load_dotenv
 
-    from ml4t.data.futures import FuturesDownloader, load_yaml_config
+    from ml4t.data.futures import load_yaml_config
 
     load_dotenv()
     quiet = ctx.obj.get("quiet", False)
@@ -72,6 +72,8 @@ def download_futures(ctx, config, dry_run, force, product, parallel):
     try:
         # Load configuration
         download_config = load_yaml_config(config)
+
+        from ml4t.data.futures import FuturesDownloader
 
         # Override products if specific ones requested
         if product:
@@ -230,7 +232,7 @@ def update_futures(ctx, config, end_date, dry_run, yes):
 
     from dotenv import load_dotenv
 
-    from ml4t.data.futures import FuturesDownloader, load_yaml_config
+    from ml4t.data.futures import load_yaml_config
 
     load_dotenv()
     quiet = ctx.obj.get("quiet", False)
@@ -239,6 +241,8 @@ def update_futures(ctx, config, end_date, dry_run, yes):
     try:
         # Load configuration
         download_config = load_yaml_config(config)
+
+        from ml4t.data.futures import FuturesDownloader
 
         # Initialize downloader
         downloader = FuturesDownloader(download_config)

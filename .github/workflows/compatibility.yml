@@ -1,0 +1,69 @@
+name: Compatibility
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.10.9"
+
+jobs:
+  compatibility:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      UV_NO_MANAGED_PYTHON: "1"
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install the complete stable environment
+        if: matrix.python-version != '3.15'
+        run: uv sync --locked --all-extras --dev
+
+      - name: Install the core prerelease environment
+        if: matrix.python-version == '3.15'
+        run: uv sync --locked --no-default-groups --group prerelease
+
+      - name: Verify import
+        run: uv run --no-sync python -c "import ml4t.data as package; print(package.__version__)"
+
+      - name: Type-check for Python ${{ matrix.python-version }}
+        run: uv run --no-sync ty check --python-version "${{ matrix.python-version }}"
+
+      - name: Run the non-hardware-dependent test suite
+        run: uv run --no-sync pytest tests/ -q --tb=short -W error::ResourceWarning -W error::pytest.PytestUnraisableExceptionWarning
+
+      - name: Build wheel and source distribution
+        run: uv build --out-dir compatibility-dist
+
+      - name: Verify isolated wheel and source installs
+        run: uv run --no-sync python scripts/verify_distribution.py --dist-dir compatibility-dist

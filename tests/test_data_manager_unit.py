@@ -219,13 +219,19 @@ class TestDataManagerConvertOutput:
     def test_convert_to_pandas(self):
         """Test pandas output format."""
         dm = DataManager(output_format="pandas")
-        df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "a": [1, None],
+            }
+        )
 
         result = dm._convert_output(df)
 
-        # Check it's pandas
         assert hasattr(result, "iloc")
-        assert list(result["a"]) == [1, 2, 3]
+        assert result["timestamp"].tolist() == [datetime(2024, 1, 1), datetime(2024, 1, 2)]
+        assert result["a"].iloc[0] == 1
+        assert result["a"].isna().iloc[1]
 
     def test_convert_to_lazy(self):
         """Test lazy output format."""

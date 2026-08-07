@@ -193,7 +193,7 @@ None identified
 ### Important Issues
 1. **Binance Integration Tests** - Missing (requires VPN in US)
 2. **Async Storage** - Implemented but under-tested
-3. **Type Hints** - Not strict (mypy strict mode disabled)
+3. **Type Checking** - Reduce the remaining suppressed ty rules
 
 ### Nice-to-Have
 1. WebSocket streaming (Phase 2)
@@ -316,7 +316,7 @@ ruff format .
 ruff check .
 
 # Type check
-mypy src/
+uv run ty check
 
 # Pre-commit hooks
 pre-commit run --all-files

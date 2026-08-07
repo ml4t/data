@@ -156,6 +156,14 @@ def close_default_event_loop():
             continue
 
 
+@pytest.fixture(scope="module", autouse=True)
+def collect_module_resources():
+    """Make resource leaks fail in the module that created them."""
+    yield
+    _close_yfinance_caches()
+    gc.collect()
+
+
 @pytest.fixture(autouse=True)
 def close_yfinance_caches():
     """Close yfinance sqlite caches around each test to prevent leaked sqlite handles."""

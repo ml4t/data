@@ -264,7 +264,7 @@ class TestMultiAssetWorkflows:
 class TestPerformanceIntegration:
     """Test performance characteristics across integrated features."""
 
-    @pytest.mark.skip(reason="Performance targets not finalized")
+    @pytest.mark.integration
     def test_batch_load_universe_performance_target(self):
         """Validate loading 10 symbols completes in reasonable time.
 
@@ -596,29 +596,40 @@ class TestErrorHandling:
                 fetch_missing=False,
             )
 
-    @pytest.mark.skip(reason="Error handling not implemented")
-    def test_partial_failures_with_graceful_degradation(self):
+    def test_partial_failures_with_graceful_degradation(self, monkeypatch):
         """Test that partial failures can be handled gracefully."""
         manager = DataManager(output_format="polars")
 
         # Mix of valid and invalid symbols
         symbols = ["AAPL", "INVALID_SYMBOL_123", "MSFT"]
 
-        # With fail_on_partial=False, should get data for valid symbols
+        def fetch(symbol, *_args, **_kwargs):
+            if symbol == "INVALID_SYMBOL_123":
+                raise ValueError("symbol not found")
+            return pl.DataFrame(
+                {
+                    "timestamp": [datetime(2024, 1, 2, tzinfo=UTC)],
+                    "open": [100.0],
+                    "high": [101.0],
+                    "low": [99.0],
+                    "close": [100.5],
+                    "volume": [1_000.0],
+                }
+            )
+
+        monkeypatch.setattr(manager._fetch_manager, "fetch", fetch)
+
         df = manager.batch_load(
             symbols=symbols,
             start="2024-01-01",
             end="2024-01-05",
-            provider="yahoo",
             fail_on_partial=False,
         )
 
-        # Should have data for at least one valid symbol
         unique_symbols = df["symbol"].unique().to_list()
-        assert "AAPL" in unique_symbols or "MSFT" in unique_symbols
+        assert set(unique_symbols) == {"AAPL", "MSFT"}
         assert "INVALID_SYMBOL_123" not in unique_symbols
 
-        # Should still be valid multi-asset format
         assert MultiAssetSchema.validate(df, strict=True)
 
     def test_format_conversion_with_missing_data(self):

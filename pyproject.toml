@@ -75,7 +75,6 @@ dependencies = [
     "polars>=0.20.0",
     "pandas>=2.0.0",
     "numpy>=1.24.0",
-    "pyarrow>=14.0.0",
     # HTTP and networking
     "httpx>=0.25.0",
     "tenacity>=8.0.0",
@@ -85,6 +84,7 @@ dependencies = [
     "click>=8.0.0",
     "python-dotenv>=1.0.0",
     "pydantic-settings>=2.0.0",
+    "pydantic>=2.14.0b1; python_version >= '3.15'",
     # Utilities
     "structlog>=23.0.0",
     "platformdirs>=4.0.0",
@@ -105,6 +105,7 @@ yahoo = [
 ]
 databento = [
     "databento>=0.38.0",
+    "pyarrow>=14.0.0",
 ]
 oanda = [
     "oandapyV20>=0.7.0",
@@ -128,7 +129,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "hypothesis>=6.80.0",
     "ruff>=0.1.0",
-    "mypy>=1.5.0",
+    "ty",
     "ipython>=8.14.0",
     "ipdb>=0.13.0",
     "pre-commit>=3.3.0",
@@ -160,6 +161,20 @@ Issues = "https://github.com/ml4t/data/issues"
 Changelog = "https://github.com/ml4t/data/blob/main/CHANGELOG.md"
 
 [dependency-groups]
+prerelease = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-xdist>=3.3.0",
+    "pytest-timeout>=2.1.0",
+    "pytest-asyncio>=0.21.0",
+    "hypothesis>=6.80.0",
+    "ty",
+    "yfinance>=0.2.0",
+    "oandapyV20>=0.7.0",
+    "requests>=2.32.0",
+    "cot-reports>=0.1.0",
+    "xlsxwriter>=3.1.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
@@ -171,6 +186,7 @@ dev = [
     "ty",
     "pre-commit>=3.3.0",
     "twine>=6.0.0",
+    "pip-audit>=2.10.1",
     "databento>=0.38.0",
     "yfinance>=0.2.0",
     "oandapyV20>=0.7.0",
@@ -257,130 +273,6 @@ known-first-party = ["ml4t"]
 "src/ml4t/data/export/formats/excel.py" = ["F401"]  # Conditional import
 "provider_template/*" = ["ARG002", "F821"]  # Template placeholders
 "examples/notebooks/*" = ["E402"]  # Jupyter notebooks
-
-[tool.mypy]
-python_version = "3.11"
-# Set mypy_path to src for proper module resolution
-mypy_path = "src"
-namespace_packages = true
-explicit_package_bases = true
-# Exclude data storage directory at project root (conflicts with ml4t.data package)
-exclude = ["^data/", "^benchmarks/", "^scripts/", "^examples/", "^provider_template/"]
-# Start with moderate strictness - can be increased incrementally
-strict = false
-warn_return_any = false  # Too many false positives with Any
-warn_unused_ignores = true
-disallow_untyped_defs = false  # Relax for initial commit
-disallow_any_unimported = false
-no_implicit_optional = true
-check_untyped_defs = true
-show_error_codes = true
-warn_redundant_casts = true
-ignore_missing_imports = true
-# Still catch real issues
-warn_unreachable = true
-warn_unused_configs = true
-disallow_untyped_calls = false
-
-# Exclude test files, examples, and benchmarks from strict checking
-[[tool.mypy.overrides]]
-module = ["tests.*", "examples.*", "benchmarks.*", "scripts.*"]
-disallow_untyped_defs = false
-check_untyped_defs = false
-warn_return_any = false
-
-# CLI files use Click which has complex decorators and config model issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.cli", "ml4t.data.cli_interface"]
-ignore_errors = true
-
-# Storage modules with async/complex patterns
-[[tool.mypy.overrides]]
-module = ["ml4t.data.storage.async_migration"]
-ignore_errors = true
-
-# Provider init with dynamic loading and specific provider issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.providers.__init__", "ml4t.data.providers.twelve_data", "ml4t.data.provider_updater"]
-ignore_errors = true
-
-# Pipeline and storage async modules need refactoring
-[[tool.mypy.overrides]]
-module = ["ml4t.data.pipeline", "ml4t.data.storage.async_filesystem"]
-ignore_errors = true
-
-# Anomaly detection module
-[[tool.mypy.overrides]]
-module = ["ml4t.data.anomaly.*"]
-ignore_errors = true
-
-# Config modules with model issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.config.*"]
-ignore_errors = true
-
-# Storage and provider modules needing refactoring
-[[tool.mypy.overrides]]
-module = ["ml4t.data.storage.hive", "ml4t.data.storage.migration", "ml4t.data.storage.partitioning", "ml4t.data.storage.__init__", "ml4t.data.storage.transaction"]
-ignore_errors = true
-
-# Data manager with complex type interactions
-[[tool.mypy.overrides]]
-module = ["ml4t.data.data_manager"]
-ignore_errors = true
-
-# Provider modules with various issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.providers.base", "ml4t.data.providers.oanda", "ml4t.data.providers.mock", "ml4t.data.providers.binance", "ml4t.data.providers.yahoo", "ml4t.data.providers.polygon", "ml4t.data.providers.eodhd", "ml4t.data.providers.finnhub", "ml4t.data.providers.tiingo", "ml4t.data.providers.alpha_vantage"]
-ignore_errors = true
-
-# Export and core modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.export.formats.*", "ml4t.data.core.config"]
-ignore_errors = true
-
-# Utility modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.utils.global_rate_limit"]
-ignore_errors = true
-
-# Asset modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.assets.asset_class", "ml4t.data.assets.validation"]
-ignore_errors = true
-
-# Modules with Polars type inference issues (to be fixed incrementally)
-[[tool.mypy.overrides]]
-module = [
-    "ml4t.data.utils.gaps",
-    "ml4t.data.update_manager",
-    "ml4t.data.storage.chunked",
-    "ml4t.data.providers.wiki_prices",
-    "ml4t.data.core.schemas",
-    "ml4t.data.etfs.downloader",
-    "ml4t.data.futures.roll",
-    "ml4t.data.futures.downloader",
-    "ml4t.data.futures.book_downloader",
-    "ml4t.data.providers.nasdaq_itch",
-    "ml4t.data.providers.kalshi",
-    "ml4t.data.calendar.crypto",
-    "ml4t.data.futures.continuous",
-    "ml4t.data.cot.fetcher",
-    "ml4t.data.cot.workflow",
-    "ml4t.data.utils.format",
-    "ml4t.data.sessions.*",
-    "ml4t.data.providers.polymarket",
-    "ml4t.data.providers.fred",
-    "ml4t.data.macro.downloader",
-    "ml4t.data.crypto.downloader",
-    "ml4t.data.providers.fama_french",
-    "ml4t.data.providers.aqr",
-    "ml4t.data.providers.databento",
-    "ml4t.data.validation.*",
-    "ml4t.data.futures.parser",
-    "ml4t.data.storage.flat",
-]
-ignore_errors = true
 
 [tool.ty.environment]
 python-version = "3.12"

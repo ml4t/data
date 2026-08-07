@@ -1,7 +1,7 @@
 """Test enhanced BaseProvider architecture with Template Method pattern."""
 
 from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import polars as pl
 import pytest
@@ -530,20 +530,13 @@ class TestBaseProvider:
         assert result.height == 2
         assert result["symbol"].unique().to_list() == ["GOOD"]
 
-    @pytest.mark.skip(
-        reason="Limiter class doesn't exist - test needs rewrite for global_rate_limit_manager"
-    )
-    @patch("ml4t.data.providers.base.Limiter")
-    def test_rate_limiting(self, mock_limiter_class):
+    def test_rate_limiting(self):
         """Test rate limiting integration."""
-        mock_limiter = Mock()
-        mock_limiter_class.return_value = mock_limiter
-
         provider = MockProvider()
+        provider.rate_limiter = Mock()
         provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        # Verify rate limiter was called
-        mock_limiter.try_acquire.assert_called_with("api_call")
+        provider.rate_limiter.acquire.assert_called_once_with(blocking=True)
 
     def test_duplicate_timestamp_rejected(self):
         """Conflicting duplicate bars are rejected instead of silently discarded."""
@@ -578,25 +571,19 @@ class TestBaseProvider:
 class TestProviderLogging:
     """Test provider logging functionality."""
 
-    @pytest.mark.skip(reason="Structlog logger initialized at import time - mock timing issue")
     def test_structured_logging(self):
         """Test that providers use structured logging."""
         provider = MockProvider()
+        provider.logger = Mock()
 
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = Mock()
-            mock_get_logger.return_value = mock_logger
+        provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert provider.logger.info.call_count >= 2
 
-            # Verify info logs were called
-            assert mock_logger.info.call_count >= 2
-
-            # Check log structure
-            start_call = mock_logger.info.call_args_list[0]
-            assert "Fetching OHLCV data" in start_call[0]
-            assert "symbol" in start_call[1]
-            assert "provider" in start_call[1]
+        start_call = provider.logger.info.call_args_list[0]
+        assert "Fetching OHLCV data" in start_call.args
+        assert start_call.kwargs["symbol"] == "AAPL"
+        assert start_call.kwargs["provider"] == "mock"
 
 
 if __name__ == "__main__":

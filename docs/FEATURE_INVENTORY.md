@@ -1043,7 +1043,6 @@ ml4t-data export [options]
 - polars >= 0.20.0
 - pandas >= 2.0.0
 - numpy >= 1.24.0
-- pyarrow >= 14.0.0
 - httpx >= 0.25.0
 - tenacity >= 8.0.0
 - pybreaker >= 1.0.0 (circuit breaker)
@@ -1073,7 +1072,7 @@ ml4t-data export [options]
 - pytest-asyncio >= 0.21.0
 - hypothesis >= 6.80.0
 - ruff >= 0.1.0
-- mypy >= 1.5.0
+- ty
 - ipython >= 8.14.0
 - ipdb >= 0.13.0
 - pre-commit >= 3.3.0
@@ -1127,7 +1126,7 @@ ml4t-data export [options]
 | Integration Tests | 10 ✅ |
 | Provider Coverage | 13/13 (100%) ✅ |
 | Code Coverage | ~80%+ (target) ✅ |
-| Type Hints | Partial (mypy strict excluded) ⚠️ |
+| Type Hints | Public interfaces checked with ty ⚠️ |
 | Pre-commit Hooks | Enabled ✅ |
 | CI/CD | GitHub Actions ✅ |
 
@@ -1141,7 +1140,7 @@ None identified
 ### Important (Should Fix)
 1. Binance integration tests - Requires VPN in US
 2. Async storage tests - Needs more coverage
-3. Type hints - mypy strict mode not yet enabled
+3. Type checking - reduce the remaining suppressed ty rules
 
 ### Nice-to-Have (Low Priority)
 1. WebSocket streaming support (Phase 2)

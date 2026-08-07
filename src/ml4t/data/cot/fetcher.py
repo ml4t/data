@@ -16,6 +16,7 @@ import polars as pl
 import yaml
 
 from ml4t.data.core.config import resolve_storage_path
+from ml4t.data.utils.conversion import pandas_to_polars
 
 logger = logging.getLogger(__name__)
 
@@ -439,7 +440,7 @@ class COTFetcher:
                 os.chdir(original_dir)
 
         # Convert to Polars
-        df = pl.from_pandas(df_pandas)
+        df = pandas_to_polars(df_pandas)
         self._cache[cache_key] = df
 
         return df

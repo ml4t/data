@@ -1,5 +1,9 @@
 """Test provider registration in DataManager."""
 
+import pytest
+
+pytest.importorskip("databento")
+
 from ml4t.data.data_manager import DataManager
 from ml4t.data.providers.alpaca import AlpacaDataProvider
 from ml4t.data.providers.binance import BinanceProvider

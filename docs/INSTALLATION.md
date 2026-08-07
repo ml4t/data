@@ -41,7 +41,7 @@ ML4T Data has several categories of dependencies:
 
 These are installed automatically with `pip install -e .`:
 
-- **Data Processing**: polars, pandas, numpy, pyarrow
+- **Data Processing**: polars, pandas, numpy
 - **HTTP/Networking**: httpx, tenacity, pybreaker
 - **Configuration**: pyyaml, click, python-dotenv, pydantic-settings
 - **Utilities**: structlog, platformdirs, filelock, rich
@@ -86,7 +86,8 @@ For contributing to ml4t-data:
 pip install -e ".[dev]"
 ```
 
-Includes: pytest, pytest-cov, ruff, mypy, black, pre-commit
+Includes the pytest test stack, ruff, ty, pre-commit, package verification tools, and the
+provider SDKs used by the test suite.
 
 ## Updating Installation
 

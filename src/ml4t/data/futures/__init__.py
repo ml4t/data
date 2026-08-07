@@ -20,15 +20,18 @@ from ml4t.data.futures.book_downloader import (
     download_futures_data,
     update_futures_data,
 )
+from ml4t.data.futures.config import (
+    DEFAULT_PRODUCTS,
+    DefinitionsConfig,
+    DownloadProgress,
+    FuturesCategory,
+    FuturesDownloadConfig,
+    load_definitions_config,
+    load_yaml_config,
+)
 from ml4t.data.futures.continuous import (
     ContinuousContractBuilder,
     build_continuous_contract,
-)
-from ml4t.data.futures.continuous_downloader import (
-    ContinuousDownloadConfig,
-    ContinuousDownloader,
-    ContinuousDownloadProgress,
-    load_continuous_config,
 )
 from ml4t.data.futures.databento_parser import (
     STAT_TYPE_CLEARED_VOLUME,
@@ -46,23 +49,6 @@ from ml4t.data.futures.databento_parser import (
     parse_contract_symbol,
     parse_databento,
     parse_databento_raw,
-)
-from ml4t.data.futures.downloader import (
-    DEFAULT_PRODUCTS,
-    DefinitionsConfig,
-    DefinitionsDownloader,
-    DownloadProgress,
-    FuturesCategory,
-    FuturesDownloadConfig,
-    FuturesDownloader,
-    load_definitions_config,
-    load_yaml_config,
-)
-from ml4t.data.futures.individual_downloader import (
-    IndividualDownloadConfig,
-    IndividualDownloader,
-    IndividualProductConfig,
-    load_individual_config,
 )
 from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
 from ml4t.data.futures.roll import (
@@ -87,6 +73,40 @@ from ml4t.data.futures.schema import (
     SettlementType,
 )
 
+_DATABENTO_EXPORTS: list[str] = []
+
+try:
+    from ml4t.data.futures import continuous_downloader as _continuous_downloader
+    from ml4t.data.futures import downloader as _downloader
+    from ml4t.data.futures import individual_downloader as _individual_downloader
+except ModuleNotFoundError as error:
+    missing_module = error.name or ""
+    if missing_module != "databento" and not missing_module.startswith("databento."):
+        raise
+else:
+    ContinuousDownloadConfig = _continuous_downloader.ContinuousDownloadConfig
+    ContinuousDownloader = _continuous_downloader.ContinuousDownloader
+    ContinuousDownloadProgress = _continuous_downloader.ContinuousDownloadProgress
+    load_continuous_config = _continuous_downloader.load_continuous_config
+    DefinitionsDownloader = _downloader.DefinitionsDownloader
+    FuturesDownloader = _downloader.FuturesDownloader
+    IndividualDownloadConfig = _individual_downloader.IndividualDownloadConfig
+    IndividualDownloader = _individual_downloader.IndividualDownloader
+    IndividualProductConfig = _individual_downloader.IndividualProductConfig
+    load_individual_config = _individual_downloader.load_individual_config
+    _DATABENTO_EXPORTS = [
+        "FuturesDownloader",
+        "ContinuousDownloader",
+        "ContinuousDownloadConfig",
+        "ContinuousDownloadProgress",
+        "load_continuous_config",
+        "IndividualDownloader",
+        "IndividualDownloadConfig",
+        "IndividualProductConfig",
+        "load_individual_config",
+        "DefinitionsDownloader",
+    ]
+
 __all__ = [
     # Schema
     "AssetClass",  # Backward compat alias for FuturesAssetClass
@@ -95,6 +115,13 @@ __all__ = [
     "ExchangeInfo",
     "MAJOR_CONTRACTS",
     "SettlementType",
+    "FuturesDownloadConfig",
+    "FuturesCategory",
+    "DownloadProgress",
+    "DefinitionsConfig",
+    "DEFAULT_PRODUCTS",
+    "load_yaml_config",
+    "load_definitions_config",
     # Parser (Quandl)
     "parse_quandl_chris",
     "parse_quandl_chris_raw",
@@ -133,30 +160,9 @@ __all__ = [
     # Continuous contract builder
     "ContinuousContractBuilder",
     "build_continuous_contract",
-    # Downloader (individual contracts)
-    "FuturesDownloader",
-    "FuturesDownloadConfig",
-    "FuturesCategory",
-    "DownloadProgress",
-    "DEFAULT_PRODUCTS",
-    "load_yaml_config",
-    # Continuous contract downloader
-    "ContinuousDownloader",
-    "ContinuousDownloadConfig",
-    "ContinuousDownloadProgress",
-    "load_continuous_config",
-    # Individual contract downloader
-    "IndividualDownloader",
-    "IndividualDownloadConfig",
-    "IndividualProductConfig",
-    "load_individual_config",
-    # Definitions downloader
-    "DefinitionsDownloader",
-    "DefinitionsConfig",
-    "load_definitions_config",
     # Book downloader (simplified interface for ML4T readers)
     "FuturesDataManager",
     "FuturesConfig",
     "download_futures_data",
     "update_futures_data",
-]
+] + _DATABENTO_EXPORTS

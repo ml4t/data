@@ -35,7 +35,8 @@ The goal is to support an ongoing research workflow rather than one-off download
 
 ML4T Data supports stable CPython 3.12 through 3.14 on Linux, macOS, and Windows.
 Python 3.15 prereleases are tested as blocking compatibility checks but are not advertised
-as stable support until Python 3.15 is final.
+as stable support until Python 3.15 is final. The Databento SDK currently has no CPython 3.15
+distribution, so the 3.15 prerelease lane tests the core package without the Databento extra.
 
 ```bash
 pip install ml4t-data

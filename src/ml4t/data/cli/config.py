@@ -164,17 +164,13 @@ def show_completion(shell):
     Fish:
         eval (env _ML4T_DATA_COMPLETE=fish_source ml4t-data)
     """
-    import os
-    import subprocess
+    from click.shell_completion import get_completion_class
 
-    env = os.environ.copy()
-    env["_QDATA_COMPLETE"] = f"{shell}_source"
+    completion_class = get_completion_class(shell)
+    if completion_class is None:
+        raise click.ClickException(f"Shell completion is not available for {shell}")
 
-    result = subprocess.run(
-        [sys.executable, "-m", "mlquant.data.cli_interface"],
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    from ml4t.data.cli import cli
 
-    console.print(result.stdout)
+    completion = completion_class(cli, {}, "ml4t-data", "_ML4T_DATA_COMPLETE")
+    click.echo(completion.source())

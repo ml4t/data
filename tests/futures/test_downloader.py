@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+pytest.importorskip("databento")
+
 # Import real databento exceptions (databento package is installed)
 from databento.common.error import BentoClientError, BentoServerError
 

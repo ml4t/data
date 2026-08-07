@@ -25,7 +25,6 @@ class TestDataManagerInitialization:
         assert dm.config is not None
         assert dm.providers == {}  # No providers loaded by default
 
-    @pytest.mark.skip(reason="Config initialization not implemented in PRE-RELEASE")
     def test_init_with_env_vars(self):
         """Test DataManager initialization from environment variables."""
         with patch.dict(
@@ -35,11 +34,12 @@ class TestDataManagerInitialization:
                 "DATABENTO_API_KEY": "db-test",
                 "OANDA_API_KEY": "oanda_test",
             },
+            clear=True,
         ):
             dm = DataManager()
             assert "CRYPTOCOMPARE_API_KEY" in os.environ
             # Provider instances are created lazily
-            assert dm._available_providers == ["cryptocompare", "databento", "oanda"]
+            assert {"cryptocompare", "databento", "oanda"} <= set(dm._available_providers)
 
     def test_init_with_yaml_config(self):
         """Test DataManager initialization from YAML config file."""
@@ -529,14 +529,14 @@ class TestIntegration:
 
     def test_batch_fetch(self):
         """Test fetching multiple symbols efficiently."""
-        dm = DataManager()
-        dm.router.add_pattern(r"^(BTC|ETH)", "cryptocompare")
-        dm.router.add_pattern(r"^EUR", "oanda")
+        with DataManager() as dm:
+            dm.router.patterns.clear()
+            dm.router.add_pattern(r".*", "mock")
 
-        symbols = ["BTC", "ETH", "EURUSD"]
-        results = dm.fetch_batch(symbols, "2024-01-01", "2024-01-01")
+            symbols = ["BTC", "ETH", "EURUSD"]
+            results = dm.fetch_batch(symbols, "2024-01-01", "2024-01-01")
 
         assert isinstance(results, dict)
         assert set(results.keys()) == set(symbols)
         for _symbol, df in results.items():
-            assert df is None or isinstance(df, pl.DataFrame | pl.LazyFrame)
+            assert isinstance(df, pl.DataFrame | pl.LazyFrame)

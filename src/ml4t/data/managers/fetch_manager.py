@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
 import polars as pl
 import structlog
 
@@ -92,7 +93,7 @@ class FetchManager:
         if self.output_format == "lazy":
             return df.lazy()
         if self.output_format == "pandas":
-            return df.to_pandas()
+            return pd.DataFrame(df.to_dict(as_series=False))
         return df
 
     def fetch(
