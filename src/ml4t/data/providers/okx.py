@@ -22,7 +22,7 @@ import httpx
 import polars as pl
 import structlog
 
-from ml4t.data.core.exceptions import RateLimitError, SymbolNotFoundError
+from ml4t.data.core.exceptions import DataValidationError, RateLimitError, SymbolNotFoundError
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.mixins import AsyncSessionMixin
 
@@ -68,6 +68,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
     }
 
     MAX_CANDLES = 100  # OKX returns max 100 candles per request
+    MAX_PAGES: ClassVar[int] = 10000
 
     # Rate limit: 20 requests per 2 seconds for market data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (20, 2.0)
@@ -187,6 +188,19 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         """Return the exchange symbol emitted by OHLCV transformations."""
         return self._normalize_symbol(symbol)
 
+    def _next_before(self, current_before: int, oldest_ts: int, page_count: int) -> int:
+        """Validate that backward timestamp pagination is bounded and progressing."""
+        if oldest_ts >= current_before:
+            raise DataValidationError(
+                provider=self.name, message="pagination cursor did not move backward"
+            )
+        if page_count >= self.MAX_PAGES:
+            raise DataValidationError(
+                provider=self.name,
+                message=f"reached pagination page limit of {self.MAX_PAGES}",
+            )
+        return oldest_ts
+
     def _fetch_and_transform_data(
         self, symbol: str, start: str, end: str, frequency: str
     ) -> pl.DataFrame:
@@ -236,6 +250,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         # Fetch data in chunks (OKX returns newest first, paginate backwards)
         all_candles: list[list[Any]] = []
         current_before = end_ms + 1  # Start from end, go backwards
+        page_count = 0
 
         while True:
             url = f"{self.BASE_URL}/market/candles"
@@ -261,6 +276,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not candles:
                     break
+                page_count += 1
 
                 # Filter candles within our date range
                 for candle in candles:
@@ -274,7 +290,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                     break
 
                 # Update pagination cursor
-                current_before = oldest_ts
+                current_before = self._next_before(current_before, oldest_ts, page_count)
 
                 # Rate limit for pagination
                 self._acquire_rate_limit()
@@ -357,6 +373,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
         all_rates: list[dict[str, Any]] = []
         current_before = end_ms + 1
+        page_count = 0
 
         while True:
             self._acquire_rate_limit()
@@ -383,6 +400,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not rates:
                     break
+                page_count += 1
 
                 # Filter rates within our date range
                 for rate in rates:
@@ -395,7 +413,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = oldest_ts
+                current_before = self._next_before(current_before, oldest_ts, page_count)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
@@ -511,6 +529,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
         all_candles: list[list[Any]] = []
         current_before = end_ms + 1
+        page_count = 0
 
         while True:
             url = f"{self.BASE_URL}/market/candles"
@@ -536,6 +555,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not candles:
                     break
+                page_count += 1
 
                 for candle in candles:
                     ts = int(candle[0])
@@ -546,7 +566,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = oldest_ts
+                current_before = self._next_before(current_before, oldest_ts, page_count)
                 self._acquire_rate_limit()
 
             except httpx.HTTPStatusError as e:
