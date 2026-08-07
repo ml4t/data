@@ -21,7 +21,7 @@ ML4T Data provides two excellent **free-tier providers** for cryptocurrency data
 | Provider | Free Tier | API Key | Best For | Symbol Format |
 |----------|-----------|---------|----------|---------------|
 | **CoinGecko** | 30 calls/min (Demo) | Required | Historical analysis, wide coverage | Coin IDs (bitcoin, ethereum) |
-| **CryptoCompare** | 100K calls/month | Optional | Aggregated prices, exchange data | Pairs (BTC/USD, ETH/BTC) |
+| **CryptoCompare** | 100K calls/month | Required | Aggregated prices, exchange data | Pairs (BTC/USD, ETH/BTC) |
 
 ---
 
@@ -249,7 +249,7 @@ except RateLimitError as e:
 ```python
 from ml4t.data.providers import CryptoCompareProvider
 
-# Optional: Set API key for higher rate limits
+# A CryptoCompare API key is required
 provider = CryptoCompareProvider(
     api_key="your_cryptocompare_api_key",  # Or from env: CRYPTOCOMPARE_API_KEY
     exchange="CCCAGG"  # Aggregate across exchanges (default)
@@ -450,7 +450,7 @@ except RateLimitError as e:
 
 | Feature | CoinGecko | CryptoCompare |
 |---------|-----------|---------------|
-| **API Key Required** | Yes (Demo plan) | No (optional for higher limits) |
+| **API Key Required** | Yes (Demo plan) | Yes (free account available) |
 | **Free Tier Limit** | 30 calls/min (10K/month) | 100K calls/month |
 | **Cryptocurrencies** | 10,000+ | 5,000+ |
 | **Daily Data** | ✅ Yes | ✅ Yes |
@@ -473,6 +473,7 @@ df = provider.fetch_ohlcv(symbol="BTC", start="2023-01-01", end="2023-12-31")
 # → 1 API call, ~2 seconds
 
 # CryptoCompare
+# Reads CRYPTOCOMPARE_API_KEY from the environment
 provider = CryptoCompareProvider()
 df = provider.fetch_ohlcv(symbol="BTC/USD", start="2023-01-01", end="2023-12-31")
 # → 1 API call, ~2 seconds
@@ -584,6 +585,7 @@ def fetch_crypto_data_robust(symbol: str, start: str, end: str):
 
     # Fallback to CryptoCompare
     try:
+        # Reads CRYPTOCOMPARE_API_KEY from the environment
         provider = CryptoCompareProvider()
         # Convert symbol format: BTC → BTC/USD
         pair = f"{symbol}/USD"
@@ -609,7 +611,7 @@ df = fetch_crypto_data_robust("BTC", "2024-01-01", "2024-01-31")
 coingecko = CoinGeckoProvider()
 coingecko.fetch_ohlcv(symbol="BTC/USD", ...)  # Error! Needs "BTC" or "bitcoin"
 
-cryptocompare = CryptoCompareProvider()
+cryptocompare = CryptoCompareProvider()  # Reads CRYPTOCOMPARE_API_KEY
 cryptocompare.fetch_ohlcv(symbol="BTC", ...)  # Error! Needs "BTC/USD"
 
 # ✅ Correct: Use provider-specific format
@@ -649,8 +651,8 @@ coingecko_df = coingecko.fetch_ohlcv(symbol="BTC", ...)
 # Price is weighted average across 500+ exchanges
 
 # CryptoCompare: Choose aggregated or exchange-specific
-agg_provider = CryptoCompareProvider(exchange="CCCAGG")  # Aggregated
-binance_provider = CryptoCompareProvider(exchange="Binance")  # Binance only
+agg_provider = CryptoCompareProvider(exchange="CCCAGG")  # Reads CRYPTOCOMPARE_API_KEY
+binance_provider = CryptoCompareProvider(exchange="Binance")
 
 # Prices may differ significantly!
 ```

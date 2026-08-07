@@ -247,7 +247,7 @@ _SPECS = (
         "CryptoCompareProvider",
         "CryptoCompare crypto markets",
         "ohlcv",
-        optional_credential_environment=("CRYPTOCOMPARE_API_KEY",),
+        credentials=(_credential("api_key", "CRYPTOCOMPARE_API_KEY"),),
     ),
     _spec(
         "oanda",

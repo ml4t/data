@@ -18,11 +18,9 @@ CryptoCompare provides comprehensive cryptocurrency historical data with good co
 ## Quick Start
 
 ```python
-import os
-os.environ["CRYPTOCOMPARE_API_KEY"] = "your_key_here"
-
 from ml4t.data.providers import CryptoCompareProvider
 
+# Reads CRYPTOCOMPARE_API_KEY from the environment
 provider = CryptoCompareProvider()
 df = provider.fetch_ohlcv("BTC", "2024-01-01", "2024-12-01", frequency="daily")
 provider.close()

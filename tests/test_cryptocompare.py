@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from ml4t.data.core.exceptions import RateLimitError
+from ml4t.data.core.exceptions import AuthenticationError, RateLimitError
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 
 
@@ -15,14 +15,21 @@ class TestCryptoCompareProvider:
 
     def test_provider_name(self) -> None:
         """Test provider name."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         assert provider.name == "cryptocompare"
 
-    def test_initialization(self) -> None:
+    def test_missing_api_key_fails_during_initialization(self, monkeypatch) -> None:
+        """Reject an unconfigured provider before its first HTTP request."""
+        monkeypatch.delenv("CRYPTOCOMPARE_API_KEY", raising=False)
+
+        with pytest.raises(AuthenticationError, match="CryptoCompare API key required"):
+            CryptoCompareProvider()
+
+    def test_initialization(self, monkeypatch) -> None:
         """Test provider initialization."""
-        # Without API key
+        monkeypatch.setenv("CRYPTOCOMPARE_API_KEY", "environment_key")
         provider1 = CryptoCompareProvider()
-        assert provider1.api_key is None
+        assert provider1.api_key == "environment_key"
         assert provider1.exchange == "CCCAGG"
 
         # With API key
@@ -32,7 +39,7 @@ class TestCryptoCompareProvider:
 
     def test_symbol_normalization(self) -> None:
         """Test symbol normalization."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Different formats
         assert provider._normalize_symbol("BTC") == ("BTC", "USD")
@@ -78,7 +85,7 @@ class TestCryptoCompareProvider:
         mock_client_class.return_value = mock_client
 
         # Fetch data
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         df = provider.fetch_ohlcv(
             symbol="BTC-USD",
             start="2024-01-01",
@@ -147,7 +154,7 @@ class TestCryptoCompareProvider:
         mock_client_class.return_value = mock_client
 
         # Fetch data
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         df = provider.fetch_ohlcv(
             symbol="ETH/USD",
             start="2024-01-01",
@@ -184,7 +191,7 @@ class TestCryptoCompareProvider:
         mock_client_class.return_value = mock_client
 
         # Should raise ValueError
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         with pytest.raises(ValueError, match="API error: Invalid API key"):
             provider.fetch_ohlcv(
                 symbol="BTC",
@@ -214,7 +221,7 @@ class TestCryptoCompareProvider:
         mock_client_class.return_value = mock_client
 
         # Should retry after rate limit
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         with patch("time.sleep") as mock_sleep:
             provider.fetch_ohlcv(
@@ -232,7 +239,7 @@ class TestCryptoCompareProvider:
 
     def test_persistent_rate_limit_stops_after_declared_attempts(self) -> None:
         """Persistent sync 429 responses terminate without an unbounded sleep loop."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         provider.MAX_RATE_LIMIT_ATTEMPTS = 3
         response = MagicMock(status_code=429, headers={"Retry-After": "120"})
         response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -261,7 +268,7 @@ class TestCryptoCompareProvider:
     @pytest.mark.asyncio
     async def test_persistent_rate_limit_stops_after_declared_attempts_async(self) -> None:
         """Persistent async 429 responses use the same finite retry contract."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         provider.MAX_RATE_LIMIT_ATTEMPTS = 3
         response = MagicMock(status_code=429, headers={"Retry-After": "120"})
         response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -303,7 +310,7 @@ class TestCryptoCompareProvider:
         mock_client_class.return_value = mock_client
 
         # Should return empty DataFrame
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         df = provider.fetch_ohlcv(
             symbol="UNKNOWN",
             start="2024-01-01",
@@ -315,7 +322,7 @@ class TestCryptoCompareProvider:
 
     def test_frequency_mapping(self) -> None:
         """Test frequency mapping."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Valid frequencies
         assert provider.FREQUENCY_MAP["minute"] == "histominute"

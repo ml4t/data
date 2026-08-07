@@ -112,7 +112,6 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Binance Public | Bulk crypto data downloads |
 | Binance | Crypto exchange data |
 | OKX | Crypto perpetuals and funding rates |
-| CryptoCompare | Crypto market data; key optional for some access tiers |
 | NASDAQ ITCH Sample | Tick-level sample data |
 
 ### Authenticated or Metered APIs
@@ -128,6 +127,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | OANDA | Forex broker data |
+| CryptoCompare | Crypto market data; free account key required |
 
 ## Specialized Modules
 

@@ -182,7 +182,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | Provider | Crypto | Stocks | Forex | Futures | Free Tier | API Key | Best For |
 |----------|--------|--------|-------|---------|-----------|---------|----------|
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Optional | Crypto (beginners) |
-| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Optional | Crypto (advanced) |
+| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Required | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | Required | US stocks |
 | **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Required | Global stocks (best value) |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time only | Required | Professional stocks |

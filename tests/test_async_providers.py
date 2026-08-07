@@ -296,14 +296,14 @@ class TestCryptoCompareProviderAsync:
     @pytest.mark.asyncio
     async def test_async_context_manager(self):
         """Test async context manager protocol."""
-        async with CryptoCompareProvider() as provider:
+        async with CryptoCompareProvider(api_key="test_key") as provider:
             assert provider is not None
             assert provider.name == "cryptocompare"
 
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_async_success(self, sample_ohlcv_data):
         """Test async fetch returns valid data."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Mock the transform to return valid data directly
         with (
@@ -323,7 +323,7 @@ class TestCryptoCompareProviderAsync:
     @pytest.mark.asyncio
     async def test_close_async(self):
         """Test async close cleans up resources."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         # Create async client
         _ = provider._async_session
         assert provider._async_client is not None
@@ -573,7 +573,7 @@ class TestAsyncProtocolConformance:
 
     def test_cryptocompare_has_async_methods(self):
         """Test CryptoCompareProvider has required async methods."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         assert hasattr(provider, "fetch_ohlcv_async")
         assert asyncio.iscoroutinefunction(provider.fetch_ohlcv_async)

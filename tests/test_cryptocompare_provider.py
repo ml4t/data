@@ -14,7 +14,7 @@ class TestCryptoCompareProvider:
 
     def test_provider_initialization(self):
         """Test provider can be initialized."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         assert provider.name == "cryptocompare"
         assert provider.exchange == "CCCAGG"
         assert provider.timeout == 30.0
@@ -27,7 +27,7 @@ class TestCryptoCompareProvider:
 
     def test_symbol_normalization(self):
         """Test symbol normalization logic."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Test different symbol formats
         assert provider._normalize_symbol("BTC") == ("BTC", "USD")
@@ -39,7 +39,7 @@ class TestCryptoCompareProvider:
 
     def test_frequency_mapping(self):
         """Test frequency mapping to API endpoints."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         assert provider.FREQUENCY_MAP["minute"] == "histominute"
         assert provider.FREQUENCY_MAP["hourly"] == "histohour"
@@ -117,14 +117,14 @@ class TestCryptoCompareProvider:
 
     def test_invalid_frequency(self):
         """Test handling of invalid frequency."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         with pytest.raises(ValueError, match="Unsupported frequency"):
             provider._fetch_raw_data("BTC", "2024-01-01", "2024-01-02", "invalid")
 
     def test_empty_symbol(self):
         """Test handling of empty symbol."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # This should be caught by BaseProvider input validation
         with pytest.raises(ValueError, match="Symbol cannot be empty"):
@@ -132,7 +132,7 @@ class TestCryptoCompareProvider:
 
     def test_date_range_validation(self):
         """Test date range validation."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Test start > end (should be caught by BaseProvider)
         with pytest.raises(ValueError, match="Start date must be before or equal to end date"):
@@ -140,7 +140,7 @@ class TestCryptoCompareProvider:
 
     def test_transform_data_empty(self):
         """Test transform_data with empty input."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Test with None
         result = provider._transform_data(None, "BTC")
@@ -154,7 +154,7 @@ class TestCryptoCompareProvider:
 
     def test_transform_data_with_mock_data(self):
         """Test transform_data with mock API response."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         from datetime import UTC
 

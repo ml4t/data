@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any, ClassVar
@@ -11,7 +12,7 @@ import httpx
 import polars as pl
 import structlog
 
-from ml4t.data.core.exceptions import RateLimitError
+from ml4t.data.core.exceptions import AuthenticationError, RateLimitError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -68,21 +69,26 @@ class CryptoCompareProvider(BaseProvider):
         Initialize CryptoCompare provider.
 
         Args:
-            api_key: Optional API key for higher rate limits
+            api_key: CryptoCompare API key (or set CRYPTOCOMPARE_API_KEY)
             exchange: Exchange to fetch from (default: aggregate)
             timeout: Request timeout in seconds
             **kwargs: Additional arguments passed to BaseProvider
         """
+        self.api_key = api_key or os.getenv("CRYPTOCOMPARE_API_KEY")
+        if not self.api_key:
+            raise AuthenticationError(
+                provider="cryptocompare",
+                message="CryptoCompare API key required. Set CRYPTOCOMPARE_API_KEY "
+                "or pass api_key. Get a key at: https://www.cryptocompare.com/cryptopian/api-keys",
+            )
+
         # Initialize base provider with rate limiting
         super().__init__(**kwargs)
 
-        self.api_key = api_key
         self.exchange = exchange
         self.timeout = timeout
 
-        # Configure session headers if API key provided
-        if self.api_key:
-            self.session.headers.update({"authorization": f"Apikey {self.api_key}"})
+        self.session.headers.update({"authorization": f"Apikey {self.api_key}"})
 
     @property
     def name(self) -> str:

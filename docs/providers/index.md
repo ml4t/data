@@ -25,7 +25,7 @@ ML4T Data supports 20+ live and specialized data providers, plus synthetic and t
 | [Finnhub](finnhub.md) | Global Stocks | 30/day OHLCV | Thread | Yes |
 | [Binance](binance.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |
-| [CryptoCompare](cryptocompare.md) | Crypto | Good | Native | Optional |
+| [CryptoCompare](cryptocompare.md) | Crypto | Good | Native | Required |
 | [Oanda](oanda.md) | Forex | Demo only | Thread | Yes |
 
 ## Async Support

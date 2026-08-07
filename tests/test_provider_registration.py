@@ -39,7 +39,6 @@ def test_free_providers_detected():
         "binance_public",
         "coingecko",
         "mock",
-        "cryptocompare",
         "synthetic",
     ]
 
