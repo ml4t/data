@@ -259,10 +259,7 @@ class CryptoCompareProvider(BaseProvider):
                 current_time = oldest_time - 1
 
                 # Rate limiting (be conservative)
-                if not self.api_key:
-                    time.sleep(0.5)  # Slower for free tier
-                else:
-                    time.sleep(0.1)  # Faster with API key
+                time.sleep(0.1)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
@@ -375,12 +372,9 @@ class CryptoCompareProvider(BaseProvider):
     def _async_session(self) -> httpx.AsyncClient:
         """Lazily create async HTTP client."""
         if not hasattr(self, "_async_client") or self._async_client is None:
-            headers = {}
-            if self.api_key:
-                headers["authorization"] = f"Apikey {self.api_key}"
             self._async_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
-                headers=headers,
+                headers={"authorization": f"Apikey {self.api_key}"},
             )
         return self._async_client
 
@@ -484,8 +478,7 @@ class CryptoCompareProvider(BaseProvider):
                 current_time = oldest_time - 1
 
                 # Rate limiting
-                delay = 0.5 if not self.api_key else 0.1
-                await asyncio.sleep(delay)
+                await asyncio.sleep(0.1)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:

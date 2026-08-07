@@ -284,14 +284,16 @@ class TestYahooFinanceProviderAsync:
 class TestCryptoCompareProviderAsync:
     """Test async methods on CryptoCompareProvider."""
 
-    def test_async_session_with_api_key(self):
+    @pytest.mark.asyncio
+    async def test_async_session_with_api_key(self):
         """Test async session includes API key in headers."""
         provider = CryptoCompareProvider(api_key="test_key_123")
         session = provider._async_session
 
         assert session is not None
-        assert "authorization" in session.headers
-        assert provider.api_key in session.headers["authorization"]
+        assert session.headers["authorization"] == "Apikey test_key_123"
+        await provider.close_async()
+        provider.close()
 
     @pytest.mark.asyncio
     async def test_async_context_manager(self):

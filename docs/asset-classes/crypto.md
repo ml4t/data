@@ -651,8 +651,8 @@ coingecko_df = coingecko.fetch_ohlcv(symbol="BTC", ...)
 # Price is weighted average across 500+ exchanges
 
 # CryptoCompare: Choose aggregated or exchange-specific
-agg_provider = CryptoCompareProvider(exchange="CCCAGG")  # Reads CRYPTOCOMPARE_API_KEY
-binance_provider = CryptoCompareProvider(exchange="Binance")
+agg_provider = CryptoCompareProvider(exchange="CCCAGG")  # Aggregated
+binance_provider = CryptoCompareProvider(exchange="Binance")  # Binance only
 
 # Prices may differ significantly!
 ```

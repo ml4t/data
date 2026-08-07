@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("databento")
 
 from ml4t.data.data_manager import DataManager
-from ml4t.data.providers.registry import PROVIDER_REGISTRY
+from ml4t.data.providers.registry import PROVIDER_REGISTRY, get_provider_spec
 
 
 def test_all_providers_registered():
@@ -46,6 +46,19 @@ def test_free_providers_detected():
         assert provider in dm._available_providers, (
             f"{provider} should be available without API key"
         )
+
+
+def test_cryptocompare_is_unavailable_without_api_key(monkeypatch):
+    monkeypatch.delenv("CRYPTOCOMPARE_API_KEY", raising=False)
+
+    assert "cryptocompare" not in DataManager()._available_providers
+    assert get_provider_spec("cryptocompare").access_label == "Yes"
+
+
+def test_cryptocompare_is_available_with_api_key(monkeypatch):
+    monkeypatch.setenv("CRYPTOCOMPARE_API_KEY", "test-key")
+
+    assert "cryptocompare" in DataManager()._available_providers
 
 
 def test_provider_instantiation():
