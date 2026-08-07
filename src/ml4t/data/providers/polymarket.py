@@ -401,7 +401,11 @@ class PolymarketProvider(BaseProvider):
                     second=0,
                 )
 
-            deduped = {entry.get("t"): entry for entry in history if entry.get("t") is not None}
+            deduped: dict[int, dict[str, Any]] = {}
+            for entry in history:
+                timestamp = entry.get("t")
+                if isinstance(timestamp, int):
+                    deduped[timestamp] = entry
             return [deduped[timestamp] for timestamp in sorted(deduped)]
         except (RateLimitError, NetworkError, SymbolNotFoundError):
             raise

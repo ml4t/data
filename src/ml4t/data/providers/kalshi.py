@@ -252,7 +252,7 @@ class KalshiProvider(BaseProvider):
     @staticmethod
     def _struct_field_names(dtype: pl.DataType | None) -> set[str]:
         """Return the available field names for a Polars struct dtype."""
-        if dtype is None or not hasattr(dtype, "fields"):
+        if not isinstance(dtype, pl.Struct):
             return set()
         return {field.name for field in dtype.fields}
 

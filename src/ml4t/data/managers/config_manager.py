@@ -200,7 +200,9 @@ class ConfigManager:
             **kwargs: Additional default overrides
         """
         if providers:
-            validated_providers = DataConfig(providers=providers).to_runtime_dict()["providers"]
+            validated_providers = DataConfig.model_validate(
+                {"providers": providers}
+            ).to_runtime_dict()["providers"]
             self.config["providers"] = self._merge_configs(
                 self.config.get("providers", {}),
                 validated_providers,

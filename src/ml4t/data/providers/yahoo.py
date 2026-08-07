@@ -4,21 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pandas as pd
 import polars as pl
 import structlog
 
-# yfinance is an optional dependency
-try:
+# yfinance is an optional dependency. Keep its static type in checked code while
+# retaining a runtime sentinel when the extra is not installed.
+if TYPE_CHECKING:
     import yfinance as yf
 
     _YFINANCE_AVAILABLE = True
-except ImportError:
-    yf = None  # type: ignore[assignment]
-    _YFINANCE_AVAILABLE = False
+else:
+    try:
+        import yfinance as yf
+
+        _YFINANCE_AVAILABLE = True
+    except ImportError:
+        yf = None
+        _YFINANCE_AVAILABLE = False
 
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
@@ -39,7 +46,7 @@ from ml4t.data.providers.fundamentals import (
 logger = structlog.get_logger()
 
 
-def _chunks(lst: list, n: int):
+def _chunks(lst: list[Any], n: int) -> Iterator[list[Any]]:
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i : i + n]

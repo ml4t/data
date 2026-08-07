@@ -91,13 +91,22 @@ class BulkManager:
                 if exchange and metadata.get("exchange") != exchange:
                     continue
 
+                symbol = metadata.get("symbol")
+                frequency = metadata.get("frequency", "daily")
+                metadata_asset_class = metadata.get("asset_class", "equities")
+                metadata_provider = metadata.get("provider")
+                if not isinstance(symbol, str):
+                    logger.warning(f"Skipping metadata without a string symbol for {key}")
+                    continue
+                if not isinstance(frequency, str) or not isinstance(metadata_asset_class, str):
+                    logger.warning(f"Skipping metadata with invalid fields for {key}")
+                    continue
+                if metadata_provider is not None and not isinstance(metadata_provider, str):
+                    logger.warning(f"Skipping metadata with invalid provider for {key}")
+                    continue
+
                 symbols_to_update.append(
-                    (
-                        metadata.get("symbol"),
-                        metadata.get("frequency", "daily"),
-                        metadata.get("asset_class", "equities"),
-                        metadata.get("provider"),
-                    )
+                    (symbol, frequency, metadata_asset_class, metadata_provider)
                 )
 
             except Exception as e:

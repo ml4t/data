@@ -572,7 +572,7 @@ class DataConfig(BaseModel):
                     f"Dataset '{dataset.name}' references unknown provider '{dataset.provider}'"
                 )
 
-            if not self.get_universe(dataset.universe):
+            if dataset.universe is not None and not self.get_universe(dataset.universe):
                 issues.append(
                     f"Dataset '{dataset.name}' references unknown universe '{dataset.universe}'"
                 )

@@ -270,6 +270,7 @@ class BatchManager:
         """
         if not self.storage:
             raise ValueError("Storage not configured")
+        storage = self.storage
 
         if not symbols:
             raise ValueError("symbols list cannot be empty")
@@ -300,10 +301,10 @@ class BatchManager:
             try:
                 key = f"{asset_class}/{frequency}/{symbol}"
 
-                if not self.storage.exists(key):
+                if not storage.exists(key):
                     return (symbol, None, "not_in_storage")
 
-                lazy_df = self.storage.read(key, start_date=start_dt, end_date=end_dt)
+                lazy_df = storage.read(key, start_date=start_dt, end_date=end_dt)
                 df = lazy_df.collect()
 
                 if df.is_empty():

@@ -44,6 +44,8 @@ Example:
     >>> data = provider.fetch_ohlcv("bitcoin", str(end - timedelta(days=6)), str(end))
 """
 
+from typing import TYPE_CHECKING
+
 # Base classes
 from ml4t.data.providers.base import BaseProvider, Provider
 from ml4t.data.providers.registry import (
@@ -143,10 +145,13 @@ from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
 from ml4t.data.providers.twelve_data import TwelveDataProvider
 
 # Market data providers
-try:
+if TYPE_CHECKING:
     from ml4t.data.providers.databento import DataBentoProvider
-except ImportError:
-    DataBentoProvider = None  # type: ignore[assignment, misc]
+else:
+    try:
+        from ml4t.data.providers.databento import DataBentoProvider
+    except ImportError:
+        DataBentoProvider = None
 
 # Tick data providers
 from ml4t.data.providers.nasdaq_itch import ITCHSampleProvider
