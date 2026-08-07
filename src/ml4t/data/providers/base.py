@@ -54,6 +54,7 @@ from ml4t.data.providers.protocols import OHLCVProvider, ProviderCapabilities
 
 logger = structlog.get_logger()
 _DEFAULT_RETRY_WAIT = wait_exponential(multiplier=1, min=4, max=10)
+_MAX_RETRY_AFTER = 60.0
 
 
 def _provider_retry_wait(retry_state: RetryCallState) -> float:
@@ -63,7 +64,7 @@ def _provider_retry_wait(retry_state: RetryCallState) -> float:
         return delay
     error = retry_state.outcome.exception()
     if isinstance(error, NetworkError) and error.retry_after is not None:
-        return max(delay, max(0.0, error.retry_after))
+        return min(max(delay, float(error.retry_after)), _MAX_RETRY_AFTER)
     return delay
 
 
