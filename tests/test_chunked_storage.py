@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -12,6 +13,7 @@ import pytest
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.storage.chunked import ChunkedStorage, ChunkInfo
 from ml4t.data.storage.config import CompressionType
+from ml4t.data.storage.keys import storage_key_path
 
 
 class TestChunkedStorage:
@@ -169,6 +171,43 @@ class TestChunkedStorage:
         assert result.metadata.calendar == "CME_Equity"
         assert result.metadata.attributes == {"dataset": "GLBX.MDP3"}
 
+    def test_incremental_metadata_preserves_omitted_fields(self, tmp_path: Path) -> None:
+        """An incremental write does not erase richer stored metadata by omission."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        rich = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_params={"frequency": "daily"},
+            exchange="XCME",
+            calendar="CME_Equity",
+            attributes={"dataset": "GLBX.MDP3"},
+        )
+        lean = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=rich))
+        storage.write(DataObject(data=frame, metadata=lean))
+        result = storage.read(key)
+
+        assert result.metadata.exchange == "XCME"
+        assert result.metadata.calendar == "CME_Equity"
+        assert result.metadata.attributes == {"dataset": "GLBX.MDP3"}
+
     def test_reads_version_one_chunk_index(self, tmp_path: Path) -> None:
         storage = ChunkedStorage(base_path=tmp_path)
         frame = pl.DataFrame(
@@ -197,6 +236,112 @@ class TestChunkedStorage:
         assert result.data.equals(frame)
         assert result.metadata.symbol == "TEST"
         assert result.metadata.frequency == "daily"
+
+    def test_weekly_version_one_index_requires_migration(self, tmp_path: Path) -> None:
+        """Legacy weekly IDs cannot be mixed with the corrected ISO-year scheme."""
+        storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=7)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        index_path = next(storage.metadata_path.glob("k1_*_index.json"))
+        current_index = json.loads(index_path.read_text(encoding="utf-8"))
+        index_path.write_text(json.dumps(current_index["chunks"]), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="requires migration"):
+            storage.read(key)
+
+    @pytest.mark.parametrize(
+        "index_data",
+        [
+            {"format_version": 2, "metadata": {}, "chunks": []},
+            {"format_version": 3, "metadata": {}, "chunks": {}},
+        ],
+    )
+    def test_rejects_invalid_index_envelopes(self, tmp_path: Path, index_data: dict) -> None:
+        """Malformed and unsupported index envelopes fail with an index diagnostic."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        key = "equities/daily/TEST"
+        index_path = storage_key_path(storage.metadata_path, key, "_index.json")
+        index_path.write_text(json.dumps(index_data), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="chunk index"):
+            storage.read(key)
+
+    def test_failed_index_flush_preserves_committed_index(self, tmp_path: Path) -> None:
+        """A failed index flush leaves the last committed index readable."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        chunks, stored_metadata = storage._load_index(key)
+        assert stored_metadata is not None
+        index_path = storage_key_path(storage.metadata_path, key, "_index.json")
+        committed = index_path.read_text(encoding="utf-8")
+
+        with patch("ml4t.data.storage.chunked.os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                storage._save_chunk_index(key, chunks, stored_metadata)
+
+        assert index_path.read_text(encoding="utf-8") == committed
+        assert not list(index_path.parent.glob(f".{index_path.name}.*.tmp"))
+
+    def test_failed_chunk_write_preserves_committed_parquet(self, tmp_path: Path) -> None:
+        """A failed incremental Parquet write leaves the prior chunk readable."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        initial = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        update = initial.with_columns(pl.lit(105.0).alias("close"))
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=initial, metadata=metadata))
+        chunk_path = storage.get_chunk_info(key)[0].file_path
+
+        with patch.object(pl.DataFrame, "write_parquet", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                storage.write(DataObject(data=update, metadata=metadata))
+
+        assert storage.read(key).data.equals(initial)
+        assert not list(chunk_path.parent.glob(f".{chunk_path.name}.*.tmp"))
 
     def test_empty_range_uses_next_readable_chunk_schema(self, tmp_path: Path) -> None:
         storage = ChunkedStorage(base_path=tmp_path)
@@ -299,6 +444,9 @@ class TestChunkedStorage:
         assert empty.data.schema == frame.schema
         assert empty.metadata.symbol == "TEST"
         assert empty.metadata.frequency == "daily"
+        assert empty.metadata.data_range is None
+        assert empty.metadata.start_date is None
+        assert empty.metadata.end_date is None
 
     def test_nanosecond_timestamps_round_trip_at_month_boundary(self, tmp_path: Path) -> None:
         storage = ChunkedStorage(tmp_path)

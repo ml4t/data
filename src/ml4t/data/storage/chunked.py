@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -234,20 +237,29 @@ class ChunkedStorage:
         if not index_file.exists():
             return {}, None
 
-        with file_lock(index_file):
-            import json
-
-            with open(index_file) as f:
+        try:
+            with file_lock(index_file), open(index_file) as f:
                 index_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Cannot read chunk index for {key}: {error}") from error
 
         if not isinstance(index_data, dict):
             raise ValueError(f"Invalid chunk index for {key}")
-        if index_data.get("format_version") == 2 and isinstance(index_data.get("chunks"), dict):
+        format_version = index_data.get("format_version")
+        if format_version is None:
+            if self.chunk_size_days <= 7:
+                raise ValueError(
+                    f"Version 1 weekly chunk index for {key} requires migration before writing"
+                )
+            raw_chunks = index_data
+            raw_metadata = None
+        elif format_version == 2:
+            if not isinstance(index_data.get("chunks"), dict):
+                raise ValueError(f"Invalid version 2 chunk index for {key}")
             raw_chunks = index_data["chunks"]
             raw_metadata = index_data.get("metadata")
         else:
-            raw_chunks = index_data
-            raw_metadata = None
+            raise ValueError(f"Unsupported chunk index version {format_version!r} for {key}")
 
         # Convert to ChunkInfo objects
         chunks = {}
@@ -307,11 +319,58 @@ class ChunkedStorage:
             "chunks": chunk_data,
         }
 
+        serialized = json.dumps(index_data, indent=2)
         with file_lock(index_file):
-            import json
+            self._atomic_write_text(index_file, serialized)
 
-            with open(index_file, "w") as f:
-                json.dump(index_data, f, indent=2)
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        """Persist directory entry changes where the platform supports it."""
+        if os.name == "nt":
+            return
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @classmethod
+    def _atomic_write_text(cls, path: Path, content: str) -> None:
+        """Atomically replace and flush a small text file."""
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, mode="w", encoding="utf-8") as temporary_file:
+                temporary_file.write(content)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            temporary_path.replace(path)
+            cls._fsync_directory(path.parent)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    def _atomic_write_parquet(self, frame: pl.DataFrame, path: Path) -> None:
+        """Atomically replace and flush a Parquet chunk."""
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        os.close(descriptor)
+        temporary_path = Path(temporary_name)
+        try:
+            frame.write_parquet(temporary_path, compression=self.compression)
+            with temporary_path.open("rb") as temporary_file:
+                os.fsync(temporary_file.fileno())
+            temporary_path.replace(path)
+            self._fsync_directory(path.parent)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     def exists(self, key: str) -> bool:
         """
@@ -371,9 +430,13 @@ class ChunkedStorage:
                 start_date=start_date,
                 end_date=end_date,
             )
+            metadata = self._metadata_for_key(key, stored_metadata)
+            metadata.start_date = None
+            metadata.end_date = None
+            metadata.data_range = None
             return DataObject(
                 data=self._empty_frame(key, chunks),
-                metadata=self._metadata_for_key(key, stored_metadata),
+                metadata=metadata,
             )
 
         # Sort chunks by start date
@@ -415,6 +478,8 @@ class ChunkedStorage:
                 "start": str(min_ts),
                 "end": str(max_ts),
             }
+            metadata.start_date = min_ts
+            metadata.end_date = max_ts
 
         return DataObject(data=combined_df, metadata=metadata)
 
@@ -440,7 +505,7 @@ class ChunkedStorage:
             chunk_path = self._chunk_path(key, chunk.chunk_id)
             try:
                 return pl.DataFrame(schema=pl.read_parquet_schema(chunk_path))
-            except (FileNotFoundError, OSError) as error:
+            except (OSError, pl.exceptions.PolarsError) as error:
                 logger.warning(
                     "Cannot read chunk schema; trying next indexed chunk",
                     key=key,
@@ -469,8 +534,18 @@ class ChunkedStorage:
             logger.warning("No data to write", key=key)
             return key
 
-        # Load existing chunk index
-        existing_chunks = self._load_chunk_index(key)
+        # Load existing chunk index and preserve fields omitted from an incremental write.
+        existing_chunks, stored_metadata = self._load_index(key)
+        if stored_metadata is not None:
+            stored_key = f"{stored_metadata.asset_class}/{stored_metadata.frequency}/{stored_metadata.symbol}"
+            if stored_key != key:
+                raise ValueError(
+                    f"Stored metadata identifies '{stored_key}' but the chunk index key is '{key}'"
+                )
+            metadata = stored_metadata.model_copy(
+                update={field: getattr(metadata, field) for field in metadata.model_fields_set},
+                deep=True,
+            )
 
         # Write each chunk
         chunk_index = {}
@@ -510,7 +585,7 @@ class ChunkedStorage:
 
             # Write Parquet file with file locking
             with file_lock(chunk_path):
-                chunk_df.write_parquet(chunk_path, compression=self.compression)
+                self._atomic_write_parquet(chunk_df, chunk_path)
 
             # Create chunk info
             min_ts, max_ts = timestamp_bounds(chunk_df)
