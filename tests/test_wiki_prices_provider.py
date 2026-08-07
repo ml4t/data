@@ -521,6 +521,29 @@ class TestDownload:
             with pytest.raises(RuntimeError, match="Rate limited"):
                 WikiPricesProvider.download(output_path=tmp_path, api_key="test_key")
 
+    def test_download_does_not_log_api_key_fragments(self, tmp_path, capsys):
+        """The public download path never writes credential fragments to logs."""
+        import httpx
+
+        api_key = "abcdefghSECRET-canary-value"
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+
+            with pytest.raises(ValueError, match="Invalid API key"):
+                WikiPricesProvider.download(output_path=tmp_path, api_key=api_key)
+
+        captured = capsys.readouterr()
+        combined_output = captured.out + captured.err
+        assert api_key not in combined_output
+        assert api_key[:8] not in combined_output
+        assert api_key[-8:] not in combined_output
+
 
 class TestResolveApiKey:
     """Tests for _resolve_api_key class method."""

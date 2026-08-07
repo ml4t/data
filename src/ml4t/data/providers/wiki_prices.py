@@ -609,7 +609,6 @@ class WikiPricesProvider(BaseProvider):
         log.info(
             "Starting Wiki Prices download",
             output_path=str(output_file),
-            api_key_prefix=resolved_key[:8] + "...",
         )
 
         # Request export from NASDAQ Data Link API
