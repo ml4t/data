@@ -10,6 +10,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+import ml4t.data.storage.legacy_migration as legacy_migration
 from ml4t.data.storage import (
     FlatStorage,
     HiveStorage,
@@ -52,7 +53,15 @@ def test_flat_migration_verifies_data_and_preserves_legacy_backup(tmp_path: Path
     source_metadata = tmp_path / ".metadata" / "equities_daily_BRK_B.json"
     source_metadata.parent.mkdir()
     expected.write_parquet(source)
-    source_metadata.write_text('{"custom": {"source": "legacy"}}')
+    source_metadata.write_text(
+        json.dumps(
+            {
+                "custom": {"source": "legacy"},
+                "first_update": "2024-01-02T00:00:00",
+                "update_history": [{"records_added": 2}],
+            }
+        )
+    )
 
     results = migrate_legacy_storage(
         tmp_path,
@@ -62,12 +71,22 @@ def test_flat_migration_verifies_data_and_preserves_legacy_backup(tmp_path: Path
 
     storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
     actual = storage.read("equities/daily/BRK_B").collect()
+    migrated_metadata = storage.get_metadata("equities/daily/BRK_B")
     assert_frame_equal(actual, expected)
+    assert migrated_metadata is not None
+    assert migrated_metadata["custom"] == {
+        "source": "legacy",
+        "first_update": "2024-01-02T00:00:00",
+        "update_history": [{"records_added": 2}],
+        "migrated_from_legacy_layout": True,
+    }
     assert [result.logical_key for result in results] == ["equities/daily/BRK_B"]
     assert not source.exists()
     assert not source_metadata.exists()
     assert (tmp_path / ".legacy-v0-backup/flat/equities_daily_BRK_B.parquet").is_file()
     assert (tmp_path / ".legacy-v0-backup/flat/.metadata/equities_daily_BRK_B.json").is_file()
+    assert find_legacy_storage_entries(tmp_path, "flat") == []
+    assert migrate_legacy_storage(tmp_path, "flat", {}) == []
 
 
 def test_migration_rejects_duplicate_destinations_before_writing(tmp_path: Path) -> None:
@@ -98,7 +117,7 @@ def test_migration_rejects_invalid_destination_before_writing(tmp_path: Path) ->
     assert not (tmp_path.parent / "escape").exists()
 
 
-def test_hive_migration_reads_all_partitions_and_preserves_backup(tmp_path: Path) -> None:
+def test_hive_migration_uses_caller_partition_granularity(tmp_path: Path) -> None:
     expected = _market_frame()
     legacy_root = tmp_path / "equities_daily_BRK_B"
     january = legacy_root / "year=2024/month=1"
@@ -108,18 +127,22 @@ def test_hive_migration_reads_all_partitions_and_preserves_backup(tmp_path: Path
     expected.head(1).write_parquet(january / "data.parquet")
     expected.tail(1).write_parquet(february / "data.parquet")
 
+    config = StorageConfig(tmp_path, strategy="hive", partition_granularity="day")
     migrate_legacy_storage(
         tmp_path,
         "hive",
         {"equities_daily_BRK_B": "equities/daily/BRK_B"},
+        storage_config=config,
     )
 
-    storage = HiveStorage(StorageConfig(tmp_path, strategy="hive"))
+    storage = HiveStorage(config)
     assert_frame_equal(storage.read("equities/daily/BRK_B").collect(), expected)
     assert not legacy_root.exists()
     assert (
         tmp_path / ".legacy-v0-backup/hive/equities_daily_BRK_B/year=2024/month=1/data.parquet"
     ).is_file()
+    assert find_legacy_storage_entries(tmp_path, "hive") == []
+    assert migrate_legacy_storage(tmp_path, "hive", {}, storage_config=config) == []
 
 
 def test_chunked_migration_uses_index_files_without_guessing_keys(tmp_path: Path) -> None:
@@ -166,6 +189,109 @@ def test_chunked_migration_uses_index_files_without_guessing_keys(tmp_path: Path
     assert (
         tmp_path / ".legacy-v0-backup/chunked/metadata/equities_daily_BRK_B_index.json"
     ).is_file()
+    assert find_legacy_storage_entries(tmp_path, "chunked") == []
+    assert migrate_legacy_storage(tmp_path, "chunked", {}) == []
+
+
+def test_verification_failure_removes_destination_and_preserves_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "ambiguous_key.parquet"
+    _market_frame().write_parquet(source)
+
+    def fail_verification(*_args: object) -> None:
+        raise LegacyStorageMigrationError("injected verification failure")
+
+    monkeypatch.setattr(legacy_migration, "_verify_frame", fail_verification)
+
+    with pytest.raises(LegacyStorageMigrationError, match="injected verification failure"):
+        migrate_legacy_storage(
+            tmp_path,
+            "flat",
+            {"ambiguous_key": "equities/daily/AAPL"},
+        )
+
+    assert source.is_file()
+    assert not FlatStorage(StorageConfig(tmp_path, strategy="flat")).exists("equities/daily/AAPL")
+
+
+def test_migration_refuses_to_overwrite_existing_destination(tmp_path: Path) -> None:
+    destination = "equities/daily/AAPL"
+    storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
+    storage.write(_market_frame(), destination)
+    source = tmp_path / "ambiguous_key.parquet"
+    _market_frame().write_parquet(source)
+
+    with pytest.raises(LegacyStorageMigrationError, match="Refusing to overwrite"):
+        migrate_legacy_storage(tmp_path, "flat", {"ambiguous_key": destination})
+
+    assert source.is_file()
+    assert storage.exists(destination)
+
+
+def test_backup_move_failure_restores_sources_and_removes_destinations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    _market_frame().write_parquet(first)
+    _market_frame().write_parquet(second)
+    real_move = legacy_migration._move_to_backup
+    moves = 0
+
+    def fail_second_move(source: Path, destination: Path) -> None:
+        nonlocal moves
+        moves += 1
+        if moves == 2:
+            raise OSError("injected backup failure")
+        real_move(source, destination)
+
+    monkeypatch.setattr(legacy_migration, "_move_to_backup", fail_second_move)
+
+    with pytest.raises(OSError, match="injected backup failure"):
+        migrate_legacy_storage(
+            tmp_path,
+            "flat",
+            {"first": "equities/daily/AAPL", "second": "equities/daily/MSFT"},
+        )
+
+    assert first.is_file()
+    assert second.is_file()
+    storage = FlatStorage(StorageConfig(tmp_path, strategy="flat"))
+    assert not storage.exists("equities/daily/AAPL")
+    assert not storage.exists("equities/daily/MSFT")
+
+
+def test_chunked_schema_failure_uses_migration_error(tmp_path: Path) -> None:
+    chunks = tmp_path / "chunks"
+    metadata = tmp_path / "metadata"
+    chunks.mkdir()
+    metadata.mkdir()
+    chunk_path = chunks / "fundamentals_annual_AAPL_2024.parquet"
+    pl.DataFrame({"timestamp": [datetime(2024, 1, 2)], "value": [1.0]}).write_parquet(chunk_path)
+    (metadata / "fundamentals_annual_AAPL_index.json").write_text(
+        json.dumps(
+            {
+                "AAPL_annual_2024": {
+                    "file_path": str(chunk_path),
+                    "start_date": "2024-01-01T00:00:00",
+                    "end_date": "2024-12-31T23:59:59",
+                    "row_count": 1,
+                    "size_bytes": chunk_path.stat().st_size,
+                }
+            }
+        )
+    )
+
+    with pytest.raises(
+        LegacyStorageMigrationError,
+        match="Cannot migrate legacy chunked entry 'fundamentals_annual_AAPL'",
+    ):
+        migrate_legacy_storage(
+            tmp_path,
+            "chunked",
+            {"fundamentals_annual_AAPL": "fundamentals/annual/AAPL"},
+        )
 
 
 def test_migration_refuses_to_overwrite_a_previous_backup(tmp_path: Path) -> None:

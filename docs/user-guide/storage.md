@@ -55,24 +55,48 @@ storage = HiveStorage(config)
 ```
 
 On-disk layout for month-level partitioning. Storage keys can use slashes, such as
-`equities/daily/AAPL`, but the filesystem directory is flattened to
-`equities_daily_AAPL`:
+`equities/daily/AAPL`. Each key is encoded into one filesystem-safe directory and
+published through a `CURRENT` commit pointer:
 
 ```
 data/
-  equities_daily_AAPL/
-    year=2024/
-      month=1/
-        data.parquet
-      month=2/
-        data.parquet
-      ...
-    year=2025/
-      month=1/
-        data.parquet
+  k1_<encoded-key>/
+    CURRENT
+    commits/
+    generations/
+      <generation-id>/
+        year=2024/
+          month=1/
+            data.parquet
+          month=2/
+            data.parquet
   .metadata/
-    equities_daily_AAPL.json
+    k1_<encoded-key>.lock
 ```
+
+## Upgrading Pre-0.1 Storage
+
+Pre-0.1 development releases used ambiguous flattened filesystem names. The current
+storage backends report those entries but do not guess their logical keys. Inventory
+the old names, supply an explicit mapping, and run the verified migration:
+
+```python
+from ml4t.data.storage import find_legacy_storage_entries, migrate_legacy_storage
+
+entries = find_legacy_storage_entries("./data", "hive")
+print([entry.physical_key for entry in entries])
+
+migrate_legacy_storage(
+    "./data",
+    "hive",
+    {"equities_daily_BRK_B": "equities/daily/BRK_B"},
+)
+```
+
+The mapping must cover the complete inventory. Migration writes and reads back each
+new dataset before moving its legacy files to `.legacy-v0-backup`. Pass the same
+`StorageConfig` used by the application through `storage_config=` when Hive partition
+granularity or compression differs from the defaults.
 
 ## Reading and Writing
 
