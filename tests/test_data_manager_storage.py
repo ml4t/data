@@ -809,15 +809,10 @@ class TestDataManagerListSymbols:
         assert isinstance(symbols, list)
         assert len(symbols) == 0
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_all(self, mock_fetch, manager, sample_data):
+    def test_list_symbols_all(self, manager, sample_data):
         """Test listing all symbols."""
-        mock_fetch.return_value = sample_data
-
-        # Load multiple symbols
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("MSFT", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("GOOGL", "2024-01-01", "2024-01-05", provider="yahoo")
+        for symbol in ("AAPL", "MSFT", "GOOGL"):
+            manager.import_data(sample_data, symbol=symbol, provider="yahoo")
 
         symbols = manager.list_symbols()
 
@@ -825,13 +820,9 @@ class TestDataManagerListSymbols:
         # Note: list_symbols depends on metadata files, which may not be created
         # by all storage backends in the same way
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_filter_by_provider(self, mock_fetch, manager, sample_data):
+    def test_list_symbols_filter_by_provider(self, manager, sample_data):
         """Test filtering symbols by provider."""
-        mock_fetch.return_value = sample_data
-
-        # Load from different providers
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
+        manager.import_data(sample_data, symbol="AAPL", provider="yahoo")
 
         # Filter by provider
         symbols = manager.list_symbols(provider="yahoo")

@@ -2,13 +2,17 @@
 
 import asyncio
 import gc
+import ipaddress
 import os
+import socket
 
 import pytest
 import structlog
 
 # Set TESTING environment variable for all tests
 os.environ["TESTING"] = "true"
+
+NETWORK_MARKERS = ("integration", "real_api", "requires_api_key", "paid_tier")
 
 # Configure structlog for tests without format_exc_info to avoid warnings
 structlog.configure(
@@ -38,6 +42,49 @@ def _close_yfinance_caches() -> None:
         close_db = getattr(manager, "close_db", None) if manager is not None else None
         if callable(close_db):
             close_db()
+
+
+def _is_loopback_address(address: object) -> bool:
+    if not isinstance(address, tuple):
+        return True
+    host = address[0]
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def block_external_network(request, monkeypatch):
+    """Default-lane tests must declare live network access with a marker."""
+    if any(request.node.get_closest_marker(marker) for marker in NETWORK_MARKERS):
+        yield
+        return
+
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def guarded_connect(sock, address):
+        if not _is_loopback_address(address):
+            raise RuntimeError(
+                f"Offline test attempted an external network connection to {address!r}; "
+                "mark the test as integration or mock the transport"
+            )
+        return original_connect(sock, address)
+
+    def guarded_connect_ex(sock, address):
+        if not _is_loopback_address(address):
+            raise RuntimeError(
+                f"Offline test attempted an external network connection to {address!r}; "
+                "mark the test as integration or mock the transport"
+            )
+        return original_connect_ex(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+    yield
 
 
 # ===== Rate Limiter Reset Fixtures =====
