@@ -10,6 +10,7 @@ This module handles core data fetching operations including:
 from __future__ import annotations
 
 from datetime import datetime
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -93,12 +94,9 @@ class FetchManager:
         if self.output_format == "lazy":
             return df.lazy()
         if self.output_format == "pandas":
-            try:
-                return df.to_pandas()
-            except ModuleNotFoundError as error:
-                if error.name != "pyarrow":
-                    raise
+            if find_spec("pyarrow") is None:
                 return pd.DataFrame(df.to_dict(as_series=False))
+            return df.to_pandas()
         return df
 
     def fetch(

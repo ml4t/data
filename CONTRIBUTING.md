@@ -86,7 +86,6 @@ Tests are organized by marker. The default `pytest` invocation skips slow, integ
 | `integration` | Real API calls to external services | Skipped |
 | `requires_api_key` | Needs a specific API key in env | Skipped |
 | `paid_tier` | Requires paid API subscription | Skipped |
-| `optional_dependency` | Requires optional heavy dependency | Skipped |
 | `expensive` | High API cost | Skipped |
 
 To run a specific marker lane:

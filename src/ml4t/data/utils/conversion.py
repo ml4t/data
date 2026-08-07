@@ -14,16 +14,47 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
     dtype = series.dtype
     if isinstance(dtype, pd.DatetimeTZDtype):
         unit = dtype.unit
-        time_zone = str(dtype.tz)
-    else:
+        series = series.dt.tz_convert("UTC")
+        time_zone = "UTC"
+        values = series.array.asi8
+    elif isinstance(dtype, np.dtype):
         unit = np.datetime_data(dtype)[0]
         time_zone = None
+        values = series.array.asi8
+    else:
+        arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
+        unit = getattr(arrow_dtype, "unit", None)
+        arrow_time_zone = getattr(arrow_dtype, "tz", None)
+        if arrow_time_zone is not None:
+            series = series.dt.tz_convert("UTC")
+        time_zone = "UTC" if arrow_time_zone is not None else None
+        target_unit = unit if unit in {"ms", "us", "ns"} else "ms"
+        normalized = [
+            None
+            if pd.isna(value)
+            else int(pd.Timestamp(value).as_unit(target_unit).asm8.astype("int64"))
+            for value in series
+        ]
+        return pl.Series(
+            name,
+            normalized,
+            dtype=pl.Datetime(target_unit, time_zone),
+            strict=False,
+        )
 
-    values = series.array.asi8
     target_unit = unit if unit in {"ms", "us", "ns"} else "ms"
-    multiplier = 1_000 if unit == "s" else 1
     nat = np.iinfo(np.int64).min
-    normalized = [None if value == nat else int(value) * multiplier for value in values]
+    if unit == "s":
+        normalized = [None if value == nat else int(value) * 1_000 for value in values]
+    elif unit in {"ms", "us", "ns"}:
+        normalized = [None if value == nat else int(value) for value in values]
+    else:
+        normalized = [
+            None
+            if pd.isna(value)
+            else int(pd.Timestamp(value).as_unit(target_unit).asm8.astype("int64"))
+            for value in series
+        ]
     return pl.Series(
         name,
         normalized,
@@ -41,6 +72,11 @@ def _all_null_dtype(dtype: Any) -> pl.DataType | None:
         return getattr(pl, f"{prefix}{dtype.itemsize * 8}")
     if pd.api.types.is_bool_dtype(dtype):
         return pl.Boolean
+    if pd.api.types.is_timedelta64_dtype(dtype):
+        unit = np.datetime_data(dtype)[0] if isinstance(dtype, np.dtype) else "ms"
+        return pl.Duration(unit if unit in {"ms", "us", "ns"} else "ms")
+    if isinstance(dtype, pd.CategoricalDtype):
+        return pl.Categorical
     if isinstance(dtype, pd.StringDtype):
         return pl.String
     return None

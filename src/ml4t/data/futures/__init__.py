@@ -112,7 +112,7 @@ else:
 def __getattr__(name: str):
     """Explain how to install public Databento-backed downloader symbols."""
     if name in _DATABENTO_EXPORTS and _DATABENTO_IMPORT_ERROR is not None:
-        raise ImportError(
+        raise AttributeError(
             f"{name} requires the Databento extra: uv add 'ml4t-data[databento]'"
         ) from _DATABENTO_IMPORT_ERROR
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -176,4 +176,4 @@ __all__ = [
     "FuturesConfig",
     "download_futures_data",
     "update_futures_data",
-] + _DATABENTO_EXPORTS
+] + ([] if _DATABENTO_IMPORT_ERROR is not None else _DATABENTO_EXPORTS)

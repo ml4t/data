@@ -202,7 +202,7 @@ python_functions = ["test_*"]
 addopts = [
     "-ra",
     "--strict-markers",
-    "-m", "not slow and not paid_tier and not integration and not requires_api_key and not optional_dependency",
+    "-m", "not slow and not paid_tier and not integration and not requires_api_key",
     "--tb=short",
 ]
 
@@ -212,7 +212,6 @@ markers = [
     "integration: marks tests as integration tests requiring external APIs",
     "real_api: marks tests that use real API calls (deprecated, use integration)",
     "requires_api_key: marks tests requiring specific API keys",
-    "optional_dependency: marks tests requiring optional heavy dependencies",
     "expensive: marks tests with high API costs",
 ]
 
