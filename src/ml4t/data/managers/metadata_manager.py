@@ -121,16 +121,25 @@ class MetadataManager:
         Returns:
             Metadata dict or None if not found
         """
-        if not hasattr(self.storage, "metadata_dir"):
-            return None
-
         try:
-            metadata_file = storage_key_path(self.storage.metadata_dir, key, ".json")
-            if not metadata_file.exists():
+            get_metadata = getattr(self.storage, "get_metadata", None)
+            metadata = get_metadata(key) if callable(get_metadata) else None
+            if metadata is None and hasattr(self.storage, "metadata_dir"):
+                metadata_file = storage_key_path(self.storage.metadata_dir, key, ".json")
+                if metadata_file.exists():
+                    with open(metadata_file, encoding="utf-8") as metadata_handle:
+                        metadata = json.load(metadata_handle)
+            if metadata is None:
                 return None
 
-            with open(metadata_file) as f:
-                return json.load(f)
+            custom = metadata.get("custom")
+            if isinstance(custom, dict):
+                metadata = {**metadata, **custom}
+            if "frequency" not in metadata:
+                bar_params = metadata.get("bar_params")
+                if isinstance(bar_params, dict) and isinstance(bar_params.get("frequency"), str):
+                    metadata["frequency"] = bar_params["frequency"]
+            return metadata
         except Exception as e:
             logger.warning(f"Failed to read metadata for {key}: {e}")
             return None

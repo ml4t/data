@@ -10,6 +10,7 @@ import pytest
 
 from ml4t.data.data_manager import DataManager
 from ml4t.data.storage.backend import StorageConfig
+from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
 
 
@@ -816,9 +817,7 @@ class TestDataManagerListSymbols:
 
         symbols = manager.list_symbols()
 
-        assert isinstance(symbols, list)
-        # Note: list_symbols depends on metadata files, which may not be created
-        # by all storage backends in the same way
+        assert symbols == ["AAPL", "GOOGL", "MSFT"]
 
     def test_list_symbols_filter_by_provider(self, manager, sample_data):
         """Test filtering symbols by provider."""
@@ -827,7 +826,7 @@ class TestDataManagerListSymbols:
         # Filter by provider
         symbols = manager.list_symbols(provider="yahoo")
 
-        assert isinstance(symbols, list)
+        assert symbols == ["AAPL"]
 
     @patch.object(DataManager, "fetch")
     def test_list_symbols_filter_by_asset_class(self, mock_fetch, manager, sample_data):
@@ -847,7 +846,37 @@ class TestDataManagerListSymbols:
 
         # Filter by asset class
         crypto_symbols = manager.list_symbols(asset_class="crypto")
-        assert isinstance(crypto_symbols, list)
+        assert crypto_symbols == ["BTC"]
+
+    @pytest.mark.parametrize("storage_type", [HiveStorage, FlatStorage])
+    def test_loaded_symbol_is_discoverable_after_restart(self, temp_dir, storage_type):
+        """A stored dataset remains discoverable through a new manager instance."""
+        storage = storage_type(StorageConfig(base_path=temp_dir))
+        manager = DataManager(storage=storage, enable_validation=False)
+        manager.load("AAPL", "2024-01-01", "2024-01-03", provider="mock")
+
+        restarted_storage = storage_type(StorageConfig(base_path=temp_dir))
+        restarted = DataManager(storage=restarted_storage, enable_validation=False)
+
+        assert restarted.list_symbols(provider="mock") == ["AAPL"]
+        metadata = restarted.get_metadata("AAPL")
+        assert metadata is not None
+        assert metadata["provider"] == "mock"
+        assert metadata["symbol"] == "AAPL"
+        assert metadata["frequency"] == "daily"
+
+        with patch.object(
+            restarted._storage_manager,
+            "update",
+            return_value="equities/daily/AAPL",
+        ) as update:
+            assert restarted.update_all(provider="mock") == {"AAPL": "equities/daily/AAPL"}
+        update.assert_called_once_with(
+            symbol="AAPL",
+            frequency="daily",
+            asset_class="equities",
+            provider="mock",
+        )
 
 
 class TestDataManagerBatchLoad:
