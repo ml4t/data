@@ -58,6 +58,7 @@ class ExcelExporter(BaseExporter):
         try:
             # Apply transformations
             df = self._apply_transformations(data)
+            df = self._prepare_excel_data(df)
 
             # Determine output path
             output_file = self._get_output_path(symbol)
@@ -224,6 +225,7 @@ class ExcelExporter(BaseExporter):
         # Add data sheets
         for symbol, data in datasets.items():
             df = self._apply_transformations(data)
+            df = self._prepare_excel_data(df)
             worksheet = workbook.add_worksheet(symbol[:31])
 
             # Write headers
@@ -259,6 +261,7 @@ class ExcelExporter(BaseExporter):
 
             for symbol, data in datasets.items():
                 df = self._apply_transformations(data)
+                df = self._prepare_excel_data(df)
                 # Create worksheet
                 ws = wb.create_sheet(title=symbol[:31])
 
@@ -277,7 +280,18 @@ class ExcelExporter(BaseExporter):
             if datasets:
                 first_symbol = next(iter(datasets))
                 df = self._apply_transformations(datasets[first_symbol])
+                df = self._prepare_excel_data(df)
                 df.write_excel(str(output_file), worksheet=first_symbol[:31])
+
+    @staticmethod
+    def _prepare_excel_data(df: pl.DataFrame) -> pl.DataFrame:
+        """Serialize timezone-aware datetimes without discarding their offsets."""
+        expressions = [
+            pl.col(column).dt.to_string("%+").alias(column)
+            for column, dtype in df.schema.items()
+            if isinstance(dtype, pl.Datetime) and dtype.time_zone is not None
+        ]
+        return df.with_columns(expressions) if expressions else df
 
     def _add_metadata_sheet(self, workbook: Any, datasets: dict[str, pl.DataFrame]) -> None:
         """

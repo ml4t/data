@@ -97,11 +97,10 @@ class BaseExporter(ABC):
 
         # Select specific columns
         if self.config.columns:
-            available = set(df.columns)
-            requested = set(self.config.columns)
-            to_select = list(requested & available)
-            if to_select:
-                df = df.select(to_select)
+            missing = [column for column in self.config.columns if column not in df.columns]
+            if missing:
+                raise ValueError(f"Requested export columns are missing: {missing}")
+            df = df.select(self.config.columns)
 
         # Add calculated fields
         if self.config.add_returns and "close" in df.columns:

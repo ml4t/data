@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol
 
+import polars as pl
 import structlog
 
+from ml4t.data.core.models import DataObject
 from ml4t.data.export.formats import (
     CSVExporter,
     ExcelExporter,
@@ -17,6 +20,16 @@ from ml4t.data.export.formats import (
 from ml4t.data.export.formats.base import ExportResult
 
 logger = structlog.get_logger()
+
+
+class ExportStorage(Protocol):
+    """Storage operations required by the export manager."""
+
+    def exists(self, key: str) -> bool: ...
+
+    def read(self, key: str) -> pl.LazyFrame | pl.DataFrame | DataObject: ...
+
+    def list_keys(self) -> list[str]: ...
 
 
 class ExportManager:
@@ -31,7 +44,7 @@ class ExportManager:
 
     def __init__(
         self,
-        storage: Any,
+        storage: ExportStorage,
         progress_callback: Callable[[str, float], None] | None = None,
     ) -> None:
         """
@@ -84,7 +97,7 @@ class ExportManager:
                 error=f"Dataset not found: {key}",
             )
 
-        data_obj = self.storage.read(key)
+        data, symbol = self._read_dataset(key)
 
         # Create export config
         config = ExportConfig(
@@ -100,10 +113,10 @@ class ExportManager:
         # Export data
         self._report_progress(f"Exporting to {format_type}", 0.5)
 
-        symbol = data_obj.metadata.symbol
-        result = exporter.export(data_obj.data, symbol)
+        result = exporter.export(data, symbol)
 
-        self._report_progress("Export complete", 1.0)
+        completion = "Export complete" if result.success else "Export failed"
+        self._report_progress(completion, 1.0)
 
         return result
 
@@ -141,9 +154,10 @@ class ExportManager:
             self._report_progress(f"Reading {key}", (idx + 1) / total * 0.5)
 
             if self.storage.exists(key):
-                data_obj = self.storage.read(key)
-                symbol = data_obj.metadata.symbol
-                datasets[symbol] = data_obj.data
+                data, symbol = self._read_dataset(key)
+                if symbol in datasets:
+                    raise ValueError(f"Multiple storage keys resolve to export symbol '{symbol}'")
+                datasets[symbol] = data
             else:
                 logger.warning(f"Dataset not found: {key}")
 
@@ -176,7 +190,12 @@ class ExportManager:
 
         results = exporter.export_batch(datasets)
 
-        self._report_progress("Batch export complete", 1.0)
+        completion = (
+            "Batch export complete"
+            if all(result.success for result in results)
+            else "Batch export failed"
+        )
+        self._report_progress(completion, 1.0)
 
         return results
 
@@ -199,10 +218,7 @@ class ExportManager:
         Returns:
             List of export results
         """
-        # List matching keys
-        # Convert pattern to prefix for list_keys
-        prefix = pattern.replace("*", "")
-        keys = self.storage.list_keys(prefix)
+        keys = [key for key in self.storage.list_keys() if fnmatchcase(key, pattern)]
 
         if not keys:
             logger.warning(f"No datasets match pattern: {pattern}")
@@ -212,6 +228,38 @@ class ExportManager:
 
         # Export batch
         return self.export_batch(keys, output_path, format_type, **options)
+
+    def _read_dataset(self, key: str) -> tuple[pl.DataFrame, str]:
+        """Read one dataset through the canonical frame-key storage protocol."""
+        stored = self.storage.read(key)
+        if isinstance(stored, DataObject):
+            return stored.data, stored.metadata.symbol
+        if isinstance(stored, pl.LazyFrame):
+            data = stored.collect()
+        elif isinstance(stored, pl.DataFrame):
+            data = stored
+        else:
+            raise TypeError(
+                f"Storage read for '{key}' returned unsupported type {type(stored).__name__}"
+            )
+
+        metadata_getter = getattr(self.storage, "get_metadata", None)
+        metadata = metadata_getter(key) if callable(metadata_getter) else None
+        symbol = self._symbol_from_metadata(metadata) or key.rsplit("/", 1)[-1]
+        if not symbol:
+            raise ValueError(f"No export symbol is available for storage key '{key}'")
+        return data, symbol
+
+    @staticmethod
+    def _symbol_from_metadata(metadata: Any) -> str | None:
+        """Read the explicit symbol from canonical or legacy metadata shapes."""
+        if not isinstance(metadata, dict):
+            return None
+        custom = metadata.get("custom")
+        if isinstance(custom, dict) and isinstance(custom.get("symbol"), str):
+            return custom["symbol"]
+        symbol = metadata.get("symbol")
+        return symbol if isinstance(symbol, str) else None
 
     def _report_progress(self, message: str, progress: float) -> None:
         """Report progress if callback is configured."""

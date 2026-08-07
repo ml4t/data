@@ -3,6 +3,7 @@
 import json
 import tempfile
 from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
@@ -11,6 +12,7 @@ import pytest
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.export.formats import CSVExporter, ExcelExporter, ExportConfig, JSONExporter
 from ml4t.data.export.manager import ExportManager
+from ml4t.data.storage import FlatStorage, HiveStorage, StorageConfig
 
 
 class TestCSVExporter:
@@ -434,3 +436,134 @@ class TestExportManager:
         assert "json" in formats
         assert "excel" in formats
         assert "xlsx" in formats
+
+
+class TestExportManagerProductionStorage:
+    """Exercise export through the production storage protocol."""
+
+    @pytest.fixture(params=[FlatStorage, HiveStorage])
+    def storage(self, request, tmp_path):
+        storage_class = request.param
+        strategy = "flat" if storage_class is FlatStorage else "hive"
+        config = StorageConfig(
+            base_path=tmp_path / strategy,
+            strategy=strategy,
+            partition_granularity="day",
+        )
+        storage = storage_class(config)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 2, 14, 30, tzinfo=UTC),
+                    datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
+                ],
+                "open": [100.0, 101.0],
+                "high": [105.0, 106.0],
+                "low": [99.0, 100.0],
+                "close": [104.0, None],
+                "volume": [1_000_000.0, 1_100_000.0],
+                "label": ["München", "東京"],
+            }
+        )
+        storage.write(
+            frame.lazy(),
+            "equities/daily/AAPL",
+            metadata={"symbol": "AAPL", "provider": "test"},
+        )
+        storage.write(
+            frame.lazy(),
+            "equities/hourly/MSFT",
+            metadata={"symbol": "MSFT", "provider": "test"},
+        )
+        return storage
+
+    @pytest.mark.parametrize("format_type", ["csv", "json", "excel"])
+    def test_single_export_round_trips_values_and_column_order(
+        self, storage, tmp_path, format_type
+    ):
+        output_dir = tmp_path / f"output-{format_type}"
+        output_dir.mkdir()
+        manager = ExportManager(storage)
+        columns = ["timestamp", "close", "open", "label"]
+
+        result = manager.export(
+            "equities/daily/AAPL",
+            output_dir,
+            format_type,
+            columns=columns,
+            include_metadata=False,
+        )
+
+        assert result.success, result.error
+        if format_type == "csv":
+            exported = pl.read_csv(result.output_path)
+            records = exported.to_dicts()
+        elif format_type == "json":
+            payload = json.loads(result.output_path.read_text())
+            records = payload["data"]
+            assert list(records[0]) == columns
+        else:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(result.output_path, read_only=True, data_only=True)
+            worksheet = workbook["AAPL"]
+            rows = list(worksheet.iter_rows(values_only=True))
+            assert list(rows[0]) == columns
+            records = [dict(zip(rows[0], row, strict=True)) for row in rows[1:]]
+
+        assert list(records[0]) == columns
+        assert records[0]["label"] == "München"
+        assert records[1]["label"] == "東京"
+        assert records[1]["close"] is None
+        timestamp = records[0]["timestamp"]
+        parsed = timestamp if isinstance(timestamp, datetime) else datetime.fromisoformat(timestamp)
+        assert parsed == datetime(2024, 1, 2, 14, 30, tzinfo=UTC)
+
+    def test_pattern_uses_glob_matching_with_zero_argument_list_keys(self, storage, tmp_path):
+        output_dir = tmp_path / "pattern"
+        output_dir.mkdir()
+
+        results = ExportManager(storage).export_pattern(
+            "equities/*/A*", output_dir, "csv", include_metadata=False
+        )
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].output_path.name == "AAPL.csv"
+
+    @pytest.mark.parametrize("format_type", ["csv", "json", "excel"])
+    def test_batch_uses_symbols_from_storage_metadata(self, storage, tmp_path, format_type):
+        suffix = "xlsx" if format_type == "excel" else format_type
+        output_path = tmp_path / ("batch" if format_type == "csv" else f"batch.{suffix}")
+        if format_type == "csv":
+            output_path.mkdir()
+
+        results = ExportManager(storage).export_batch(
+            ["equities/daily/AAPL", "equities/hourly/MSFT"],
+            output_path,
+            format_type,
+            include_metadata=False,
+        )
+
+        assert all(result.success for result in results), [result.error for result in results]
+        if format_type == "csv":
+            assert [result.output_path.name for result in results] == ["AAPL.csv", "MSFT.csv"]
+        elif format_type == "json":
+            payload = json.loads(output_path.read_text())
+            assert list(payload) == ["AAPL", "MSFT"]
+        else:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(output_path, read_only=True, data_only=True)
+            assert workbook.sheetnames == ["AAPL", "MSFT"]
+
+    def test_missing_requested_column_returns_explicit_failure(self, storage, tmp_path):
+        result = ExportManager(storage).export(
+            "equities/daily/AAPL",
+            tmp_path / "missing.csv",
+            "csv",
+            columns=["timestamp", "not_present"],
+        )
+
+        assert result.success is False
+        assert result.error == "Requested export columns are missing: ['not_present']"
