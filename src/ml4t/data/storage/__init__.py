@@ -20,6 +20,13 @@ from .data_profile import (
 )
 from .flat import FlatStorage
 from .hive import HiveStorage
+from .legacy_migration import (
+    LegacyStorageEntry,
+    LegacyStorageMigration,
+    LegacyStorageMigrationError,
+    find_legacy_storage_entries,
+    migrate_legacy_storage,
+)
 
 
 def create_storage(base_path: str | Path, strategy: str = "hive", **kwargs) -> StorageBackend:
@@ -51,12 +58,17 @@ __all__ = [
     "DatasetProfile",
     "FlatStorage",
     "HiveStorage",
+    "LegacyStorageEntry",
+    "LegacyStorageMigration",
+    "LegacyStorageMigrationError",
     "ProfileMixin",
     "StorageBackend",
     "StorageConfig",
     "create_storage",
+    "find_legacy_storage_entries",
     "generate_profile",
     "get_profile_path",
     "load_profile",
+    "migrate_legacy_storage",
     "save_profile",
 ]
