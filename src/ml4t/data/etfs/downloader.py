@@ -230,6 +230,8 @@ class ETFDataManager(ProfileMixin):
                 else:
                     # Start from day after last existing date
                     last_date = existing["timestamp"].max()
+                    if not isinstance(last_date, datetime):
+                        raise TypeError("'timestamp' must contain non-null Datetime values")
                     start_date = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
                 # Check if we need to update

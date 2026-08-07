@@ -10,6 +10,13 @@ from ml4t.data.validation.base import Severity, ValidationIssue, ValidationResul
 
 logger = structlog.get_logger()
 
+
+def _numeric_scalar(value: object, metric: str) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"'{metric}' must contain non-null numeric values")
+    return float(value)
+
+
 NegativePricePolicy = Literal["forbid", "warn", "allow"]
 _NUMERIC_COLUMNS = ("open", "high", "low", "close", "volume")
 _PRICE_COLUMNS = ("open", "high", "low", "close")
@@ -364,7 +371,7 @@ class OHLCVValidator(Validator):
                     message=f"Found {len(extreme_returns)} extreme returns (>{self.max_return_threshold:.0%})",
                     details={
                         "threshold": self.max_return_threshold,
-                        "max_return": float(max_return) if max_return is not None else 0.0,
+                        "max_return": _numeric_scalar(max_return, "return"),
                         "count": len(extreme_returns),
                     },
                     row_count=len(extreme_returns),

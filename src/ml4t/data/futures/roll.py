@@ -126,7 +126,7 @@ class TimeBasedRoll(RollStrategy):
             for symbol, expiration in contracts.items()
         }
         available_by_date = _available_symbols_by_date(data)
-        records = []
+        records: list[dict[str, object]] = []
         for observation_date in dates:
             eligible = [
                 (symbol, contracts[symbol])

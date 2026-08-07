@@ -295,7 +295,9 @@ def _validate_mixed_price_consistency(data: pl.DataFrame, ticker: str) -> None:
         return
     median = positive_closes.median()
     maximum = positive_closes.max()
-    if median is not None and maximum is not None and median > 0 and maximum / median > 10:
+    if not isinstance(median, int | float) or not isinstance(maximum, int | float):
+        raise TypeError("'close' must contain non-null numeric values")
+    if median > 0 and maximum / median > 10:
         raise ValueError(
             f"Normalized prices for ticker '{ticker}' remain inconsistent; "
             "provide corrected source price-unit metadata"
