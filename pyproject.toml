@@ -171,6 +171,7 @@ test = [
     "hypothesis>=6.80.0",
     "ty",
     "xlsxwriter>=3.1.0",
+    "pyarrow>=14.0.0",
 ]
 prerelease = [
     { include-group = "test" },

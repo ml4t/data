@@ -15,13 +15,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import polars as pl
 import structlog
 from filelock import FileLock
 
-from ml4t.data.storage.config import CompressionType, StorageConfig
+from ml4t.data.storage.config import ParquetCompression, StorageConfig, parquet_compression
 from ml4t.data.storage.keys import contained_path, storage_key_path
 
 logger = structlog.get_logger()
@@ -80,18 +80,9 @@ class StorageBackend(ABC):
 
     def _parquet_compression(
         self,
-    ) -> Literal["uncompressed", "zstd", "lz4", "snappy", "gzip"]:
+    ) -> ParquetCompression:
         """Return the Polars codec name for the canonical storage configuration."""
-        compression = self.config.compression
-        if compression is None:
-            return "uncompressed"
-        if compression == CompressionType.ZSTD:
-            return "zstd"
-        if compression == CompressionType.LZ4:
-            return "lz4"
-        if compression == CompressionType.SNAPPY:
-            return "snappy"
-        return "gzip"
+        return parquet_compression(self.config.compression)
 
     @staticmethod
     def _recover_key_staging(key_path: Path) -> None:

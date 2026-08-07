@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -31,16 +31,37 @@ class CompressionType(StrEnum):
     GZIP = "gzip"
 
 
+ParquetCompression = Literal["uncompressed", "snappy", "gzip", "lz4", "zstd"]
+
+
 def normalize_compression(
     value: CompressionType | str | None,
 ) -> CompressionType | None:
     """Return the canonical compression value for public storage inputs."""
     if value is None or isinstance(value, CompressionType):
         return value
+    if not isinstance(value, str):
+        raise ValueError(f"Unsupported Parquet compression {value!r}")
     normalized = value.lower()
     if normalized in {"none", "null"}:
         return None
-    return CompressionType(normalized)
+    try:
+        return CompressionType(normalized)
+    except ValueError as exc:
+        supported = ", ".join(codec.value for codec in CompressionType)
+        raise ValueError(
+            f"Unsupported Parquet compression {value!r}; expected one of {supported} or none"
+        ) from exc
+
+
+def parquet_compression(
+    value: CompressionType | str | None,
+) -> ParquetCompression:
+    """Return the Polars codec name for a public storage compression value."""
+    normalized = normalize_compression(value)
+    if normalized is None:
+        return "uncompressed"
+    return cast(ParquetCompression, normalized.value)
 
 
 class PartitionGranularity(StrEnum):

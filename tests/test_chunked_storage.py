@@ -24,6 +24,9 @@ class TestChunkedStorage:
         with pytest.raises(ValueError, match="Unsupported Parquet compression"):
             ChunkedStorage(tmp_path, compression="invalid")
 
+        with pytest.raises(ValueError, match="Unsupported Parquet compression"):
+            ChunkedStorage(tmp_path, compression=5)  # type: ignore[arg-type]
+
     def test_none_compression_writes_uncompressed_parquet(self, tmp_path: Path) -> None:
         storage = ChunkedStorage(tmp_path, compression=None)
         frame = pl.DataFrame(
@@ -79,6 +82,9 @@ class TestChunkedStorage:
 
         assert storage.compression == compression.value
         assert storage.read(key).data.equals(frame)
+        chunk = storage.get_chunk_info(key)[0]
+        parquet_metadata = pq.ParquetFile(chunk.file_path).metadata
+        assert parquet_metadata.row_group(0).column(0).compression == compression.name
 
     @pytest.mark.parametrize("compression", [None, "none", "NONE", "null", "NULL"])
     def test_no_compression_aliases(self, tmp_path: Path, compression: str | None) -> None:

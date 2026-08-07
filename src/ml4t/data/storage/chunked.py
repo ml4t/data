@@ -5,14 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, cast
 
 import polars as pl
 import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
-from ml4t.data.storage.config import CompressionType, normalize_compression
+from ml4t.data.storage.config import CompressionType, parquet_compression
 from ml4t.data.storage.keys import (
     KEY_ENCODING_PREFIX,
     decode_storage_key,
@@ -21,23 +20,6 @@ from ml4t.data.storage.keys import (
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
-
-ParquetCompression = Literal["uncompressed", "snappy", "gzip", "lz4", "zstd"]
-
-
-def _parquet_compression(
-    compression: CompressionType | str | None,
-) -> ParquetCompression:
-    try:
-        normalized = normalize_compression(compression)
-    except ValueError as exc:
-        supported = ", ".join(codec.value for codec in CompressionType)
-        raise ValueError(
-            f"Unsupported Parquet compression '{compression}'; expected one of {supported} or none"
-        ) from exc
-    if normalized is None:
-        return "uncompressed"
-    return cast(ParquetCompression, normalized.value)
 
 
 @dataclass
@@ -94,7 +76,7 @@ class ChunkedStorage:
 
         self.base_path = Path(base_path).expanduser().resolve()
         self.chunk_size_days = chunk_size_days
-        self.compression = _parquet_compression(compression)
+        self.compression = parquet_compression(compression)
 
         # Chunk storage directory
         self.chunks_path = self.base_path / "chunks"
