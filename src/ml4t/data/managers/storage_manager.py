@@ -114,7 +114,7 @@ class StorageManager:
         ohlcv_validator = OHLCVValidator(
             check_nulls=rules.check_nulls,
             check_price_consistency=rules.check_price_consistency,
-            check_negative_prices=rules.check_negative_prices,
+            negative_price_policy=rules.negative_price_policy,
             check_negative_volume=rules.check_negative_volume,
             check_duplicate_timestamps=rules.check_duplicate_timestamps,
             check_chronological_order=rules.check_chronological_order,

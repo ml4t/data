@@ -178,7 +178,7 @@ validation:
     volume_spike_threshold: 100  # 100x volume spikes happen
     price_gap_threshold: 0.5  # 50% gaps possible
     staleness_threshold: 10  # 10 periods before considering stale
-    check_negative_prices: true
+    negative_price_policy: forbid
     check_negative_volume: true
     check_duplicate_timestamps: true
 

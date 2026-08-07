@@ -30,7 +30,7 @@ validation:
     check_nulls: true
     check_duplicate_timestamps: true
     check_chronological_order: true
-    check_negative_prices: true
+    negative_price_policy: forbid
     check_negative_volume: true
 
 # Storage configuration

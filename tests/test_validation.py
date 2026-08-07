@@ -144,7 +144,7 @@ class TestOHLCVValidator:
 
         assert not result.passed
         assert result.error_count > 0
-        assert result.critical_count > 0  # Negative prices are critical
+        assert result.critical_count == 0
 
     def test_null_detection(self):
         """Test null value detection."""

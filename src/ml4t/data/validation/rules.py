@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from ml4t.data.assets.asset_class import AssetClass
+from ml4t.data.validation.ohlcv import NegativePricePolicy
 
 logger = structlog.get_logger()
 
@@ -20,7 +21,9 @@ class ValidationRuleConfig(BaseModel):
     # OHLCV validation settings
     check_nulls: bool = Field(default=True, description="Check for null values")
     check_price_consistency: bool = Field(default=True, description="Check OHLC relationships")
-    check_negative_prices: bool = Field(default=True, description="Check for negative prices")
+    negative_price_policy: NegativePricePolicy = Field(
+        default="forbid", description="Whether negative prices fail, warn, or are accepted"
+    )
     check_negative_volume: bool = Field(default=True, description="Check for negative volume")
     check_duplicate_timestamps: bool = Field(
         default=True, description="Check for duplicate timestamps"
@@ -175,6 +178,7 @@ class ValidationRulePresets:
         """Commodity validation rules."""
         return ValidationRuleConfig(
             asset_class=AssetClass.COMMODITY,
+            negative_price_policy="warn",
             check_weekend_trading=True,
             check_market_hours=True,
             max_return_threshold=0.15,  # 15% daily return
@@ -189,7 +193,7 @@ class ValidationRulePresets:
         return ValidationRuleConfig(
             check_nulls=True,
             check_price_consistency=True,
-            check_negative_prices=True,
+            negative_price_policy="forbid",
             check_negative_volume=True,
             check_duplicate_timestamps=True,
             check_chronological_order=True,
@@ -209,7 +213,7 @@ class ValidationRulePresets:
         return ValidationRuleConfig(
             check_nulls=True,
             check_price_consistency=True,
-            check_negative_prices=True,
+            negative_price_policy="forbid",
             check_negative_volume=False,  # Allow missing volume
             check_duplicate_timestamps=True,
             check_chronological_order=True,

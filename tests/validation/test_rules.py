@@ -26,7 +26,7 @@ class TestValidationRuleConfig:
         config = ValidationRuleConfig()
         assert config.check_nulls is True
         assert config.check_price_consistency is True
-        assert config.check_negative_prices is True
+        assert config.negative_price_policy == "forbid"
         assert config.check_negative_volume is True
         assert config.check_duplicate_timestamps is True
         assert config.check_chronological_order is True
@@ -274,6 +274,7 @@ class TestValidationRulePresets:
         config = ValidationRulePresets.commodity_rules()
 
         assert config.asset_class == AssetClass.COMMODITY
+        assert config.negative_price_policy == "warn"
         assert config.check_weekend_trading is True
         assert config.check_market_hours is True
         assert config.max_return_threshold == 0.15
@@ -286,7 +287,7 @@ class TestValidationRulePresets:
         # All checks enabled
         assert config.check_nulls is True
         assert config.check_price_consistency is True
-        assert config.check_negative_prices is True
+        assert config.negative_price_policy == "forbid"
         assert config.check_negative_volume is True
         assert config.check_duplicate_timestamps is True
         assert config.check_chronological_order is True
@@ -308,7 +309,7 @@ class TestValidationRulePresets:
         # Core checks enabled
         assert config.check_nulls is True
         assert config.check_price_consistency is True
-        assert config.check_negative_prices is True
+        assert config.negative_price_policy == "forbid"
         assert config.check_duplicate_timestamps is True
         assert config.check_chronological_order is True
 
