@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from statistics import stdev
 
 import polars as pl
 import pytest
 
 from ml4t.data.cot.workflow import (
+    attach_cot_release_schedule,
     combine_cot_ohlcv,
     combine_cot_ohlcv_pit,
     create_cot_features,
@@ -15,8 +17,115 @@ from ml4t.data.cot.workflow import (
 )
 
 
+class TestAttachCOTReleaseSchedule:
+    """Tests for authoritative release schedule attachment."""
+
+    def test_attaches_complete_timezone_aware_schedule(self):
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2), date(2024, 1, 9)],
+                "open_interest": [100_000, 110_000],
+            }
+        )
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2), date(2024, 1, 9)],
+                "available_at": [
+                    datetime(2024, 1, 5, 20, 30, tzinfo=UTC),
+                    datetime(2024, 1, 12, 20, 30, tzinfo=UTC),
+                ],
+            }
+        )
+
+        result = attach_cot_release_schedule(cot, schedule)
+
+        assert result["available_at"].dtype == pl.Datetime("us", "UTC")
+        assert result["open_interest"].to_list() == [100_000, 110_000]
+
+    def test_rejects_incomplete_schedule(self):
+        cot = pl.DataFrame(
+            {"report_date": [date(2024, 1, 2), date(2024, 1, 9)], "open_interest": [1, 2]}
+        )
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+            }
+        )
+
+        with pytest.raises(ValueError, match="2024-01-09"):
+            attach_cot_release_schedule(cot, schedule)
+
+    def test_rejects_naive_schedule_timestamps(self):
+        cot = pl.DataFrame({"report_date": [date(2024, 1, 2)]})
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [datetime(2024, 1, 5, 15, 30)],
+            }
+        )
+
+        with pytest.raises(ValueError, match="timezone-aware"):
+            attach_cot_release_schedule(cot, schedule)
+
+
 class TestCombineCOTOHLCV:
     """Tests for combine_cot_ohlcv function."""
+
+    def test_report_is_hidden_until_exact_release_timestamp(self):
+        """A report must not be visible before its official release timestamp."""
+        ohlcv = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 2, 21, tzinfo=UTC),
+                    datetime(2024, 1, 5, 20, 29, tzinfo=UTC),
+                    datetime(2024, 1, 5, 20, 30, tzinfo=UTC),
+                ],
+                "close": [100.0, 101.0, 102.0],
+            }
+        )
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+                "open_interest": [100_000],
+            }
+        )
+
+        result = combine_cot_ohlcv(ohlcv, cot)
+
+        assert result["cot_open_interest"].to_list() == [None, None, 100_000]
+
+    def test_explicit_schedule_handles_holiday_delayed_release(self):
+        """The supplied release timestamp controls holiday-delayed availability."""
+        ohlcv = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 3, 29, 20, 30, tzinfo=UTC),
+                    datetime(2024, 4, 1, 19, 30, tzinfo=UTC),
+                ],
+                "close": [100.0, 101.0],
+            }
+        )
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2024, 3, 26)],
+                "available_at": [datetime(2024, 4, 1, 19, 30, tzinfo=UTC)],
+                "open_interest": [100_000],
+            }
+        )
+
+        result = combine_cot_ohlcv(ohlcv, cot)
+
+        assert result["cot_open_interest"].to_list() == [None, 100_000]
+
+    def test_missing_release_timestamp_is_rejected(self):
+        """The safe default must not infer publication from a report date."""
+        ohlcv = pl.DataFrame({"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)], "close": [100.0]})
+        cot = pl.DataFrame({"report_date": [date(2024, 1, 2)], "open_interest": [100_000]})
+
+        with pytest.raises(ValueError, match="available_at"):
+            combine_cot_ohlcv(ohlcv, cot)
 
     def test_basic_combine(self):
         """Test basic OHLCV and COT combination."""
@@ -36,6 +145,7 @@ class TestCombineCOTOHLCV:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 3)],
+                "available_at": [datetime(2023, 1, 6, tzinfo=UTC)],
                 "open_interest": [50000],
                 "lev_money_net": [1000],
             }
@@ -44,7 +154,7 @@ class TestCombineCOTOHLCV:
         result = combine_cot_ohlcv(ohlcv, cot)
 
         assert "close" in result.columns
-        assert "open_interest" in result.columns
+        assert "cot_open_interest" in result.columns
         assert len(result) == 5
 
     def test_forward_fill_cot_data(self):
@@ -65,6 +175,7 @@ class TestCombineCOTOHLCV:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 11, tzinfo=UTC)],
                 "open_interest": [50000],
             }
         )
@@ -73,10 +184,12 @@ class TestCombineCOTOHLCV:
 
         # COT data should be filled for dates after report_date
         assert (
-            result.filter(pl.col("timestamp") == datetime(2023, 1, 11))["open_interest"][0] == 50000
+            result.filter(pl.col("timestamp") == datetime(2023, 1, 11))["cot_open_interest"][0]
+            == 50000
         )
         assert (
-            result.filter(pl.col("timestamp") == datetime(2023, 1, 12))["open_interest"][0] == 50000
+            result.filter(pl.col("timestamp") == datetime(2023, 1, 12))["cot_open_interest"][0]
+            == 50000
         )
 
     def test_exclude_metadata_columns(self):
@@ -91,6 +204,7 @@ class TestCombineCOTOHLCV:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 10, tzinfo=UTC)],
                 "open_interest": [50000],
                 "product": ["ES"],
                 "report_type": ["traders_in_financial_futures_fut"],
@@ -114,17 +228,24 @@ class TestCombineCOTOHLCV:
         cot = pl.DataFrame(
             {
                 "cot_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 10, tzinfo=UTC)],
                 "open_interest": [50000],
             }
         )
 
         result = combine_cot_ohlcv(ohlcv, cot, date_col="date", cot_date_col="cot_date")
-        assert "open_interest" in result.columns
+        assert "cot_open_interest" in result.columns
 
     def test_empty_ohlcv(self):
         """Test with empty OHLCV data."""
-        ohlcv = pl.DataFrame({"timestamp": [], "close": []})
-        cot = pl.DataFrame({"report_date": [date(2023, 1, 10)], "open_interest": [50000]})
+        ohlcv = pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC"), "close": pl.Float64})
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 13, 20, 30, tzinfo=UTC)],
+                "open_interest": [50000],
+            }
+        )
 
         result = combine_cot_ohlcv(ohlcv, cot)
         assert result.is_empty()
@@ -133,8 +254,8 @@ class TestCombineCOTOHLCV:
 class TestCombineCOTOHLCVPIT:
     """Tests for combine_cot_ohlcv_pit (point-in-time) function."""
 
-    def test_publication_lag_applied(self):
-        """Test publication lag is correctly applied."""
+    def test_alias_uses_official_release_timestamp(self):
+        """The compatibility alias has the same exact release semantics."""
         ohlcv = pl.DataFrame(
             {
                 "timestamp": [
@@ -152,23 +273,23 @@ class TestCombineCOTOHLCVPIT:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],  # Tuesday positions
+                "available_at": [datetime(2023, 1, 16, tzinfo=UTC)],
                 "open_interest": [50000],
             }
         )
 
-        # Default 6-day lag (available Monday)
-        result = combine_cot_ohlcv_pit(ohlcv, cot, publication_lag_days=6)
+        result = combine_cot_ohlcv_pit(ohlcv, cot)
 
         # Before publication (first 4 rows) should have null COT data
         before_pub = result.filter(pl.col("timestamp") < datetime(2023, 1, 16))
-        assert before_pub["open_interest"].null_count() == len(before_pub)
+        assert before_pub["cot_open_interest"].null_count() == len(before_pub)
 
         # After publication should have COT data
         after_pub = result.filter(pl.col("timestamp") >= datetime(2023, 1, 16))
-        assert after_pub["open_interest"].null_count() == 0
+        assert after_pub["cot_open_interest"].null_count() == 0
 
-    def test_custom_publication_lag(self):
-        """Test custom publication lag."""
+    def test_custom_availability_column(self):
+        """The official release timestamp column can be renamed explicitly."""
         ohlcv = pl.DataFrame(
             {
                 "timestamp": [
@@ -183,16 +304,16 @@ class TestCombineCOTOHLCVPIT:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],
+                "released_at": [datetime(2023, 1, 13, tzinfo=UTC)],
                 "open_interest": [50000],
             }
         )
 
-        # 3-day lag (Friday publication)
-        result = combine_cot_ohlcv_pit(ohlcv, cot, publication_lag_days=3)
+        result = combine_cot_ohlcv_pit(ohlcv, cot, available_at_col="released_at")
 
         # Jan 13 (Friday) should have COT data
         jan_13 = result.filter(pl.col("timestamp") == datetime(2023, 1, 13))
-        assert jan_13["open_interest"][0] == 50000
+        assert jan_13["cot_open_interest"][0] == 50000
 
     def test_excludes_metadata_columns(self):
         """Test metadata columns are excluded."""
@@ -206,6 +327,7 @@ class TestCombineCOTOHLCVPIT:
         cot = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 13, 20, 30, tzinfo=UTC)],
                 "open_interest": [50000],
                 "product": ["ES"],
                 "report_type": ["tff"],
@@ -220,6 +342,70 @@ class TestCombineCOTOHLCVPIT:
 
 class TestCreateCOTFeatures:
     """Tests for create_cot_features function."""
+
+    def test_joined_features_use_cot_open_interest(self):
+        """Position percentages use the report denominator, not OHLCV open interest."""
+        combined = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 8, tzinfo=UTC)],
+                "open_interest": [50.0],
+                "cot_report_date": [date(2024, 1, 2)],
+                "cot_open_interest": [100.0],
+                "lev_money_net": [10.0],
+            }
+        )
+
+        result = create_cot_features(combined)
+
+        assert result["cot_lev_money_pct_oi"][0] == pytest.approx(10.0)
+
+    def test_four_week_change_counts_reports_not_daily_rows(self):
+        """A four-week feature compares distinct weekly reports after daily expansion."""
+        report_dates = [date(2024, 1, 2) + timedelta(weeks=week) for week in range(5)]
+        rows: list[dict[str, object]] = []
+        for report_index, report_date in enumerate(report_dates):
+            for day in range(5):
+                rows.append(
+                    {
+                        "timestamp": datetime(2024, 1, 8, tzinfo=UTC)
+                        + timedelta(weeks=report_index, days=day),
+                        "cot_report_date": report_date,
+                        "cot_open_interest": 100.0,
+                        "lev_money_net": float(report_index * 10),
+                    }
+                )
+        combined = pl.DataFrame(rows)
+
+        result = create_cot_features(combined)
+
+        fifth_report = result.filter(pl.col("cot_report_date") == report_dates[-1])
+        assert fifth_report["cot_lev_money_chg_4w"].unique().to_list() == [40.0]
+
+    def test_52_week_zscore_counts_distinct_reports(self):
+        """A 52-week feature uses 52 reports even after daily expansion."""
+        rows: list[dict[str, object]] = []
+        for report_index in range(52):
+            report_date = date(2023, 1, 3) + timedelta(weeks=report_index)
+            for day in range(5):
+                rows.append(
+                    {
+                        "timestamp": datetime(2023, 1, 9, tzinfo=UTC)
+                        + timedelta(weeks=report_index, days=day),
+                        "cot_report_date": report_date,
+                        "cot_open_interest": 100.0,
+                        "lev_money_net": float(report_index),
+                    }
+                )
+
+        result = create_cot_features(pl.DataFrame(rows))
+
+        last_report = result.filter(
+            pl.col("cot_report_date") == date(2023, 1, 3) + timedelta(weeks=51)
+        )
+        expected = (51 - 25.5) / stdev(range(52))
+        assert last_report["cot_lev_money_zscore_52w"].unique().to_list() == [
+            pytest.approx(expected)
+        ]
 
     def test_financial_futures_features(self):
         """Test feature creation for financial futures."""
@@ -383,6 +569,10 @@ class TestLoadCombinedFuturesData:
         cot_data = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10), date(2023, 1, 17)],
+                "available_at": [
+                    datetime(2023, 1, 13, 20, 30, tzinfo=UTC),
+                    datetime(2023, 1, 20, 20, 30, tzinfo=UTC),
+                ],
                 "open_interest": [100000, 110000],
                 "lev_money_net": [10000, 12000],
             }
@@ -396,7 +586,7 @@ class TestLoadCombinedFuturesData:
         )
 
         assert "close" in result.columns
-        assert "open_interest" in result.columns
+        assert "cot_open_interest" in result.columns
 
     def test_date_filtering(self, tmp_path):
         """Test date filtering in load function."""
@@ -418,6 +608,7 @@ class TestLoadCombinedFuturesData:
         cot_data = pl.DataFrame(
             {
                 "report_date": [date(2023, 1, 10)],
+                "available_at": [datetime(2023, 1, 13, 20, 30, tzinfo=UTC)],
                 "open_interest": [100000],
             }
         )

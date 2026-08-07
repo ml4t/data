@@ -25,6 +25,7 @@ from ml4t.data.cot.fetcher import (
     load_cot_config,
 )
 from ml4t.data.cot.workflow import (
+    attach_cot_release_schedule,
     combine_cot_ohlcv,
     combine_cot_ohlcv_pit,
     create_cot_features,
@@ -37,6 +38,7 @@ __all__ = [
     "load_cot_config",
     "PRODUCT_MAPPINGS",
     "ProductMapping",
+    "attach_cot_release_schedule",
     "combine_cot_ohlcv",
     "combine_cot_ohlcv_pit",
     "create_cot_features",
