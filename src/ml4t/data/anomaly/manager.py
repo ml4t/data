@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import structlog
 
 from ml4t.data.anomaly.base import AnomalyDetector, AnomalyReport
-from ml4t.data.anomaly.config import AnomalyConfig
+from ml4t.data.anomaly.config import (
+    AnomalyConfig,
+    PriceStalenessConfig,
+    ReturnOutlierConfig,
+    VolumeSpikeConfig,
+)
 from ml4t.data.anomaly.detectors import (
     PriceStalenessDetector,
     ReturnOutlierDetector,
@@ -17,6 +23,12 @@ from ml4t.data.anomaly.detectors import (
 )
 
 logger = structlog.get_logger()
+
+
+def _datetime_scalar(value: object, column: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{column} must contain non-null datetime values")
+    return value
 
 
 class AnomalyManager:
@@ -95,23 +107,33 @@ class AnomalyManager:
         # Create report
         report = AnomalyReport(
             symbol=symbol,
-            start_date=df["timestamp"].min(),
-            end_date=df["timestamp"].max(),
+            start_date=_datetime_scalar(df["timestamp"].min(), "timestamp"),
+            end_date=_datetime_scalar(df["timestamp"].max(), "timestamp"),
             total_rows=len(df),
         )
 
         # Apply each detector
         for detector in self.detectors:
-            if not detector.is_enabled():
-                continue
-
             try:
                 # Get detector config with overrides
-                if hasattr(detector, "config"):
-                    detector_config = self.config.get_detector_config(
-                        detector.name, asset_class=asset_class, symbol=symbol
-                    )
-                    detector.config = detector_config
+                detector_config = self.config.get_detector_config(
+                    detector.name, asset_class=asset_class, symbol=symbol
+                )
+                if isinstance(detector, ReturnOutlierDetector):
+                    config = ReturnOutlierConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+                elif isinstance(detector, VolumeSpikeDetector):
+                    config = VolumeSpikeConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+                elif isinstance(detector, PriceStalenessDetector):
+                    config = PriceStalenessConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+
+                if not detector.is_enabled():
+                    continue
 
                 # Detect anomalies
                 anomalies = detector.detect(df, symbol)
@@ -225,7 +247,7 @@ class AnomalyManager:
 
         return filtered
 
-    def get_statistics(self, report: AnomalyReport) -> dict:
+    def get_statistics(self, report: AnomalyReport) -> dict[str, Any]:
         """
         Get statistics from anomaly report.
 

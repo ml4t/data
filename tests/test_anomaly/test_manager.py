@@ -148,6 +148,30 @@ class TestAnomalyManager:
 
         assert len(tsla_outliers) <= len(normal_outliers)
 
+    def test_symbol_override_can_disable_and_next_symbol_restores_detector(self, sample_data):
+        """Per-symbol enabled overrides apply only to the requested analysis."""
+        config = AnomalyConfig(
+            return_outliers={"enabled": True, "threshold": 3.0},
+            volume_spikes={"enabled": False},
+            price_staleness={"enabled": False},
+            symbol_overrides={"SKIP": {"return_outliers": {"enabled": False}}},
+        )
+        manager = AnomalyManager(config)
+
+        skipped = manager.analyze(sample_data, "SKIP")
+        restored = manager.analyze(sample_data, "AAPL")
+
+        assert "return_outliers" not in skipped.detectors_used
+        assert "return_outliers" in restored.detectors_used
+
+    def test_invalid_timestamp_schema_is_rejected(self, sample_data):
+        """Reports reject timestamp columns that cannot satisfy their datetime contract."""
+        invalid = sample_data.with_columns(pl.col("timestamp").dt.to_string())
+        manager = AnomalyManager()
+
+        with pytest.raises(ValueError, match="timestamp must contain non-null datetime values"):
+            manager.analyze(invalid, "TEST")
+
     def test_save_report(self, sample_data):
         """Test saving report to disk."""
         manager = AnomalyManager()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -53,12 +55,12 @@ class AnomalyConfig(BaseModel):
     )
 
     # Asset class overrides
-    asset_overrides: dict[str, dict[str, dict]] = Field(
+    asset_overrides: dict[str, dict[str, dict[str, Any]]] = Field(
         default_factory=dict, description="Asset-specific configuration overrides"
     )
 
     # Symbol-specific overrides
-    symbol_overrides: dict[str, dict[str, dict]] = Field(
+    symbol_overrides: dict[str, dict[str, dict[str, Any]]] = Field(
         default_factory=dict, description="Symbol-specific configuration overrides"
     )
 
