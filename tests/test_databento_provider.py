@@ -517,32 +517,7 @@ class TestDataBentoProvider:
 
 @pytest.mark.integration
 class TestDataBentoProviderIntegration:
-    """Integration tests for Databento provider (requires API key)."""
-
-    @pytest.mark.skipif(not os.getenv("DATABENTO_API_KEY"), reason="DATABENTO_API_KEY not set")
-    def test_real_api_fetch(self):
-        """Test with real Databento API (if key available)."""
-        provider = DataBentoProvider()
-
-        # Fetch a small amount of data to minimize costs
-        # Note: ES.v.0 continuous futures don't work with GLBX.MDP3 dataset
-        # Using specific contract instead
-        df = provider.fetch_ohlcv(
-            "ESH4",  # E-mini S&P March 2024 contract
-            "2024-01-02",  # Single day
-            "2024-01-02",
-            "daily",
-        )
-
-        assert not df.is_empty()
-        assert "timestamp" in df.columns
-        assert "open" in df.columns
-        assert "close" in df.columns
-
-        # Verify data quality
-        assert df["high"].max() >= df["low"].min()
-        assert df["high"].max() >= df["open"].max()
-        assert df["high"].max() >= df["close"].max()
+    """Non-contract Databento integration scenarios."""
 
     @pytest.mark.skipif(not os.getenv("DATABENTO_API_KEY"), reason="DATABENTO_API_KEY not set")
     @pytest.mark.skip(reason="DataBento paid tier required")

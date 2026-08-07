@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import numpy as np
 import polars as pl
@@ -163,16 +162,6 @@ class TestLearnedSyntheticInit:
         """Test initialization without seed."""
         provider = LearnedSyntheticProvider(samples=sample_3d_array)
         assert provider.seed is None
-
-    def test_init_with_model(self, sample_3d_array: np.ndarray):
-        """Test initialization with model object."""
-        mock_model = MagicMock()
-        provider = LearnedSyntheticProvider(
-            samples=sample_3d_array,
-            model=mock_model,
-        )
-        # Model is stored internally
-        assert provider._model is mock_model
 
 
 # =============================================================================
@@ -434,23 +423,6 @@ class TestLearnedSyntheticSamples:
         samples = provider.get_samples(n_samples=1000, shuffle=False)
         # Should return all available
         assert samples.shape[0] == 100
-
-    def test_generate_samples_no_model(self, provider: LearnedSyntheticProvider):
-        """Test generate_samples raises error when no model."""
-        with pytest.raises(RuntimeError, match="Cannot generate new samples"):
-            provider.generate_samples(n_samples=10)
-
-    def test_generate_samples_with_model(self, sample_3d_array: np.ndarray):
-        """Test generate_samples with model (placeholder behavior)."""
-        mock_model = MagicMock()
-        provider = LearnedSyntheticProvider(
-            samples=sample_3d_array,
-            model=mock_model,
-        )
-
-        # Should return random samples (placeholder implementation)
-        samples = provider.generate_samples(n_samples=10)
-        assert samples.shape[0] == 10
 
 
 # =============================================================================

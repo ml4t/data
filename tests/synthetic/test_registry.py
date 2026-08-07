@@ -444,6 +444,22 @@ class TestRegistryProvider:
         provider = registry.get_provider("timegan", "etf_returns", seed=42)
         assert provider.seed == 42
 
+    def test_get_provider_rejects_incomplete_artifact(self, mock_checkpoint_dir: Path):
+        """Provider creation names the missing safe sample artifact."""
+        artifact = mock_checkpoint_dir / "synthetic" / "checkpoints" / "incomplete" / "experiment"
+        artifact.mkdir(parents=True)
+        (artifact / "metadata.json").write_text(
+            json.dumps({"generator": {"name": "incomplete"}}),
+            encoding="utf-8",
+        )
+        registry = SyntheticRegistry(
+            data_dir=mock_checkpoint_dir,
+            checkpoints_subdir="synthetic/checkpoints",
+        )
+
+        with pytest.raises(FileNotFoundError, match="samples.npy"):
+            registry.get_provider("incomplete", "experiment")
+
     def test_get_provider_default_experiment(self, registry: SyntheticRegistry):
         """Test getting provider with default experiment."""
         provider = registry.get_provider("timegan", experiment=None)

@@ -319,22 +319,11 @@ class SyntheticRegistry:
 
         checkpoint_path = self._get_checkpoint_path(generator, experiment)
 
-        # Prefer loading from samples (faster)
-        samples_file = checkpoint_path / "samples.npy"
-        if samples_file.exists():
-            return LearnedSyntheticProvider.from_samples(
-                samples_path=samples_file,
-                metadata_path=checkpoint_path / "metadata.json",
-                seed=seed,
-                calendar_mode=calendar_mode,
-            )
-        else:
-            # Fall back to checkpoint loading
-            return LearnedSyntheticProvider.from_checkpoint(
-                checkpoint_path=checkpoint_path,
-                seed=seed,
-                calendar_mode=calendar_mode,
-            )
+        return LearnedSyntheticProvider.from_checkpoint(
+            checkpoint_path=checkpoint_path,
+            seed=seed,
+            calendar_mode=calendar_mode,
+        )
 
     def get_info(self, generator: str, experiment: str | None = None) -> str:
         """Get a human-readable summary of a generator.

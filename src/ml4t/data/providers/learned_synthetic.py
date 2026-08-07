@@ -67,8 +67,6 @@ class LearnedSyntheticProvider(BaseProvider):
         Pre-loaded samples of shape (n_samples, seq_length, n_features)
     metadata : dict
         Metadata about the generator and training
-    model : Any, optional
-        Loaded model for generating new samples (checkpoint mode only)
     seed : int, optional
         Random seed for reproducibility
     calendar_mode : {"equity", "continuous"}, default="equity"
@@ -147,12 +145,11 @@ class LearnedSyntheticProvider(BaseProvider):
         self,
         samples: np.ndarray,
         metadata: dict[str, Any] | None = None,
-        model: Any = None,
         seed: int | None = None,
         rate_limit: tuple[int, float] | None = None,
         calendar_mode: CalendarMode = "equity",
     ) -> None:
-        """Initialize provider with samples or model.
+        """Initialize a provider with safe, pre-generated samples.
 
         Note: Prefer using class methods from_samples() or from_checkpoint()
         instead of calling __init__ directly.
@@ -165,7 +162,6 @@ class LearnedSyntheticProvider(BaseProvider):
 
         self._samples = samples
         self._metadata = metadata or {}
-        self._model = model
         self.seed = seed
         if calendar_mode not in {"equity", "continuous"}:
             raise ValueError("calendar_mode must be 'equity' or 'continuous'")
@@ -239,7 +235,6 @@ class LearnedSyntheticProvider(BaseProvider):
         return cls(
             samples=samples,
             metadata=metadata,
-            model=None,
             seed=seed,
             calendar_mode=calendar_mode,
         )
@@ -299,27 +294,9 @@ class LearnedSyntheticProvider(BaseProvider):
         return cls(
             samples=samples,
             metadata=metadata,
-            model=None,
             seed=seed,
             calendar_mode=calendar_mode,
         )
-
-    @staticmethod
-    def _generate_from_model(
-        model: Any,  # noqa: ARG004 - used when model generation is implemented
-        n_samples: int,
-        seq_length: int,
-        n_features: int,
-    ) -> np.ndarray:
-        """Generate samples from the loaded model.
-
-        This is a placeholder that returns random data.
-        Full implementation would use the actual model.
-        """
-        # Placeholder: return random samples
-        # In a full implementation, this would call the model's generate method
-        logger.warning("Model generation not implemented, returning random placeholder samples")
-        return np.random.randn(n_samples, seq_length, n_features) * 0.01
 
     @property
     def name(self) -> str:
@@ -384,44 +361,6 @@ class LearnedSyntheticProvider(BaseProvider):
             return self._samples[indices]
         else:
             return self._samples[:n_samples]
-
-    def generate_samples(
-        self,
-        n_samples: int,
-        seq_length: int | None = None,
-    ) -> np.ndarray:
-        """Generate new samples using the loaded model.
-
-        This only works if the provider was created from a checkpoint.
-
-        Parameters
-        ----------
-        n_samples : int
-            Number of samples to generate
-        seq_length : int, optional
-            Sequence length. If None, uses the default from training.
-
-        Returns
-        -------
-        np.ndarray
-            Generated samples
-
-        Raises
-        ------
-        RuntimeError
-            If no model is loaded (sample-only mode)
-        """
-        if self._model is None:
-            raise RuntimeError(
-                "Cannot generate new samples without a loaded model. "
-                "Use from_checkpoint() to load a model, or use get_samples() "
-                "to access pre-generated samples."
-            )
-
-        if seq_length is None:
-            seq_length = self._seq_length
-
-        return self._generate_from_model(self._model, n_samples, seq_length, self._n_features)
 
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with the correct schema."""
