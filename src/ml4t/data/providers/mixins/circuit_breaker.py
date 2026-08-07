@@ -217,8 +217,6 @@ class CircuitBreaker:
             error_type=type(error).__name__,
             failure_count=self.failure_count,
         )
-        if self.state == "HALF_OPEN":
-            self.state = "OPEN"
 
     def reset(self) -> None:
         """Manually reset the circuit breaker."""

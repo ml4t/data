@@ -250,6 +250,29 @@ class TestCircuitBreaker:
         assert breaker.state == "OPEN"
         assert breaker.failure_count == 1
 
+    def test_half_open_ignored_error_does_not_restart_open_timeout(self):
+        """A client error during a probe provides no service-health evidence."""
+        now = [100.0]
+        breaker = CircuitBreaker(failure_threshold=1, reset_timeout=10.0, clock=lambda: now[0])
+
+        def transient_failure():
+            raise NetworkError("mock")
+
+        def invalid_response():
+            raise DataValidationError("mock", "bad")
+
+        with pytest.raises(NetworkError):
+            breaker.call(transient_failure)
+        now[0] += 10.0
+
+        with pytest.raises(DataValidationError):
+            breaker.call(invalid_response)
+
+        assert breaker.state == "HALF_OPEN"
+        assert breaker.call(lambda: "healthy") == "healthy"
+        assert breaker.state == "CLOSED"
+        assert breaker.failure_count == 0
+
 
 class TestBaseProvider:
     """Test enhanced BaseProvider functionality."""

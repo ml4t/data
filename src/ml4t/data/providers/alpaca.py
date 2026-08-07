@@ -527,11 +527,15 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         if token in (None, ""):
             return None
         if not isinstance(token, str):
-            raise NetworkError(provider="alpaca", message="received an invalid pagination token")
+            raise DataValidationError(
+                provider="alpaca", message="received an invalid pagination token"
+            )
         if token in seen_tokens:
-            raise NetworkError(provider="alpaca", message="received a repeated pagination token")
+            raise DataValidationError(
+                provider="alpaca", message="received a repeated pagination token"
+            )
         if page_count >= self.MAX_PAGES:
-            raise NetworkError(
+            raise DataValidationError(
                 provider="alpaca",
                 message=f"reached pagination page limit of {self.MAX_PAGES}",
             )

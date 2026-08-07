@@ -573,7 +573,7 @@ class TestPagination:
             patch.object(provider.session, "get", side_effect=repeat_with_probe_limit) as mock_get,
             patch.object(provider.rate_limiter, "acquire"),
         ):
-            with pytest.raises(NetworkError, match="repeated pagination token"):
+            with pytest.raises(DataValidationError, match="repeated pagination token"):
                 provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
 
         assert mock_get.call_count == 2
@@ -597,14 +597,14 @@ class TestPagination:
             ) as mock_aget,
             patch.object(provider.rate_limiter, "acquire"),
         ):
-            with pytest.raises(NetworkError, match="repeated pagination token"):
+            with pytest.raises(DataValidationError, match="repeated pagination token"):
                 await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-07", "daily")
 
         assert mock_aget.call_count == 2
 
-    def test_page_limit_terminates_public_fetch(self, provider):
+    def test_page_limit_terminates_public_fetch(self, provider, monkeypatch):
         """A unique but endless cursor sequence stops at the declared page limit."""
-        provider.MAX_PAGES = 2
+        monkeypatch.setattr(AlpacaDataProvider, "MAX_PAGES", 2)
         calls = 0
 
         def endless_pages(*args, **kwargs):
@@ -618,10 +618,21 @@ class TestPagination:
             patch.object(provider.session, "get", side_effect=endless_pages) as mock_get,
             patch.object(provider.rate_limiter, "acquire"),
         ):
-            with pytest.raises(NetworkError, match="pagination page limit"):
+            with pytest.raises(DataValidationError, match="pagination page limit"):
                 provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
 
         assert mock_get.call_count == provider.MAX_PAGES
+
+    def test_non_string_page_token_is_response_validation_error(self, provider):
+        response = _page_response([], None)
+        response.json.return_value["next_page_token"] = 123
+
+        with (
+            patch.object(provider.session, "get", return_value=response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(DataValidationError, match="invalid pagination token"):
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-07", "daily")
 
     def test_follows_next_page_token(self, provider):
         """Two stock pages are merged and page 2 is requested with the token."""
