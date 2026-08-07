@@ -36,6 +36,7 @@ class TestCoinGeckoProviderInit:
 
         assert provider.api_key == "test_key"
         assert provider.use_pro is False
+        assert provider.session.headers["x-cg-demo-api-key"] == "test_key"
 
     def test_init_with_env_api_key(self):
         """Test initialization with API key from environment."""
@@ -46,10 +47,12 @@ class TestCoinGeckoProviderInit:
 
     def test_init_pro_tier(self):
         """Test initialization with Pro tier."""
-        provider = CoinGeckoProvider(use_pro=True)
+        provider = CoinGeckoProvider(api_key="pro-key", use_pro=True)
 
         assert provider.use_pro is True
         assert provider.base_url == "https://pro-api.coingecko.com/api/v3"
+        assert provider.session.headers["x-cg-pro-api-key"] == "pro-key"
+        assert "x-cg-demo-api-key" not in provider.session.headers
 
     def test_init_custom_rate_limit(self):
         """Test initialization with custom rate limit."""
@@ -373,6 +376,7 @@ class TestFetchOhlc:
                 "vs_currency": "usd",
                 "from": 1704067200,
                 "to": 1704153600,
+                "interval": "daily",
             },
         )
         assert result["volume"].to_list() == [1234.5, 2345.6]
@@ -381,8 +385,8 @@ class TestFetchOhlc:
             datetime(2024, 1, 2, tzinfo=UTC),
         ]
 
-    def test_fetch_daily_volumes_requests_daily_interval_only_on_pro(self):
-        """Test `interval` is sent only where the plan supports it."""
+    def test_fetch_daily_volumes_requests_daily_interval_on_pro(self):
+        """Test Pro requests use the explicit daily interval."""
         provider = CoinGeckoProvider(api_key="pro-key", use_pro=True)
         response = MagicMock()
         response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
@@ -443,6 +447,7 @@ class TestFetchOhlc:
                 "vs_currency": "usd",
                 "from": 1704067200,
                 "to": 1704067200,
+                "interval": "daily",
             },
         )
 
@@ -454,14 +459,14 @@ class TestFetchOhlc:
             [1704153600000, 102.0, 106.0, 101.0, 104.0],
         ]
         volume_response = MagicMock()
-        volume_response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
+        volume_response.json.return_value = {"total_volumes": [[1704153540000, 1234.5]]}
 
         with (
             patch.object(
                 provider.session,
                 "get",
                 side_effect=[ohlc_response, volume_response],
-            ),
+            ) as get,
             patch.object(provider, "_acquire_rate_limit"),
         ):
             result = provider._fetch_ohlc(
@@ -481,6 +486,12 @@ class TestFetchOhlc:
                 "volume": 1234.5,
             }
         ]
+        assert get.call_args_list[1].kwargs["params"] == {
+            "vs_currency": "usd",
+            "from": 1704067200,
+            "to": 1704153600,
+            "interval": "daily",
+        }
 
     def test_fetch_ohlc_excludes_current_utc_day(self, provider):
         """An incomplete current UTC candle is never returned as a daily bar."""

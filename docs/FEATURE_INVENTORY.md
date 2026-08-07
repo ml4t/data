@@ -667,7 +667,8 @@ class UpdateResult:
    ml4t-data fetch -s AAPL -s MSFT --start 2024-01-01 --end 2024-12-31
    ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-12-31
    # CoinGecko daily OHLC covers the last 29 completed UTC days only
-   ml4t-data fetch -s BTC --provider coingecko --start 2026-07-09 --end 2026-08-06
+   # Replace the dates with a 29-day window ending yesterday in UTC
+   ml4t-data fetch -s BTC --provider coingecko --start START_DATE --end END_DATE
    ```
 
 2. **update-all** - Incremental updates from YAML config

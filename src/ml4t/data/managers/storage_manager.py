@@ -526,7 +526,7 @@ class StorageManager:
                         max_history_days=max_history_days,
                     )
                     fetch_start = earliest_fetch_start
-                    provider_history_limited = True
+                    provider_history_limited = fetch_start.date() > last_timestamp.date()
 
             # Skip update if data is already current
             if frequency == "daily" and (fetch_end - last_timestamp).days < 1:

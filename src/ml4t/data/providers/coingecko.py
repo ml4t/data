@@ -124,7 +124,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         # Add API key to headers if provided
         session_config = {}
         if self.api_key:
-            session_config["headers"] = {"x-cg-demo-api-key": self.api_key}
+            header = "x-cg-pro-api-key" if self.use_pro else "x-cg-demo-api-key"
+            session_config["headers"] = {header: self.api_key}
 
         # Initialize base provider with rate limiting
         super().__init__(rate_limit=rate_limit, session_config=session_config)
@@ -293,7 +294,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             self._acquire_rate_limit()
             volumes = self._fetch_daily_volumes(
                 coin_id,
-                start_date + timedelta(days=1),
+                start_date,
                 end_date + timedelta(days=1),
                 vs_currency,
             )
@@ -317,10 +318,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             "vs_currency": vs_currency,
             "from": self._epoch_seconds(start),
             "to": self._epoch_seconds(end),
+            "interval": "daily",
         }
-        # `interval` is a paid-plan parameter; free plans infer granularity from the range.
-        if self.use_pro:
-            params["interval"] = "daily"
         return params
 
     def _fetch_daily_volumes(
@@ -633,7 +632,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             await asyncio.to_thread(self._acquire_rate_limit)
             volumes = await self._fetch_daily_volumes_async(
                 coin_id,
-                start_date + timedelta(days=1),
+                start_date,
                 end_date + timedelta(days=1),
                 vs_currency,
             )

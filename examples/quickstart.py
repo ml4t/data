@@ -13,7 +13,7 @@ Usage:
 """
 
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Add src to path for development
@@ -30,9 +30,11 @@ def main():
     print("=" * 80)
     print()
 
-    # Calculate date range (last 30 days)
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    # Calculate the most recent 29 completed UTC days
+    end = datetime.now(UTC).date() - timedelta(days=1)
+    start = end - timedelta(days=28)
+    start_date = start.isoformat()
+    end_date = end.isoformat()
 
     print(f"📈 Fetching Bitcoin data from {start_date} to {end_date}...")
     print()

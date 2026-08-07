@@ -315,6 +315,48 @@ class TestDataManagerUpdate:
         assert (datetime.now(UTC).date() - effective_start).days == 29
         fill_gaps.assert_not_called()
         assert len(storage.read(key).collect()) == 2
+        metadata = storage.get_metadata(key)
+        assert metadata is not None
+        assert metadata["custom"]["attributes"]["provider_history_limited"] is True
+
+    def test_update_keeps_gap_checks_when_history_clamp_leaves_no_hole(
+        self,
+        manager,
+        storage,
+    ):
+        """A bounded lookback does not disable gap checks for a current dataset."""
+        recent_date = datetime.now(UTC) - timedelta(days=1)
+        columns = {
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [1_000.0],
+        }
+        manager.import_data(
+            pl.DataFrame({"timestamp": [recent_date], **columns}),
+            symbol="BTC",
+            provider="coingecko",
+            asset_class="crypto",
+        )
+        next_date = recent_date + timedelta(days=1)
+        new_data = pl.DataFrame({"timestamp": [next_date], **columns})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data),
+            patch("ml4t.data.utils.gaps.GapDetector.detect_gaps", return_value=[]) as detect,
+        ):
+            key = manager.update(
+                "BTC",
+                asset_class="crypto",
+                provider="coingecko",
+                lookback_days=30,
+            )
+
+        detect.assert_called_once()
+        metadata = storage.get_metadata(key)
+        assert metadata is not None
+        assert metadata["custom"]["attributes"]["provider_history_limited"] is False
 
     def test_update_incremental(self, manager, storage):
         """Test incremental update with new data."""
