@@ -111,32 +111,6 @@ def health(storage_path, stale_days, detailed):
         raise click.Abort()
 
 
-@click.command()
-@click.option("--host", default="127.0.0.1", help="Host to bind to")
-@click.option("--port", default=8000, type=int, help="Port to bind to")
-@click.option("--reload", is_flag=True, help="Enable auto-reload (development)")
-def server(host, port, reload):
-    """Start the ML4T Data REST API server."""
-    console.print(f"[bold]Starting ML4T Data API server on {host}:{port}[/bold]")
-
-    if reload:
-        console.print("[yellow]Auto-reload enabled (development mode)[/yellow]")
-
-    try:
-        from ml4t.data.api.main import run_server  # type: ignore[import-not-found]
-
-        run_server(host=host, port=port, reload=reload)
-
-    except ImportError:
-        console.print(
-            "[red]API dependencies not installed. Install with: pip install 'ml4t-data[api]'[/red]"
-        )
-        raise click.Abort()
-    except Exception as e:
-        console.print(f"[red]Error starting server: {e}[/red]")
-        raise click.Abort()
-
-
 @click.command("show-completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def show_completion(shell):

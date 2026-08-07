@@ -65,11 +65,9 @@ Complete documentation for the ML4T Data market data library.
 - **[Yahoo Finance](yahoo_provider.md)** - Free stock data (legacy)
 - **[Crypto Providers](crypto_providers.md)** - Cryptocurrency data sources
 
-### API & Deployment
+### Interfaces
 
-- **[REST API Guide](api/rest-api.md)** - FastAPI server for production
-- **[API Guide](api_guide.md)** - HTTP API reference
-- **[Production Deployment](deployment/production-guide.md)** - Deploy ML4T Data in production
+- **[Python API Reference](api/index.md)** - Public classes and methods
 - **[CLI Reference](user-guide/cli-reference.md)** - Command-line interface
 
 ---
@@ -105,15 +103,14 @@ Complete documentation for the ML4T Data market data library.
 4. [Provider Template](../provider_template/)
 5. [Integration Testing](INTEGRATION_TESTING.md)
 
-### For Production Systems
+### For Maintained Workflows
 
 **Deploy ML4T Data at scale**:
 
 1. [Incremental Updates](INCREMENTAL_UPDATES.md)
 2. [Async Storage](ASYNC_STORAGE.md)
-3. [REST API Guide](api/rest-api.md)
-4. [Production Deployment](deployment/production-guide.md)
-5. [Tutorial 05: Multi-Provider](tutorials/05_multi_provider.md)
+3. [Python API Reference](api/index.md)
+4. [Tutorial 05: Multi-Provider](tutorials/05_multi_provider.md)
 
 ---
 
@@ -219,14 +216,13 @@ es = provider.fetch_ohlcv("ES.v.0", "2024-01-01", "2024-12-31")  # S&P 500 futur
 - **Data Quality**: [Tutorial 04](tutorials/04_data_quality.md)
 - **Multi-Provider**: [Tutorial 05](tutorials/05_multi_provider.md)
 - **Storage**: [ASYNC_STORAGE.md](ASYNC_STORAGE.md)
-- **API**: [REST API Guide](api/rest-api.md), [API Guide](api_guide.md)
+- **Python API**: [API Reference](api/index.md)
 
 ### By Task
 
 - **Adding a provider**: [Creating a Provider](creating_a_provider.md)
 - **Understanding architecture**: [Extending ML4T Data](extending_ml4t-data.md)
 - **Writing tests**: [Integration Testing](INTEGRATION_TESTING.md)
-- **Deploying**: [Production Guide](deployment/production-guide.md)
 - **Exporting data**: [Export Guide](export_guide.md)
 - **Using CLI**: [CLI Reference](user-guide/cli-reference.md)
 
@@ -242,8 +238,7 @@ docs/
 ├── asset-classes/               # Market-specific guides (crypto, stocks, forex, futures)
 ├── tutorials/                   # Step-by-step educational content
 ├── user-guide/                  # Getting started, CLI reference
-├── api/                         # REST API documentation
-├── deployment/                  # Production deployment guides
+├── api/                         # Python API documentation
 ├── providers/                   # Provider-specific references
 ├── creating_a_provider.md       # Tutorial for adding providers
 ├── extending_ml4t-data.md           # Architecture documentation
@@ -256,7 +251,7 @@ docs/
 1. **New users**: Start with [Main README](../README.md) → [Asset Classes](asset-classes/README.md)
 2. **Developers**: [Provider Selection](provider-selection-guide.md) → [Tutorials](tutorials/README.md)
 3. **Contributors**: [CONTRIBUTING](../CONTRIBUTING.md) → [Creating a Provider](creating_a_provider.md)
-4. **Production**: [Tutorials](tutorials/README.md) → [Production Guide](deployment/production-guide.md)
+4. **Maintained workflows**: [Tutorials](tutorials/README.md) → [CLI Reference](user-guide/cli-reference.md)
 
 ### Cross-References
 

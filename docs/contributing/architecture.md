@@ -32,10 +32,9 @@ ML4T Data Architecture
 │   ├── OHLCV Invariants
 │   └── Anomaly Detection
 │
-└── API (Access Layer)
-    ├── REST API (FastAPI)
-    ├── WebSocket (Real-time)
-    └── CLI Interface
+└── Interfaces
+    ├── Python API
+    └── CLI
 ```
 
 ### Design Philosophy

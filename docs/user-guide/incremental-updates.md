@@ -321,8 +321,7 @@ Potential improvements for future sprints:
 4. **Compression Options**: Support for different compression algorithms
 5. **Archive Storage**: Move old data to compressed archives
 6. **Update Notifications**: Email/webhook alerts for failures
-7. **REST API**: HTTP endpoint for remote updates
-8. **Data Reconciliation**: Compare and sync with multiple providers
+7. **Data Reconciliation**: Compare and sync with multiple providers
 
 ## Summary
 

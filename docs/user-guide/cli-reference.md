@@ -217,7 +217,6 @@ ml4t-data download-cot -c cot-config.yaml -o ~/ml4t-data/cot
 | `ml4t-data config` | Show current configuration |
 | `ml4t-data health` | Check health status of all datasets |
 | `ml4t-data health --detailed --stale-days 7` | Show per-symbol staleness |
-| `ml4t-data server --port 8000` | Start the REST API server (requires `ml4t-data[api]`) |
 | `ml4t-data show-completion bash` | Print shell completion script |
 
 ## Shell Completion

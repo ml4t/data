@@ -9,7 +9,7 @@ Modules:
     batch: Batch operations (update-all)
     futures: Futures commands (download-futures, update-futures)
     cot: COT data commands (download-cot)
-    config: Configuration commands (version, providers, config, health, server)
+    config: Configuration commands (version, providers, config, health)
 """
 
 import click
@@ -59,7 +59,6 @@ cli.add_command(config.version)
 cli.add_command(config.providers)
 cli.add_command(config.show_config, name="config")
 cli.add_command(config.health)
-cli.add_command(config.server)
 cli.add_command(config.show_completion, name="show-completion")
 
 

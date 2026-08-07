@@ -1626,17 +1626,17 @@ class TestDownloadCotCommand:
         # Should show some product codes or product listing
 
 
-class TestServerCommand:
-    """Test the server command."""
+def test_unimplemented_server_command_is_not_advertised():
+    """The stable CLI must not expose a command backed by a missing module."""
+    runner = CliRunner()
 
-    def test_server_help(self):
-        """Test server command help."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["server", "--help"])
-        assert result.exit_code == 0
-        assert "Start" in result.output or "API server" in result.output
-        assert "--host" in result.output
-        assert "--port" in result.output
+    help_result = runner.invoke(cli, ["--help"])
+    server_result = runner.invoke(cli, ["server"])
+
+    assert help_result.exit_code == 0
+    assert "server" not in help_result.output
+    assert server_result.exit_code == 2
+    assert "No such command 'server'" in server_result.output
 
 
 class TestUpdateAllCommand:

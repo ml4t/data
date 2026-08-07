@@ -46,7 +46,6 @@ These are installed automatically with `pip install -e .`:
 - **Configuration**: pyyaml, click, python-dotenv, pydantic-settings
 - **Utilities**: structlog, platformdirs, filelock, rich
 - **Session Management**: pandas-market-calendars (≥4.3.0)
-- **REST API**: fastapi, uvicorn, websockets
 
 ### Provider-Specific Dependencies (Optional)
 

@@ -25,9 +25,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install the package
 pip install -e .
 
-# For additional features
-pip install -e ".[api]"    # API server support
-pip install -e ".[dev]"    # Development tools
+# For development tools
+pip install -e ".[dev]"
 ```
 
 ### Verify Installation
@@ -212,56 +211,6 @@ else:
     print("❌ Data validation failed:")
     for issue in result.issues:
         print(f"  - {issue.severity}: {issue.message}")
-```
-
-## API Server
-
-### Starting the Server
-
-```bash
-# Start with default settings
-ml4t-data serve
-
-# Specify port and host
-ml4t-data serve --host 0.0.0.0 --port 8000
-
-# With authentication enabled
-ml4t-data serve --auth
-```
-
-### Using the API
-
-Once the server is running, you can access:
-- Interactive docs: http://localhost:8000/docs
-- API endpoints: http://localhost:8000/api/v1/
-
-#### Example API Calls
-
-```python
-import requests
-
-# Get data for a symbol
-response = requests.get(
-    "http://localhost:8000/api/v1/data/AAPL",
-    params={"start": "2024-01-01", "end": "2024-06-30"}
-)
-data = response.json()
-
-# Update symbol data
-response = requests.post(
-    "http://localhost:8000/api/v1/update/AAPL",
-    headers={"X-API-Key": "your-api-key"}  # If auth enabled
-)
-
-# Export data
-response = requests.post(
-    "http://localhost:8000/api/v1/export",
-    json={
-        "symbol": "AAPL",
-        "format": "csv",
-        "start": "2024-01-01"
-    }
-)
 ```
 
 ## Common Workflows
