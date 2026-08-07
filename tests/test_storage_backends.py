@@ -2,6 +2,7 @@
 
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,7 +16,6 @@ from ml4t.data.storage import (
     StorageConfig,
     create_storage,
 )
-from ml4t.data.storage.keys import storage_key_path
 
 
 @pytest.fixture
@@ -175,10 +175,9 @@ class TestStorageBackends:
     def test_hive_partitioning(self, temp_dir, sample_data):
         """Test Hive-specific partitioning structure."""
         storage = create_storage(temp_dir, strategy="hive")
-        storage.write(sample_data.lazy(), "test_key")
+        key_path = storage.write(sample_data.lazy(), "test_key")
 
         # Check partition structure
-        key_path = storage_key_path(temp_dir, "test_key")
         assert key_path.exists()
 
         # Should have year directories
@@ -201,6 +200,115 @@ class TestStorageBackends:
         # No temp files should remain
         temp_files = list(temp_dir.glob("*.tmp"))
         assert len(temp_files) == 0
+
+    def test_hive_repeated_write_is_full_replacement(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="hive")
+        original = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15), datetime(2024, 2, 15)],
+                "close": [1.0, 2.0],
+            }
+        )
+        replacement = pl.DataFrame({"timestamp": [datetime(2024, 1, 20)], "close": [3.0]})
+        storage.write(original, "prices")
+
+        storage.write(replacement, "prices")
+
+        assert storage.read("prices").collect().equals(replacement)
+        metadata = storage.get_metadata("prices")
+        assert metadata is not None
+        assert metadata["row_count"] == 1
+        assert metadata["partitions"] == ["year=2024/month=1"]
+
+    def test_hive_partition_failure_preserves_previous_commit(self, temp_dir, monkeypatch):
+        storage = create_storage(temp_dir, strategy="hive")
+        original = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15), datetime(2024, 2, 15)],
+                "close": [1.0, 2.0],
+            }
+        )
+        replacement = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 3, 15), datetime(2024, 4, 15)],
+                "close": [3.0, 4.0],
+            }
+        )
+        storage.write(original, "prices")
+        previous_commit = storage._current_commit("prices")
+        original_atomic_write = storage._atomic_write
+        call_count = 0
+
+        def fail_second_partition(df, path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise OSError("injected partition failure")
+            original_atomic_write(df, path)
+
+        monkeypatch.setattr(storage, "_atomic_write", fail_second_partition)
+
+        with pytest.raises(OSError, match="injected partition failure"):
+            storage.write(replacement, "prices")
+
+        assert storage.read("prices").collect().equals(original)
+        assert storage._current_commit("prices").commit_id == previous_commit.commit_id
+        assert storage.get_metadata("prices") == previous_commit.metadata
+        assert not list(storage._key_path("prices").glob(".staging-*"))
+        restarted = create_storage(temp_dir, strategy="hive")
+        assert restarted.read("prices").collect().equals(original)
+
+    def test_pointer_failure_preserves_previous_commit(self, temp_dir, monkeypatch):
+        storage = create_storage(temp_dir, strategy="flat")
+        original = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "value": [1]})
+        replacement = pl.DataFrame({"timestamp": [datetime(2024, 1, 2)], "value": [2]})
+        storage.write(original, "prices")
+        previous_commit = storage._current_commit("prices")
+
+        def fail_pointer(path, content):
+            raise OSError("injected pointer failure")
+
+        monkeypatch.setattr(storage, "_atomic_write_text", fail_pointer)
+
+        with pytest.raises(OSError, match="injected pointer failure"):
+            storage.write(replacement, "prices")
+
+        assert storage.read("prices").collect().equals(original)
+        assert storage._current_commit("prices").commit_id == previous_commit.commit_id
+        restarted = create_storage(temp_dir, strategy="flat")
+        assert restarted.read("prices").collect().equals(original)
+
+    def test_restart_removes_unpublished_staging_directory(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        storage.write(pl.DataFrame({"value": [1]}), "prices")
+        staging = storage._key_path("prices") / ".staging-interrupted"
+        staging.mkdir()
+        (staging / "partial.parquet").write_bytes(b"partial")
+
+        create_storage(temp_dir, strategy="flat")
+
+        assert not staging.exists()
+
+    def test_concurrent_flat_writes_publish_matching_data_and_metadata(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+
+        def write_generation(writer: int) -> None:
+            data = pl.DataFrame(
+                {
+                    "timestamp": [datetime(2024, 1, 1)] * writer,
+                    "writer": [writer] * writer,
+                }
+            )
+            storage.write(data, "prices", metadata={"writer": writer})
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write_generation, range(1, 25)))
+
+        data = storage.read("prices").collect()
+        metadata = storage.get_metadata("prices")
+        assert metadata is not None
+        assert data.height == metadata["row_count"]
+        assert data["writer"].unique().to_list() == [metadata["custom"]["writer"]]
 
     def test_lazy_evaluation(self, temp_dir, sample_data):
         """Test that lazy evaluation is preserved."""

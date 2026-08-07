@@ -300,12 +300,8 @@ class StorageManager:
             # Store data
             self._report_progress(f"Storing data for {symbol}", 0.8)
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    txn.write(data_obj)
-            else:
-                metadata_dict = data_obj.metadata.model_dump() if data_obj.metadata else None
-                self.storage.write(data_obj.data, key, metadata_dict)
+            metadata_dict = data_obj.metadata.model_dump() if data_obj.metadata else None
+            self.storage.write(data_obj.data, key, metadata_dict)
 
             logger.info("Data load completed", key=key, rows=len(df))
             self._report_progress(f"Completed loading {symbol}", 1.0)
@@ -417,12 +413,8 @@ class StorageManager:
             data_obj = DataObject(data=df, metadata=metadata)
             key = f"{asset_class}/{frequency}/{symbol}"
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    txn.write(data_obj)
-            else:
-                metadata_dict = data_obj.metadata.model_dump()
-                self.storage.write(data_obj.data, key, metadata_dict)
+            metadata_dict = data_obj.metadata.model_dump()
+            self.storage.write(data_obj.data, key, metadata_dict)
 
             logger.info("Data import completed", key=key, rows=len(df))
             return key
@@ -602,15 +594,8 @@ class StorageManager:
 
             updated_obj = DataObject(data=merged_df, metadata=updated_metadata)
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    if hasattr(txn, "update"):
-                        txn.update(key, updated_obj)
-                    else:
-                        txn.write(updated_obj)
-            else:
-                metadata_dict = updated_obj.metadata.model_dump() if updated_obj.metadata else None
-                self.storage.write(updated_obj.data, key, metadata_dict)
+            metadata_dict = updated_obj.metadata.model_dump() if updated_obj.metadata else None
+            self.storage.write(updated_obj.data, key, metadata_dict)
 
             logger.info(
                 "Incremental update completed",

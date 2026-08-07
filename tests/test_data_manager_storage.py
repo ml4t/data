@@ -33,7 +33,6 @@ class TestDataManagerLoad:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 
@@ -124,7 +123,6 @@ class TestDataManagerLoad:
 
         manager = DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
             progress_callback=progress_callback,
         )
@@ -184,7 +182,6 @@ class TestDataManagerUpdate:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 
@@ -351,7 +348,6 @@ class TestDataManagerUpdate:
 
         manager = DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
             progress_callback=progress_callback,
         )
@@ -400,24 +396,19 @@ class TestDataManagerTransactions:
             }
         )
 
-    def test_transactions_enabled(self, storage):
-        """Test that transactions can be enabled."""
-        manager = DataManager(storage=storage, use_transactions=True)
+    def test_removed_transaction_option_is_rejected(self, storage):
+        """The beta transaction wrapper cannot imply unsupported guarantees."""
+        with pytest.raises(TypeError, match="use_transactions was removed"):
+            DataManager(storage=storage, use_transactions=True)
 
-        # TransactionalStorage should be wrapped
-        assert hasattr(manager.storage, "transaction")
+    def test_storage_uses_atomic_backend_directly(self, storage):
+        manager = DataManager(storage=storage)
 
-    def test_transactions_disabled(self, storage):
-        """Test that transactions can be disabled."""
-        manager = DataManager(storage=storage, use_transactions=False)
-
-        # Should be raw storage (HiveStorage doesn't have transaction)
-        assert not hasattr(manager.storage, "transaction")
+        assert manager.storage is storage
 
     @patch.object(DataManager, "fetch")
-    def test_load_uses_transactions(self, mock_fetch, storage, sample_data):
-        """Test that load() uses transactions when enabled."""
-        manager = DataManager(storage=storage, use_transactions=True)
+    def test_load_publishes_atomic_storage_generation(self, mock_fetch, storage, sample_data):
+        manager = DataManager(storage=storage)
         mock_fetch.return_value = sample_data
 
         # Load should use transaction
@@ -447,7 +438,6 @@ class TestDataManagerBatchLoadFromStorage:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=False,  # Disable - TransactionalStorage.read() doesn't accept date kwargs
             enable_validation=False,  # Disable for faster tests
         )
 
@@ -610,7 +600,6 @@ class TestDataManagerImportData:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 

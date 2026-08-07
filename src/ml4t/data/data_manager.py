@@ -49,7 +49,7 @@ class DataManager:
     **Storage Operations (when storage configured):**
     - Initial data loading with validation
     - Incremental updates with gap detection and filling
-    - Transaction support for ACID guarantees
+    - Atomic generation-based replacement
     - Progress callbacks for UI integration
     - Data validation (OHLCV, cross-validation)
 
@@ -63,7 +63,7 @@ class DataManager:
         >>> from ml4t.data.storage.hive import HiveStorage
         >>> from ml4t.data.storage.backend import StorageConfig
         >>> storage = HiveStorage(StorageConfig(base_path="./data"))
-        >>> manager = DataManager(storage=storage, use_transactions=True)
+        >>> manager = DataManager(storage=storage)
         >>> key = manager.load("AAPL", "2024-01-01", "2024-12-31")
         >>> key = manager.update("AAPL")  # Incremental update
     """
@@ -74,7 +74,6 @@ class DataManager:
         output_format: str = "polars",
         providers: dict[str, dict[str, Any]] | None = None,
         storage: Any | None = None,
-        use_transactions: bool = False,
         enable_validation: bool = True,
         progress_callback: Callable[[str, float], None] | None = None,
         **kwargs,
@@ -86,11 +85,15 @@ class DataManager:
             output_format: Output format ('polars', 'pandas', 'lazy')
             providers: Provider-specific configuration overrides
             storage: Optional storage backend for load/update operations
-            use_transactions: Enable transactional storage for ACID guarantees
             enable_validation: Enable data validation during load/update
             progress_callback: Optional callback for progress updates (message, progress)
             **kwargs: Additional configuration parameters
         """
+        if "use_transactions" in kwargs:
+            raise TypeError(
+                "use_transactions was removed before 0.1.0; supported storage writes are atomic"
+            )
+
         # Initialize configuration manager
         self._config_manager = ConfigManager(
             config_path=config_path,
@@ -118,13 +121,8 @@ class DataManager:
             output_format=self._config_manager.output_format,
         )
 
-        # Setup storage with optional transactions
+        # Supported storage backends publish complete immutable generations.
         self._storage = storage
-        if storage and use_transactions:
-            from ml4t.data.storage.transaction import TransactionalStorage
-
-            self._storage = TransactionalStorage(storage)
-            logger.info("TransactionalStorage enabled for ACID guarantees")
 
         # Initialize storage manager (if storage configured)
         self._storage_manager: StorageManager | None = None

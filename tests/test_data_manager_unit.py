@@ -432,15 +432,12 @@ class TestDataManagerInitOptions:
 
         assert dm.storage is mock_storage
 
-    def test_init_with_transactions(self):
-        """Test initialization with transactional storage."""
+    def test_init_rejects_removed_transactions_option(self):
+        """Test the removed beta transaction option has an actionable error."""
         mock_storage = MagicMock()
 
-        with patch("ml4t.data.storage.transaction.TransactionalStorage") as mock_trans:
-            mock_trans.return_value = MagicMock()
-            _dm = DataManager(storage=mock_storage, use_transactions=True)  # noqa: F841
-
-            mock_trans.assert_called_once_with(mock_storage)
+        with pytest.raises(TypeError, match="use_transactions was removed"):
+            DataManager(storage=mock_storage, use_transactions=True)
 
     def test_init_validation_disabled(self):
         """Test initialization with validation disabled."""

@@ -6,8 +6,6 @@ with measured 7x query performance improvement.
 
 from __future__ import annotations
 
-import json
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,7 +20,6 @@ from .keys import (
     contained_path,
     decode_storage_key,
     encode_path_component,
-    storage_key_path,
 )
 
 if TYPE_CHECKING:
@@ -303,40 +300,38 @@ class HiveStorage(StorageBackend):
         # Add partition columns dynamically based on granularity
         df = self._add_partition_columns(df, partition_cols)
 
-        # Create key directory
-        key_path = storage_key_path(self.base_path, key)
-        key_path.mkdir(exist_ok=True)
+        with self._key_lock(key):
+            staging_path, generation_id = self._prepare_generation(key)
+            try:
+                partitions_written = []
+                for partition_values, partition_df in df.group_by(
+                    partition_cols, maintain_order=True
+                ):
+                    partition_path = self._build_partition_path(
+                        staging_path, partition_cols, partition_values
+                    )
+                    partition_path.mkdir(parents=True, exist_ok=True)
+                    partition_df = partition_df.drop(partition_cols)
+                    self._atomic_write(partition_df, partition_path / "data.parquet")
+                    partitions_written.append(str(partition_path.relative_to(staging_path)))
 
-        # Group by partitions and write
-        partitions_written = []
+                commit_metadata = (
+                    {
+                        "last_updated": datetime.now().isoformat(),
+                        "partitions": partitions_written,
+                        "row_count": len(df),
+                        "schema": list(df.columns),
+                        "custom": metadata or {},
+                    }
+                    if self.config.metadata_tracking
+                    else {}
+                )
+                commit = self._publish_generation(key, staging_path, generation_id, commit_metadata)
+            except BaseException:
+                self._cleanup_staging(staging_path)
+                raise
 
-        for partition_values, partition_df in df.group_by(partition_cols, maintain_order=True):
-            # Create partition path dynamically
-            partition_path = self._build_partition_path(key_path, partition_cols, partition_values)
-            partition_path.mkdir(parents=True, exist_ok=True)
-
-            # Remove partition columns from data
-            partition_df = partition_df.drop(partition_cols)
-
-            # Write with atomic pattern
-            file_path = partition_path / "data.parquet"
-            self._atomic_write(partition_df, file_path)
-            partitions_written.append(str(partition_path.relative_to(self.base_path)))
-
-        # Update metadata
-        if self.config.metadata_tracking:
-            self._update_metadata(
-                key,
-                {
-                    "last_updated": datetime.now().isoformat(),
-                    "partitions": partitions_written,
-                    "row_count": len(df),
-                    "schema": list(df.columns),
-                    "custom": metadata or {},
-                },
-            )
-
-        return key_path
+        return commit.generation_path
 
     def read(
         self,
@@ -356,10 +351,7 @@ class HiveStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        key_path = storage_key_path(self.base_path, key)
-
-        if not key_path.exists():
-            raise KeyError(f"Key '{key}' not found in storage")
+        key_path = self._current_commit(key).generation_path
 
         # Get partition columns based on granularity
         partition_cols = self._get_partition_columns()
@@ -400,7 +392,7 @@ class HiveStorage(StorageBackend):
         """
         keys = []
         for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
-            if path.is_dir():
+            if path.is_dir() and (path / "CURRENT").is_file():
                 keys.append(decode_storage_key(path.name))
         return sorted(keys)
 
@@ -413,8 +405,11 @@ class HiveStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        key_path = storage_key_path(self.base_path, key)
-        return key_path.exists()
+        try:
+            self._current_commit(key)
+        except KeyError:
+            return False
+        return True
 
     def delete(self, key: str) -> bool:
         """Delete all data for a key.
@@ -425,17 +420,7 @@ class HiveStorage(StorageBackend):
         Returns:
             True if successful
         """
-        key_path = storage_key_path(self.base_path, key)
-        if key_path.exists():
-            shutil.rmtree(key_path)
-
-            # Remove metadata
-            metadata_file = storage_key_path(self.metadata_dir, key, ".json")
-            if metadata_file.exists():
-                metadata_file.unlink()
-
-            return True
-        return False
+        return self._delete_key(key)
 
     # Incremental update methods for IncrementalStorageBackend protocol
 
@@ -548,7 +533,10 @@ class HiveStorage(StorageBackend):
             Path to combined data directory
         """
         key = f"{provider}/{symbol}"
-        return storage_key_path(self.base_path, key)
+        try:
+            return self._current_commit(key).generation_path
+        except KeyError:
+            return self._key_path(key)
 
     def read_data(
         self,
@@ -593,19 +581,15 @@ class HiveStorage(StorageBackend):
             chunk_file: Name of the chunk file saved
         """
         key = f"{provider}/{symbol}"
-        metadata_file = storage_key_path(self.metadata_dir, key, ".json")
-
-        # Load existing metadata or create new
-        if metadata_file.exists():
-            with open(metadata_file) as f:
-                metadata = json.load(f)
-        else:
-            metadata = {
-                "symbol": symbol,
-                "provider": provider,
-                "first_update": last_update.isoformat(),
-                "update_history": [],
-            }
+        metadata = self.get_metadata(key) or {
+            "symbol": symbol,
+            "provider": provider,
+            "first_update": last_update.isoformat(),
+            "update_history": [],
+        }
+        metadata.setdefault("symbol", symbol)
+        metadata.setdefault("provider", provider)
+        metadata.setdefault("first_update", last_update.isoformat())
 
         # Update metadata
         metadata["last_update"] = last_update.isoformat()

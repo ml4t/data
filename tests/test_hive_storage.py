@@ -103,11 +103,8 @@ class TestHiveStorageWrite:
 
         storage.write(df, "test_key")
 
-        metadata_file = storage_key_path(storage.metadata_dir, "test_key", ".json")
-        assert metadata_file.exists()
-
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        metadata = storage.get_metadata("test_key")
+        assert metadata is not None
         assert "last_updated" in metadata
         assert "row_count" in metadata
         assert metadata["row_count"] == 1
@@ -411,6 +408,10 @@ class TestHiveStorageIncrementalMethods:
 
     def test_update_metadata_new(self, storage):
         """Test updating metadata for new symbol."""
+        storage.write(
+            pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]}),
+            "yahoo/AAPL",
+        )
         storage.update_metadata(
             "AAPL", "yahoo", datetime(2024, 1, 15), 100, "chunk_20240101.parquet"
         )
@@ -523,8 +524,8 @@ class TestHiveStorageSlashInKey:
         path = storage.write(df, "provider/symbol")
 
         assert path.exists()
-        assert path.parent == tmp_path
-        assert path.name.startswith("k1_")
+        assert path.is_relative_to(storage_key_path(tmp_path, "provider/symbol"))
+        assert path.parent.name == "generations"
 
     def test_exists_with_slash_key(self, tmp_path):
         """Test exists handles slash in key."""
