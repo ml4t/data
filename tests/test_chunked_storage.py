@@ -1,7 +1,8 @@
 """Tests for chunked storage implementation."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
@@ -56,6 +57,142 @@ class TestChunkedStorage:
         result = storage.read(key)
         assert len(result.data) == len(df)
         assert result.data["close"].to_list() == df["close"].to_list()
+
+    @pytest.mark.parametrize(
+        ("chunk_size_days", "boundary"),
+        [
+            (7, datetime(2024, 1, 8)),
+            (30, datetime(2024, 2, 1)),
+            (90, datetime(2024, 4, 1)),
+            (365, datetime(2025, 1, 1)),
+        ],
+    )
+    def test_subsecond_records_round_trip_across_chunk_boundaries(
+        self,
+        tmp_path: Path,
+        chunk_size_days: int,
+        boundary: datetime,
+    ) -> None:
+        storage = ChunkedStorage(tmp_path, chunk_size_days=chunk_size_days)
+        timestamps = [boundary - timedelta(microseconds=1), boundary]
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+
+        result = storage.read("equities/tick/TEST")
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
+        assert result.data["timestamp"].to_list() == timestamps
+
+    def test_read_range_uses_exclusive_end_and_returns_typed_empty_result(
+        self, tmp_path: Path
+    ) -> None:
+        storage = ChunkedStorage(tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        first_day = storage.read(key, end_date=datetime(2024, 1, 2))
+        empty = storage.read(
+            key,
+            start_date=datetime(2025, 1, 1),
+            end_date=datetime(2025, 2, 1),
+        )
+
+        assert first_day.data["timestamp"].to_list() == [datetime(2024, 1, 1)]
+        assert empty.data.is_empty()
+        assert empty.data.schema == frame.schema
+        assert empty.metadata.symbol == "TEST"
+        assert empty.metadata.frequency == "daily"
+
+    def test_nanosecond_timestamps_round_trip_at_month_boundary(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path)
+        timestamps = (
+            pl.Series(
+                "timestamp",
+                ["2024-01-31T23:59:59.999999999", "2024-02-01T00:00:00.000000000"],
+            )
+            .str.to_datetime(time_unit="ns")
+            .alias("timestamp")
+        )
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read("equities/tick/TEST")
+
+        assert result.data["timestamp"].equals(timestamps)
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
+
+    def test_timezone_aware_timestamps_round_trip_across_dst_week(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path, chunk_size_days=7)
+        timezone = ZoneInfo("America/New_York")
+        boundary = datetime(2024, 3, 11, tzinfo=timezone)
+        timestamps = [boundary - timedelta(microseconds=1), boundary]
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read("equities/tick/TEST")
+
+        assert result.data["timestamp"].to_list() == timestamps
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
 
     def test_date_range_filtering(self, tmp_path: Path) -> None:
         """Test reading specific date ranges from chunks."""

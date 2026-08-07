@@ -122,53 +122,38 @@ class ChunkedStorage:
         start_date: datetime,
     ) -> tuple[datetime, datetime]:
         """
-        Get the start and end dates for a chunk.
+        Get the inclusive start and exclusive end for a chunk.
 
         Args:
             start_date: Reference date
 
         Returns:
-            Tuple of (chunk_start, chunk_end)
+            Tuple of (chunk_start, exclusive_chunk_end)
         """
+        day_start = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
         if self.chunk_size_days <= 7:
-            # Weekly: Monday to Sunday
-            days_since_monday = start_date.weekday()
-            chunk_start = start_date - timedelta(days=days_since_monday)
-            chunk_end = chunk_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+            # Weekly: Monday through the following Monday.
+            chunk_start = day_start - timedelta(days=day_start.weekday())
+            chunk_end = chunk_start + timedelta(days=7)
         elif self.chunk_size_days <= 31:
-            # Monthly: First to last day of month
-            chunk_start = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            # Get last day of month
+            chunk_start = day_start.replace(day=1)
             if start_date.month == 12:
-                chunk_end = chunk_start.replace(year=start_date.year + 1, month=1) - timedelta(
-                    seconds=1
-                )
+                chunk_end = chunk_start.replace(year=start_date.year + 1, month=1)
             else:
-                chunk_end = chunk_start.replace(month=start_date.month + 1) - timedelta(seconds=1)
+                chunk_end = chunk_start.replace(month=start_date.month + 1)
         elif self.chunk_size_days <= 93:
-            # Quarterly
             quarter = (start_date.month - 1) // 3
-            chunk_start = start_date.replace(
+            chunk_start = day_start.replace(
                 month=quarter * 3 + 1,
                 day=1,
-                hour=0,
-                minute=0,
-                second=0,
-                microsecond=0,
             )
-            # Get last day of quarter
             if quarter == 3:
-                chunk_end = chunk_start.replace(year=start_date.year + 1, month=1) - timedelta(
-                    seconds=1
-                )
+                chunk_end = chunk_start.replace(year=start_date.year + 1, month=1)
             else:
-                chunk_end = chunk_start.replace(month=(quarter + 1) * 3 + 1) - timedelta(seconds=1)
+                chunk_end = chunk_start.replace(month=(quarter + 1) * 3 + 1)
         else:
-            # Yearly
-            chunk_start = start_date.replace(
-                month=1, day=1, hour=0, minute=0, second=0, microsecond=0
-            )
-            chunk_end = chunk_start.replace(year=start_date.year + 1) - timedelta(seconds=1)
+            chunk_start = day_start.replace(month=1, day=1)
+            chunk_end = chunk_start.replace(year=start_date.year + 1)
 
         return chunk_start, chunk_end
 
@@ -204,7 +189,7 @@ class ChunkedStorage:
 
             # Filter data for this chunk
             chunk_df = df.filter(
-                (pl.col("timestamp") >= chunk_start) & (pl.col("timestamp") <= chunk_end)
+                (pl.col("timestamp") >= chunk_start) & (pl.col("timestamp") < chunk_end)
             )
 
             if not chunk_df.is_empty():
@@ -216,7 +201,7 @@ class ChunkedStorage:
                 chunks.append((chunk_df, chunk_id))
 
             # Move to next chunk period
-            current = chunk_end + timedelta(seconds=1)
+            current = chunk_end
 
         logger.info(
             f"Split data into {len(chunks)} chunks",
@@ -319,7 +304,7 @@ class ChunkedStorage:
         Args:
             key: Storage key
             start_date: Optional start date filter
-            end_date: Optional end date filter
+            end_date: Optional exclusive end date filter
 
         Returns:
             DataObject with combined data from chunks
@@ -341,7 +326,7 @@ class ChunkedStorage:
         for _chunk_id, info in chunks.items():
             if start_date and info.end_date < start_date:
                 continue
-            if end_date and info.start_date > end_date:
+            if end_date and info.start_date >= end_date:
                 continue
             relevant_chunks.append(info)
 
@@ -352,15 +337,8 @@ class ChunkedStorage:
                 start_date=start_date,
                 end_date=end_date,
             )
-            # Return empty DataFrame with proper schema
             return DataObject(
-                data=pl.DataFrame(),
-                metadata=Metadata(
-                    provider="",
-                    symbol="",
-                    asset_class="",
-                    frequency="",
-                ),
+                data=self._empty_frame(key, chunks), metadata=self._metadata_for_key(key)
             )
 
         # Sort chunks by start date
@@ -387,25 +365,13 @@ class ChunkedStorage:
                 if start_date:
                     chunk_df = chunk_df.filter(pl.col("timestamp") >= start_date)
                 if end_date:
-                    chunk_df = chunk_df.filter(pl.col("timestamp") <= end_date)
+                    chunk_df = chunk_df.filter(pl.col("timestamp") < end_date)
             dfs.append(chunk_df)
 
         # Combine all chunks
         combined_df = pl.concat(dfs) if dfs else pl.DataFrame()
 
-        # Reconstruct metadata from stored information
-        parts = key.split("/")
-        if len(parts) == 3:
-            asset_class, frequency, symbol = parts
-        else:
-            asset_class, frequency, symbol = "", "", ""
-
-        metadata = Metadata(
-            provider="",  # Will be updated from chunk index metadata
-            symbol=symbol,
-            asset_class=asset_class,
-            frequency=frequency,
-        )
+        metadata = self._metadata_for_key(key)
 
         # Update metadata with actual data range
         if not combined_df.is_empty():
@@ -415,6 +381,26 @@ class ChunkedStorage:
             }
 
         return DataObject(data=combined_df, metadata=metadata)
+
+    def _metadata_for_key(self, key: str) -> Metadata:
+        """Reconstruct the metadata encoded in a chunked-storage key."""
+        parts = key.split("/")
+        if len(parts) == 3:
+            asset_class, frequency, symbol = parts
+        else:
+            asset_class, frequency, symbol = "", "", ""
+        return Metadata(
+            provider="",
+            symbol=symbol,
+            asset_class=asset_class,
+            bar_params={"frequency": frequency},
+        )
+
+    def _empty_frame(self, key: str, chunks: dict[str, ChunkInfo]) -> pl.DataFrame:
+        """Return an empty frame with the stored data schema."""
+        first_chunk = min(chunks.values(), key=lambda chunk: chunk.start_date)
+        chunk_path = self._chunk_path(key, first_chunk.chunk_id)
+        return pl.DataFrame(schema=pl.read_parquet_schema(chunk_path))
 
     def write(self, data_object: DataObject) -> str:
         """
