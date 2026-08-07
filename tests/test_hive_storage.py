@@ -8,7 +8,7 @@ import pytest
 
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
-from ml4t.data.storage.keys import storage_key_path
+from ml4t.data.storage.keys import decode_storage_key, encode_storage_key, storage_key_path
 
 
 class TestHiveStorageInit:
@@ -342,6 +342,67 @@ class TestHiveStorageIncrementalMethods:
 
         assert chunk_path.exists()
         assert ".chunks" in str(chunk_path)
+
+    def test_save_chunk_round_trips_exchange_symbol_without_collision(self, storage):
+        """Valid exchange symbols remain reversible and physically distinct."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15)],
+                "close": [100.0],
+            }
+        )
+
+        slash_path = storage.save_chunk(
+            df, "BTC/USD", "exchange", datetime(2024, 1, 1), datetime(2024, 1, 31)
+        )
+        underscore_path = storage.save_chunk(
+            df, "BTC_USD", "exchange", datetime(2024, 1, 1), datetime(2024, 1, 31)
+        )
+
+        assert slash_path != underscore_path
+        assert decode_storage_key(slash_path.parent.name) == "BTC/USD"
+        assert decode_storage_key(underscore_path.parent.name) == "BTC_USD"
+        assert slash_path.resolve().is_relative_to(storage.base_path.resolve())
+        assert underscore_path.resolve().is_relative_to(storage.base_path.resolve())
+
+    @pytest.mark.parametrize(
+        ("symbol", "provider"),
+        [
+            ("../../escaped", "exchange"),
+            ("..\\..\\escaped", "exchange"),
+            ("/absolute", "exchange"),
+            ("BTC/USD", "../escaped"),
+        ],
+    )
+    def test_save_chunk_rejects_path_escape(self, storage, symbol, provider):
+        """Incremental writes reject traversal syntax before creating a path."""
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError):
+            storage.save_chunk(df, symbol, provider, datetime(2024, 1, 1), datetime(2024, 1, 31))
+
+    def test_save_chunk_rejects_existing_symlink_escape(self, storage, tmp_path_factory):
+        """An existing encoded directory symlink cannot redirect a chunk write."""
+        outside = tmp_path_factory.mktemp("outside")
+        chunks = storage.base_path / ".chunks"
+        chunks.mkdir()
+        provider_path = chunks / encode_storage_key("exchange")
+        try:
+            provider_path.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.save_chunk(
+                df,
+                "BTC/USD",
+                "exchange",
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 31),
+            )
+
+        assert not any(outside.iterdir())
 
     def test_update_combined_file_new(self, storage):
         """Test updating combined file with new data."""

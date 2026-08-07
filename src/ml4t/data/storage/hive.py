@@ -19,7 +19,7 @@ from .keys import (
     KEY_ENCODING_PREFIX,
     contained_path,
     decode_storage_key,
-    encode_path_component,
+    encode_storage_key,
 )
 
 if TYPE_CHECKING:
@@ -470,8 +470,8 @@ class HiveStorage(StorageBackend):
         # Create chunks directory
         chunks_dir = contained_path(
             self.base_path / ".chunks",
-            encode_path_component(provider, "provider"),
-            encode_path_component(symbol, "symbol"),
+            encode_storage_key(provider),
+            encode_storage_key(symbol),
         )
         chunks_dir.mkdir(parents=True, exist_ok=True)
 
