@@ -31,6 +31,7 @@ Example:
 
 import json
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any, ClassVar
 
 import polars as pl
@@ -402,10 +403,23 @@ class PolymarketProvider(BaseProvider):
                 )
 
             deduped: dict[int, dict[str, Any]] = {}
+            dropped = 0
             for entry in history:
                 timestamp = entry.get("t")
-                if isinstance(timestamp, int):
-                    deduped[timestamp] = entry
+                if isinstance(timestamp, int) and not isinstance(timestamp, bool):
+                    normalized_timestamp = timestamp
+                    deduped[normalized_timestamp] = {**entry, "t": normalized_timestamp}
+                elif isinstance(timestamp, float) and isfinite(timestamp):
+                    normalized_timestamp = int(timestamp)
+                    deduped[normalized_timestamp] = {**entry, "t": normalized_timestamp}
+                else:
+                    dropped += 1
+            if dropped:
+                self.logger.warning(
+                    "Dropped Polymarket price history entries with invalid timestamps",
+                    dropped=dropped,
+                    total=len(history),
+                )
             return [deduped[timestamp] for timestamp in sorted(deduped)]
         except (RateLimitError, NetworkError, SymbolNotFoundError):
             raise

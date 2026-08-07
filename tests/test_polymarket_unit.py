@@ -391,6 +391,31 @@ class TestFetchOHLCV:
         assert mock_fetch_chunk.call_count == 2
         assert [point["t"] for point in history] == [1704067200, 1704153600, 1704240000]
 
+    @patch.object(PolymarketProvider, "_fetch_price_history_chunk")
+    def test_fetch_price_history_normalizes_numeric_timestamps(self, mock_fetch_chunk, provider):
+        """Retain numeric JSON timestamps and report malformed entries."""
+        mock_fetch_chunk.return_value = [
+            {"t": 1704067200.0, "p": 0.45},
+            {"t": True, "p": 0.50},
+            {"t": "1704153600", "p": 0.48},
+            {"t": float("nan"), "p": 0.49},
+        ]
+
+        with patch.object(provider.logger, "warning") as mock_warning:
+            history = provider._fetch_price_history(
+                "12345678901234567890",
+                "2024-01-01",
+                "2024-01-01",
+                "1d",
+            )
+
+        assert history == [{"t": 1704067200, "p": 0.45}]
+        mock_warning.assert_called_once_with(
+            "Dropped Polymarket price history entries with invalid timestamps",
+            dropped=3,
+            total=4,
+        )
+
 
 class TestFetchBothOutcomes:
     """Test fetch_both_outcomes method."""
