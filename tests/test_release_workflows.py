@@ -112,5 +112,6 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
         "test_kalshi.py::TestKalshiProvider::test_list_markets",
         "test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug",
         "test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily",
+        "test_release_provider_contracts.py",
     ):
         assert contract in command

@@ -188,9 +188,9 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         """Return the exchange symbol emitted by OHLCV transformations."""
         return self._normalize_symbol(symbol)
 
-    def _next_before(self, current_before: int, oldest_ts: int, page_count: int) -> int:
+    def _next_after(self, current_after: int, oldest_ts: int, page_count: int) -> int:
         """Validate that backward timestamp pagination is bounded and progressing."""
-        if oldest_ts >= current_before:
+        if oldest_ts >= current_after:
             raise DataValidationError(
                 provider=self.name, message="pagination cursor did not move backward"
             )
@@ -206,8 +206,8 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Fetch and transform OHLCV data from OKX.
 
-        Note: OKX returns newest data first and uses "before" parameter
-        for pagination (timestamp before which to fetch).
+        Note: OKX returns newest data first. Its ``after`` parameter requests
+        records earlier than the supplied timestamp.
 
         Args:
             symbol: Cryptocurrency symbol
@@ -249,7 +249,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
         # Fetch data in chunks (OKX returns newest first, paginate backwards)
         all_candles: list[list[Any]] = []
-        current_before = end_ms + 1  # Start from end, go backwards
+        current_after = end_ms + 1  # Start from end, go backwards
         page_count = 0
 
         while True:
@@ -257,7 +257,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
             params = {
                 "instId": inst_id,
                 "bar": bar,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": str(self.MAX_CANDLES),
             }
 
@@ -290,7 +290,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                     break
 
                 # Update pagination cursor
-                current_before = self._next_before(current_before, oldest_ts, page_count)
+                current_after = self._next_after(current_after, oldest_ts, page_count)
 
                 # Rate limit for pagination
                 self._acquire_rate_limit()
@@ -372,7 +372,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         end_ms = int(end_dt.timestamp() * 1000)
 
         all_rates: list[dict[str, Any]] = []
-        current_before = end_ms + 1
+        current_after = end_ms + 1
         page_count = 0
 
         while True:
@@ -381,7 +381,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
             url = f"{self.BASE_URL}/public/funding-rate-history"
             params = {
                 "instId": inst_id,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": "100",
             }
 
@@ -413,7 +413,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = self._next_before(current_before, oldest_ts, page_count)
+                current_after = self._next_after(current_after, oldest_ts, page_count)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
@@ -528,7 +528,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         end_ms = int(end_dt.timestamp() * 1000)
 
         all_candles: list[list[Any]] = []
-        current_before = end_ms + 1
+        current_after = end_ms + 1
         page_count = 0
 
         while True:
@@ -536,7 +536,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
             params = {
                 "instId": inst_id,
                 "bar": bar,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": str(self.MAX_CANDLES),
             }
 
@@ -566,7 +566,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = self._next_before(current_before, oldest_ts, page_count)
+                current_after = self._next_after(current_after, oldest_ts, page_count)
                 self._acquire_rate_limit()
 
             except httpx.HTTPStatusError as e:

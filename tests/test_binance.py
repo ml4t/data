@@ -25,7 +25,7 @@ class TestBinanceProvider:
         # Spot market
         provider1 = BinanceProvider()
         assert provider1.market == "spot"
-        assert provider1.base_url == "https://api.binance.com/api/v3"
+        assert provider1.base_url == "https://data-api.binance.vision/api/v3"
 
         # Futures market
         provider2 = BinanceProvider(market="futures")
@@ -105,7 +105,7 @@ class TestBinanceProvider:
         # Verify request
         mock_client.get.assert_called_once()
         call_args = mock_client.get.call_args
-        assert call_args[0][0] == "https://api.binance.com/api/v3/klines"
+        assert call_args[0][0] == "https://data-api.binance.vision/api/v3/klines"
 
         params = call_args[1]["params"]
         assert params["symbol"] == "BTCUSDT"

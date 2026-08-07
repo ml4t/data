@@ -57,6 +57,7 @@ jobs:
           tests/integration/test_kalshi.py::TestKalshiProvider::test_list_markets
           tests/integration/test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug
           tests/integration/test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily
+          tests/integration/test_release_provider_contracts.py
 
   cryptocompare:
     name: CryptoCompare Contract

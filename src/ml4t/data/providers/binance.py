@@ -36,7 +36,7 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
     API Documentation: https://binance-docs.github.io/apidocs/
     """
 
-    SPOT_BASE_URL = "https://api.binance.com/api/v3"
+    SPOT_BASE_URL = "https://data-api.binance.vision/api/v3"
     FUTURES_BASE_URL = "https://fapi.binance.com/fapi/v1"
 
     # Map internal frequencies to Binance intervals
