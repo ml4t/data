@@ -401,6 +401,25 @@ class TestRegistrySamples:
         with pytest.raises(FileNotFoundError, match="Samples file not found"):
             registry.load_samples("no_samples", "experiment")
 
+    def test_load_samples_rejects_unsupported_dtype(self, mock_checkpoint_dir: Path):
+        """Registry loading uses the same safe tensor contract as the provider."""
+        samples_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "samples.npy"
+        )
+        np.save(samples_file, np.ones((2, 3, 1), dtype=np.int64))
+        registry = SyntheticRegistry(
+            data_dir=mock_checkpoint_dir,
+            checkpoints_subdir="synthetic/checkpoints",
+        )
+
+        with pytest.raises(ValueError, match="dtype"):
+            registry.load_samples("timegan", "etf_returns")
+
 
 # =============================================================================
 # TestRegistryProvider - Provider Creation

@@ -255,6 +255,31 @@ class TestLearnedSyntheticFromSamples:
         assert provider.generator_name == "unknown"
         assert provider.n_samples == 100
 
+    def test_from_samples_rejects_unsupported_dtype(self, tmp_path: Path):
+        """Only bounded floating-point sample tensors are accepted."""
+        samples_path = tmp_path / "integer-samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.int64))
+
+        with pytest.raises(ValueError, match="dtype"):
+            LearnedSyntheticProvider.from_samples(samples_path)
+
+    def test_from_samples_rejects_oversized_file(self, tmp_path: Path, monkeypatch):
+        """Artifact size is checked before NumPy opens the array."""
+        samples_path = tmp_path / "samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.float32))
+        monkeypatch.setattr(LearnedSyntheticProvider, "MAX_SAMPLE_FILE_BYTES", 16)
+
+        with pytest.raises(ValueError, match="size limit"):
+            LearnedSyntheticProvider.from_samples(samples_path)
+
+    def test_from_samples_rejects_non_mapping_metadata(self, samples_file: Path, tmp_path: Path):
+        """Metadata must use the documented JSON object schema."""
+        metadata_path = tmp_path / "metadata.json"
+        metadata_path.write_text("[]")
+
+        with pytest.raises(ValueError, match="JSON object"):
+            LearnedSyntheticProvider.from_samples(samples_file, metadata_path=metadata_path)
+
 
 # =============================================================================
 # TestLearnedSyntheticFromCheckpoint - from_checkpoint Class Method
@@ -306,6 +331,25 @@ class TestLearnedSyntheticFromCheckpoint:
         """Test from_checkpoint with seed parameter."""
         provider = LearnedSyntheticProvider.from_checkpoint(checkpoint_dir, seed=42)
         assert provider.seed == 42
+
+    def test_from_checkpoint_cannot_execute_object_array_pickle(
+        self, checkpoint_dir: Path, tmp_path: Path
+    ):
+        """A malicious NumPy object payload cannot execute through the public loader."""
+        marker = tmp_path / "payload-executed"
+
+        class MaliciousPayload:
+            def __reduce__(self):
+                return (Path.mkdir, (marker,))
+
+        payload = np.empty((1,), dtype=object)
+        payload[0] = MaliciousPayload()
+        np.save(checkpoint_dir / "samples.npy", payload, allow_pickle=True)
+
+        with pytest.raises(ValueError, match="safe NumPy"):
+            LearnedSyntheticProvider.from_checkpoint(checkpoint_dir)
+
+        assert not marker.exists()
 
 
 # =============================================================================

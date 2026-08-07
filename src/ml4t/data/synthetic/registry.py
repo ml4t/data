@@ -274,10 +274,13 @@ class SyntheticRegistry:
                 "The checkpoint may not have pre-generated samples."
             )
 
-        samples = np.load(samples_file)
+        from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+
+        samples = LearnedSyntheticProvider._load_samples_file(samples_file)
         logger.info(f"Loaded samples for {generator}", shape=samples.shape)
 
         if shuffle:
+            samples = np.array(samples, copy=True)
             rng = np.random.default_rng()
             rng.shuffle(samples)
 

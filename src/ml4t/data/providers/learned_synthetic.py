@@ -86,6 +86,62 @@ class LearnedSyntheticProvider(BaseProvider):
 
     # No rate limiting needed for synthetic data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 1.0)
+    MAX_SAMPLE_FILE_BYTES: ClassVar[int] = 4 * 1024**3
+    MAX_METADATA_FILE_BYTES: ClassVar[int] = 1024**2
+    SUPPORTED_SAMPLE_DTYPES: ClassVar[frozenset[str]] = frozenset({"float32", "float64"})
+
+    @classmethod
+    def _validate_samples(cls, samples: np.ndarray) -> None:
+        """Validate the non-executable sample tensor contract."""
+        if samples.ndim != 3:
+            raise ValueError(
+                f"Samples must have shape (n_samples, seq_length, n_features), got {samples.shape}"
+            )
+        if any(dimension <= 0 for dimension in samples.shape):
+            raise ValueError(f"Sample dimensions must be positive, got {samples.shape}")
+        if samples.dtype.name not in cls.SUPPORTED_SAMPLE_DTYPES:
+            raise ValueError(
+                f"Unsupported sample dtype {samples.dtype}; expected float32 or float64"
+            )
+        if samples.nbytes > cls.MAX_SAMPLE_FILE_BYTES:
+            raise ValueError(
+                f"Sample tensor exceeds size limit of {cls.MAX_SAMPLE_FILE_BYTES} bytes"
+            )
+
+    @classmethod
+    def _load_samples_file(cls, samples_path: Path) -> np.ndarray:
+        """Load a bounded NumPy array without enabling pickle deserialization."""
+        if not samples_path.is_file():
+            raise FileNotFoundError(f"Samples file not found: {samples_path}")
+        if samples_path.stat().st_size > cls.MAX_SAMPLE_FILE_BYTES:
+            raise ValueError(f"Sample file exceeds size limit of {cls.MAX_SAMPLE_FILE_BYTES} bytes")
+        try:
+            samples = np.load(samples_path, allow_pickle=False, mmap_mode="r")
+        except (OSError, ValueError) as error:
+            raise ValueError(f"Failed to load safe NumPy sample array: {samples_path}") from error
+        if not isinstance(samples, np.ndarray):
+            close = getattr(samples, "close", None)
+            if callable(close):
+                close()
+            raise ValueError("Sample artifact must contain one NumPy array, not an archive")
+        cls._validate_samples(samples)
+        return samples
+
+    @classmethod
+    def _load_metadata_file(cls, metadata_path: Path) -> dict[str, Any]:
+        """Load a bounded JSON object used only as descriptive metadata."""
+        if metadata_path.stat().st_size > cls.MAX_METADATA_FILE_BYTES:
+            raise ValueError(
+                f"Metadata file exceeds size limit of {cls.MAX_METADATA_FILE_BYTES} bytes"
+            )
+        try:
+            with metadata_path.open(encoding="utf-8") as file:
+                metadata = json.load(file)
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Failed to load metadata JSON: {metadata_path}") from error
+        if not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a JSON object")
+        return metadata
 
     def __init__(
         self,
@@ -101,6 +157,12 @@ class LearnedSyntheticProvider(BaseProvider):
         Note: Prefer using class methods from_samples() or from_checkpoint()
         instead of calling __init__ directly.
         """
+        if not isinstance(samples, np.ndarray):
+            raise TypeError("samples must be a NumPy array")
+        self._validate_samples(samples)
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("Metadata must be a JSON object")
+
         self._samples = samples
         self._metadata = metadata or {}
         self._model = model
@@ -109,12 +171,6 @@ class LearnedSyntheticProvider(BaseProvider):
             raise ValueError("calendar_mode must be 'equity' or 'continuous'")
         self.calendar_mode = calendar_mode
         self._rng = create_rng(seed)
-
-        # Validate samples shape
-        if samples.ndim != 3:
-            raise ValueError(
-                f"Samples must have shape (n_samples, seq_length, n_features), got {samples.shape}"
-            )
 
         self._n_samples, self._seq_length, self._n_features = samples.shape
 
@@ -160,11 +216,7 @@ class LearnedSyntheticProvider(BaseProvider):
         """
         samples_path = Path(samples_path)
 
-        # Load samples
-        if not samples_path.exists():
-            raise FileNotFoundError(f"Samples file not found: {samples_path}")
-
-        samples = np.load(samples_path)
+        samples = cls._load_samples_file(samples_path)
         logger.info(f"Loaded samples from {samples_path}", shape=samples.shape)
 
         # Try to find metadata
@@ -181,8 +233,7 @@ class LearnedSyntheticProvider(BaseProvider):
                     break
 
         if metadata_path and Path(metadata_path).exists():
-            with open(metadata_path) as f:
-                metadata = json.load(f)
+            metadata = cls._load_metadata_file(Path(metadata_path))
             logger.info(f"Loaded metadata from {metadata_path}")
 
         return cls(
@@ -234,8 +285,7 @@ class LearnedSyntheticProvider(BaseProvider):
         if not metadata_file.exists():
             raise FileNotFoundError(f"Metadata file not found: {metadata_file}")
 
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        metadata = cls._load_metadata_file(metadata_file)
 
         samples_file = checkpoint_path / "samples.npy"
         if not samples_file.is_file():
@@ -244,7 +294,7 @@ class LearnedSyntheticProvider(BaseProvider):
                 "Executable model checkpoints are not supported."
             )
 
-        samples = np.load(samples_file, allow_pickle=False)
+        samples = cls._load_samples_file(samples_file)
         logger.info("Loaded pre-generated samples", path=samples_file, shape=samples.shape)
         return cls(
             samples=samples,
