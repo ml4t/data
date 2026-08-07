@@ -526,10 +526,7 @@ class DataBentoProvider(BaseProvider):
             df, ["right", "put_call", "option_type", "instrument_class"]
         )
         if right_lower not in {"both", "all"} and right_column is not None:
-            if right_lower in {"call", "c"}:
-                right_prefix = "C"
-            elif right_lower in {"put", "p"}:
-                right_prefix = "P"
+            right_prefix = "C" if right_lower in {"call", "c"} else "P"
             df = df.filter(
                 pl.col(right_column).cast(pl.Utf8).str.to_uppercase().str.starts_with(right_prefix)
             )
@@ -656,7 +653,7 @@ class DataBentoProvider(BaseProvider):
         start: str,
         end: str,
         schemas: list[str],
-    ) -> dict[str, pl.DataFrame]:
+    ) -> dict[str, pl.DataFrame | None]:
         """Fetch data for multiple schemas at once.
 
         Args:
@@ -666,9 +663,10 @@ class DataBentoProvider(BaseProvider):
             schemas: List of schemas to fetch (e.g., ["ohlcv-1m", "trades"])
 
         Returns:
-            Dictionary mapping schema names to DataFrames
+            Dictionary mapping schema names to DataFrames, or ``None`` when a schema
+            fetch fails.
         """
-        results = {}
+        results: dict[str, pl.DataFrame | None] = {}
         for schema in schemas:
             # Map schema back to frequency
             if schema == "ohlcv-1d":

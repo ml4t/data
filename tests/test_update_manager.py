@@ -483,6 +483,25 @@ class TestIncrementalUpdaterStrategies:
         assert result.rows_added == 10
         assert result.rows_after == 10
 
+    def test_update_failure_before_storage_read_reports_zero_prior_rows(
+        self, tracker: MetadataTracker, new_data: pl.DataFrame
+    ):
+        """A storage discovery failure has deterministic row counts."""
+        storage = MagicMock()
+        storage.exists.side_effect = OSError("storage unavailable")
+
+        result = IncrementalUpdater().update_incremental(
+            storage,
+            tracker,
+            "equities/daily/AAPL",
+            new_data,
+            "mock",
+        )
+
+        assert result.success is False
+        assert result.rows_before == 0
+        assert result.rows_after == 0
+
     def test_append_only_strategy(
         self, storage: HiveStorage, existing_data: pl.DataFrame, new_data: pl.DataFrame
     ):

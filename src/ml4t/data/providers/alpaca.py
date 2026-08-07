@@ -264,6 +264,9 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
     async def init_async_session(
         self,
+        timeout: float | None = None,
+        max_connections: int | None = None,
+        max_keepalive: int | None = None,
         headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -273,11 +276,20 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         session, so the auth headers are applied unless a caller supplies its own.
 
         Args:
+            timeout: Request timeout in seconds.
+            max_connections: Maximum concurrent connections.
+            max_keepalive: Maximum keepalive connections.
             headers: Default headers for all requests; falls back to the auth
                 headers when not provided.
             **kwargs: Additional arguments forwarded to AsyncSessionMixin.
         """
-        await super().init_async_session(headers=headers or self._auth_headers, **kwargs)
+        await super().init_async_session(
+            timeout=timeout,
+            max_connections=max_connections,
+            max_keepalive=max_keepalive,
+            headers=headers or self._auth_headers,
+            **kwargs,
+        )
 
     def capabilities(self) -> ProviderCapabilities:
         """Return provider capabilities.

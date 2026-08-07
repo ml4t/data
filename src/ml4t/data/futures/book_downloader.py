@@ -503,8 +503,12 @@ class FuturesDataManager:
                 df = pl.read_parquet(data_file)
                 if len(df) > 0:
                     latest = df["ts_event"].max()
-                    if latest:
+                    if isinstance(latest, datetime):
                         return latest.replace(tzinfo=UTC)
+                    if latest is not None:
+                        raise TypeError(
+                            f"Expected datetime ts_event in {data_file}, got {type(latest).__name__}"
+                        )
 
         return None
 

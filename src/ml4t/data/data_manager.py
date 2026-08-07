@@ -17,7 +17,7 @@ Architecture:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 import polars as pl
 import structlog
@@ -67,6 +67,8 @@ class DataManager:
         >>> key = manager.load("AAPL", "2024-01-01", "2024-12-31")
         >>> key = manager.update("AAPL")  # Incremental update
     """
+
+    PROVIDER_CLASSES: ClassVar[dict[str, type]]
 
     def __init__(
         self,
@@ -435,13 +437,13 @@ class DataManager:
         symbol: str,
         asset_class: str = "equities",
         frequency: str = "daily",
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Get metadata for a specific symbol."""
         if not self._metadata_manager:
             raise ValueError("Storage not configured")
         return self._metadata_manager.get_metadata(symbol, asset_class, frequency)
 
-    def get_metadata_for_key(self, key: str) -> dict | None:
+    def get_metadata_for_key(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a storage key."""
         if not self._metadata_manager:
             return None

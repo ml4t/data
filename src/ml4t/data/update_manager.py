@@ -19,11 +19,13 @@ from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
 logger = structlog.get_logger()
 
 
-def _ensure_datetime(dt: date | datetime) -> datetime:
-    """Ensure we have a datetime object."""
-    if isinstance(dt, date) and not isinstance(dt, datetime):
-        return datetime.combine(dt, datetime.min.time())
-    return dt
+def _ensure_datetime(value: Any) -> datetime:
+    """Return a datetime scalar or reject an incompatible timestamp value."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    raise TypeError(f"Expected a date or datetime, got {type(value).__name__}")
 
 
 class UpdateStrategy(Enum):
@@ -329,6 +331,7 @@ class IncrementalUpdater:
         start_time = time.time()
         strategy = strategy or self.strategy
         errors = []
+        rows_before = 0
 
         try:
             # Validate new data
@@ -346,7 +349,6 @@ class IncrementalUpdater:
                 )
 
             # Get existing data info
-            rows_before = 0
             existing_df = None
 
             if storage.exists(key):
@@ -362,6 +364,10 @@ class IncrementalUpdater:
 
             # Update metadata
             if tracker and result.success:
+                new_start = _ensure_datetime(new_data["timestamp"].min())
+                new_end = _ensure_datetime(new_data["timestamp"].max())
+                final_start = _ensure_datetime(final_df["timestamp"].min())
+                final_end = _ensure_datetime(final_df["timestamp"].max())
                 update_record = UpdateRecord(
                     timestamp=datetime.now(),
                     update_type=strategy.value,
@@ -369,8 +375,8 @@ class IncrementalUpdater:
                     rows_after=rows_after,
                     rows_added=result.rows_added,
                     rows_updated=result.rows_updated,
-                    start_date=new_data["timestamp"].min(),
-                    end_date=new_data["timestamp"].max(),
+                    start_date=new_start,
+                    end_date=new_end,
                     provider=provider,
                     duration_seconds=time.time() - start_time,
                     gaps_filled=result.gaps_filled,
@@ -381,8 +387,8 @@ class IncrementalUpdater:
                     key,
                     update_record,
                     rows_after,
-                    final_df["timestamp"].min(),
-                    final_df["timestamp"].max(),
+                    final_start,
+                    final_end,
                 )
 
             result.duration_seconds = time.time() - start_time
@@ -409,8 +415,8 @@ class IncrementalUpdater:
                 update_type=strategy.value,
                 rows_added=0,
                 rows_updated=0,
-                rows_before=rows_before if "rows_before" in locals() else 0,
-                rows_after=rows_before if "rows_before" in locals() else 0,
+                rows_before=rows_before,
+                rows_after=rows_before,
                 duration_seconds=time.time() - start_time,
                 errors=errors,
             )
@@ -552,8 +558,8 @@ class IncrementalUpdater:
             existing_df = storage.read(key).collect()
 
             # Separate overlapping and new data
-            min_new = new_data["timestamp"].min()
-            max_existing = existing_df["timestamp"].max()
+            min_new = _ensure_datetime(new_data["timestamp"].min())
+            max_existing = _ensure_datetime(existing_df["timestamp"].max())
 
             if min_new <= max_existing:
                 # There's overlap

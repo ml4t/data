@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import structlog
 
+from ml4t.data.core.config import resolve_data_root
+
 if TYPE_CHECKING:
     from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
     from ml4t.data.synthetic.ohlcv_utils import CalendarMode
@@ -57,7 +59,7 @@ class SyntheticRegistry:
     Parameters
     ----------
     data_dir : Path, optional
-        Root data directory. If None, uses DATA_DIR from ml4t_code.
+        Root data directory. If None, uses the configured ML4T data root.
     checkpoints_subdir : str, default="synthetic/checkpoints"
         Subdirectory containing checkpoints relative to data_dir.
 
@@ -79,10 +81,7 @@ class SyntheticRegistry:
     ) -> None:
         """Initialize the registry."""
         if data_dir is None:
-            # Import here to avoid circular imports
-            from ml4t_code import DATA_DIR  # type: ignore[import-not-found]
-
-            data_dir = DATA_DIR
+            data_dir = resolve_data_root()
 
         self._data_dir = Path(data_dir)
         self._checkpoints_dir = self._data_dir / checkpoints_subdir

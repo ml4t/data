@@ -106,7 +106,10 @@ class AsyncSessionMixin:
         """
         if self.async_session is None:
             await self.init_async_session()
-        return await self.async_session.get(url, **kwargs)
+        session = self.async_session
+        if session is None:
+            raise RuntimeError("async session initialization did not create a client")
+        return await session.get(url, **kwargs)
 
     async def _apost(self, url: str, **kwargs: Any) -> httpx.Response:
         """Make async POST request.
@@ -120,7 +123,10 @@ class AsyncSessionMixin:
         """
         if self.async_session is None:
             await self.init_async_session()
-        return await self.async_session.post(url, **kwargs)
+        session = self.async_session
+        if session is None:
+            raise RuntimeError("async session initialization did not create a client")
+        return await session.post(url, **kwargs)
 
     async def _aget_json(self, url: str, **kwargs: Any) -> Any:
         """Make async GET request and parse JSON response.
