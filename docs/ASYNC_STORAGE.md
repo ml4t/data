@@ -11,7 +11,7 @@ The async storage backend is built on top of `aiofiles` and provides the same in
 - **Non-blocking I/O** - Uses `aiofiles` for async file operations
 - **Shared Lock Coordination** - Prevents race conditions with coordinated locking
 - **Migration Utilities** - Easy conversion between sync and async storage
-- **ACID Transactions** - Full transaction support with rollback capability
+- **Atomic Publication** - Immutable generations become visible through an atomic commit pointer
 - **Exponential Backoff** - Automatic retry with intelligent backoff
 - **Path Security** - Built-in protection against path traversal attacks
 

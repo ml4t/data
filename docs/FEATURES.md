@@ -94,7 +94,7 @@ src/ml4t/data/
 │   ├── hive.py        # Hive-partitioned (primary)
 │   ├── metadata_tracker.py  # Update tracking
 │   ├── migration.py    # Schema evolution
-│   └── transaction.py  # ACID-like operations
+│   └── backend.py      # Atomic generation publication
 ├── validation/         # Data quality
 │   ├── ohlcv.py       # OHLC invariant checks
 │   ├── anomaly.py     # 3 anomaly detectors

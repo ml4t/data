@@ -34,7 +34,6 @@ class TestStorageConfig:
         assert config.strategy == StorageStrategy.HIVE
         assert config.compression == CompressionType.ZSTD
         assert config.atomic_writes is True
-        assert config.enable_locking is True
         assert config.metadata_tracking is True
         assert config.partition_cols == ["year", "month"]
 

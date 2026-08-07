@@ -44,7 +44,6 @@ def _build_storage_from_config(config_data: dict[str, Any], config_path: Path):
         "partition_granularity",
         "partition_cols",
         "atomic_writes",
-        "enable_locking",
         "metadata_tracking",
         "generate_profile",
     }

@@ -598,6 +598,9 @@ class HiveStorage(StorageBackend):
             last_update: Timestamp of this update
             records_added: Number of records added
             chunk_file: Name of the chunk file saved
+
+        Raises:
+            KeyError: If no published dataset exists for the provider and symbol.
         """
         key = f"{provider}/{symbol}"
         metadata = self.get_metadata(key) or {

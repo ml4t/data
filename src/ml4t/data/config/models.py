@@ -105,9 +105,6 @@ class StorageConfig(BaseModel):
         default=CompressionType.ZSTD, description="Compression type for Parquet files"
     )
     atomic_writes: bool = Field(default=True, description="Use atomic writes with temp file rename")
-    enable_locking: bool = Field(
-        default=True, description="Enable file locking for concurrent access safety"
-    )
     lock_timeout: int = Field(default=30, ge=1, description="File lock timeout in seconds")
     metadata_tracking: bool = Field(default=True, description="Track metadata in manifest files")
     partition_granularity: PartitionGranularity = Field(

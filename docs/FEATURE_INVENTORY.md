@@ -153,7 +153,7 @@ class UpdateRecord:
 
 **Transaction Support**
 
-**File**: `storage/transaction.py` (485 lines)
+**File**: `storage/backend.py`
 
 **Features**:
 - ACID-like guarantees

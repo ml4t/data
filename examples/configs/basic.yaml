@@ -6,7 +6,6 @@ storage:
   strategy: hive  # 'hive' for partitioned or 'flat' for single file
   base_path: ~/qdata/storage
   compression: zstd  # Best compression/speed balance
-  enable_locking: true  # Safe concurrent access
   metadata_tracking: true  # Track update timestamps
 
 # Data providers configuration

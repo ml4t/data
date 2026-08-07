@@ -18,9 +18,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
+import structlog
 from filelock import FileLock
 
 from ml4t.data.storage.keys import contained_path, storage_key_path
+
+logger = structlog.get_logger()
 
 # Type alias for partition granularity
 PartitionGranularityType = Literal["year", "month", "day", "hour"]
@@ -65,7 +68,6 @@ class StorageConfig:
             - "hour": Best for second/tick data (~3,600 rows/partition)
         partition_cols: Deprecated. Use partition_granularity instead.
         atomic_writes: Use atomic writes with temp file rename.
-        enable_locking: Enable file locking for concurrent access.
         metadata_tracking: Track metadata in manifest files.
     """
 
@@ -75,7 +77,6 @@ class StorageConfig:
     partition_granularity: PartitionGranularityType = "month"
     partition_cols: list[str] | None = None  # Deprecated, kept for backward compat
     atomic_writes: bool = True
-    enable_locking: bool = True
     metadata_tracking: bool = True
     generate_profile: bool = True  # Generate column-level statistics on write
 
@@ -113,6 +114,8 @@ class CommitState:
 class StorageBackend(ABC):
     """Abstract base class for storage backends."""
 
+    GENERATION_RETENTION = 3
+
     def __init__(self, config: StorageConfig) -> None:
         """Initialize storage backend with configuration.
 
@@ -125,18 +128,15 @@ class StorageBackend(ABC):
         self.base_path.mkdir(parents=True, exist_ok=True)
         self.metadata_dir = self.base_path / ".metadata"
         self.metadata_dir.mkdir(exist_ok=True)
-        self._recover_unpublished_staging()
 
-    def _recover_unpublished_staging(self) -> None:
-        """Remove generations that were never made visible by a commit pointer."""
-        for key_path in self.base_path.glob("k1_*"):
-            if key_path.is_symlink() or not key_path.is_dir():
-                continue
-            for staging_path in key_path.glob(".staging-*"):
-                if staging_path.is_symlink():
-                    staging_path.unlink()
-                elif staging_path.is_dir():
-                    shutil.rmtree(staging_path)
+    @staticmethod
+    def _recover_key_staging(key_path: Path) -> None:
+        """Remove unpublished staging while the caller holds this key's writer lock."""
+        for staging_path in key_path.glob(".staging-*"):
+            if staging_path.is_symlink():
+                staging_path.unlink()
+            elif staging_path.is_dir():
+                shutil.rmtree(staging_path)
 
     @abstractmethod
     def write(self, data: pl.LazyFrame, key: str, metadata: dict[str, Any] | None = None) -> Path:
@@ -211,7 +211,7 @@ class StorageBackend(ABC):
             Metadata dict or None
         """
         try:
-            return self._current_commit(key).metadata
+            return self._current_commit(key).metadata or None
         except KeyError:
             return None
 
@@ -227,6 +227,7 @@ class StorageBackend(ABC):
         """Create an unpublished staging directory for a new generation."""
         key_path = self._key_path(key)
         key_path.mkdir(exist_ok=True)
+        self._recover_key_staging(key_path)
         contained_path(key_path, "generations").mkdir(exist_ok=True)
         contained_path(key_path, "commits").mkdir(exist_ok=True)
         generation_id = uuid.uuid4().hex
@@ -246,6 +247,7 @@ class StorageBackend(ABC):
         generations_path = contained_path(key_path, "generations")
         generation_path = contained_path(generations_path, generation_id)
         staging_path.replace(generation_path)
+        self._fsync_directory(generations_path)
         return self._publish_commit(key, generation_id, metadata)
 
     def _publish_commit(
@@ -273,7 +275,12 @@ class StorageBackend(ABC):
             },
         )
         self._atomic_write_text(contained_path(key_path, "CURRENT"), f"{commit_id}\n")
-        return CommitState(commit_id, generation_id, generation_path, metadata)
+        commit = CommitState(commit_id, generation_id, generation_path, metadata)
+        try:
+            self._prune_history(key_path, commit_id)
+        except OSError as error:
+            logger.warning("Failed to prune storage history", key=key, error=str(error))
+        return commit
 
     def _current_commit(self, key: str) -> CommitState:
         """Resolve the single commit visible to readers."""
@@ -283,6 +290,33 @@ class StorageBackend(ABC):
             raise KeyError(f"Key '{key}' not found in storage")
 
         commit_id = pointer_path.read_text(encoding="utf-8").strip()
+        try:
+            return self._load_commit(key_path, commit_id, key)
+        except RuntimeError as current_error:
+            commits_path = contained_path(key_path, "commits")
+            candidates = sorted(
+                commits_path.glob("*.json"),
+                key=lambda path: path.stat().st_mtime_ns,
+                reverse=True,
+            )
+            for candidate in candidates:
+                if candidate.stem == commit_id:
+                    continue
+                try:
+                    fallback = self._load_commit(key_path, candidate.stem, key)
+                except RuntimeError:
+                    continue
+                logger.error(
+                    "Current storage commit is invalid; using prior valid commit",
+                    key=key,
+                    invalid_commit=commit_id,
+                    fallback_commit=fallback.commit_id,
+                )
+                return fallback
+            raise current_error
+
+    def _load_commit(self, key_path: Path, commit_id: str, key: str) -> CommitState:
+        """Load and validate one immutable commit manifest."""
         if len(commit_id) != 32 or any(
             character not in "0123456789abcdef" for character in commit_id
         ):
@@ -309,6 +343,38 @@ class StorageBackend(ABC):
         if not generation_path.is_dir():
             raise RuntimeError(f"Published generation is missing for key '{key}'")
         return CommitState(commit_id, generation_id, generation_path, metadata)
+
+    def _prune_history(self, key_path: Path, current_commit_id: str) -> None:
+        """Bound retained commit manifests and their referenced generations."""
+        commits_path = contained_path(key_path, "commits")
+        commit_paths = sorted(
+            commits_path.glob("*.json"),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+        current_path = contained_path(commits_path, f"{current_commit_id}.json")
+        retained_paths = [current_path]
+        retained_paths.extend(path for path in commit_paths if path != current_path)
+        retained_paths = retained_paths[: self.GENERATION_RETENTION]
+        retained_generations = set()
+        for path in retained_paths:
+            try:
+                manifest = json.loads(path.read_text(encoding="utf-8"))
+                generation = manifest.get("generation")
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(generation, str):
+                retained_generations.add(generation)
+
+        for path in commit_paths:
+            if path not in retained_paths:
+                path.unlink(missing_ok=True)
+        generations_path = contained_path(key_path, "generations")
+        for path in generations_path.iterdir():
+            if path.is_dir() and path.name not in retained_generations:
+                shutil.rmtree(path)
+        self._fsync_directory(commits_path)
+        self._fsync_directory(generations_path)
 
     def _delete_key(self, key: str) -> bool:
         """Atomically make a key inaccessible, then remove its old generations."""
@@ -342,6 +408,9 @@ class StorageBackend(ABC):
         try:
             df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
             tmp_path.replace(target_path)
+            with target_path.open("rb") as target_file:
+                os.fsync(target_file.fileno())
+            self._fsync_directory(target_path.parent)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -367,6 +436,7 @@ class StorageBackend(ABC):
                 tmp_file.flush()
                 os.fsync(tmp_file.fileno())
             tmp_path.replace(path)
+            self._fsync_directory(path.parent)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -381,12 +451,26 @@ class StorageBackend(ABC):
         tmp_path = Path(tmp_name)
 
         try:
-            with os.fdopen(fd, mode="w") as tmp_file:
+            with os.fdopen(fd, mode="w", encoding="utf-8") as tmp_file:
                 json.dump(metadata, tmp_file, indent=2, default=str)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
             tmp_path.replace(path)
+            self._fsync_directory(path.parent)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> None:
+        """Persist directory entry updates where the platform supports it."""
+        if os.name == "nt":
+            return
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def _ensure_lazy(self, data: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
         """Ensure data is a LazyFrame for efficient processing.

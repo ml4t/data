@@ -300,16 +300,52 @@ class TestStorageBackends:
         restarted = create_storage(temp_dir, strategy="flat")
         assert restarted.read("prices").collect().equals(original)
 
-    def test_restart_removes_unpublished_staging_directory(self, temp_dir):
+    def test_next_write_removes_unpublished_staging_directory(self, temp_dir):
         storage = create_storage(temp_dir, strategy="flat")
         storage.write(pl.DataFrame({"value": [1]}), "prices")
         staging = storage._key_path("prices") / ".staging-interrupted"
         staging.mkdir()
         (staging / "partial.parquet").write_bytes(b"partial")
 
-        create_storage(temp_dir, strategy="flat")
+        restarted = create_storage(temp_dir, strategy="flat")
+        assert staging.exists()
+        restarted.write(pl.DataFrame({"value": [2]}), "prices")
 
         assert not staging.exists()
+
+    def test_constructor_does_not_delete_another_writer_staging(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        key_path = storage._key_path("prices")
+        key_path.mkdir()
+        staging = key_path / ".staging-active"
+        staging.mkdir()
+        (staging / "partial.parquet").write_bytes(b"partial")
+
+        create_storage(temp_dir, strategy="flat")
+
+        assert staging.is_dir()
+
+    def test_corrupt_current_commit_falls_back_to_prior_valid_generation(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        original = pl.DataFrame({"value": [1]})
+        replacement = pl.DataFrame({"value": [2]})
+        storage.write(original, "prices")
+        storage.write(replacement, "prices")
+        current = storage._current_commit("prices")
+        commit_path = storage._key_path("prices") / "commits" / f"{current.commit_id}.json"
+        commit_path.write_text("{invalid", encoding="utf-8")
+
+        assert storage.read("prices").collect().equals(original)
+
+    def test_generation_history_is_bounded(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        for value in range(10):
+            storage.write(pl.DataFrame({"value": [value]}), "prices")
+
+        key_path = storage._key_path("prices")
+        assert len(list((key_path / "commits").glob("*.json"))) == storage.GENERATION_RETENTION
+        assert len(list((key_path / "generations").iterdir())) == storage.GENERATION_RETENTION
+        assert storage.read("prices").collect()["value"].item() == 9
 
     def test_concurrent_flat_writes_publish_matching_data_and_metadata(self, temp_dir):
         storage = create_storage(temp_dir, strategy="flat")
@@ -357,7 +393,6 @@ class TestStorageConfig:
         assert config.strategy == "hive"
         assert config.compression == "zstd"
         assert config.atomic_writes
-        assert config.enable_locking
         assert config.metadata_tracking
         assert config.partition_cols == ["year", "month"]
 
@@ -369,9 +404,6 @@ class TestStorageConfig:
 
     def test_custom_config(self, temp_dir):
         """Test custom configuration."""
-        config = StorageConfig(
-            base_path=temp_dir, compression="lz4", atomic_writes=False, enable_locking=False
-        )
+        config = StorageConfig(base_path=temp_dir, compression="lz4", atomic_writes=False)
         assert config.compression == "lz4"
         assert not config.atomic_writes
-        assert not config.enable_locking

@@ -155,7 +155,6 @@ meta = storage.get_metadata("AAPL")
 | `compression` | `"zstd"` | Parquet compression: `zstd`, `lz4`, `snappy`, or `None` |
 | `partition_granularity` | `"month"` | `year`, `month`, `day`, `hour` (Hive only) |
 | `atomic_writes` | `True` | Write to temp file then rename |
-| `enable_locking` | `True` | File locking for concurrent access |
 | `metadata_tracking` | `True` | JSON manifest files in `.metadata/` |
 | `generate_profile` | `True` | Column-level statistics on write |
 

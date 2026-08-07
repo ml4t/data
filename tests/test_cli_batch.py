@@ -19,7 +19,6 @@ storage:
   compression: zstd
   partition_granularity: year
   atomic_writes: true
-  enable_locking: false
   metadata_tracking: true
 datasets:
   taa:
@@ -57,7 +56,6 @@ datasets:
         "compression": "zstd",
         "partition_granularity": "year",
         "atomic_writes": True,
-        "enable_locking": False,
         "metadata_tracking": True,
     }
     manager.update.assert_called_once_with(

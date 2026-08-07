@@ -122,5 +122,8 @@ class IncrementalStorageBackend(Protocol):
             last_update: Timestamp of this update
             records_added: Number of records added
             chunk_file: Name of the chunk file saved
+
+        Raises:
+            KeyError: If no published dataset exists for the provider and symbol.
         """
         ...

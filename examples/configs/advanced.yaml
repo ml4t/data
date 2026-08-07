@@ -6,7 +6,6 @@ storage:
   strategy: hive
   base_path: ${QDATA_STORAGE_PATH:~/qdata/storage}
   compression: zstd
-  enable_locking: true
   lock_timeout: 60  # Longer timeout for large operations
   partition_cols: ["year", "month", "day"]  # More granular partitioning
 

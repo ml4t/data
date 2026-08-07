@@ -38,7 +38,6 @@ storage:
   compression: zstd         # zstd, lz4, snappy, or none
   partition_granularity: month  # year, month, day, or hour
   atomic_writes: true
-  enable_locking: true
   metadata_tracking: true
 
 # Data providers
@@ -132,7 +131,6 @@ ml4t-data also reads `.env` files automatically via Pydantic Settings.
 | `compression` | `zstd` | Parquet compression: `zstd`, `lz4`, `snappy`, `none` |
 | `partition_granularity` | `month` | Hive partition level: `year`, `month`, `day`, `hour` |
 | `atomic_writes` | `true` | Write to temp file then rename |
-| `enable_locking` | `true` | File locking for concurrent access |
 | `metadata_tracking` | `true` | JSON manifest files alongside data |
 
 ### Providers

@@ -9,7 +9,6 @@ storage:
   strategy: hive
   base_path: ~/ml4t-data/economic
   compression: zstd
-  enable_locking: true
   metadata_tracking: true
 
 # FRED provider configuration
