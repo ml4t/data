@@ -88,13 +88,13 @@ class SessionCompleter:
         if fill_method not in {"forward", "backward", "none"}:
             raise ValueError("fill_method must be 'forward', 'backward', or 'none'")
 
-        timestamp_dtype = df.schema["timestamp"]
-        if not isinstance(timestamp_dtype, pl.Datetime):
-            raise TypeError("'timestamp' must contain Datetime values")
-
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot complete sessions")
             return df
+
+        timestamp_dtype = df.schema["timestamp"]
+        if not isinstance(timestamp_dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Datetime values")
 
         # Auto-detect date range
         if start_date is None:

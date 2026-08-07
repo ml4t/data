@@ -74,12 +74,7 @@ class TestSessionAssigner:
         from ml4t.data.sessions.assigner import SessionAssigner
 
         assigner = SessionAssigner("NYSE")
-        df = pl.DataFrame(
-            {
-                "timestamp": pl.Series([], dtype=pl.Datetime("ns", "UTC")),
-                "close": pl.Series([], dtype=pl.Float64),
-            }
-        )
+        df = pl.DataFrame({"timestamp": [], "close": []})
 
         result = assigner.assign_sessions(df)
         assert "session_date" in result.columns
@@ -294,12 +289,7 @@ class TestSessionCompleter:
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
-        df = pl.DataFrame(
-            {
-                "timestamp": pl.Series([], dtype=pl.Datetime("ns", "UTC")),
-                "close": pl.Series([], dtype=pl.Float64),
-            }
-        )
+        df = pl.DataFrame({"timestamp": [], "close": []})
 
         result = completer.complete_sessions(df)
         assert len(result) == 0

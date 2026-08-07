@@ -111,13 +111,13 @@ class SessionAssigner:
         if outside_session not in {"null", "raise", "drop"}:
             raise ValueError("outside_session must be 'null', 'raise', or 'drop'")
 
-        timestamp_dtype = df.schema["timestamp"]
-        if not isinstance(timestamp_dtype, pl.Datetime):
-            raise TypeError("'timestamp' must contain Datetime values")
-
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot assign sessions")
             return df.with_columns(pl.lit(None).cast(pl.Date).alias("session_date"))
+
+        timestamp_dtype = df.schema["timestamp"]
+        if not isinstance(timestamp_dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Datetime values")
 
         # Auto-detect date range from data
         if start_date is None:
