@@ -63,7 +63,7 @@ __all__ = [
 def circuit_breaker(
     failure_threshold: int = 5,
     reset_timeout: float = 300.0,
-    expected_exception: type[Exception] = Exception,
+    expected_exception: type[Exception] = NetworkError,
 ):
     """Decorator for circuit breaker pattern (backward compatibility).
 

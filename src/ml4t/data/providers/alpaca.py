@@ -933,8 +933,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         Mirrors :meth:`fetch_ohlcv` over the async transport with the same
         resilience semantics: the circuit breaker wraps the full
         fetch/transform/validate pipeline (an open breaker refuses before any
-        request goes out, and fetch failures count toward opening it), and
-        transient failures retry per page inside the fetch.
+        request goes out, and transient service failures count toward opening
+        it), and transient failures retry per page inside the fetch.
 
         Args:
             symbol: The symbol to fetch. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD")

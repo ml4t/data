@@ -5,11 +5,16 @@ from unittest.mock import Mock, patch
 
 import polars as pl
 import pytest
+from tenacity import wait_none
 
 from ml4t.data.core.exceptions import (
+    AuthenticationError,
     CircuitBreakerOpenError,
+    DataNotAvailableError,
     DataValidationError,
     NetworkError,
+    RateLimitError,
+    SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider, CircuitBreaker
 
@@ -81,7 +86,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_failure_counting(self):
         """Test circuit breaker counts failures."""
-        breaker = CircuitBreaker(failure_threshold=3)
+        breaker = CircuitBreaker(failure_threshold=3, expected_exception=Exception)
 
         def failing_func():
             raise Exception("Mock failure")
@@ -106,7 +111,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_open_state(self):
         """Test circuit breaker prevents calls when open."""
-        breaker = CircuitBreaker(failure_threshold=2)
+        breaker = CircuitBreaker(failure_threshold=2, expected_exception=Exception)
 
         def failing_func():
             raise Exception("Mock failure")
@@ -125,7 +130,13 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_half_open_success(self):
         """Test circuit breaker recovery on success."""
-        breaker = CircuitBreaker(failure_threshold=2, reset_timeout=0.1)
+        now = [100.0]
+        breaker = CircuitBreaker(
+            failure_threshold=2,
+            reset_timeout=10.0,
+            expected_exception=Exception,
+            clock=lambda: now[0],
+        )
 
         def failing_func():
             raise Exception("Mock failure")
@@ -140,10 +151,7 @@ class TestCircuitBreaker:
             breaker.call(failing_func)
         assert breaker.state == "OPEN"
 
-        # Wait for reset timeout
-        import time
-
-        time.sleep(0.2)
+        now[0] += 10.0
 
         # Successful call should reset circuit
         result = breaker.call(success_func)
@@ -154,7 +162,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_call_async_success_and_failure_accounting(self):
         """call_async mirrors call: successes pass through, failures count."""
-        breaker = CircuitBreaker(failure_threshold=2)
+        breaker = CircuitBreaker(failure_threshold=2, expected_exception=Exception)
 
         async def success_func():
             return "success"
@@ -180,9 +188,13 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_call_async_half_open_recovery(self):
         """After the reset timeout, call_async probes HALF_OPEN and recovers."""
-        import time
-
-        breaker = CircuitBreaker(failure_threshold=1, reset_timeout=0.05)
+        now = [100.0]
+        breaker = CircuitBreaker(
+            failure_threshold=1,
+            reset_timeout=10.0,
+            expected_exception=Exception,
+            clock=lambda: now[0],
+        )
 
         async def failing_func():
             raise Exception("Mock failure")
@@ -194,11 +206,49 @@ class TestCircuitBreaker:
             await breaker.call_async(failing_func)
         assert breaker.state == "OPEN"
 
-        time.sleep(0.1)
+        now[0] += 10.0
 
         assert await breaker.call_async(success_func) == "success"
         assert breaker.state == "CLOSED"
         assert breaker.failure_count == 0
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            SymbolNotFoundError("mock", "BAD"),
+            AuthenticationError("mock"),
+            DataNotAvailableError("mock", "BAD"),
+            DataValidationError("mock", "invalid response"),
+            RateLimitError("mock", retry_after=1.0),
+            ValueError("invalid request"),
+        ],
+    )
+    def test_default_circuit_ignores_permanent_and_client_errors(self, error):
+        """Only transient service failures affect the default circuit."""
+        breaker = CircuitBreaker(failure_threshold=1)
+
+        def fail():
+            raise error
+
+        with pytest.raises(type(error)):
+            breaker.call(fail)
+
+        assert breaker.state == "CLOSED"
+        assert breaker.failure_count == 0
+        assert breaker.ignored_failure_count == 1
+
+    def test_default_circuit_counts_transient_network_errors(self):
+        """A classified transport failure opens the default circuit."""
+        breaker = CircuitBreaker(failure_threshold=1)
+
+        def fail():
+            raise NetworkError("mock", "connection reset")
+
+        with pytest.raises(NetworkError):
+            breaker.call(fail)
+
+        assert breaker.state == "OPEN"
+        assert breaker.failure_count == 1
 
 
 class TestBaseProvider:
@@ -412,23 +462,22 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match=message):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    @pytest.mark.skip(reason="Circuit breaker state pollution in parallel execution")
-    def test_circuit_breaker_integration(self):
-        """Test circuit breaker integration with provider."""
-        provider = MockProvider(circuit_breaker_config={"failure_threshold": 2})
+    def test_circuit_breaker_integration(self, monkeypatch):
+        """Repeated transient failures open the provider's service circuit."""
+        provider = MockProvider(circuit_breaker_config={"failure_threshold": 3})
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "wait", wait_none())
         provider._should_fail = True
 
-        # First failure
         with pytest.raises(NetworkError):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        # Second failure should open circuit
-        with pytest.raises(NetworkError):
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert provider.circuit_breaker.state == "OPEN"
+        assert provider.circuit_breaker.metrics["counted_failures"] == 3
+        assert provider.circuit_breaker.metrics["opened"] == 1
 
-        # Third call should be prevented by circuit breaker
+        provider._should_fail = False
         with pytest.raises(CircuitBreakerOpenError):
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+            provider.fetch_ohlcv("GOOD", "2022-01-01", "2022-01-03")
 
     def test_retry_mechanism(self):
         """Test retry mechanism for transient failures."""
@@ -450,6 +499,36 @@ class TestBaseProvider:
         df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
         assert isinstance(df, pl.DataFrame)
         assert call_count == 3
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            SymbolNotFoundError("mock", "BAD"),
+            AuthenticationError("mock"),
+            DataNotAvailableError("mock", "BAD"),
+            DataValidationError("mock", "invalid response"),
+        ],
+    )
+    def test_permanent_error_never_blocks_later_valid_symbol(self, error):
+        """One invalid request cannot make a healthy provider unavailable."""
+        provider = MockProvider(circuit_breaker_config={"failure_threshold": 2})
+        original_fetch = provider._fetch_raw_data
+
+        def fail_bad_symbol(symbol, start, end, frequency):
+            raise error
+
+        provider._fetch_raw_data = fail_bad_symbol
+        for _ in range(2):
+            with pytest.raises(type(error)):
+                provider.fetch_ohlcv("BAD", "2022-01-01", "2022-01-03")
+
+        assert provider.circuit_breaker.state == "CLOSED"
+        assert provider.circuit_breaker.failure_count == 0
+
+        provider._fetch_raw_data = original_fetch
+        result = provider.fetch_ohlcv("GOOD", "2022-01-01", "2022-01-03")
+        assert result.height == 2
+        assert result["symbol"].unique().to_list() == ["GOOD"]
 
     @pytest.mark.skip(
         reason="Limiter class doesn't exist - test needs rewrite for global_rate_limit_manager"

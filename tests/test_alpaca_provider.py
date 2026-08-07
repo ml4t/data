@@ -1124,8 +1124,8 @@ class TestFetchOhlcvAsync:
         mock_aget.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_fetch_ohlcv_async_failure_counts_toward_breaker(self, provider):
-        """An async fetch failure increments the breaker's failure count."""
+    async def test_fetch_ohlcv_async_permanent_failure_does_not_affect_breaker(self, provider):
+        """An async permanent failure does not affect provider health."""
         response = _page_response([], status=404)
 
         with (
@@ -1135,7 +1135,23 @@ class TestFetchOhlcvAsync:
             with pytest.raises(DataNotAvailableError):
                 await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-05")
 
+        assert provider.circuit_breaker.failure_count == 0
+        assert provider.circuit_breaker.metrics["ignored_failures"] == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlcv_async_transport_failure_counts_toward_breaker(self, provider):
+        """An async transient service failure increments the breaker count."""
+        response = _page_response([], status=500)
+
+        with (
+            patch.object(provider, "_aget", new=AsyncMock(return_value=response)),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(NetworkError):
+                await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-05")
+
         assert provider.circuit_breaker.failure_count == 1
+        assert provider.circuit_breaker.metrics["counted_failures"] == 1
 
 
 class TestMalformedRateLimitHeaders:
