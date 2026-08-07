@@ -31,6 +31,18 @@ class CompressionType(StrEnum):
     GZIP = "gzip"
 
 
+def normalize_compression(
+    value: CompressionType | str | None,
+) -> CompressionType | None:
+    """Return the canonical compression value for public storage inputs."""
+    if value is None or isinstance(value, CompressionType):
+        return value
+    normalized = value.lower()
+    if normalized in {"none", "null"}:
+        return None
+    return CompressionType(normalized)
+
+
 class PartitionGranularity(StrEnum):
     """Time components used by Hive storage partitions."""
 
@@ -117,8 +129,8 @@ class StorageConfig(BaseModel):
     @classmethod
     def normalize_compression(cls, value: Any) -> Any:
         """Accept case-insensitive codecs and explicit no-compression values."""
-        if isinstance(value, str):
-            return None if value.lower() in {"none", "null"} else value.lower()
+        if value is None or isinstance(value, CompressionType | str):
+            return normalize_compression(value)
         return value
 
     @property

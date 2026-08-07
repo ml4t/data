@@ -6,10 +6,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import polars as pl
+import pyarrow.parquet as pq
 import pytest
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.storage.chunked import ChunkedStorage, ChunkInfo
+from ml4t.data.storage.config import CompressionType
 
 
 class TestChunkedStorage:
@@ -45,6 +47,44 @@ class TestChunkedStorage:
 
         assert storage.compression == "uncompressed"
         assert storage.read(key).data.equals(frame)
+        chunk = storage.get_chunk_info(key)[0]
+        parquet_metadata = pq.ParquetFile(chunk.file_path).metadata
+        assert parquet_metadata.row_group(0).column(0).compression == "UNCOMPRESSED"
+
+    @pytest.mark.parametrize("compression", list(CompressionType))
+    def test_canonical_compressions_round_trip(
+        self,
+        tmp_path: Path,
+        compression: CompressionType,
+    ) -> None:
+        storage = ChunkedStorage(tmp_path, compression=compression.value.upper())
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert storage.compression == compression.value
+        assert storage.read(key).data.equals(frame)
+
+    @pytest.mark.parametrize("compression", [None, "none", "NONE", "null", "NULL"])
+    def test_no_compression_aliases(self, tmp_path: Path, compression: str | None) -> None:
+        storage = ChunkedStorage(tmp_path, compression=compression)
+
+        assert storage.compression == "uncompressed"
 
     def test_basic_write_and_read(self, tmp_path: Path) -> None:
         """Test basic chunked storage operations."""

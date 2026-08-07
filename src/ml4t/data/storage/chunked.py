@@ -12,6 +12,7 @@ import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.storage.config import CompressionType, normalize_compression
 from ml4t.data.storage.keys import (
     KEY_ENCODING_PREFIX,
     decode_storage_key,
@@ -21,19 +22,22 @@ from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
 
-ParquetCompression = Literal["uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd"]
-_PARQUET_COMPRESSIONS = frozenset({"uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd"})
+ParquetCompression = Literal["uncompressed", "snappy", "gzip", "lz4", "zstd"]
 
 
-def _normalize_compression(compression: str | None) -> ParquetCompression:
-    if compression is None:
-        return "uncompressed"
-    if compression not in _PARQUET_COMPRESSIONS:
-        supported = ", ".join(sorted(_PARQUET_COMPRESSIONS))
+def _parquet_compression(
+    compression: CompressionType | str | None,
+) -> ParquetCompression:
+    try:
+        normalized = normalize_compression(compression)
+    except ValueError as exc:
+        supported = ", ".join(codec.value for codec in CompressionType)
         raise ValueError(
-            f"Unsupported Parquet compression '{compression}'; expected one of {supported}"
-        )
-    return cast(ParquetCompression, compression)
+            f"Unsupported Parquet compression '{compression}'; expected one of {supported} or none"
+        ) from exc
+    if normalized is None:
+        return "uncompressed"
+    return cast(ParquetCompression, normalized.value)
 
 
 def _datetime_scalar(value: object, column: str = "timestamp") -> datetime:
@@ -77,7 +81,7 @@ class ChunkedStorage:
         self,
         base_path: Path,
         chunk_size_days: int = DEFAULT_CHUNK_SIZE_DAYS,
-        compression: str | None = "snappy",
+        compression: CompressionType | str | None = CompressionType.SNAPPY,
     ) -> None:
         """
         Initialize chunked storage.
@@ -85,14 +89,18 @@ class ChunkedStorage:
         Args:
             base_path: Base directory for storage
             chunk_size_days: Number of days per chunk
-            compression: Compression algorithm for Parquet files
+            compression: Canonical Parquet codec, case-insensitive codec name, or
+                ``None``, ``"none"``, or ``"null"`` to disable compression
+
+        Raises:
+            ValueError: If the chunk size or compression value is unsupported.
         """
         if chunk_size_days <= 0:
             raise ValueError("chunk_size_days must be positive")
 
         self.base_path = Path(base_path).expanduser().resolve()
         self.chunk_size_days = chunk_size_days
-        self.compression = _normalize_compression(compression)
+        self.compression = _parquet_compression(compression)
 
         # Chunk storage directory
         self.chunks_path = self.base_path / "chunks"
