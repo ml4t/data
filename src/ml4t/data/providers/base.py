@@ -40,12 +40,12 @@ import structlog
 from tenacity import (
     RetryCallState,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
 
-from ml4t.data.core.exceptions import NetworkError, RateLimitError
+from ml4t.data.core.exceptions import NetworkError
 from ml4t.data.providers.mixins.circuit_breaker import CircuitBreaker, CircuitBreakerMixin
 from ml4t.data.providers.mixins.rate_limit import RateLimitMixin
 from ml4t.data.providers.mixins.session import SessionMixin
@@ -66,6 +66,11 @@ def _provider_retry_wait(retry_state: RetryCallState) -> float:
     if isinstance(error, NetworkError) and error.retry_after is not None:
         return min(max(delay, float(error.retry_after)), _MAX_RETRY_AFTER)
     return delay
+
+
+def _provider_error_is_retryable(error: BaseException) -> bool:
+    """Retry transient provider failures that have not exhausted a local policy."""
+    return isinstance(error, NetworkError) and error.retryable
 
 
 # Re-export for backward compatibility
@@ -194,7 +199,7 @@ class BaseProvider(
     @retry(
         stop=stop_after_attempt(3),
         wait=_provider_retry_wait,
-        retry=retry_if_exception_type((NetworkError, RateLimitError)),
+        retry=retry_if_exception(_provider_error_is_retryable),
         reraise=True,
     )
     def fetch_ohlcv(

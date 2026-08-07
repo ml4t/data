@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import time
 from datetime import UTC, datetime
@@ -56,6 +57,7 @@ class CryptoCompareProvider(BaseProvider):
         60.0,
     )  # 10 requests per minute for free tier
     MAX_RATE_LIMIT_ATTEMPTS: ClassVar[int] = 3
+    DEFAULT_RETRY_AFTER: ClassVar[float] = 6.0
     MAX_RETRY_AFTER: ClassVar[float] = 60.0
 
     def __init__(
@@ -139,11 +141,13 @@ class CryptoCompareProvider(BaseProvider):
         """Return a non-negative server delay capped by the provider policy."""
         value = response.headers.get("Retry-After")
         if not isinstance(value, str | int | float):
-            return self.MAX_RETRY_AFTER
+            return self.DEFAULT_RETRY_AFTER
         try:
             delay = float(value)
         except ValueError:
-            return self.MAX_RETRY_AFTER
+            return self.DEFAULT_RETRY_AFTER
+        if not math.isfinite(delay):
+            return self.DEFAULT_RETRY_AFTER
         return min(max(delay, 0.0), self.MAX_RETRY_AFTER)
 
     def _fetch_raw_data(self, symbol: str, start: str, end: str, frequency: str) -> Any:
@@ -269,6 +273,7 @@ class CryptoCompareProvider(BaseProvider):
                         raise RateLimitError(
                             provider=self.name,
                             retry_after=retry_after,
+                            retryable=False,
                         ) from e
                     logger.warning(
                         "Rate limit hit",
@@ -488,6 +493,7 @@ class CryptoCompareProvider(BaseProvider):
                         raise RateLimitError(
                             provider=self.name,
                             retry_after=retry_after,
+                            retryable=False,
                         ) from e
                     logger.warning(
                         "Rate limit hit",

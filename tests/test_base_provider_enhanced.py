@@ -523,6 +523,26 @@ class TestBaseProvider:
         assert call_count == 2
         assert delays == [12.0]
 
+    def test_exhausted_provider_retry_policy_is_not_retried(self, monkeypatch):
+        """A provider-local retry budget prevents a second outer retry loop."""
+        provider = MockProvider()
+        call_count = 0
+
+        def exhausted_fetch(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RateLimitError("mock", retry_after=6.0, retryable=False)
+
+        provider._fetch_raw_data = exhausted_fetch
+        delays = []
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "sleep", delays.append)
+
+        with pytest.raises(RateLimitError):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        assert call_count == 1
+        assert delays == []
+
     @pytest.mark.parametrize(
         ("retry_after", "expected_delay"),
         [(1.0, 4.0), (3_600.0, 60.0)],

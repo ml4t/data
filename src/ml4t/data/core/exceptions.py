@@ -50,6 +50,7 @@ class NetworkError(ProviderError):
         message: str = "Network error occurred",
         details: dict[str, Any] | None = None,
         retry_after: float | None = None,
+        retryable: bool = True,
     ) -> None:
         """
         Initialize network error.
@@ -59,9 +60,11 @@ class NetworkError(ProviderError):
             message: Error message
             details: Optional error details
             retry_after: Seconds to wait before retry
+            retryable: Whether a higher-level operation should retry this error
         """
         super().__init__(provider, message, details)
         self.retry_after = retry_after
+        self.retryable = retryable
 
 
 class RateLimitError(NetworkError):
@@ -73,6 +76,7 @@ class RateLimitError(NetworkError):
         retry_after: float | None = None,
         remaining: int | None = None,
         limit: int | None = None,
+        retryable: bool = True,
     ) -> None:
         """
         Initialize rate limit error.
@@ -82,6 +86,7 @@ class RateLimitError(NetworkError):
             retry_after: Seconds to wait before retry
             remaining: Remaining API calls
             limit: API call limit
+            retryable: Whether a higher-level operation should retry this error
         """
         details = {
             "remaining": remaining,
@@ -91,7 +96,7 @@ class RateLimitError(NetworkError):
         if retry_after:
             message += f", retry after {retry_after} seconds"
 
-        super().__init__(provider, message, details, retry_after)
+        super().__init__(provider, message, details, retry_after, retryable)
         self.remaining = remaining
         self.limit = limit
 
