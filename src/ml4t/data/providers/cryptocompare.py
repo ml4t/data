@@ -363,11 +363,6 @@ class CryptoCompareProvider(BaseProvider):
 
         return df
 
-    def __del__(self) -> None:
-        """Clean up HTTP client."""
-        if hasattr(self, "_client") and self._client:
-            self._client.close()
-
     # ===== Async Support =====
 
     @property

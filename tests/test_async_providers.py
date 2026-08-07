@@ -167,6 +167,31 @@ class TestBinancePublicProviderAsync:
         await provider.close_async()
 
     @pytest.mark.asyncio
+    async def test_fetch_daily_data_async_does_not_swallow_base_exception(self, sample_ohlcv_data):
+        """Cancellation-class failures propagate from concurrent downloads."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = BinancePublicProvider()
+        call_count = 0
+
+        async def mock_download(url):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return sample_ohlcv_data
+            raise WorkerStopped("stopped")
+
+        with patch.object(provider, "_download_and_parse_zip_async", side_effect=mock_download):
+            with pytest.raises(WorkerStopped, match="stopped"):
+                await provider._fetch_daily_data_async(
+                    "BTCUSDT", "1d", datetime(2024, 1, 1), datetime(2024, 1, 2)
+                )
+
+        await provider.close_async()
+
+    @pytest.mark.asyncio
     async def test_fetch_ohlcv_multi_async_combines_symbols(self, sample_ohlcv_data):
         """Test multi-symbol OHLCV fetch combines successful results."""
         provider = BinancePublicProvider()

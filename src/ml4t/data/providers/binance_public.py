@@ -1393,13 +1393,18 @@ class BinancePublicProvider(BaseProvider):
         # Fetch all concurrently with semaphore for rate limiting
         semaphore = asyncio.Semaphore(20)  # Max concurrent requests
 
-        async def fetch_one(date: datetime, url: str) -> tuple[datetime, pl.DataFrame | None]:
+        async def fetch_one(
+            date: datetime, url: str
+        ) -> tuple[datetime, pl.DataFrame | None] | Exception:
             async with semaphore:
-                df = await self._download_and_parse_zip_async(url)
-                return (date, df)
+                try:
+                    df = await self._download_and_parse_zip_async(url)
+                    return (date, df)
+                except Exception as exc:
+                    return exc
 
         tasks = [fetch_one(date, url) for date, url in urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
 
         # Collect successful results in order
         all_data: list[pl.DataFrame] = [first_df]
@@ -1756,13 +1761,16 @@ class BinancePublicProvider(BaseProvider):
         # Fetch all months concurrently
         semaphore = asyncio.Semaphore(10)
 
-        async def fetch_month(year: int, month: int) -> pl.DataFrame | None:
+        async def fetch_month(year: int, month: int) -> pl.DataFrame | None | Exception:
             async with semaphore:
-                url = self._build_premium_index_monthly_url(symbol, interval, year, month)
-                return await self._download_and_parse_premium_index_zip_async(url, symbol)
+                try:
+                    url = self._build_premium_index_monthly_url(symbol, interval, year, month)
+                    return await self._download_and_parse_premium_index_zip_async(url, symbol)
+                except Exception as exc:
+                    return exc
 
         tasks = [fetch_month(year, month) for year, month in months]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
 
         all_data: list[pl.DataFrame] = []
         for i, result in enumerate(results):
