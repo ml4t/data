@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import polars as pl
 import structlog
@@ -22,9 +22,6 @@ from .keys import (
     decode_storage_key,
     encode_storage_key,
 )
-
-if TYPE_CHECKING:
-    from ml4t.data.core.models import DataObject
 
 logger = structlog.get_logger()
 
@@ -102,7 +99,7 @@ class HiveStorage(StorageBackend):
         return df
 
     def _build_partition_path(
-        self, base_path: Path, partition_cols: list[str], values: tuple
+        self, base_path: Path, partition_cols: list[str], values: tuple[Any, ...]
     ) -> Path:
         """Build partition directory path from column names and values.
 
@@ -254,39 +251,20 @@ class HiveStorage(StorageBackend):
 
     def write(
         self,
-        data: pl.LazyFrame | pl.DataFrame | DataObject,
-        key: str | None = None,
+        data: pl.LazyFrame | pl.DataFrame,
+        key: str,
         metadata: dict[str, Any] | None = None,
-    ) -> Path | str:
+    ) -> Path:
         """Write data using Hive partitioning.
 
         Args:
-            data: Data to write (DataFrame, LazyFrame, or DataObject)
-            key: Storage key (e.g., "BTC-USD" or "equities/daily/AAPL"). Optional if data is DataObject.
+            data: DataFrame or LazyFrame to write
+            key: Storage key (e.g., "BTC-USD" or "equities/daily/AAPL")
             metadata: Optional metadata dict
 
         Returns:
-            Path to base directory (old API) or storage key string (new DataObject API)
+            Path to the committed data generation
         """
-        # Handle DataObject input (new API)
-        from ml4t.data.core.models import DataObject
-
-        if isinstance(data, DataObject):
-            # Extract components from DataObject
-            df_data = data.data
-            data_metadata = data.metadata
-            # Construct storage key from metadata
-            storage_key = (
-                f"{data_metadata.asset_class}/{data_metadata.frequency}/{data_metadata.symbol}"
-            )
-            # Use the old API internally
-            self.write(df_data, storage_key, None)
-            return storage_key
-
-        # Old API: data is DataFrame/LazyFrame, key is required
-        if key is None:
-            raise ValueError("key is required when data is not a DataObject")
-
         # Ensure LazyFrame for efficiency
         lazy_data = self._ensure_lazy(data)
 
@@ -458,13 +436,13 @@ class HiveStorage(StorageBackend):
         if not self.exists(key):
             return None
 
-        try:
-            df = self.read(key).select("timestamp").collect()
-            if df.is_empty():
-                return None
-            return df["timestamp"].max()
-        except Exception:
+        df = self.read(key).select("timestamp").collect()
+        if df.is_empty():
             return None
+        latest = df["timestamp"].max()
+        if not isinstance(latest, datetime):
+            raise TypeError(f"Expected datetime timestamp for '{key}', got {type(latest).__name__}")
+        return latest
 
     def save_chunk(
         self,
@@ -501,7 +479,7 @@ class HiveStorage(StorageBackend):
         chunk_path = chunks_dir / chunk_name
 
         # Save chunk
-        data.write_parquet(chunk_path, compression=self.config.compression or "zstd")
+        data.write_parquet(chunk_path, compression=self._parquet_compression())
 
         return chunk_path
 

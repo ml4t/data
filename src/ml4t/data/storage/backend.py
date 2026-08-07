@@ -15,13 +15,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import structlog
 from filelock import FileLock
 
-from ml4t.data.storage.config import StorageConfig
+from ml4t.data.storage.config import CompressionType, StorageConfig
 from ml4t.data.storage.keys import contained_path, storage_key_path
 
 logger = structlog.get_logger()
@@ -78,6 +78,21 @@ class StorageBackend(ABC):
         self.metadata_dir = self.base_path / ".metadata"
         self.metadata_dir.mkdir(exist_ok=True)
 
+    def _parquet_compression(
+        self,
+    ) -> Literal["uncompressed", "zstd", "lz4", "snappy", "gzip"]:
+        """Return the Polars codec name for the canonical storage configuration."""
+        compression = self.config.compression
+        if compression is None:
+            return "uncompressed"
+        if compression == CompressionType.ZSTD:
+            return "zstd"
+        if compression == CompressionType.LZ4:
+            return "lz4"
+        if compression == CompressionType.SNAPPY:
+            return "snappy"
+        return "gzip"
+
     @staticmethod
     def _recover_key_staging(key_path: Path) -> None:
         """Remove unpublished staging while the caller holds this key's writer lock."""
@@ -88,7 +103,12 @@ class StorageBackend(ABC):
                 shutil.rmtree(staging_path)
 
     @abstractmethod
-    def write(self, data: pl.LazyFrame, key: str, metadata: dict[str, Any] | None = None) -> Path:
+    def write(
+        self,
+        data: pl.LazyFrame | pl.DataFrame,
+        key: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> Path:
         """Write data to storage.
 
         Args:
@@ -357,7 +377,7 @@ class StorageBackend(ABC):
         tmp_path = Path(tmp_name)
 
         try:
-            df.write_parquet(tmp_path, compression=self.config.compression or "zstd")
+            df.write_parquet(tmp_path, compression=self._parquet_compression())
             tmp_path.replace(target_path)
             with target_path.open("rb") as target_file:
                 os.fsync(target_file.fileno())

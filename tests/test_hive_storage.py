@@ -89,7 +89,7 @@ class TestHiveStorageWrite:
             }
         )
 
-        with pytest.raises(ValueError, match="key is required"):
+        with pytest.raises(ValueError, match="non-empty string"):
             storage.write(df, None)
 
     def test_write_creates_metadata(self, storage):
