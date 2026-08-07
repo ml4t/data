@@ -1644,6 +1644,16 @@ prerelease = [
     { name = "xlsxwriter" },
     { name = "yfinance" },
 ]
+test = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+    { name = "ty" },
+    { name = "xlsxwriter" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1752,6 +1762,16 @@ prerelease = [
     { name = "ty" },
     { name = "xlsxwriter", specifier = ">=3.1.0" },
     { name = "yfinance", specifier = ">=0.2.0" },
+]
+test = [
+    { name = "hypothesis", specifier = ">=6.80.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.1.0" },
+    { name = "pytest-xdist", specifier = ">=3.3.0" },
+    { name = "ty" },
+    { name = "xlsxwriter", specifier = ">=3.1.0" },
 ]
 
 [[package]]

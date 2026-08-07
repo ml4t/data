@@ -233,6 +233,29 @@ class TestDataManagerConvertOutput:
         assert result["a"].iloc[0] == 1
         assert result["a"].isna().iloc[1]
 
+    def test_convert_to_pandas_preserves_categorical_dtype(self):
+        """Use the Arrow-backed conversion when its optional dependency is installed."""
+        dm = DataManager(output_format="pandas")
+        df = pl.DataFrame({"state": pl.Series(["open", "closed"], dtype=pl.Categorical)})
+
+        result = dm._convert_output(df)
+
+        assert str(result["state"].dtype) == "category"
+
+    @patch("ml4t.data.managers.fetch_manager.pl.DataFrame.to_pandas")
+    def test_convert_to_pandas_without_pyarrow(self, mock_to_pandas):
+        """Fall back to Python values only when Arrow cannot be imported."""
+        error = ModuleNotFoundError("No module named 'pyarrow'")
+        error.name = "pyarrow"
+        mock_to_pandas.side_effect = error
+        dm = DataManager(output_format="pandas")
+        df = pl.DataFrame({"a": [1, None]})
+
+        result = dm._convert_output(df)
+
+        assert result["a"].iloc[0] == 1
+        assert result["a"].isna().iloc[1]
+
     def test_convert_to_lazy(self):
         """Test lazy output format."""
         dm = DataManager(output_format="lazy")

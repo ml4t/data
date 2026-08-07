@@ -73,7 +73,19 @@ from ml4t.data.futures.schema import (
     SettlementType,
 )
 
-_DATABENTO_EXPORTS: list[str] = []
+_DATABENTO_EXPORTS = [
+    "FuturesDownloader",
+    "ContinuousDownloader",
+    "ContinuousDownloadConfig",
+    "ContinuousDownloadProgress",
+    "load_continuous_config",
+    "IndividualDownloader",
+    "IndividualDownloadConfig",
+    "IndividualProductConfig",
+    "load_individual_config",
+    "DefinitionsDownloader",
+]
+_DATABENTO_IMPORT_ERROR: ModuleNotFoundError | None = None
 
 try:
     from ml4t.data.futures import continuous_downloader as _continuous_downloader
@@ -83,6 +95,7 @@ except ModuleNotFoundError as error:
     missing_module = error.name or ""
     if missing_module != "databento" and not missing_module.startswith("databento."):
         raise
+    _DATABENTO_IMPORT_ERROR = error
 else:
     ContinuousDownloadConfig = _continuous_downloader.ContinuousDownloadConfig
     ContinuousDownloader = _continuous_downloader.ContinuousDownloader
@@ -94,18 +107,16 @@ else:
     IndividualDownloader = _individual_downloader.IndividualDownloader
     IndividualProductConfig = _individual_downloader.IndividualProductConfig
     load_individual_config = _individual_downloader.load_individual_config
-    _DATABENTO_EXPORTS = [
-        "FuturesDownloader",
-        "ContinuousDownloader",
-        "ContinuousDownloadConfig",
-        "ContinuousDownloadProgress",
-        "load_continuous_config",
-        "IndividualDownloader",
-        "IndividualDownloadConfig",
-        "IndividualProductConfig",
-        "load_individual_config",
-        "DefinitionsDownloader",
-    ]
+
+
+def __getattr__(name: str):
+    """Explain how to install public Databento-backed downloader symbols."""
+    if name in _DATABENTO_EXPORTS and _DATABENTO_IMPORT_ERROR is not None:
+        raise ImportError(
+            f"{name} requires the Databento extra: uv add 'ml4t-data[databento]'"
+        ) from _DATABENTO_IMPORT_ERROR
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Schema

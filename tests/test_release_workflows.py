@@ -56,6 +56,29 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     )
     assert publish_action["with"]["packages-dir"] == "dist/packages/"
 
+    github_release = release["jobs"]["github-release"]
+    create_step = next(
+        step
+        for step in github_release["steps"]
+        if step.get("name") == "Create GitHub release with validated distributions"
+    )
+    assert create_step["env"]["GH_REPO"] == "${{ github.repository }}"
+
+
+def test_compatibility_checkout_fetches_release_tags() -> None:
+    compatibility = _load("compatibility.yml")["jobs"]["compatibility"]
+    checkout = next(
+        step
+        for step in compatibility["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["fetch-depth"] == "0"
+
+
+def test_ci_does_not_run_an_empty_optional_dependency_lane() -> None:
+    jobs = _load("ci.yml")["jobs"]
+    assert "optional-dependency" not in jobs
+
 
 def test_provider_contract_jobs_isolate_credentials() -> None:
     jobs = _load("provider-contracts.yml")["jobs"]
@@ -70,3 +93,25 @@ def test_provider_contract_jobs_isolate_credentials() -> None:
         assert expected_credential in serialized
         for other_credential in set(credentials.values()) - {expected_credential}:
             assert other_credential not in serialized
+
+
+def test_public_provider_integrations_are_manually_reachable() -> None:
+    workflow = _load("provider-contracts.yml")
+    options = workflow["on"]["workflow_dispatch"]["inputs"]["provider"]["options"]
+    public_job = workflow["jobs"]["public"]
+    command = next(
+        step["run"]
+        for step in public_job["steps"]
+        if step.get("name") == "Run public live integrations"
+    )
+
+    assert "public" in options
+    for path in (
+        "tests/integration/test_binance_public.py",
+        "tests/integration/test_coingecko.py",
+        "tests/integration/test_kalshi.py",
+        "tests/integration/test_polymarket.py",
+        "tests/integration/test_yahoo.py",
+        "tests/test_multi_asset.py",
+    ):
+        assert path in command

@@ -161,7 +161,7 @@ Issues = "https://github.com/ml4t/data/issues"
 Changelog = "https://github.com/ml4t/data/blob/main/CHANGELOG.md"
 
 [dependency-groups]
-prerelease = [
+test = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.3.0",
@@ -169,28 +169,24 @@ prerelease = [
     "pytest-asyncio>=0.21.0",
     "hypothesis>=6.80.0",
     "ty",
+    "xlsxwriter>=3.1.0",
+]
+prerelease = [
+    { include-group = "test" },
     "yfinance>=0.2.0",
     "oandapyV20>=0.7.0",
     "requests>=2.32.0",
     "cot-reports>=0.1.0",
-    "xlsxwriter>=3.1.0",
 ]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-xdist>=3.3.0",
-    "pytest-timeout>=2.1.0",
-    "pytest-asyncio>=0.21.0",
-    "hypothesis>=6.80.0",
+    { include-group = "test" },
     "ruff>=0.8.0",
-    "ty",
     "pre-commit>=3.3.0",
     "twine>=6.0.0",
     "pip-audit>=2.10.1",
     "databento>=0.38.0",
     "yfinance>=0.2.0",
     "oandapyV20>=0.7.0",
-    "xlsxwriter>=3.1.0",
 ]
 
 [tool.pytest.ini_options]
@@ -227,6 +223,7 @@ filterwarnings = [
 
 # Timeout for tests (prevent hanging)
 timeout = 300
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

@@ -93,7 +93,12 @@ class FetchManager:
         if self.output_format == "lazy":
             return df.lazy()
         if self.output_format == "pandas":
-            return pd.DataFrame(df.to_dict(as_series=False))
+            try:
+                return df.to_pandas()
+            except ModuleNotFoundError as error:
+                if error.name != "pyarrow":
+                    raise
+                return pd.DataFrame(df.to_dict(as_series=False))
         return df
 
     def fetch(

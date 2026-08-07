@@ -158,9 +158,8 @@ def close_default_event_loop():
 
 @pytest.fixture(scope="module", autouse=True)
 def collect_module_resources():
-    """Make resource leaks fail in the module that created them."""
+    """Force delayed finalizers to run before pytest leaves each module."""
     yield
-    _close_yfinance_caches()
     gc.collect()
 
 

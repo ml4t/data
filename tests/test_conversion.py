@@ -28,3 +28,23 @@ def test_pandas_to_polars_preserves_mixed_types_and_nulls() -> None:
         {"timestamp": datetime(2024, 1, 1, tzinfo=UTC), "count": 1, "state": "open"},
         {"timestamp": None, "count": None, "state": None},
     ]
+
+
+def test_pandas_to_polars_preserves_nanosecond_timestamps() -> None:
+    source = pd.DataFrame(
+        {"timestamp": pd.to_datetime(["2024-01-01T00:00:00.123456789Z"], utc=True)}
+    )
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"timestamp": pl.Datetime("ns", "UTC")}
+    assert result["timestamp"].cast(pl.Int64).item() == 1_704_067_200_123_456_789
+
+
+def test_pandas_to_polars_preserves_all_null_float_dtype() -> None:
+    source = pd.DataFrame({"value": pd.Series([None, None], dtype="float64")})
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"value": pl.Float64}
+    assert result["value"].null_count() == 2
