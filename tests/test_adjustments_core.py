@@ -4,6 +4,7 @@ from datetime import date
 
 import numpy as np
 import polars as pl
+import pytest
 
 from ml4t.data.adjustments.core import (
     apply_corporate_actions,
@@ -57,9 +58,10 @@ class TestApplyCorporateActions:
 
         result = apply_corporate_actions(df)
 
-        # Pre-split day should be adjusted down
-        # Most recent day (day 2) stays the same
-        assert result["adj_close"][1] == 51.0  # Most recent unchanged
+        np.testing.assert_allclose(result["adj_close"], [51.0, 51.0])
+        np.testing.assert_allclose(result["adj_volume"], [2000.0, 2000.0])
+        np.testing.assert_allclose(result["price_adjustment_factor"], [0.5, 1.0])
+        np.testing.assert_allclose(result["volume_adjustment_factor"], [2.0, 1.0])
 
     def test_reverse_split(self):
         """Test reverse split (1-for-2) adjustment."""
@@ -79,8 +81,10 @@ class TestApplyCorporateActions:
 
         result = apply_corporate_actions(df)
 
-        # Most recent day unchanged
-        assert result["adj_close"][1] == 102.0
+        np.testing.assert_allclose(result["adj_close"], [102.0, 102.0])
+        np.testing.assert_allclose(result["adj_volume"], [1000.0, 1000.0])
+        np.testing.assert_allclose(result["price_adjustment_factor"], [2.0, 1.0])
+        np.testing.assert_allclose(result["volume_adjustment_factor"], [0.5, 1.0])
 
     def test_dividend_adjustment(self):
         """Test dividend adjustment."""
@@ -105,6 +109,24 @@ class TestApplyCorporateActions:
 
         # Historical days should be adjusted down for dividend
         # The adjustment accounts for total return
+
+    def test_adjusted_return_includes_split_and_dividend(self):
+        """Adjusted close return equals the shareholder wealth return."""
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "close": [200.0, 98.0],
+                "volume": [1000.0, 2000.0],
+                "split_ratio": [1.0, 2.0],
+                "ex-dividend": [0.0, 3.0],
+            }
+        )
+
+        result = apply_corporate_actions(df)
+
+        adjusted_gross_return = result["adj_close"][1] / result["adj_close"][0]
+        shareholder_gross_return = 2.0 * (98.0 + 3.0) / 200.0
+        assert adjusted_gross_return == pytest.approx(shareholder_gross_return)
 
     def test_custom_price_columns(self):
         """Test with custom price columns."""
@@ -251,6 +273,35 @@ class TestApplySplits:
         assert "adj_close" in result.columns
         assert "adj_volume" in result.columns
 
+    def test_matches_canonical_engine_for_forward_and_reverse_splits(self):
+        """Both split entry points use the same event-date and share-basis convention."""
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+                "open": [100.0, 50.0, 100.0],
+                "high": [100.0, 50.0, 100.0],
+                "low": [100.0, 50.0, 100.0],
+                "close": [100.0, 50.0, 100.0],
+                "volume": [1000.0, 2000.0, 1000.0],
+                "split_ratio": [1.0, 2.0, 0.5],
+                "ex-dividend": [0.0, 0.0, 0.0],
+            }
+        )
+
+        split_only = apply_splits(df)
+        canonical = apply_corporate_actions(df)
+
+        for column in (
+            "adj_open",
+            "adj_high",
+            "adj_low",
+            "adj_close",
+            "adj_volume",
+            "price_adjustment_factor",
+            "volume_adjustment_factor",
+        ):
+            np.testing.assert_allclose(split_only[column], canonical[column])
+
     def test_custom_price_cols(self):
         """Test with custom price columns."""
         df = pl.DataFrame(
@@ -332,10 +383,12 @@ class TestApplyDividends:
             }
         )
 
-        _result = apply_dividends(df)  # noqa: F841
+        result = apply_dividends(df)
 
-        # Historical prices should be adjusted
-        # Day 2 dividend should affect day 1 prices
+        adjusted_gross_return = result["adj_close"][1] / result["adj_close"][0]
+        expected_gross_return = (103.0 + 1.0) / 102.0
+        assert adjusted_gross_return == pytest.approx(expected_gross_return)
+        assert result["adj_close"][1] == 103.0
 
     def test_custom_price_cols(self):
         """Test with custom price columns."""
@@ -392,6 +445,20 @@ class TestEdgeCases:
         assert len(result) == 1
         assert result["adj_close"][0] == 102.0
 
+    @pytest.mark.parametrize("ratio", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_split_ratios_are_rejected(self, ratio):
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1)],
+                "close": [100.0],
+                "split_ratio": [ratio],
+                "ex-dividend": [0.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="Split ratios|finite"):
+            apply_corporate_actions(df)
+
     def test_multiple_splits(self):
         """Test with multiple splits over time."""
         df = pl.DataFrame(
@@ -438,12 +505,8 @@ class TestEdgeCases:
 class TestIntegration:
     """Integration tests for adjustment functions."""
 
-    def test_industry_standard_formula(self):
-        """Test that adjustment follows industry-standard formula.
-
-        The formula should be:
-        Adj[i] = Adj[i+1] × (Price[i] × Split[i+1] - Div[i+1]) / Price[i+1]
-        """
+    def test_no_action_factors_are_identity(self):
+        """Rows without corporate actions retain raw values and unit factors."""
         df = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
@@ -463,3 +526,5 @@ class TestIntegration:
         np.testing.assert_array_almost_equal(
             result["adj_close"].to_numpy(), result["close"].to_numpy(), decimal=6
         )
+        np.testing.assert_allclose(result["price_adjustment_factor"], 1.0)
+        np.testing.assert_allclose(result["volume_adjustment_factor"], 1.0)
