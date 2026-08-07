@@ -11,6 +11,7 @@ from rich import box
 from rich.table import Table
 
 from ml4t.data import __version__
+from ml4t.data.providers.registry import advertised_provider_specs
 from ml4t.data.storage.metadata_tracker import MetadataTracker
 
 from .utils import console
@@ -32,20 +33,8 @@ def providers():
     table.add_column("Description", style="white")
     table.add_column("API Key", style="yellow")
 
-    # List all available providers (matches DataManager's provider registry)
-    providers_list = [
-        ("yahoo", "Yahoo Finance - Free US/Global equities", "No"),
-        ("coingecko", "CoinGecko - Free crypto historical", "No"),
-        ("binance", "Binance - Free crypto spot", "No"),
-        ("binance_futures", "Binance Futures - Free crypto futures", "No"),
-        ("cryptocompare", "CryptoCompare - Crypto + paid features", "Optional"),
-        ("databento", "DataBento - Professional derivatives", "Yes"),
-        ("oanda", "OANDA - Professional forex", "Yes"),
-        ("mock", "Mock Provider - Testing only", "No"),
-    ]
-
-    for provider, description, api_key in providers_list:
-        table.add_row(provider, description, api_key)
+    for spec in advertised_provider_specs():
+        table.add_row(spec.name, spec.description, spec.access_label)
 
     console.print(table)
     console.print("\n[bold]Usage:[/bold] ml4t-data fetch --provider <name> --symbol <symbol> ...")

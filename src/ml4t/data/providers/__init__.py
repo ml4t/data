@@ -46,6 +46,12 @@ Example:
 
 # Base classes
 from ml4t.data.providers.base import BaseProvider, Provider
+from ml4t.data.providers.registry import (
+    PROVIDER_REGISTRY,
+    ProviderSpec,
+    advertised_provider_specs,
+    get_provider_spec,
+)
 
 # Equity providers
 try:
@@ -161,6 +167,10 @@ __all__ = [
     # Base classes
     "BaseProvider",
     "Provider",
+    "ProviderSpec",
+    "PROVIDER_REGISTRY",
+    "get_provider_spec",
+    "advertised_provider_specs",
     # Equity providers
     "YahooFinanceProvider",
     "AlpacaDataProvider",

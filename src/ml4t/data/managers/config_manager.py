@@ -19,6 +19,8 @@ from typing import Any
 import structlog
 import yaml
 
+from ml4t.data.providers.registry import PROVIDER_REGISTRY
+
 logger = structlog.get_logger()
 
 
@@ -44,16 +46,16 @@ class ConfigManager:
     # two variables map to the same field, so the APCA_* aliases (Alpaca's own
     # SDK/CLI names) come before the ALPACA_* project-convention names.
     ENV_MAPPING = {
-        "APCA_API_KEY_ID": ("alpaca", "api_key"),
-        "APCA_API_SECRET_KEY": ("alpaca", "api_secret"),
-        "ALPACA_API_KEY": ("alpaca", "api_key"),
-        "ALPACA_API_SECRET": ("alpaca", "api_secret"),
-        "CRYPTOCOMPARE_API_KEY": ("cryptocompare", "api_key"),
-        "DATABENTO_API_KEY": ("databento", "api_key"),
-        "POLYGON_API_KEY": ("massive", "api_key"),
-        "MASSIVE_API_KEY": ("massive", "api_key"),
-        "OANDA_API_KEY": ("oanda", "api_key"),
-        "OANDA_ACCOUNT_ID": ("oanda", "account_id"),
+        environment: (spec.name, requirement.config_field)
+        for spec in PROVIDER_REGISTRY.values()
+        if not spec.deprecated
+        for requirement in spec.credentials
+        for environment in requirement.environment
+    } | {
+        environment: (spec.name, "api_key")
+        for spec in PROVIDER_REGISTRY.values()
+        if not spec.deprecated
+        for environment in spec.optional_credential_environment
     }
 
     # Default configuration

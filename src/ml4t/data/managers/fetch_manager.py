@@ -153,7 +153,9 @@ class FetchManager:
 
         try:
             # Get provider instance
-            provider_instance = self.provider_manager.get_provider(provider_name)
+            provider_instance = self.provider_manager.get_provider(
+                provider_name, required_capability="ohlcv"
+            )
 
             # Fetch data
             df = provider_instance.fetch_ohlcv(symbol, start, end, frequency, **kwargs)
@@ -261,7 +263,9 @@ class FetchManager:
             )
 
         # Get provider instance and fetch
-        provider_instance = self.provider_manager.get_provider(provider_name)
+        provider_instance = self.provider_manager.get_provider(
+            provider_name, required_capability="ohlcv"
+        )
         return provider_instance.fetch_ohlcv(symbol, start, end, frequency, **kwargs)
 
     def get_max_history_days(self, symbol: str, provider: str | None = None) -> int | None:
@@ -269,5 +273,7 @@ class FetchManager:
         provider_name = self.router.get_provider(symbol, override=provider)
         if provider_name is None:
             return None
-        capabilities = self.provider_manager.get_provider(provider_name).capabilities()
+        capabilities = self.provider_manager.get_provider(
+            provider_name, required_capability="ohlcv"
+        ).capabilities()
         return capabilities.max_history_days

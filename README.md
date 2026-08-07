@@ -18,7 +18,7 @@ Together they cover data infrastructure, feature engineering, modeling, signal e
 
 Quantitative research requires consistent, reproducible access to market data from multiple sources. ml4t-data provides:
 
-- `DataManager` as the unified interface: fetch, store, update, and query across all providers
+- `DataManager` as the unified OHLCV interface for registry providers with that capability
 - 20+ provider adapters covering equities, crypto, futures, forex, macro, prediction markets, and factors
 - Automated storage in Hive-partitioned Parquet format with metadata tracking
 - Incremental updates, gap detection, and backfill via CLI
@@ -70,7 +70,8 @@ metadata = dm.get_metadata("AAPL")
 
 ### Direct Provider Access
 
-All providers implement the same interface:
+Providers expose capability-specific methods. OHLCV providers use `fetch_ohlcv`, economic-series
+providers may also use `fetch_series`, and factor providers use `fetch`.
 
 ```python
 from datetime import UTC, datetime, timedelta
@@ -90,6 +91,7 @@ crypto = CoinGeckoProvider().fetch_ohlcv(
 )
 
 # Economic data
+# Reads FRED_API_KEY from the environment
 fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 ```
 
@@ -101,7 +103,6 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 |----------|----------|
 | Yahoo Finance | US/global equities, ETFs, crypto, forex |
 | CoinGecko | 10,000+ cryptocurrencies; daily OHLCV for 29 completed UTC days |
-| FRED | 850,000 economic series |
 | FXMacroData | FX macro releases, calendars, COT, commodities, sentiment |
 | Fama-French | Academic factor data |
 | AQR | Research factors (QMJ, BAB, HML Devil, VME, more) |
@@ -109,12 +110,16 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Kalshi | Prediction market contracts |
 | Polymarket | Prediction market history/order book snapshots |
 | Binance Public | Bulk crypto data downloads |
+| Binance | Crypto exchange data |
+| OKX | Crypto perpetuals and funding rates |
+| CryptoCompare | Crypto market data; key optional for some access tiers |
 | NASDAQ ITCH Sample | Tick-level sample data |
 
 ### Authenticated or Metered APIs
 
 | Provider | Coverage |
 |----------|----------|
+| FRED | 850,000 economic series |
 | Alpaca | US equities + crypto (free IEX feed) |
 | EODHD | 60+ global exchanges |
 | Tiingo | US equities with quality focus |
@@ -122,9 +127,6 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Databento | CME/ICE futures; OPRA options |
 | Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
-| Binance | Crypto exchange data |
-| OKX | Crypto perpetuals and funding rates |
-| CryptoCompare | Crypto market data |
 | OANDA | Forex broker data |
 
 ## Specialized Modules
