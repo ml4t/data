@@ -342,7 +342,7 @@ class CryptoDataManager(ProfileMixin):
         combined_file = self.config.storage_path / f"{dataset_name}.parquet"
 
         if combined_file.exists():
-            df = pl.read_parquet(combined_file)
+            df = self._normalize_loaded_timestamps(pl.read_parquet(combined_file))
 
             if symbols:
                 df = df.filter(pl.col("symbol").is_in(symbols))
@@ -365,12 +365,19 @@ class CryptoDataManager(ProfileMixin):
 
                 data_file = symbol_dir / "data.parquet"
                 if data_file.exists():
-                    dfs.append(pl.read_parquet(data_file))
+                    dfs.append(self._normalize_loaded_timestamps(pl.read_parquet(data_file)))
 
         if not dfs:
             return pl.DataFrame()
 
         return pl.concat(dfs).sort(["symbol", "timestamp"])
+
+    @staticmethod
+    def _normalize_loaded_timestamps(df: pl.DataFrame) -> pl.DataFrame:
+        """Normalize beta parquet timestamp units before combining partitions."""
+        if "timestamp" not in df.columns:
+            return df
+        return df.with_columns(pl.col("timestamp").cast(pl.Datetime("us", "UTC")))
 
     def load_symbol(self, symbol: str) -> pl.DataFrame:
         """Load premium index data for a single symbol.

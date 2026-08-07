@@ -79,7 +79,8 @@ class TestCreateEmptyDataframe:
         provider = BinancePublicProvider()
         df = provider._create_empty_dataframe()
 
-        assert df.schema["timestamp"] == pl.Datetime("ms", "UTC")
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
+        assert df.schema["symbol"] == pl.String
         assert df.schema["open"] == pl.Float64
         assert df.schema["close"] == pl.Float64
         assert df.schema["volume"] == pl.Float64
@@ -521,6 +522,7 @@ class TestFetchPremiumIndex:
         assert "symbol" in df.columns
         assert "premium_index_open" in df.columns
         assert "premium_index_close" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
 
     def test_build_premium_index_url(self, provider):
         """Test premium index URL construction."""
@@ -736,6 +738,7 @@ class TestParsePremiumIndexZip:
         assert "premium_index_open" in df.columns
         assert df["symbol"][0] == "BTCUSDT"
         assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+        assert df["timestamp"][0] == datetime(2024, 1, 1, tzinfo=UTC)
 
     @pytest.mark.asyncio
     async def test_parse_premium_index_async_preserves_canonical_dtype(self, provider):
@@ -752,6 +755,7 @@ class TestParsePremiumIndexZip:
 
         assert df is not None
         assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+        assert df["timestamp"][0] == datetime(2024, 1, 1, tzinfo=UTC)
 
     def test_parse_premium_index_404_returns_none(self, provider):
         """Test 404 response returns None."""

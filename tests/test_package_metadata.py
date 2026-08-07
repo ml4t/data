@@ -71,6 +71,12 @@ def test_core_futures_import_does_not_require_databento_extra() -> None:
             raise AssertionError("Databento-backed symbol was unexpectedly available")
         assert not hasattr(futures, "FuturesDownloader")
         assert "FuturesDownloader" not in futures.__all__
+        try:
+            futures.require_databento("FuturesDownloader")
+        except ImportError as error:
+            assert "ml4t-data[databento]" in str(error)
+        else:
+            raise AssertionError("Databento requirement check unexpectedly passed")
         """
     )
 

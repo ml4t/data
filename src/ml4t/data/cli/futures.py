@@ -73,6 +73,9 @@ def download_futures(ctx, config, dry_run, force, product, parallel):
         # Load configuration
         download_config = load_yaml_config(config)
 
+        from ml4t.data.futures import require_databento
+
+        require_databento("FuturesDownloader")
         from ml4t.data.futures import FuturesDownloader
 
         # Override products if specific ones requested
@@ -242,6 +245,9 @@ def update_futures(ctx, config, end_date, dry_run, yes):
         # Load configuration
         download_config = load_yaml_config(config)
 
+        from ml4t.data.futures import require_databento
+
+        require_databento("FuturesDownloader")
         from ml4t.data.futures import FuturesDownloader
 
         # Initialize downloader

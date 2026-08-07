@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
@@ -83,5 +84,60 @@ def test_pandas_to_polars_preserves_all_null_duration_and_category_dtypes() -> N
 
     assert dict(result.schema) == {
         "duration": pl.Duration("ns"),
-        "category": pl.Categorical,
+        "category": pl.String,
     }
+
+
+def test_pandas_to_polars_uses_one_dtype_for_partial_and_all_null_categories() -> None:
+    partial = pandas_to_polars(
+        pd.DataFrame({"category": pd.Series(["open", None], dtype="category")})
+    )
+    all_null = pandas_to_polars(
+        pd.DataFrame({"category": pd.Series(pd.Categorical([None], categories=["open", "closed"]))})
+    )
+
+    assert partial.schema["category"] == pl.String
+    assert all_null.schema["category"] == pl.String
+
+
+def test_pandas_to_polars_normalizes_named_timezones_to_utc() -> None:
+    source = pd.DataFrame(
+        {"timestamp": pd.Series(pd.date_range("2024-01-01", periods=1, tz="America/New_York"))}
+    )
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"timestamp": pl.Datetime("us", "UTC")}
+    assert result["timestamp"].dt.hour().item() == 5
+
+
+def test_pandas_to_polars_rescales_second_timestamps() -> None:
+    source = pd.DataFrame(
+        {"timestamp": pd.Series(np.array(["2024-01-01T00:00:01"], dtype="datetime64[s]"))}
+    )
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"timestamp": pl.Datetime("ms")}
+    assert result["timestamp"].cast(pl.Int64).item() == 1_704_067_201_000
+
+
+def test_pandas_to_polars_preserves_tz_naive_arrow_timestamp() -> None:
+    pyarrow = pytest.importorskip("pyarrow")
+    dtype = pd.ArrowDtype(pyarrow.timestamp("us"))
+    source = pd.DataFrame({"timestamp": pd.Series(["2024-01-01T00:00:00.123456"], dtype=dtype)})
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"timestamp": pl.Datetime("us")}
+    assert result["timestamp"].cast(pl.Int64).item() == 1_704_067_200_123_456
+
+
+def test_pandas_to_polars_preserves_all_null_arrow_duration_unit() -> None:
+    pyarrow = pytest.importorskip("pyarrow")
+    dtype = pd.ArrowDtype(pyarrow.duration("ns"))
+    source = pd.DataFrame({"duration": pd.Series([None], dtype=dtype)})
+
+    result = pandas_to_polars(source)
+
+    assert result.schema == {"duration": pl.Duration("ns")}

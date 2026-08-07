@@ -118,27 +118,6 @@ class BinancePublicProvider(BaseProvider):
         """Return the provider name."""
         return "binance_public"
 
-    def _create_empty_dataframe(self) -> pl.DataFrame:
-        """Create an empty DataFrame with the correct schema."""
-        return pl.DataFrame(
-            {
-                "timestamp": [],
-                "open": [],
-                "high": [],
-                "low": [],
-                "close": [],
-                "volume": [],
-            },
-            schema={
-                "timestamp": pl.Datetime("ms", "UTC"),
-                "open": pl.Float64,
-                "high": pl.Float64,
-                "low": pl.Float64,
-                "close": pl.Float64,
-                "volume": pl.Float64,
-            },
-        )
-
     def _normalize_symbol(self, symbol: str) -> str:
         """Normalize symbol to Binance format.
 

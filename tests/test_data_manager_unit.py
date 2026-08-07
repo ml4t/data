@@ -243,8 +243,8 @@ class TestDataManagerConvertOutput:
 
         assert str(result["state"].dtype) == "category"
 
-    @patch("ml4t.data.managers.fetch_manager.find_spec", return_value=None)
-    def test_convert_to_pandas_without_pyarrow(self, mock_find_spec):
+    @patch("ml4t.data.managers.fetch_manager._has_pyarrow", return_value=False)
+    def test_convert_to_pandas_without_pyarrow(self, mock_has_pyarrow):
         """Fall back to Python values only when Arrow cannot be imported."""
         dm = DataManager(output_format="pandas")
         df = pl.DataFrame({"a": [1, None]})
@@ -253,7 +253,7 @@ class TestDataManagerConvertOutput:
 
         assert result["a"].iloc[0] == 1
         assert result["a"].isna().iloc[1]
-        mock_find_spec.assert_called_once_with("pyarrow")
+        mock_has_pyarrow.assert_called_once_with()
 
     def test_convert_to_lazy(self):
         """Test lazy output format."""

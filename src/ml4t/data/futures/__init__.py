@@ -118,6 +118,14 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def require_databento(name: str = "FuturesDownloader") -> None:
+    """Raise an actionable error before using a Databento-backed export."""
+    if _DATABENTO_IMPORT_ERROR is not None:
+        raise ImportError(
+            f"{name} requires the Databento extra: uv add 'ml4t-data[databento]'"
+        ) from _DATABENTO_IMPORT_ERROR
+
+
 __all__ = [
     # Schema
     "AssetClass",  # Backward compat alias for FuturesAssetClass
@@ -133,6 +141,7 @@ __all__ = [
     "DEFAULT_PRODUCTS",
     "load_yaml_config",
     "load_definitions_config",
+    "require_databento",
     # Parser (Quandl)
     "parse_quandl_chris",
     "parse_quandl_chris_raw",

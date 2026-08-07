@@ -10,7 +10,7 @@ import polars as pl
 
 
 def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
-    """Preserve pandas' integer timestamp representation without Arrow."""
+    """Preserve timestamp precision and normalize timezone-aware data to UTC."""
     dtype = series.dtype
     if isinstance(dtype, pd.DatetimeTZDtype):
         unit = dtype.unit
@@ -65,6 +65,10 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
 
 def _all_null_dtype(dtype: Any) -> pl.DataType | None:
     """Map typed all-null pandas columns to their Polars scalar dtype."""
+    arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
+    if arrow_dtype is not None and str(arrow_dtype).startswith("duration["):
+        unit = getattr(arrow_dtype, "unit", "ms")
+        return pl.Duration(unit if unit in {"ms", "us", "ns"} else "ms")
     if pd.api.types.is_float_dtype(dtype):
         return pl.Float32 if dtype.itemsize == 4 else pl.Float64
     if pd.api.types.is_integer_dtype(dtype):
@@ -73,10 +77,15 @@ def _all_null_dtype(dtype: Any) -> pl.DataType | None:
     if pd.api.types.is_bool_dtype(dtype):
         return pl.Boolean
     if pd.api.types.is_timedelta64_dtype(dtype):
-        unit = np.datetime_data(dtype)[0] if isinstance(dtype, np.dtype) else "ms"
+        arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
+        unit = getattr(arrow_dtype, "unit", None)
+        if unit is None:
+            unit = np.datetime_data(dtype)[0] if isinstance(dtype, np.dtype) else "ms"
         return pl.Duration(unit if unit in {"ms", "us", "ns"} else "ms")
     if isinstance(dtype, pd.CategoricalDtype):
-        return pl.Categorical
+        if dtype.categories.empty:
+            return pl.String
+        return _all_null_dtype(dtype.categories.dtype) or pl.String
     if isinstance(dtype, pd.StringDtype):
         return pl.String
     return None

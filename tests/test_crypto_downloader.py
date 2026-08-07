@@ -361,6 +361,25 @@ crypto:
 
         assert len(loaded) == 2
 
+    def test_load_partitions_normalizes_legacy_timestamp_units(self, manager, temp_storage):
+        """Test beta millisecond partitions combine with canonical microsecond data."""
+        partition_dir = temp_storage / "premium_index"
+        for symbol, unit in (("BTCUSDT", "ms"), ("ETHUSDT", "us")):
+            symbol_dir = partition_dir / f"symbol={symbol}"
+            symbol_dir.mkdir(parents=True)
+            pl.DataFrame(
+                {
+                    "timestamp": pl.Series([datetime(2024, 1, 1)], dtype=pl.Datetime(unit, "UTC")),
+                    "symbol": [symbol],
+                    "premium_index": [0.001],
+                }
+            ).write_parquet(symbol_dir / "data.parquet")
+
+        loaded = manager.load_premium_index()
+
+        assert len(loaded) == 2
+        assert loaded.schema["timestamp"] == pl.Datetime("us", "UTC")
+
     def test_load_perps_from_combined(self, manager, temp_storage):
         """Test load_perps uses combined dataset file."""
         df = pl.DataFrame(

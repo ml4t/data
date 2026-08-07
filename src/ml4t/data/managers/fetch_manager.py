@@ -10,6 +10,7 @@ This module handles core data fetching operations including:
 from __future__ import annotations
 
 from datetime import datetime
+from functools import cache
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,12 @@ if TYPE_CHECKING:
     from ml4t.data.managers.provider_manager import ProviderManager, ProviderRouter
 
 logger = structlog.get_logger()
+
+
+@cache
+def _has_pyarrow() -> bool:
+    """Return whether the optional Arrow conversion dependency is installed."""
+    return find_spec("pyarrow") is not None
 
 
 class FetchManager:
@@ -94,7 +101,7 @@ class FetchManager:
         if self.output_format == "lazy":
             return df.lazy()
         if self.output_format == "pandas":
-            if find_spec("pyarrow") is None:
+            if not _has_pyarrow():
                 return pd.DataFrame(df.to_dict(as_series=False))
             return df.to_pandas()
         return df
