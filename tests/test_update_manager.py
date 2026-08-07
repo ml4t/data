@@ -10,7 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -225,13 +225,14 @@ class TestGapDetector:
         assert result.year == 2024
         assert result.month == 1
         assert result.day == 15
+        assert result.tzinfo is UTC
 
     def test_ensure_datetime_with_datetime(self):
-        """Ensure datetime objects pass through unchanged."""
+        """Ensure naive datetime objects are interpreted as UTC."""
         dt = datetime(2024, 1, 15, 10, 30, 0)
         result = _ensure_datetime(dt)
 
-        assert result == dt
+        assert result == dt.replace(tzinfo=UTC)
 
     def test_weekend_exclusion(self, weekend_detector: GapDetector, continuous_data: pl.DataFrame):
         """Weekend exclusion affects gap detection."""
@@ -390,7 +391,7 @@ class TestIncrementalUpdater:
         )
 
         # Should start from day after last data
-        assert start > datetime(2024, 1, 1)
+        assert start > datetime(2024, 1, 1, tzinfo=UTC)
         assert update_type == "incremental"
 
     def test_determine_update_range_already_up_to_date(
@@ -531,7 +532,7 @@ class TestIncrementalUpdaterStrategies:
         assert result.success is True
         stored = storage.read("test").collect().sort("timestamp")
         assert stored.columns == existing_data.columns
-        assert stored["timestamp"].max() == reordered["timestamp"].max()
+        assert stored["timestamp"].max() == datetime(2024, 1, 25, tzinfo=UTC)
 
     def test_incremental_strategy(
         self, storage: HiveStorage, existing_data: pl.DataFrame, new_data: pl.DataFrame

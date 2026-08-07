@@ -499,7 +499,9 @@ class PolymarketProvider(BaseProvider):
 
             # Convert timestamp from unix seconds
             df = df.with_columns(
-                pl.from_epoch("timestamp_raw", time_unit="s").alias("timestamp"),
+                pl.from_epoch("timestamp_raw", time_unit="s")
+                .dt.replace_time_zone("UTC")
+                .alias("timestamp"),
                 pl.col("price").cast(pl.Float64),
             )
 
@@ -718,8 +720,7 @@ class PolymarketProvider(BaseProvider):
         # Aggregate to OHLC
         df = self._aggregate_to_ohlc(price_data, display_symbol, frequency)
 
-        # Validate response
-        df = self._validate_response(df)
+        df = self._validate_ohlcv(df, self.name, display_symbol)
 
         self.logger.info(f"Fetched {len(df)} records", symbol=display_symbol)
 

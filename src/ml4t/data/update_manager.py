@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -20,11 +20,11 @@ logger = structlog.get_logger()
 
 
 def _ensure_datetime(value: Any) -> datetime:
-    """Return a datetime scalar or reject an incompatible timestamp value."""
+    """Return a UTC datetime scalar or reject an incompatible timestamp value."""
     if isinstance(value, datetime):
-        return value
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
     if isinstance(value, date):
-        return datetime.combine(value, datetime.min.time())
+        return datetime.combine(value, datetime.min.time(), UTC)
     raise TypeError(f"Expected a date or datetime, got {type(value).__name__}")
 
 
@@ -458,6 +458,7 @@ class IncrementalUpdater:
             # Only add new data, never update existing
             if storage.exists(key):
                 existing_df = storage.read(key).collect()
+                existing_df, new_data = align_frames_for_concat(existing_df, new_data)
                 max_existing = existing_df["timestamp"].max()
 
                 # Filter new data to only include timestamps after existing
@@ -465,7 +466,6 @@ class IncrementalUpdater:
 
                 if not new_rows.is_empty():
                     # Append new rows
-                    existing_df, new_rows = align_frames_for_concat(existing_df, new_rows)
                     combined = pl.concat([existing_df, new_rows])
                     storage.delete(key)
                     storage.write(combined, key)
@@ -500,6 +500,7 @@ class IncrementalUpdater:
             # Fill gaps in existing data
             if storage.exists(key):
                 existing_df = storage.read(key).collect()
+                existing_df, new_data = align_frames_for_concat(existing_df, new_data)
 
                 # Detect gaps
                 gaps = self.gap_detector.detect_gaps(existing_df)
@@ -519,7 +520,6 @@ class IncrementalUpdater:
 
                 if not gap_data.is_empty():
                     # Merge with existing data
-                    existing_df, gap_data = align_frames_for_concat(existing_df, gap_data)
                     combined = pl.concat([existing_df, gap_data]).sort("timestamp")
                     storage.delete(key)
                     storage.write(combined, key)
@@ -556,6 +556,7 @@ class IncrementalUpdater:
         # Update existing and add new
         if storage.exists(key):
             existing_df = storage.read(key).collect()
+            existing_df, new_data = align_frames_for_concat(existing_df, new_data)
 
             # Separate overlapping and new data
             min_new = _ensure_datetime(new_data["timestamp"].min())
@@ -573,7 +574,6 @@ class IncrementalUpdater:
                 )
 
                 # Combine all data
-                existing_filtered, new_data = align_frames_for_concat(existing_filtered, new_data)
                 combined = pl.concat([existing_filtered, new_data]).sort("timestamp")
 
                 storage.delete(key)
@@ -588,7 +588,6 @@ class IncrementalUpdater:
                     rows_after=len(combined),
                 )
             # No overlap, just append
-            existing_df, new_data = align_frames_for_concat(existing_df, new_data)
             combined = pl.concat([existing_df, new_data]).sort("timestamp")
             storage.delete(key)
             storage.write(combined, key)
@@ -660,7 +659,7 @@ class BackfillManager:
 
                 # Check data age
                 last_update = _ensure_datetime(df["timestamp"].max())
-                age_days = (datetime.now() - last_update).days
+                age_days = (datetime.now(UTC) - last_update).days
 
                 if age_days > max_age_days:
                     continue
@@ -711,7 +710,8 @@ class BackfillManager:
 
             # Factor 2: Data staleness (older last update = higher priority)
             if "last_update" in candidate:
-                days_old = (datetime.now() - candidate["last_update"]).days
+                last_update = _ensure_datetime(candidate["last_update"])
+                days_old = (datetime.now(UTC) - last_update).days
                 score += days_old
 
             # Factor 3: Importance

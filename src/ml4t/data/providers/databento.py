@@ -356,12 +356,12 @@ class DataBentoProvider(BaseProvider):
                         timestamp = timestamp.dt.convert_time_zone("UTC")
                     df = df.with_columns(timestamp)
 
-            # Add symbol column
-            if "symbol" not in df.columns:
-                if "raw_symbol" in df.columns:
-                    df = df.with_columns(pl.col("raw_symbol").cast(pl.String).alias("symbol"))
-                else:
-                    df = df.with_columns(pl.lit(symbol).alias("symbol"))
+            # Preserve the resolved contract separately from the requested series identity.
+            if "raw_symbol" in df.columns:
+                df = df.with_columns(pl.col("raw_symbol").cast(pl.String).alias("contract"))
+            elif "symbol" in df.columns:
+                df = df.with_columns(pl.col("symbol").cast(pl.String).alias("contract"))
+            df = df.with_columns(pl.lit(symbol.upper()).alias("symbol"))
 
             # For OHLCV data, ensure proper column types
             ohlcv_columns = ["open", "high", "low", "close", "volume"]

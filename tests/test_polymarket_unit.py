@@ -334,6 +334,7 @@ class TestFetchOHLCV:
 
         assert not df.is_empty()
         assert "timestamp" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
         mock_fetch.assert_called_once()
 
     @patch.object(PolymarketProvider, "resolve_symbol")

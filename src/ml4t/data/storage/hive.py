@@ -6,7 +6,7 @@ with measured 7x query performance improvement.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -345,18 +345,40 @@ class HiveStorage(StorageBackend):
 
         # Use Polars lazy reading with predicate pushdown
         lazy_frames = []
+        normalized_start = (
+            start_date.replace(tzinfo=UTC)
+            if start_date is not None and start_date.tzinfo is None
+            else start_date.astimezone(UTC)
+            if start_date is not None
+            else None
+        )
+        normalized_end = (
+            end_date.replace(tzinfo=UTC)
+            if end_date is not None and end_date.tzinfo is None
+            else end_date.astimezone(UTC)
+            if end_date is not None
+            else None
+        )
         for path in partition_paths:
             lf = pl.scan_parquet(path)
-
-            # Apply column selection
-            if columns:
-                lf = lf.select(columns)
+            timestamp_type = lf.collect_schema().get("timestamp")
+            if isinstance(timestamp_type, pl.Datetime):
+                timestamp = pl.col("timestamp")
+                if timestamp_type.time_zone is None:
+                    timestamp = timestamp.dt.replace_time_zone("UTC")
+                else:
+                    timestamp = timestamp.dt.convert_time_zone("UTC")
+                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
 
             # Apply date filters
-            if start_date:
-                lf = lf.filter(pl.col("timestamp") >= start_date)
-            if end_date:
-                lf = lf.filter(pl.col("timestamp") < end_date)
+            if normalized_start:
+                lf = lf.filter(pl.col("timestamp") >= normalized_start)
+            if normalized_end:
+                lf = lf.filter(pl.col("timestamp") < normalized_end)
+
+            # Apply column selection after timestamp filtering.
+            if columns:
+                lf = lf.select(columns)
 
             lazy_frames.append(lf)
 

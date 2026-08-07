@@ -151,6 +151,7 @@ class TestDataBentoProvider:
                 "low": [4695.0, 4700.0],
                 "close": [4705.0, 4710.0],
                 "volume": [1000.0, 1100.0],
+                "raw_symbol": ["ESH4", "ESH4"],
             }
         )
 
@@ -168,7 +169,8 @@ class TestDataBentoProvider:
         # Check data types
         assert df["timestamp"].dtype == pl.Datetime("ns", "UTC")
         assert df["open"].dtype == pl.Float64
-        assert df["symbol"][0] == "ES.v.0"
+        assert df["symbol"][0] == "ES.V.0"
+        assert df["contract"][0] == "ESH4"
 
         # Check sorting
         timestamps = df["timestamp"].to_list()

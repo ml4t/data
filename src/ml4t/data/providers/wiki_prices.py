@@ -387,7 +387,7 @@ class WikiPricesProvider(BaseProvider):
         try:
             standardized = filtered.select(
                 [
-                    pl.col("date").alias("timestamp"),
+                    pl.col("date").cast(pl.Datetime("us", "UTC")).alias("timestamp"),
                     pl.col("adj_open").alias("open"),
                     pl.col("adj_high").alias("high"),
                     pl.col("adj_low").alias("low"),

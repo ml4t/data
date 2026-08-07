@@ -295,7 +295,11 @@ class KalshiProvider(BaseProvider):
             df = pl.DataFrame(raw_data)
 
             # Kalshi returns end_period_ts as unix timestamp
-            df = df.with_columns(pl.from_epoch("end_period_ts", time_unit="s").alias("timestamp"))
+            df = df.with_columns(
+                pl.from_epoch("end_period_ts", time_unit="s")
+                .dt.replace_time_zone("UTC")
+                .alias("timestamp")
+            )
 
             volume_expr = pl.lit(0.0).alias("volume")
             if "volume" in df.columns:
@@ -515,8 +519,8 @@ class KalshiProvider(BaseProvider):
         raw_data = self._fetch_raw_data(symbol, start, end, frequency, series_ticker=series_ticker)
         df = self._transform_data(raw_data, symbol)
 
-        # Validate response (standard OHLC validation)
-        df = self._validate_response(df)
+        df = df.drop_nulls(["open", "high", "low", "close"])
+        df = self._validate_ohlcv(df, self.name, market_ticker)
 
         self.logger.info(f"Fetched {len(df)} records", symbol=market_ticker)
 

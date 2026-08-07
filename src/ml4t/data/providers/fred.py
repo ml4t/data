@@ -272,7 +272,9 @@ class FREDProvider(BaseProvider):
 
             # FRED returns "date" and "value" columns
             # Convert date to datetime
-            df = df.with_columns(pl.col("date").str.to_date().cast(pl.Datetime).alias("timestamp"))
+            df = df.with_columns(
+                pl.col("date").str.to_date().cast(pl.Datetime("us", "UTC")).alias("timestamp")
+            )
 
             # Handle missing values: FRED uses "." for missing data
             # Replace "." with null first, then cast to float
@@ -394,8 +396,8 @@ class FREDProvider(BaseProvider):
         raw_data = self._fetch_raw_data(symbol, start, end, frequency, vintage_date=vintage_date)
         df = self._transform_data(raw_data, symbol)
 
-        # Validate (skips OHLC invariant checks)
-        df = self._validate_response(df)
+        df = df.drop_nulls(["open", "high", "low", "close"])
+        df = self._validate_ohlcv(df, self.name, series_id)
 
         self.logger.info(f"Fetched {len(df)} records", symbol=series_id)
 

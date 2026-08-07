@@ -191,6 +191,7 @@ class TestFetchAndTransformData:
         assert "low" in df.columns
         assert "close" in df.columns
         assert "volume" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
 
     def test_fetch_invalid_frequency_raises(self, provider_with_data):
         """Test invalid frequency raises error."""

@@ -245,7 +245,11 @@ class FinnhubProvider(BaseProvider):
             )
 
             # Convert unix timestamp to datetime
-            df = df.with_columns(pl.from_epoch("timestamp", time_unit="s").alias("timestamp"))
+            df = df.with_columns(
+                pl.from_epoch("timestamp", time_unit="s")
+                .dt.replace_time_zone("UTC")
+                .alias("timestamp")
+            )
 
             # Ensure numeric columns are float
             df = df.with_columns(

@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import (
@@ -211,6 +212,7 @@ class TestTransformData:
         assert "close" in df.columns
         assert "volume" in df.columns
         assert "symbol" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
         assert df["symbol"][0] == "AAPL"
 
     def test_transform_data_uppercase_symbol(self, provider):

@@ -1,7 +1,7 @@
 """Tests for Hive partitioned storage module."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import polars as pl
 import pytest
@@ -68,6 +68,32 @@ class TestHiveStorageWrite:
         result = storage.write(df, "test_key")
 
         assert result.exists()
+
+    def test_read_normalizes_mixed_legacy_partition_timezones(self, storage):
+        """Read generations containing both naive and UTC timestamp partitions."""
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2023, 1, 15), datetime(2024, 1, 15)],
+                    dtype=pl.Datetime("us", "UTC"),
+                ),
+                "close": [100.0, 101.0],
+            }
+        )
+        generation = storage.write(df, "test_key")
+        legacy_path = generation / "year=2023" / "month=1" / "data.parquet"
+        legacy = pl.read_parquet(legacy_path).with_columns(
+            pl.col("timestamp").dt.replace_time_zone(None)
+        )
+        legacy.write_parquet(legacy_path)
+
+        result = storage.read("test_key").collect().sort("timestamp")
+
+        assert result.schema["timestamp"] == pl.Datetime("us", "UTC")
+        assert result["timestamp"].to_list() == [
+            datetime(2023, 1, 15, tzinfo=UTC),
+            datetime(2024, 1, 15, tzinfo=UTC),
+        ]
 
     def test_write_without_timestamp_raises(self, storage):
         """Test writing without timestamp column raises error."""
@@ -338,7 +364,7 @@ class TestHiveStorageIncrementalMethods:
         storage.write(df, "yahoo/AAPL")
 
         result = storage.get_latest_timestamp("AAPL", "yahoo")
-        assert result == datetime(2024, 2, 15)
+        assert result == datetime(2024, 2, 15, tzinfo=UTC)
 
     def test_save_chunk(self, storage):
         """Test saving incremental chunk."""

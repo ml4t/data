@@ -68,10 +68,14 @@ def _concat_dtype(left: pl.DataType, right: pl.DataType) -> pl.DataType:
     if left == right:
         return left
     if isinstance(left, pl.Datetime) and isinstance(right, pl.Datetime):
+        precision = {"ms": 0, "us": 1, "ns": 2}
+        time_unit = max((left.time_unit, right.time_unit), key=precision.__getitem__)
         if left.time_zone == right.time_zone:
-            precision = {"ms": 0, "us": 1, "ns": 2}
-            time_unit = max((left.time_unit, right.time_unit), key=precision.__getitem__)
             return pl.Datetime(time_unit, left.time_zone)
+        time_zone = left.time_zone or right.time_zone or "UTC"
+        if left.time_zone is not None and right.time_zone is not None:
+            time_zone = "UTC"
+        return pl.Datetime(time_unit, time_zone)
 
     left_empty = pl.DataFrame({"value": pl.Series([], dtype=left)})
     right_empty = pl.DataFrame({"value": pl.Series([], dtype=right)})
