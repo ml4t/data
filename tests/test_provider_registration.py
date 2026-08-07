@@ -8,6 +8,7 @@ from ml4t.data.data_manager import DataManager
 from ml4t.data.providers.alpaca import AlpacaDataProvider
 from ml4t.data.providers.binance import BinanceProvider
 from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.coingecko import CoinGeckoProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 from ml4t.data.providers.databento import DataBentoProvider
 from ml4t.data.providers.mock import MockProvider
@@ -30,6 +31,7 @@ def test_all_providers_registered():
         "alpaca": AlpacaDataProvider,
         "binance": BinanceProvider,
         "binance_public": BinancePublicProvider,
+        "coingecko": CoinGeckoProvider,
         "cryptocompare": CryptoCompareProvider,
         "databento": DataBentoProvider,
         "massive": MassiveProvider,
@@ -42,7 +44,7 @@ def test_all_providers_registered():
     }
 
     assert expected_providers == DataManager.PROVIDER_CLASSES
-    assert len(DataManager.PROVIDER_CLASSES) == 12
+    assert len(DataManager.PROVIDER_CLASSES) == 13
 
 
 def test_provider_imports_work():
@@ -52,6 +54,7 @@ def test_provider_imports_work():
         AlpacaDataProvider,
         BinanceProvider,
         BinancePublicProvider,
+        CoinGeckoProvider,
         CryptoCompareProvider,
         DataBentoProvider,
         MassiveProvider,
@@ -72,7 +75,15 @@ def test_free_providers_detected():
     dm = DataManager()
 
     # These providers should be available even without API keys
-    free_providers = ["yahoo", "binance", "binance_public", "mock", "cryptocompare", "synthetic"]
+    free_providers = [
+        "yahoo",
+        "binance",
+        "binance_public",
+        "coingecko",
+        "mock",
+        "cryptocompare",
+        "synthetic",
+    ]
 
     for provider in free_providers:
         assert provider in dm._available_providers, (
@@ -104,14 +115,14 @@ def test_provider_count():
     """Test that we have the expected OHLCV providers registered in DataManager.
 
     Provider categories:
-    - In DataManager (12): General OHLCV providers with unified fetch_ohlcv() interface
+    - In DataManager (13): General OHLCV providers with unified fetch_ohlcv() interface
     - Standalone (5): Specialized providers with unique APIs
       - Factor data: aqr, fama_french
       - Prediction markets: kalshi, polymarket
       - Historical: wiki_prices
     """
-    assert len(DataManager.PROVIDER_CLASSES) == 12, (
-        f"Expected 12 providers, got {len(DataManager.PROVIDER_CLASSES)}"
+    assert len(DataManager.PROVIDER_CLASSES) == 13, (
+        f"Expected 13 providers, got {len(DataManager.PROVIDER_CLASSES)}"
     )
 
     # List all provider names for clarity
@@ -119,6 +130,7 @@ def test_provider_count():
     assert "alpaca" in provider_names
     assert "binance" in provider_names
     assert "binance_public" in provider_names
+    assert "coingecko" in provider_names
     assert "cryptocompare" in provider_names
     assert "databento" in provider_names
     assert "massive" in provider_names

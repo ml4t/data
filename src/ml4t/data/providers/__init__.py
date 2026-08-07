@@ -36,10 +36,12 @@ If you need incremental update functionality, implement it separately using the 
 
 Example:
     >>> from ml4t.data.providers import CoinGeckoProvider
+    >>> from datetime import UTC, datetime, timedelta
     >>>
     >>> # Use provider directly
     >>> provider = CoinGeckoProvider()
-    >>> data = provider.fetch_ohlcv("bitcoin", "2024-01-01", "2024-01-31")
+    >>> end = datetime.now(UTC).date() - timedelta(days=1)
+    >>> data = provider.fetch_ohlcv("bitcoin", str(end - timedelta(days=6)), str(end))
 """
 
 # Base classes

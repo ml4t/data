@@ -472,9 +472,21 @@ class StorageManager:
 
             if not self.storage.exists(key):
                 logger.warning("No existing data found, performing initial load", symbol=symbol)
-                end_date = initial_end or datetime.now().strftime("%Y-%m-%d")
+                today = datetime.now(UTC)
+                end_date = initial_end or today.strftime("%Y-%m-%d")
+                effective_load_days = initial_load_days
+                if initial_start is None:
+                    max_history_days = self.fetch_manager.get_max_history_days(symbol, provider)
+                    if max_history_days is not None and effective_load_days > max_history_days:
+                        logger.warning(
+                            "Initial load limited by provider history",
+                            provider=provider,
+                            requested_days=effective_load_days,
+                            max_history_days=max_history_days,
+                        )
+                        effective_load_days = max_history_days
                 start_date = initial_start or (
-                    datetime.now() - timedelta(days=initial_load_days)
+                    today - timedelta(days=effective_load_days)
                 ).strftime("%Y-%m-%d")
                 return self.load(
                     symbol=symbol,

@@ -260,6 +260,27 @@ class TestDataManagerUpdate:
             provider="mock",
         )
 
+    def test_update_limits_default_initial_load_to_provider_history(self, manager):
+        """Generated initial dates respect a provider's declared history bound."""
+        with patch.object(
+            manager._storage_manager,
+            "load",
+            return_value="crypto/daily/BTC",
+        ) as mock_load:
+            key = manager.update(
+                "BTC",
+                asset_class="crypto",
+                provider="coingecko",
+                initial_load_days=365,
+            )
+
+        assert key == "crypto/daily/BTC"
+        call = mock_load.call_args.kwargs
+        start = datetime.strptime(call["start"], "%Y-%m-%d").date()
+        end = datetime.strptime(call["end"], "%Y-%m-%d").date()
+        assert (end - start).days == 30
+        assert call["provider"] == "coingecko"
+
     def test_update_incremental(self, manager, storage):
         """Test incremental update with new data."""
         # First load initial data

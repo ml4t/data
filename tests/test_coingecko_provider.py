@@ -1,6 +1,6 @@
 """Tests for CoinGecko provider module."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -66,6 +66,13 @@ class TestNameProperty:
         """Test name property returns correct value."""
         provider = CoinGeckoProvider()
         assert provider.name == "coingecko"
+
+    def test_capabilities_declare_daily_history_bound(self):
+        """Managed loads can respect CoinGecko's accurate OHLC history limit."""
+        capabilities = CoinGeckoProvider().capabilities()
+
+        assert capabilities.supports_crypto
+        assert capabilities.max_history_days == 30
 
 
 class TestSymbolToId:
@@ -149,6 +156,15 @@ class TestRoundToValidDays:
         """Test 20 days rounds up to 30."""
         assert provider._round_to_valid_days(20) == 30
 
+    def test_utc_30_day_boundary_is_accepted(self, provider):
+        """A start exactly 30 UTC calendar days ago uses the 30-day endpoint window."""
+        start = (datetime.now(UTC).date() - timedelta(days=30)).isoformat()
+
+        days = provider._round_to_valid_days(provider._days_from_today(start))
+
+        assert days == 30
+        provider._validate_daily_window(days)
+
     def test_round_60_days(self, provider):
         """Test 60 days rounds up to 90."""
         assert provider._round_to_valid_days(60) == 90
@@ -228,7 +244,7 @@ class TestFetchOhlc:
     def test_fetch_ohlc_empty_range_skips_volume_request(self, provider):
         """An empty OHLC response does not consume a second API request."""
         response = MagicMock()
-        response.json.return_value = []
+        response.json.return_value = [[1704153600000, 100.0, 101.0, 99.0, 100.5]]
 
         with (
             patch.object(provider.session, "get", return_value=response) as get,
@@ -237,8 +253,8 @@ class TestFetchOhlc:
             result = provider._fetch_ohlc(
                 "bitcoin",
                 7,
-                start="2024-01-01",
-                end="2024-01-02",
+                start="2024-02-01",
+                end="2024-02-02",
             )
 
         assert result.is_empty()
@@ -344,6 +360,23 @@ class TestFetchOhlc:
 
         assert error.value.details["error"] == "CoinGecko returned no daily volume data"
 
+    def test_parse_daily_volumes_sorts_before_selecting_last_observation(self, provider):
+        """Payload order cannot change the selected observation for a UTC day."""
+        result = provider._parse_daily_volumes(
+            {
+                "total_volumes": [
+                    [1704236400000, 23.0],
+                    [1704157200000, 1.0],
+                    [1704240000000, 24.0],
+                ]
+            },
+            "bitcoin",
+        )
+
+        assert result.to_dicts() == [
+            {"timestamp": datetime(2024, 1, 2, tzinfo=UTC), "volume": 24.0}
+        ]
+
     @pytest.mark.asyncio
     async def test_fetch_daily_volumes_async_uses_async_transport(self, provider):
         """Test async daily volume retrieval uses the shared async request path."""
@@ -378,6 +411,72 @@ class TestFetchOhlc:
             patch.object(provider, "_acquire_rate_limit"),
         ):
             result = provider._fetch_ohlc(
+                "bitcoin",
+                7,
+                start="2024-01-01",
+                end="2024-01-01",
+            )
+
+        assert result.to_dicts() == [
+            {
+                "timestamp": datetime(2024, 1, 1, tzinfo=UTC),
+                "open": 100.0,
+                "high": 106.0,
+                "low": 99.0,
+                "close": 104.0,
+                "volume": 1234.5,
+            }
+        ]
+
+    def test_fetch_ohlc_excludes_current_utc_day(self, provider):
+        """An incomplete current UTC candle is never returned as a daily bar."""
+        today = datetime.now(UTC).date()
+        yesterday = today - timedelta(days=1)
+        today_open_ms = int(datetime.combine(today, datetime.min.time(), UTC).timestamp() * 1000)
+        today_close_ms = today_open_ms + 4 * 60 * 60 * 1000
+        response = MagicMock()
+        response.json.return_value = [
+            [today_open_ms, 100.0, 101.0, 99.0, 100.5],
+            [today_close_ms, 100.5, 102.0, 100.0, 101.5],
+        ]
+        volume_response = MagicMock()
+        volume_response.json.return_value = {"total_volumes": [[today_open_ms, 1234.5]]}
+
+        with (
+            patch.object(provider.session, "get", side_effect=[response, volume_response]),
+            patch.object(provider, "_acquire_rate_limit"),
+        ):
+            result = provider._fetch_ohlc(
+                "bitcoin",
+                7,
+                start=yesterday.isoformat(),
+                end=today.isoformat(),
+            )
+
+        assert result["timestamp"].to_list() == [
+            datetime.combine(yesterday, datetime.min.time(), UTC)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlc_async_joins_completed_daily_volume(self, provider):
+        """The async path applies the same OHLC and volume date mapping."""
+        ohlc_response = MagicMock()
+        ohlc_response.json.return_value = [
+            [1704081600000, 100.0, 105.0, 99.0, 102.0],
+            [1704153600000, 102.0, 106.0, 101.0, 104.0],
+        ]
+        volume_response = MagicMock()
+        volume_response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
+
+        with (
+            patch.object(
+                provider,
+                "_aget",
+                new=AsyncMock(side_effect=[ohlc_response, volume_response]),
+            ),
+            patch.object(provider, "_acquire_rate_limit"),
+        ):
+            result = await provider._fetch_ohlc_async(
                 "bitcoin",
                 7,
                 start="2024-01-01",

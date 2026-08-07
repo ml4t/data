@@ -246,3 +246,11 @@ class FetchManager:
         # Get provider instance and fetch
         provider_instance = self.provider_manager.get_provider(provider_name)
         return provider_instance.fetch_ohlcv(symbol, start, end, frequency, **kwargs)
+
+    def get_max_history_days(self, symbol: str, provider: str | None = None) -> int | None:
+        """Return a provider's declared history bound for managed initial loads."""
+        provider_name = self.router.get_provider(symbol, override=provider)
+        if provider_name is None:
+            return None
+        capabilities = self.provider_manager.get_provider(provider_name).capabilities()
+        return capabilities.max_history_days

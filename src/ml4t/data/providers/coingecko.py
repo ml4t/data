@@ -10,8 +10,13 @@ Performance Note:
 - Rate limiting is handled by BaseProvider
 
 Async Example:
+    last_complete_day = datetime.now(UTC).date() - timedelta(days=1)
     async with CoinGeckoProvider() as provider:
-        df = await provider.fetch_ohlcv_async("BTC", "2024-01-01", "2024-06-30")
+        df = await provider.fetch_ohlcv_async(
+            "BTC",
+            str(last_complete_day - timedelta(days=6)),
+            str(last_complete_day),
+        )
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from ml4t.data.core.exceptions import (
 )
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.mixins import AsyncSessionMixin
+from ml4t.data.providers.protocols import ProviderCapabilities
 
 logger = structlog.get_logger()
 
@@ -128,6 +134,20 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         """Return the provider name."""
         return "coingecko"
 
+    def capabilities(self) -> ProviderCapabilities:
+        """Return the bounded daily-history contract for managed loads."""
+        return ProviderCapabilities(
+            supports_crypto=True,
+            max_history_days=30,
+            rate_limit=(self.rate_limiter.max_calls, self.rate_limiter.period),
+        )
+
+    @staticmethod
+    def _days_from_today(start: str) -> int:
+        """Return the UTC calendar-day distance needed by the OHLC endpoint."""
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        return max(1, (datetime.now(UTC).date() - start_date).days)
+
     def _fetch_and_transform_data(
         self,
         symbol: str,
@@ -164,9 +184,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         start_dt = datetime.strptime(start, "%Y-%m-%d")
         end_dt = datetime.strptime(end, "%Y-%m-%d")
 
-        # CoinGecko works with "days from now" parameter
-        # Calculate how many days back from now to start date
-        days_from_now = (datetime.now() - start_dt).days + 1
+        days_from_now = self._days_from_today(start)
 
         # Round to valid days parameter (1, 7, 14, 30, 90, 180, 365, max)
         valid_days = self._round_to_valid_days(days_from_now)
@@ -329,6 +347,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 schema={"timestamp_ms": pl.Int64, "volume": pl.Float64},
                 orient="row",
             )
+            .sort("timestamp_ms")
             .with_columns(
                 (
                     pl.col("timestamp_ms")
@@ -384,14 +403,14 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
 
     def _validate_daily_window(self, days: int | str) -> None:
         """Reject source windows where CoinGecko returns four-day OHLC candles."""
-        if days == "max" or isinstance(days, int) and days > 30:
+        if days == "max" or (isinstance(days, int) and days > 30):
             raise DataValidationError(
                 provider=self.name,
                 message=(
                     "CoinGecko's OHLC endpoint returns four-day candles beyond 30 days; "
                     "daily OHLCV is limited to the most recent 30 days"
                 ),
-                field="start",
+                field="days",
                 value=days,
             )
 
@@ -661,8 +680,13 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             DataFrame with OHLCV data
 
         Example:
+            last_complete_day = datetime.now(UTC).date() - timedelta(days=1)
             async with CoinGeckoProvider() as provider:
-                df = await provider.fetch_ohlcv_async("BTC", "2024-01-01", "2024-06-30")
+                df = await provider.fetch_ohlcv_async(
+                    "BTC",
+                    str(last_complete_day - timedelta(days=6)),
+                    str(last_complete_day),
+                )
         """
         if frequency.lower() != "daily":
             raise DataValidationError(
@@ -673,7 +697,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         coin_id = self.symbol_to_id(symbol)
         start_dt = datetime.strptime(start, "%Y-%m-%d")
         end_dt = datetime.strptime(end, "%Y-%m-%d")
-        days_from_now = (datetime.now() - start_dt).days + 1
+        days_from_now = self._days_from_today(start)
         valid_days = self._round_to_valid_days(days_from_now)
 
         logger.info(

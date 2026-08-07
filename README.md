@@ -233,7 +233,7 @@ datasets:
     provider: coingecko
     symbols: [bitcoin, ethereum, solana]
     frequency: daily
-    start_date: 2020-01-01
+    initial_load_days: 30
 ```
 
 ## Storage Format

@@ -666,7 +666,7 @@ class UpdateResult:
    ```bash
    ml4t-data fetch -s AAPL -s MSFT --start 2024-01-01 --end 2024-12-31
    ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-12-31
-   ml4t-data fetch -s BTC --provider coingecko --start 2024-01-01
+   ml4t-data fetch -s BTC --provider coingecko --start START_DATE --end END_DATE
    ```
 
 2. **update-all** - Incremental updates from YAML config

@@ -203,12 +203,14 @@ class TestCoinGeckoProvider:
     @pytest.mark.integration
     def test_fetch_ohlcv_empty_result(self, provider):
         """Test fetching data with no results."""
+        end = datetime.now().date() - timedelta(days=1)
+        start = end - timedelta(days=1)
         # Invalid coin should raise SymbolNotFoundError
         with pytest.raises(SymbolNotFoundError):
             provider.fetch_ohlcv(
                 symbol="INVALID_COIN_XYZ_12345",
-                start="2024-01-01",
-                end="2024-01-02",
+                start=start.isoformat(),
+                end=end.isoformat(),
                 frequency="daily",
             )
 

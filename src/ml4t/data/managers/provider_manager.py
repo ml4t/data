@@ -133,6 +133,7 @@ class ProviderManager:
             "yahoo",
             "binance",
             "binance_public",
+            "coingecko",
             "mock",
             "cryptocompare",
             "synthetic",
@@ -185,6 +186,7 @@ class ProviderManager:
         from ml4t.data.providers.alpaca import AlpacaDataProvider
         from ml4t.data.providers.binance import BinanceProvider
         from ml4t.data.providers.binance_public import BinancePublicProvider
+        from ml4t.data.providers.coingecko import CoinGeckoProvider
         from ml4t.data.providers.cryptocompare import CryptoCompareProvider
         from ml4t.data.providers.mock import MockProvider
         from ml4t.data.providers.okx import OKXProvider
@@ -195,6 +197,7 @@ class ProviderManager:
             "alpaca": AlpacaDataProvider,
             "binance": BinanceProvider,
             "binance_public": BinancePublicProvider,
+            "coingecko": CoinGeckoProvider,
             "cryptocompare": CryptoCompareProvider,
             "mock": MockProvider,
             "okx": OKXProvider,
