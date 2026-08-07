@@ -16,23 +16,26 @@ Fetch financial data from any configured provider.
 
 ```bash
 # Single symbol
-ml4t-data fetch -s AAPL --start 2024-01-01 --end 2024-12-31
+ml4t-data fetch -s AAPL --provider yahoo --start 2024-01-01 --end 2024-12-31
 
 # Multiple symbols
-ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-06-30
+ml4t-data fetch -s BTC -s ETH --provider cryptocompare \
+    --start 2024-01-01 --end 2024-06-30
 
 # From a symbols file (one symbol per line)
-ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-12-31
+ml4t-data fetch -f symbols.txt --provider yahoo --start 2024-01-01 --end 2024-12-31
 
 # Specific provider and frequency
 ml4t-data fetch -s AAPL --provider yahoo --frequency daily \
     --start 2024-01-01 --end 2024-12-31
 
 # Save output to file
-ml4t-data fetch -s AAPL --start 2024-01-01 --end 2024-12-31 -o data.parquet
+ml4t-data fetch -s AAPL --provider yahoo \
+    --start 2024-01-01 --end 2024-12-31 -o data.parquet
 
 # Show progress bar for batch fetches
-ml4t-data fetch -f sp500.txt --start 2024-01-01 --end 2024-12-31 --progress
+ml4t-data fetch -f sp500.txt --provider yahoo \
+    --start 2024-01-01 --end 2024-12-31 --progress
 ```
 
 | Option | Short | Description |

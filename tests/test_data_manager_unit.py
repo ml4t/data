@@ -528,6 +528,13 @@ class TestDataManagerFetchBatch:
         assert "SYM1" in result
         assert "SYM2" in result
 
+    def test_fetch_batch_rejects_ambiguous_symbols(self):
+        """A batch routing error fails the operation instead of returning all None."""
+        dm = DataManager()
+
+        with pytest.raises(ValueError, match="specify provider explicitly"):
+            dm.fetch_batch(["AAPL", "MSFT"], "2024-01-01", "2024-01-31")
+
 
 class TestDataManagerDetectProviders:
     """Tests for provider detection during initialization."""

@@ -331,7 +331,8 @@ pip install -e .
 ### Data Operations
 ```bash
 # Fetch and save
-ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-12-31 -o crypto.parquet
+ml4t-data fetch -s BTC -s ETH --provider cryptocompare \
+    --start 2024-01-01 --end 2024-12-31 -o crypto.parquet
 
 # Update daily from config
 ml4t-data update-all -c ml4t-data.yaml --dry-run

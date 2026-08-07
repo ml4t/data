@@ -18,6 +18,7 @@ from ml4t.data.export.formats import (
     JSONExporter,
 )
 from ml4t.data.export.formats.base import ExportResult
+from ml4t.data.storage.backend import normalize_storage_metadata
 
 logger = structlog.get_logger()
 
@@ -253,12 +254,10 @@ class ExportManager:
     @staticmethod
     def _symbol_from_metadata(metadata: Any) -> str | None:
         """Read the explicit symbol from canonical or legacy metadata shapes."""
-        if not isinstance(metadata, dict):
+        normalized = normalize_storage_metadata(metadata)
+        if normalized is None:
             return None
-        custom = metadata.get("custom")
-        if isinstance(custom, dict) and isinstance(custom.get("symbol"), str):
-            return custom["symbol"]
-        symbol = metadata.get("symbol")
+        symbol = normalized.get("symbol")
         return symbol if isinstance(symbol, str) else None
 
     def _report_progress(self, message: str, progress: float) -> None:

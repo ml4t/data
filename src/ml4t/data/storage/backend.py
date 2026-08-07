@@ -26,6 +26,30 @@ from ml4t.data.storage.keys import contained_path, storage_key_path
 PartitionGranularityType = Literal["year", "month", "day", "hour"]
 
 
+def normalize_storage_metadata(metadata: Any, key: str | None = None) -> dict[str, Any] | None:
+    """Return domain metadata from a canonical or legacy storage record."""
+    if not isinstance(metadata, dict) or not metadata:
+        return None
+
+    custom = metadata.get("custom")
+    normalized = {**metadata, **custom} if isinstance(custom, dict) else metadata.copy()
+
+    if key is not None:
+        parts = key.split("/", 2)
+        if len(parts) == 3:
+            asset_class, frequency, symbol = parts
+            normalized.setdefault("asset_class", asset_class)
+            normalized.setdefault("frequency", frequency)
+            normalized.setdefault("symbol", symbol)
+
+    if "frequency" not in normalized:
+        bar_params = normalized.get("bar_params")
+        if isinstance(bar_params, dict) and isinstance(bar_params.get("frequency"), str):
+            normalized["frequency"] = bar_params["frequency"]
+
+    return normalized
+
+
 @dataclass
 class StorageConfig:
     """Configuration for storage backends.

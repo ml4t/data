@@ -16,11 +16,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.metadata_tracker import MetadataTracker
 from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 
+from .batch import _build_storage_from_config
 from .utils import (
     console,
     create_progress_bar,
@@ -57,9 +59,9 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
     """Fetch financial data from providers.
 
     Examples:
-        ml4t-data fetch -s BTC --start 2024-01-01 --end 2024-01-31
-        ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-01-31
-        ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -s BTC --provider cryptocompare --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -s BTC -s ETH -p cryptocompare --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -f symbols.txt --provider yahoo --start 2024-01-01 --end 2024-01-31
     """
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
@@ -115,6 +117,7 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
             if not quiet:
                 console.print(f"Fetching {len(symbols)} symbols")
 
+            failures: dict[str, str] = {}
             if progress and not quiet:
                 with create_progress_bar() as progress_bar:
                     task = progress_bar.add_task("Fetching...", total=len(symbols))
@@ -126,6 +129,7 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
                             )
                             progress_bar.update(task, advance=1, description=f"Fetched {sym}")
                         except Exception as e:
+                            failures[sym] = str(e)
                             if verbose:
                                 console.print(
                                     f"[yellow]Warning: Failed to fetch {sym}: {e}[/yellow]"
@@ -138,6 +142,9 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
                 )
 
             successful = sum(1 for v in results.values() if v is not None)
+            if successful == 0:
+                detail = next(iter(failures.values()), "all provider requests failed")
+                raise ValueError(f"No symbols were fetched: {detail}")
             if not quiet:
                 print_success(f"Successfully fetched {successful} symbols")
 
@@ -546,92 +553,49 @@ def info(symbol, storage_path):
 @click.pass_context
 def list_data(_ctx, config, storage_path):
     """List all stored datasets."""
-    import json as json_module
-
     import yaml
 
     try:
         if config:
-            with open(config) as f:
+            config_path = Path(config).resolve()
+            with open(config_path) as f:
                 cfg = yaml.safe_load(f)
-            storage_path = Path(cfg["storage"]["path"]).expanduser()
+            storage, storage_path = _build_storage_from_config(cfg, config_path)
         elif storage_path:
             storage_path = Path(storage_path).expanduser()
+            storage = HiveStorage(StorageConfig(base_path=storage_path))
         else:
             console.print("[red]Either --config or --storage-path required[/red]")
             raise click.Abort()
 
         console.print(f"[cyan]Storage:[/cyan] {storage_path}\n")
 
-        metadata_dir = storage_path / ".metadata"
-        if not metadata_dir.exists():
+        keys = storage.list_keys()
+        if not keys:
             console.print("[yellow]No data found[/yellow]")
             return
 
-        futures_data = {}
-        spot_data = {}
+        metadata_manager = MetadataManager(storage)
+        table = Table(show_header=True, box=box.ROUNDED)
+        table.add_column("Key", style="dim")
+        table.add_column("Symbol", style="cyan")
+        table.add_column("Provider")
+        table.add_column("Rows", justify="right", style="green")
+        table.add_column("Date Range", style="dim")
+        table.add_column("Last Updated", style="dim")
 
-        for meta_file in metadata_dir.glob("*.json"):
-            with open(meta_file) as f:
-                meta = json_module.load(f)
+        for key in keys:
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            symbol = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
+            provider = str(metadata.get("provider") or "")
+            rows = f"{int(metadata.get('row_count', 0)):,}"
+            start = str(metadata.get("start_date") or "")[:10]
+            end = str(metadata.get("end_date") or "")[:10]
+            updated = str(metadata.get("last_updated") or "")[:19]
+            table.add_row(key, symbol, provider, rows, f"{start} to {end}", updated)
 
-            custom = meta.get("custom", {})
-            provider = custom.get("provider")
-            symbol = custom.get("symbol")
-
-            if not symbol or not provider:
-                continue
-
-            data_info = {
-                "rows": meta.get("row_count", 0),
-                "start": custom.get("start_date", ""),
-                "end": custom.get("end_date", ""),
-                "updated": custom.get("last_updated", ""),
-            }
-
-            if provider == "databento":
-                futures_data[symbol] = data_info
-            elif provider == "cryptocompare":
-                spot_data[symbol] = data_info
-
-        if futures_data:
-            console.print("[bold]Futures (DataBento)[/bold]")
-            table = Table(show_header=True, box=box.ROUNDED)
-            table.add_column("Symbol", style="cyan")
-            table.add_column("Rows", justify="right", style="green")
-            table.add_column("Date Range", style="dim")
-            table.add_column("Last Updated", style="dim")
-
-            for sym in sorted(futures_data.keys()):
-                info_d = futures_data[sym]
-                rows = f"{info_d['rows']:,}"
-                date_range = f"{info_d['start'][:10]} → {info_d['end'][:10]}"
-                updated = info_d["updated"][:19] if info_d["updated"] else ""
-                table.add_row(sym, rows, date_range, updated)
-
-            console.print(table)
-            console.print()
-
-        if spot_data:
-            console.print("[bold]Spot (CryptoCompare)[/bold]")
-            table = Table(show_header=True, box=box.ROUNDED)
-            table.add_column("Symbol", style="cyan")
-            table.add_column("Rows", justify="right", style="green")
-            table.add_column("Date Range", style="dim")
-            table.add_column("Last Updated", style="dim")
-
-            for sym in sorted(spot_data.keys()):
-                info_d = spot_data[sym]
-                rows = f"{info_d['rows']:,}"
-                date_range = f"{info_d['start'][:10]} → {info_d['end'][:10]}"
-                updated = info_d["updated"][:19] if info_d["updated"] else ""
-                table.add_row(sym, rows, date_range, updated)
-
-            console.print(table)
-            console.print()
-
-        total = len(futures_data) + len(spot_data)
-        console.print(f"[bold]Total:[/bold] {total} dataset(s)")
+        console.print(table)
+        console.print(f"[bold]Total:[/bold] {len(keys)} dataset(s)")
 
     except Exception as e:
         print_error(str(e))

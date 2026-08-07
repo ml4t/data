@@ -168,9 +168,10 @@ class TestProviderRouting:
         ("symbol", "expected"),
         [
             ("EUR_USD", "oanda"),
-            ("BTC-USD", "cryptocompare"),
-            ("ETH/USDT", "cryptocompare"),
             ("ES.v.0", "databento"),
+            ("BTC-USD", None),
+            ("DOGE-USD", None),
+            ("ETH/USDT", None),
             ("AAPL", None),
             ("SPY", None),
             ("GOOGL", None),

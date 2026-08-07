@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+class ProviderRoutingError(ValueError):
+    """Raised when a request has no explicit or unambiguous provider route."""
+
+
 @cache
 def _has_pyarrow() -> bool:
     """Return whether the optional Arrow conversion dependency is installed."""
@@ -43,7 +47,7 @@ class FetchManager:
 
     Example:
         >>> fetch_mgr = FetchManager(provider_manager, router, "polars")
-        >>> df = fetch_mgr.fetch("AAPL", "2024-01-01", "2024-12-31")
+        >>> df = fetch_mgr.fetch("AAPL", "2024-01-01", "2024-12-31", provider="yahoo")
     """
 
     def __init__(
@@ -137,7 +141,7 @@ class FetchManager:
         # Determine provider
         provider_name = self.router.get_provider(symbol, override=provider)
         if not provider_name:
-            raise ValueError(
+            raise ProviderRoutingError(
                 f"No provider found for symbol: {symbol}. "
                 f"Configure routing patterns or specify provider explicitly."
             )
@@ -193,6 +197,8 @@ class FetchManager:
         for symbol in symbols:
             try:
                 results[symbol] = self.fetch(symbol, start, end, frequency, **kwargs)
+            except ProviderRoutingError:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to fetch {symbol}: {e}")
                 results[symbol] = None

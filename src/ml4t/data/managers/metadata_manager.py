@@ -14,6 +14,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.storage.backend import normalize_storage_metadata
 from ml4t.data.storage.keys import storage_key_path
 
 logger = structlog.get_logger()
@@ -124,22 +125,12 @@ class MetadataManager:
         try:
             get_metadata = getattr(self.storage, "get_metadata", None)
             metadata = get_metadata(key) if callable(get_metadata) else None
-            if metadata is None and hasattr(self.storage, "metadata_dir"):
+            if not metadata and hasattr(self.storage, "metadata_dir"):
                 metadata_file = storage_key_path(self.storage.metadata_dir, key, ".json")
                 if metadata_file.exists():
                     with open(metadata_file, encoding="utf-8") as metadata_handle:
                         metadata = json.load(metadata_handle)
-            if metadata is None:
-                return None
-
-            custom = metadata.get("custom")
-            if isinstance(custom, dict):
-                metadata = {**metadata, **custom}
-            if "frequency" not in metadata:
-                bar_params = metadata.get("bar_params")
-                if isinstance(bar_params, dict) and isinstance(bar_params.get("frequency"), str):
-                    metadata["frequency"] = bar_params["frequency"]
-            return metadata
+            return normalize_storage_metadata(metadata, key)
         except Exception as e:
             logger.warning(f"Failed to read metadata for {key}: {e}")
             return None

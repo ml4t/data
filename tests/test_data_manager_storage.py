@@ -1,5 +1,6 @@
 """Tests for DataManager storage operations (load/update)."""
 
+import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,9 +10,11 @@ import polars as pl
 import pytest
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage.keys import storage_key_path
 
 
 class TestDataManagerLoad:
@@ -877,6 +880,57 @@ class TestDataManagerListSymbols:
             asset_class="equities",
             provider="mock",
         )
+
+    @pytest.mark.parametrize("storage_type", [HiveStorage, FlatStorage])
+    def test_non_time_bar_frequency_is_restored_from_key(
+        self,
+        temp_dir,
+        storage_type,
+        sample_data,
+    ):
+        """Bulk discovery preserves the storage frequency for non-time bars."""
+        storage = storage_type(StorageConfig(base_path=temp_dir))
+        manager = DataManager(storage=storage, enable_validation=False)
+        manager.import_data(
+            sample_data,
+            symbol="AAPL",
+            provider="mock",
+            frequency="hourly",
+            bar_type="volume",
+            bar_threshold=1_000,
+        )
+
+        restarted = DataManager(
+            storage=storage_type(StorageConfig(base_path=temp_dir)),
+            enable_validation=False,
+        )
+
+        metadata = restarted.get_metadata("AAPL", frequency="hourly")
+        assert metadata is not None
+        assert metadata["frequency"] == "hourly"
+        assert metadata["bar_type"] == "volume"
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            {"custom": {"provider": "yahoo", "symbol": "AAPL"}},
+            {"provider": "yahoo", "symbol": "AAPL"},
+        ],
+    )
+    def test_legacy_metadata_shapes_remain_discoverable(self, temp_dir, record):
+        """Pre-generation metadata files retain their public domain fields."""
+        storage = HiveStorage(StorageConfig(base_path=temp_dir))
+        key = "equities/daily/AAPL"
+        metadata_file = storage_key_path(storage.metadata_dir, key, ".json")
+        metadata_file.write_text(json.dumps(record), encoding="utf-8")
+
+        metadata = MetadataManager(storage).get_metadata_for_key(key)
+
+        assert metadata is not None
+        assert metadata["provider"] == "yahoo"
+        assert metadata["symbol"] == "AAPL"
+        assert metadata["asset_class"] == "equities"
+        assert metadata["frequency"] == "daily"
 
 
 class TestDataManagerBatchLoad:

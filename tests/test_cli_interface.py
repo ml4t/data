@@ -151,6 +151,32 @@ class TestFetchCommand:
         assert "Fetching 2 symbols" in result.output
         assert "✅ Successfully fetched 2 symbols" in result.output
 
+    @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_batch_all_failures_exit_nonzero(self, mock_dm_class):
+        """A batch with no successful result is not reported as successful."""
+        mock_dm = MagicMock()
+        mock_dm_class.return_value = mock_dm
+        mock_dm.fetch_batch.return_value = {"AAPL": None, "MSFT": None}
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "AAPL",
+                "--symbol",
+                "MSFT",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-02",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "No symbols were fetched" in result.output
+        assert "Successfully fetched 0" not in result.output
+
     def test_fetch_invalid_dates(self):
         """Test fetch with invalid date format."""
         runner = CliRunner()
@@ -503,6 +529,7 @@ class TestBatchOperations:
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
         mock_dm.fetch.return_value = mock_df
+        mock_dm.fetch_batch.return_value = {"BTC": mock_df, "ETH": mock_df}
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -1342,13 +1369,8 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "List" in result.output
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_list_no_data(self, mock_storage_class):
+    def test_list_no_data(self):
         """Test list command with no data."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_storage.list_metadata.return_value = []
-
         runner = CliRunner()
         with runner.isolated_filesystem():
             # Create a minimal config file
@@ -1363,6 +1385,71 @@ datasets: {}
 
         # Should not crash
         assert result.exit_code == 0
+
+    def test_list_uses_storage_strategy_from_config(self):
+        """The CLI opens a configured flat store with the flat backend."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+
+            result = runner.invoke(cli, ["list", "--config", "config.yaml"])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "Total: 1 dataset(s)" in result.output
+
+    def test_list_reads_committed_dataset_metadata(self):
+        """The CLI lists datasets from generation-based storage metadata."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage_path = Path("data")
+            storage = create_storage(storage_path)
+            manager = DataManager(storage=storage, enable_validation=False)
+            manager.import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+
+            result = runner.invoke(cli, ["list", "--storage-path", str(storage_path)])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "Total: 1 dataset(s)" in result.output
 
 
 class TestDownloadFuturesCommand:

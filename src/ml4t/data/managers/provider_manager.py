@@ -88,20 +88,16 @@ class ProviderRouter:
 
         Default patterns:
         - Forex: ``EUR_USD`` format routes to OANDA
-        - Crypto: known ``BASE-QUOTE`` or ``BASE/QUOTE`` pairs route to CryptoCompare
         - Futures: continuous ``ROOT.v.N`` symbols route to Databento
 
         Bare tickers and compact pairs are intentionally not inferred because their
-        formats overlap across equities, crypto, forex, and futures.
+        formats overlap across equities, crypto, forex, and futures. Delimited crypto
+        pairs are also not inferred because several providers accept the same syntax.
         """
         if self.patterns:
             return  # Don't override existing patterns
 
         self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")
-        self.add_pattern(
-            r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC)[-/](USD|USDT|EUR|GBP|BTC|ETH)$",
-            "cryptocompare",
-        )
         self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")
 
 
