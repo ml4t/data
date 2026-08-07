@@ -160,8 +160,13 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
         # Rename columns
         df = df.rename({"datetime": "timestamp"})
 
-        # Convert timestamp to datetime
-        df = df.with_columns(pl.col("timestamp").str.to_datetime().alias("timestamp"))
+        # The API returns wall-clock values in the requested New York timezone.
+        df = df.with_columns(
+            pl.col("timestamp")
+            .str.to_datetime(time_zone="America/New_York")
+            .dt.convert_time_zone("UTC")
+            .alias("timestamp")
+        )
 
         # Convert OHLCV columns to float
         for col in ["open", "high", "low", "close", "volume"]:

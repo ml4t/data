@@ -4,7 +4,15 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
-from ml4t.data.providers import AQRFactorProvider, BinanceProvider, FamaFrenchProvider, OKXProvider
+from ml4t.data.providers import (
+    AQRFactorProvider,
+    BinanceProvider,
+    EODHDProvider,
+    FamaFrenchProvider,
+    FXMacroDataProvider,
+    OKXProvider,
+    TwelveDataProvider,
+)
 
 
 def _recent_dates() -> tuple[str, str]:
@@ -59,3 +67,28 @@ def test_okx_market_data_contract() -> None:
         frame = provider.fetch_ohlcv("BTC-USDT-SWAP", start, end, "daily")
 
     _assert_ohlcv(frame, "BTC-USDT-SWAP")
+
+
+def test_fxmacrodata_public_catalogue_contract() -> None:
+    with FXMacroDataProvider(api_key=None) as provider:
+        health = provider.health()
+        frame = provider.fetch_catalogue("usd")
+
+    assert health.get("status")
+    assert frame.height > 0
+    assert "indicator" in frame.columns
+
+
+def test_eodhd_demo_contract() -> None:
+    with EODHDProvider(api_key="demo") as provider:
+        frame = provider.fetch_ohlcv("AAPL", "2025-01-02", "2025-01-10", "daily")
+
+    _assert_ohlcv(frame, "AAPL")
+
+
+def test_twelve_data_demo_contract() -> None:
+    with TwelveDataProvider(api_key="demo") as provider:
+        frame = provider.fetch_ohlcv("AAPL", "2025-01-02", "2025-01-10", "daily")
+
+    _assert_ohlcv(frame, "AAPL")
+    assert frame.schema["timestamp"].time_zone == "UTC"

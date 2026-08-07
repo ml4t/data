@@ -1,5 +1,6 @@
 """Tests for Twelve Data provider module."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -188,6 +189,8 @@ class TestTransformData:
         assert "close" in df.columns
         assert "symbol" in df.columns
         assert df["symbol"][0] == "AAPL"
+        assert df.schema["timestamp"].time_zone == "UTC"
+        assert df["timestamp"][0] == datetime(2024, 1, 2, 5, tzinfo=UTC)
 
     def test_transform_data_uppercase_symbol(self, provider):
         """Test symbol is uppercased."""
