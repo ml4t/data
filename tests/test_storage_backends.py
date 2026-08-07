@@ -49,6 +49,39 @@ class TestStorageBackends:
             assert isinstance(storage, FlatStorage)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_init_rejects_symlinked_metadata_root(self, tmp_path, tmp_path_factory, strategy):
+        """Storage locks cannot be redirected outside the configured root."""
+        outside = tmp_path_factory.mktemp("metadata-outside")
+        try:
+            (tmp_path / ".metadata").symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            create_storage(tmp_path, strategy=strategy)
+
+        assert not any(outside.iterdir())
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_delete_rejects_symlinked_trash_root(
+        self, tmp_path, tmp_path_factory, sample_data, strategy
+    ):
+        """Deleting a key cannot move it to an external directory."""
+        storage = create_storage(tmp_path, strategy=strategy)
+        storage.write(sample_data, "test_key")
+        outside = tmp_path_factory.mktemp("trash-outside")
+        try:
+            (tmp_path / ".trash").symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.delete("test_key")
+
+        assert storage.exists("test_key")
+        assert not any(outside.iterdir())
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_write_read_cycle(self, temp_dir, sample_data, strategy):
         """Test basic write and read operations."""
         storage = create_storage(temp_dir, strategy=strategy)

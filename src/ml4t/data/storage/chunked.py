@@ -17,6 +17,7 @@ from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.storage.config import CompressionType, parquet_compression
 from ml4t.data.storage.keys import (
     KEY_ENCODING_PREFIX,
+    contained_path,
     decode_storage_key,
     storage_key_path,
 )
@@ -82,11 +83,11 @@ class ChunkedStorage:
         self.compression = parquet_compression(compression)
 
         # Chunk storage directory
-        self.chunks_path = self.base_path / "chunks"
+        self.chunks_path = contained_path(self.base_path, "chunks")
         self.chunks_path.mkdir(parents=True, exist_ok=True)
 
         # Metadata storage
-        self.metadata_path = self.base_path / "metadata"
+        self.metadata_path = contained_path(self.base_path, "metadata")
         self.metadata_path.mkdir(parents=True, exist_ok=True)
 
     def _chunk_path(self, key: str, chunk_id: str) -> Path:

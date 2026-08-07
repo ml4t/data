@@ -417,6 +417,27 @@ class TestHiveStorageIncrementalMethods:
 
         assert not any(outside.iterdir())
 
+    def test_save_chunk_rejects_symlinked_chunks_root(self, storage, tmp_path_factory):
+        """The chunk root itself cannot redirect writes outside storage."""
+        outside = tmp_path_factory.mktemp("outside-root")
+        chunks = storage.base_path / ".chunks"
+        try:
+            chunks.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.save_chunk(
+                df,
+                "BTC/USD",
+                "exchange",
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 31),
+            )
+
+        assert not any(outside.iterdir())
+
     def test_update_combined_file_new(self, storage):
         """Test updating combined file with new data."""
         df = pl.DataFrame(

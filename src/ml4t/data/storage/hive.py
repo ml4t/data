@@ -469,7 +469,8 @@ class HiveStorage(StorageBackend):
         """
         # Create chunks directory
         chunks_dir = contained_path(
-            self.base_path / ".chunks",
+            self.base_path,
+            ".chunks",
             encode_storage_key(provider),
             encode_storage_key(symbol),
         )

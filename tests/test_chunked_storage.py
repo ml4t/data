@@ -29,6 +29,24 @@ class TestChunkedStorage:
         with pytest.raises(ValueError, match="Unsupported Parquet compression"):
             ChunkedStorage(tmp_path, compression=5)  # type: ignore[arg-type]
 
+    @pytest.mark.parametrize("directory", ["chunks", "metadata"])
+    def test_rejects_symlinked_internal_root(
+        self,
+        tmp_path: Path,
+        tmp_path_factory,
+        directory: str,
+    ) -> None:
+        outside = tmp_path_factory.mktemp(f"chunked-{directory}-outside")
+        try:
+            (tmp_path / directory).symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            ChunkedStorage(tmp_path)
+
+        assert not any(outside.iterdir())
+
     def test_none_compression_writes_uncompressed_parquet(self, tmp_path: Path) -> None:
         storage = ChunkedStorage(tmp_path, compression=None)
         frame = pl.DataFrame(

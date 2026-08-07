@@ -10,7 +10,7 @@ from typing import Any
 
 import structlog
 
-from ml4t.data.storage.keys import storage_key_path
+from ml4t.data.storage.keys import contained_path, storage_key_path
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
@@ -143,7 +143,8 @@ class MetadataTracker:
             base_path: Base directory for metadata storage
         """
         self.base_path = Path(base_path)
-        self.metadata_dir = self.base_path / ".metadata"
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        self.metadata_dir = contained_path(self.base_path, ".metadata")
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_metadata_path(self, key: str) -> Path:

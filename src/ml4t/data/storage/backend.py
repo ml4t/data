@@ -75,7 +75,7 @@ class StorageBackend(ABC):
         self.config = config
         self.base_path = config.base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
-        self.metadata_dir = self.base_path / ".metadata"
+        self.metadata_dir = contained_path(self.base_path, ".metadata")
         self.metadata_dir.mkdir(exist_ok=True)
 
     def _parquet_compression(
@@ -344,9 +344,9 @@ class StorageBackend(ABC):
         with self._key_lock(key):
             if not (key_path / "CURRENT").is_file():
                 return False
-            trash_dir = self.base_path / ".trash"
+            trash_dir = contained_path(self.base_path, ".trash")
             trash_dir.mkdir(exist_ok=True)
-            trash_path = trash_dir / f"{key_path.name}-{uuid.uuid4().hex}"
+            trash_path = contained_path(trash_dir, f"{key_path.name}-{uuid.uuid4().hex}")
             key_path.replace(trash_path)
         shutil.rmtree(trash_path)
         return True
