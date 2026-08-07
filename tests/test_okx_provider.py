@@ -1,5 +1,6 @@
 """Reliability tests for the OKX provider."""
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -119,3 +120,83 @@ def test_candle_page_limit_terminates_public_fetch(provider) -> None:
             provider.fetch_ohlcv("BTC-USDT-SWAP", "2024-01-01", "2024-01-10", "daily")
 
     assert mock_get.call_count == provider.MAX_PAGES
+
+
+def test_candle_pagination_uses_history_endpoint_and_after_cursor(provider) -> None:
+    newest = int(datetime(2024, 1, 9, tzinfo=UTC).timestamp() * 1000)
+    oldest = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(datetime(2024, 1, 10, tzinfo=UTC).timestamp() * 1000)
+
+    with (
+        patch.object(
+            provider.client,
+            "get",
+            side_effect=[_response([_candle(newest)]), _response([_candle(oldest)])],
+        ) as get,
+        patch.object(provider, "_acquire_rate_limit"),
+    ):
+        provider.fetch_ohlcv("BTC-USDT-SWAP", "2024-01-01", "2024-01-10", "daily")
+
+    assert [call.args[0] for call in get.call_args_list] == [
+        f"{provider.BASE_URL}/market/history-candles",
+        f"{provider.BASE_URL}/market/history-candles",
+    ]
+    assert [call.kwargs["params"]["after"] for call in get.call_args_list] == [
+        str(end + 1),
+        str(newest),
+    ]
+    assert all(call.kwargs["params"]["bar"] == "1Dutc" for call in get.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_async_candle_pagination_uses_history_endpoint_and_after_cursor(provider) -> None:
+    newest = int(datetime(2024, 1, 9, tzinfo=UTC).timestamp() * 1000)
+    oldest = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(datetime(2024, 1, 10, tzinfo=UTC).timestamp() * 1000)
+
+    with (
+        patch.object(
+            provider,
+            "_aget",
+            new=AsyncMock(side_effect=[_response([_candle(newest)]), _response([_candle(oldest)])]),
+        ) as get,
+        patch.object(provider, "_acquire_rate_limit"),
+    ):
+        await provider.fetch_ohlcv_async("BTC-USDT-SWAP", "2024-01-01", "2024-01-10", "daily")
+
+    assert [call.args[0] for call in get.call_args_list] == [
+        f"{provider.BASE_URL}/market/history-candles",
+        f"{provider.BASE_URL}/market/history-candles",
+    ]
+    assert [call.kwargs["params"]["after"] for call in get.call_args_list] == [
+        str(end + 1),
+        str(newest),
+    ]
+
+
+def test_funding_pagination_uses_after_cursor(provider) -> None:
+    newest = int(datetime(2024, 1, 2, 16, tzinfo=UTC).timestamp() * 1000)
+    oldest = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(datetime(2024, 1, 3, 23, 59, 59, tzinfo=UTC).timestamp() * 1000)
+
+    def rate(timestamp: int) -> dict[str, str]:
+        return {
+            "fundingTime": str(timestamp),
+            "fundingRate": "0.0001",
+            "realizedRate": "0.0001",
+        }
+
+    with (
+        patch.object(
+            provider.client,
+            "get",
+            side_effect=[_response([rate(newest)]), _response([rate(oldest)])],
+        ) as get,
+        patch.object(provider, "_acquire_rate_limit"),
+    ):
+        provider.fetch_funding_rates("BTC-USDT-SWAP", "2024-01-01", "2024-01-03")
+
+    assert [call.kwargs["params"]["after"] for call in get.call_args_list] == [
+        str(end + 1),
+        str(newest),
+    ]

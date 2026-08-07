@@ -16,7 +16,7 @@ Available Providers:
     - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
     - PolymarketProvider: Polymarket prediction market history/order book snapshots
     - CoinGeckoProvider: CoinGecko crypto data (free, no API key)
-    - BinanceProvider: Binance cryptocurrency exchange (live API, may have geo-restrictions)
+    - BinanceProvider: Binance public market-data mirror and futures market data
     - BinancePublicProvider: Binance public data (bulk downloads, no geo-restrictions)
     - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
     - CryptoCompareProvider: CryptoCompare crypto data

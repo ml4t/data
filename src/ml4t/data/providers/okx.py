@@ -44,8 +44,8 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
     BASE_URL = "https://www.okx.com/api/v5"
 
-    # Map internal frequencies to OKX bar sizes
-    # OKX uses: 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 12H, 1D, 1W, 1M
+    # Map internal frequencies to OKX bar sizes. Calendar bars use the UTC variants
+    # so their timestamps align with the canonical daily-provider convention.
     INTERVAL_MAP: ClassVar[dict[str, str]] = {
         "minute": "1m",
         "1minute": "1m",
@@ -59,12 +59,12 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         "4hour": "4H",
         "6hour": "6H",
         "12hour": "12H",
-        "daily": "1D",
-        "1day": "1D",
-        "weekly": "1W",
-        "1week": "1W",
-        "monthly": "1M",
-        "1month": "1M",
+        "daily": "1Dutc",
+        "1day": "1Dutc",
+        "weekly": "1Wutc",
+        "1week": "1Wutc",
+        "monthly": "1Mutc",
+        "1month": "1Mutc",
     }
 
     MAX_CANDLES = 100  # OKX returns max 100 candles per request
@@ -253,7 +253,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         page_count = 0
 
         while True:
-            url = f"{self.BASE_URL}/market/candles"
+            url = f"{self.BASE_URL}/market/history-candles"
             params = {
                 "instId": inst_id,
                 "bar": bar,
@@ -532,7 +532,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         page_count = 0
 
         while True:
-            url = f"{self.BASE_URL}/market/candles"
+            url = f"{self.BASE_URL}/market/history-candles"
             params = {
                 "instId": inst_id,
                 "bar": bar,
