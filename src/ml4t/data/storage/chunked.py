@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal, cast
 
 import polars as pl
 import structlog
@@ -19,6 +20,26 @@ from ml4t.data.storage.keys import (
 from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
+
+ParquetCompression = Literal["uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd"]
+_PARQUET_COMPRESSIONS = frozenset({"uncompressed", "snappy", "gzip", "brotli", "lz4", "zstd"})
+
+
+def _normalize_compression(compression: str | None) -> ParquetCompression:
+    if compression is None:
+        return "uncompressed"
+    if compression not in _PARQUET_COMPRESSIONS:
+        supported = ", ".join(sorted(_PARQUET_COMPRESSIONS))
+        raise ValueError(
+            f"Unsupported Parquet compression '{compression}'; expected one of {supported}"
+        )
+    return cast(ParquetCompression, compression)
+
+
+def _datetime_scalar(value: object, column: str = "timestamp") -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"'{column}' must contain non-null Datetime values")
+    return value
 
 
 @dataclass
@@ -56,7 +77,7 @@ class ChunkedStorage:
         self,
         base_path: Path,
         chunk_size_days: int = DEFAULT_CHUNK_SIZE_DAYS,
-        compression: str = "snappy",
+        compression: str | None = "snappy",
     ) -> None:
         """
         Initialize chunked storage.
@@ -66,9 +87,12 @@ class ChunkedStorage:
             chunk_size_days: Number of days per chunk
             compression: Compression algorithm for Parquet files
         """
+        if chunk_size_days <= 0:
+            raise ValueError("chunk_size_days must be positive")
+
         self.base_path = Path(base_path).expanduser().resolve()
         self.chunk_size_days = chunk_size_days
-        self.compression = compression
+        self.compression = _normalize_compression(compression)
 
         # Chunk storage directory
         self.chunks_path = self.base_path / "chunks"
@@ -179,8 +203,8 @@ class ChunkedStorage:
         df = df.sort("timestamp")
 
         chunks = []
-        min_ts = df["timestamp"].min()
-        max_ts = df["timestamp"].max()
+        min_ts = _datetime_scalar(df["timestamp"].min())
+        max_ts = _datetime_scalar(df["timestamp"].max())
 
         # Generate chunk boundaries
         current = min_ts
@@ -507,8 +531,8 @@ class ChunkedStorage:
             # Create chunk info
             chunk_info = ChunkInfo(
                 chunk_id=chunk_id,
-                start_date=chunk_df["timestamp"].min(),
-                end_date=chunk_df["timestamp"].max(),
+                start_date=_datetime_scalar(chunk_df["timestamp"].min()),
+                end_date=_datetime_scalar(chunk_df["timestamp"].max()),
                 row_count=len(chunk_df),
                 file_path=chunk_path,
                 size_bytes=chunk_path.stat().st_size if chunk_path.exists() else 0,

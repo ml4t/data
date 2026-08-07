@@ -15,6 +15,37 @@ from ml4t.data.storage.chunked import ChunkedStorage, ChunkInfo
 class TestChunkedStorage:
     """Test chunked storage functionality."""
 
+    def test_rejects_invalid_configuration(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="chunk_size_days must be positive"):
+            ChunkedStorage(tmp_path, chunk_size_days=0)
+
+        with pytest.raises(ValueError, match="Unsupported Parquet compression"):
+            ChunkedStorage(tmp_path, compression="invalid")
+
+    def test_none_compression_writes_uncompressed_parquet(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path, compression=None)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert storage.compression == "uncompressed"
+        assert storage.read(key).data.equals(frame)
+
     def test_basic_write_and_read(self, tmp_path: Path) -> None:
         """Test basic chunked storage operations."""
         storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=30)
