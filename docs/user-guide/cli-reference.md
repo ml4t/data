@@ -55,25 +55,32 @@ ml4t-data fetch -f sp500.txt --provider yahoo \
 Perform incremental data updates for symbols already in storage.
 
 ```bash
-# Incremental update (default - only fetches new data)
+# Incremental update of an existing dataset
 ml4t-data update -s AAPL --storage-path ./data
 
-# Full refresh
-ml4t-data update -s AAPL --strategy full_refresh --storage-path ./data
+# Use a longer overlap to revise recent observations
+ml4t-data update -s AAPL --lookback-days 30 --storage-path ./data
 
-# Backfill with specific date range
-ml4t-data update -s AAPL --strategy backfill \
+# Set the date range used when the dataset does not exist yet
+ml4t-data update -s AAPL --provider yahoo \
     --start 2020-01-01 --end 2020-12-31 --storage-path ./data
+
+# Use the storage and provider settings from a configuration file
+ml4t-data update -s AAPL --config ml4t-data.yaml
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--symbol`, `-s` | Symbol to update (required) |
-| `--start` | Start date (defaults to 30 days ago) |
-| `--end` | End date (defaults to today) |
-| `--strategy` | `incremental`, `append_only`, `full_refresh`, or `backfill` |
+| `--frequency` | `daily`, `hourly`, or `weekly` |
+| `--asset-class` | `equities`, `crypto`, `forex`, or `futures` |
+| `--lookback-days` | Existing-data overlap used for revisions |
+| `--fill-gaps`, `--no-fill-gaps` | Enable or disable gap filling |
 | `--provider`, `-p` | Provider to use for fetching |
-| `--storage-path` | Storage directory (default: `./data`) |
+| `--start`, `--end` | Date bounds used only for a first load |
+| `--initial-load-days` | First-load history when `--start` is omitted |
+| `--config` | Configuration file selecting storage and provider settings |
+| `--storage-path` | Hive storage directory (default: `./data`) |
 
 ### validate
 
@@ -143,6 +150,7 @@ Show detailed information about a specific stored symbol, including a data previ
 
 ```bash
 ml4t-data info -s AAPL --storage-path ./data
+ml4t-data info -s BTC --asset-class crypto --config ml4t-data.yaml
 ```
 
 ## Batch Operations

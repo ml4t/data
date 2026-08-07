@@ -266,44 +266,12 @@ class TestUpdateCommand:
         assert result.exit_code == 0
         assert "Perform incremental data updates" in result.output
         assert "--symbol" in result.output
-        assert "--strategy" in result.output
+        assert "--lookback-days" in result.output
+        assert "--config" in result.output
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.IncrementalUpdater")
-    @patch("ml4t.data.cli.core.DataManager")
-    def test_update_incremental(
-        self, mock_dm_class, mock_updater_class, mock_tracker_class, mock_storage_class
-    ):
-        """Test incremental update."""
-        # Setup mocks
-        mock_dm = MagicMock()
-        mock_dm_class.return_value = mock_dm
-        mock_updater = MagicMock()
-        mock_updater_class.return_value = mock_updater
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock determine_update_range
-        mock_updater.determine_update_range.return_value = (
-            datetime(2024, 1, 2),
-            datetime(2024, 1, 10),
-            "incremental",
-        )
-
-        # Mock fetch
-        mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 2)]})
-        mock_dm.fetch.return_value = mock_df
-
-        # Mock update result
-        mock_result = MagicMock()
-        mock_result.success = True
-        mock_result.rows_added = 5
-        mock_result.rows_updated = 0
-        mock_result.gaps_filled = 0
-        mock_updater.update_incremental.return_value = mock_result
+    def test_update_initial_load_writes_canonical_dataset(self):
+        """The CLI delegates a first load to the public DataManager workflow."""
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -312,55 +280,54 @@ class TestUpdateCommand:
                 [
                     "update",
                     "--symbol",
-                    "BTC",
+                    "AAPL",
+                    "--provider",
+                    "mock",
                     "--start",
                     "2024-01-01",
                     "--end",
-                    "2024-01-10",
+                    "2024-01-03",
+                    "--storage-path",
+                    "data",
                 ],
             )
+            storage = create_storage("data")
 
             assert result.exit_code == 0, result.output
-            assert "Incremental update from" in result.output
-            assert "✅ Update successful" in result.output
-            assert "Added 5 rows" in result.output
+            assert "Updated equities/daily/AAPL" in result.output
+            assert storage.exists("equities/daily/AAPL")
+            assert len(storage.read("equities/daily/AAPL").collect()) == 3
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.IncrementalUpdater")
-    def test_update_no_new_data(self, mock_updater_class, mock_tracker_class, mock_storage_class):
-        """Test update when no new data is needed."""
-        mock_updater = MagicMock()
-        mock_updater_class.return_value = mock_updater
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock determine_update_range returns "none" type
-        mock_updater.determine_update_range.return_value = (
-            datetime(2024, 1, 10),
-            datetime(2024, 1, 10),
-            "none",
-        )
+    def test_update_uses_configured_flat_store(self):
+        """The update command honors the canonical storage configuration."""
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
             result = runner.invoke(
                 cli,
                 [
                     "update",
                     "--symbol",
-                    "BTC",
+                    "AAPL",
+                    "--provider",
+                    "mock",
                     "--start",
                     "2024-01-01",
                     "--end",
-                    "2024-01-10",
+                    "2024-01-02",
+                    "--config",
+                    "config.yaml",
                 ],
             )
+            storage = create_storage("flat-data", strategy="flat")
 
-            assert result.exit_code == 0
-            assert "Data already up to date" in result.output
+            assert result.exit_code == 0, result.output
+            assert storage.exists("equities/daily/AAPL")
 
 
 class TestValidateCommand:
@@ -702,8 +669,8 @@ class TestErrorHandling:
         assert "Error" in result.output
         assert "API key not configured" in result.output
 
-    def test_invalid_strategy(self):
-        """Test error for invalid update strategy."""
+    def test_invalid_frequency(self):
+        """Test error for an unsupported update frequency."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
@@ -711,13 +678,13 @@ class TestErrorHandling:
                 "update",
                 "--symbol",
                 "BTC",
-                "--strategy",
-                "invalid_strategy",
+                "--frequency",
+                "monthly",
             ],
         )
 
         assert result.exit_code != 0
-        assert "Invalid value for '--strategy'" in result.output
+        assert "Invalid value for '--frequency'" in result.output
 
 
 class TestVersionCommand:
@@ -886,21 +853,43 @@ class TestInfoCommand:
         assert result.exit_code == 0
         assert "Show information about stored data" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_info_no_data(self, mock_storage_class, mock_tracker_class):
+    def test_info_no_data(self):
         """Test info when no data exists."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.list_updates.return_value = []
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["info", "--symbol", "UNKNOWN", "--storage-path", "data"])
+
+            assert result.exit_code == 0
+            assert "No data found" in result.output
+
+    def test_info_reads_canonical_metadata_and_key(self):
+        """Info reads data and metadata written by DataManager."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["info", "--symbol", "UNKNOWN"])
+            storage = create_storage("data")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(cli, ["info", "--symbol", "AAPL", "--storage-path", "data"])
 
-            assert "No data found" in result.output
+        assert result.exit_code == 0, result.output
+        assert "Data Info: AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "daily" in result.output
 
 
 class TestHelperFunctions:
@@ -1125,14 +1114,14 @@ class TestFetchCommandExtended:
 class TestUpdateCommandExtended:
     """Extended update command tests."""
 
-    def test_update_strategy_choices(self):
-        """Test all update strategy options are available."""
+    def test_update_contract_options(self):
+        """Test the update command exposes the DataManager update contract."""
         runner = CliRunner()
         result = runner.invoke(cli, ["update", "--help"])
-        assert "incremental" in result.output
-        assert "append_only" in result.output
-        assert "full_refresh" in result.output
-        assert "backfill" in result.output
+        assert "--lookback-days" in result.output
+        assert "--fill-gaps" in result.output
+        assert "--initial-load-days" in result.output
+        assert "--asset-class" in result.output
 
 
 class TestValidateCommandExtended:

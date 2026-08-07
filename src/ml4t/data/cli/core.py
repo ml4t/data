@@ -18,8 +18,6 @@ from ml4t.data.data_manager import DataManager
 from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
-from ml4t.data.storage.metadata_tracker import MetadataTracker
-from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 
 from .batch import _as_date_string, _build_storage_from_config
 from .utils import (
@@ -32,6 +30,21 @@ from .utils import (
     save_dataframe,
     validate_date,
 )
+
+
+def _resolve_storage(
+    config_path: str | None,
+    storage_path: str | None,
+) -> tuple[object, Path]:
+    """Build configured storage for a CLI command."""
+    if config_path and storage_path:
+        raise click.UsageError("Use either --config or --storage-path, not both.")
+    if config_path:
+        resolved_config = Path(config_path).resolve()
+        cfg = load_config(resolved_config)
+        return _build_storage_from_config(cfg, resolved_config)
+    resolved_storage_path = Path(storage_path or "./data").expanduser()
+    return HiveStorage(StorageConfig(base_path=resolved_storage_path)), resolved_storage_path
 
 
 @click.command()
@@ -208,89 +221,65 @@ def fetch(
 
 @click.command()
 @click.option("--symbol", "-s", required=True, help="Symbol to update")
-@click.option("--start", callback=validate_date, help="Start date (YYYY-MM-DD)")
-@click.option("--end", callback=validate_date, help="End date (YYYY-MM-DD)")
 @click.option(
-    "--strategy",
-    type=click.Choice(["incremental", "append_only", "full_refresh", "backfill"]),
-    default="incremental",
-    help="Update strategy",
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
 )
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+)
+@click.option("--lookback-days", type=click.IntRange(min=0), default=7, show_default=True)
+@click.option("--fill-gaps/--no-fill-gaps", default=True, show_default=True)
 @click.option("--provider", "-p", help="Provider to use for fetching")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--start", "initial_start", callback=validate_date, help="First-load start date")
+@click.option("--end", "initial_end", callback=validate_date, help="First-load end date")
+@click.option("--initial-load-days", type=click.IntRange(min=1), default=365, show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def update(ctx, symbol, start, end, strategy, provider, storage_path):
+def update(
+    ctx,
+    symbol,
+    frequency,
+    asset_class,
+    lookback_days,
+    fill_gaps,
+    provider,
+    initial_start,
+    initial_end,
+    initial_load_days,
+    config_path,
+    storage_path,
+):
     """Perform incremental data updates."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
-
-        update_strategy = UpdateStrategy[strategy.upper()]
-        updater = IncrementalUpdater(strategy=update_strategy)
-
-        if not end:
-            end = datetime.now().strftime("%Y-%m-%d")
-        if not start:
-            start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-
-        actual_start, actual_end, update_type = updater.determine_update_range(
-            storage,
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
+        rows_before = len(storage.read(key).collect()) if storage.exists(key) else 0
+        manager = DataManager(config_path=config_path, storage=storage)
+        updated_key = manager.update(
             symbol,
-            datetime.strptime(start, "%Y-%m-%d"),
-            datetime.strptime(end, "%Y-%m-%d"),
-        )
-
-        if update_type == "none":
-            if not quiet:
-                print_success(f"Data already up to date for {symbol}")
-            return
-
-        if not quiet:
-            console.print(
-                f"{'Incremental' if update_type == 'incremental' else 'Full'} update "
-                f"from {actual_start.date()} to {actual_end.date()}"
-            )
-
-        dm = DataManager()
-        new_data = dm.fetch(
-            symbol,
-            actual_start.strftime("%Y-%m-%d"),
-            actual_end.strftime("%Y-%m-%d"),
+            frequency=frequency,
+            asset_class=asset_class,
+            lookback_days=lookback_days,
+            fill_gaps=fill_gaps,
             provider=provider,
+            initial_start=initial_start,
+            initial_end=initial_end,
+            initial_load_days=initial_load_days,
         )
-
-        if new_data.is_empty():
-            if not quiet:
-                console.print("[yellow]No new data available[/yellow]")
-            return
-
-        result = updater.update_incremental(
-            storage,
-            tracker,
-            symbol,
-            new_data,
-            provider=provider or "auto",
-            strategy=update_strategy,
-        )
-
-        if result.success:
-            if not quiet:
-                print_success("Update successful")
-                console.print(
-                    f"   Added {result.rows_added} rows, updated {result.rows_updated} rows"
-                )
-                if result.gaps_filled > 0:
-                    console.print(f"   Filled {result.gaps_filled} gaps")
-        else:
-            console.print("[red]❌ Update failed[/red]")
-            if result.errors:
-                for error in result.errors:
-                    console.print(f"   {error}")
-            ctx.exit(1)
+        rows_after = len(storage.read(updated_key).collect())
+        if not quiet:
+            print_success(f"Updated {updated_key}")
+            console.print(f"   Rows: {rows_before:,} -> {rows_after:,}")
 
     except Exception as e:
         print_error(str(e), verbose, e)
@@ -479,15 +468,7 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        if config_path and storage_path:
-            raise click.UsageError("Use either --config or --storage-path, not both.")
-        if config_path:
-            resolved_config = Path(config_path).resolve()
-            cfg = load_config(resolved_config)
-            storage, resolved_storage_path = _build_storage_from_config(cfg, resolved_config)
-        else:
-            resolved_storage_path = Path(storage_path or "./data").expanduser()
-            storage = HiveStorage(StorageConfig(base_path=resolved_storage_path))
+        storage, resolved_storage_path = _resolve_storage(config_path, storage_path)
 
         metadata_manager = MetadataManager(storage)
         datasets: list[tuple[str, dict[str, object], str]] = []
@@ -599,22 +580,21 @@ def export(symbol, output, format_type, storage_path):
 
 @click.command()
 @click.option("--symbol", "-s", required=True, help="Symbol to show info for")
-@click.option("--storage-path", default=None, help="Storage directory")
-def info(symbol, storage_path):
+@click.option("--frequency", default="daily", show_default=True)
+@click.option("--asset-class", default="equities", show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
+def info(symbol, frequency, asset_class, config_path, storage_path):
     """Show information about stored data."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
-        config = StorageConfig(base_path=storage_path)
-        storage = HiveStorage(config)
-        tracker = MetadataTracker(base_path=storage_path)
-
-        if not any(record.symbol == symbol for record in tracker.list_updates()):
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
+        if not storage.exists(key):
             console.print(f"[yellow]No data found for {symbol}[/yellow]")
             return
 
-        df = storage.read(symbol).collect()
-        updates = [r for r in tracker.list_updates() if r.symbol == symbol]
-        latest_update = max(updates, key=lambda x: x.timestamp) if updates else None
+        df = storage.read(key).collect()
+        metadata = MetadataManager(storage).get_metadata_for_key(key) or {}
 
         table = Table(title=f"Data Info: {symbol}", box=box.ROUNDED)
         table.add_column("Property", style="cyan")
@@ -624,11 +604,9 @@ def info(symbol, storage_path):
         table.add_row("Rows", str(len(df)))
         table.add_row("Date Range", f"{df['timestamp'].min()} to {df['timestamp'].max()}")
         table.add_row("Columns", ", ".join(df.columns))
-
-        if latest_update:
-            table.add_row("Provider", latest_update.provider)
-            table.add_row("Last Updated", latest_update.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
-            table.add_row("Frequency", latest_update.frequency)
+        table.add_row("Provider", str(metadata.get("provider") or ""))
+        table.add_row("Last Updated", str(metadata.get("last_updated") or "")[:19])
+        table.add_row("Frequency", str(metadata.get("frequency") or frequency))
 
         console.print(table)
         console.print("\n[bold]Data Preview:[/bold]")
