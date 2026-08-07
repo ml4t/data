@@ -207,7 +207,13 @@ class ProviderManager:
                 )
             provider_class = self._provider_classes.get(provider_type)
             if provider_class is None:
-                raise ValueError(f"Provider '{name}' requires unavailable type '{provider_type}'")
+                logger.warning(
+                    "Configured provider alias is unavailable",
+                    provider=name,
+                    provider_type=provider_type,
+                    extra=spec.extra,
+                )
+                continue
             self._provider_classes[name] = provider_class
             self._provider_specs[name] = spec
 

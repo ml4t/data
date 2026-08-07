@@ -127,6 +127,29 @@ class TestDataManagerMergeConfigs:
 
         assert result["key"] == "value"
 
+    def test_provider_override_preserves_configured_alias_type(self, tmp_path):
+        """Runtime overrides target configured instance names without changing their type."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("providers:\n  yahoo_main:\n    type: yahoo\n    rate_limit: 1\n")
+
+        config = ConfigManager(
+            config_path=str(config_path),
+            providers={"yahoo_main": {"rate_limit": 5}},
+        )
+
+        assert config.config["providers"]["yahoo_main"]["type"] == "yahoo"
+        assert config.config["providers"]["yahoo_main"]["rate_limit"] == (1, 0.2)
+
+
+def test_unavailable_optional_provider_alias_is_not_fatal():
+    """Missing optional extras leave configured aliases unavailable without aborting startup."""
+    with patch.object(ProviderManager, "_PROVIDER_CLASSES", {}):
+        manager = ProviderManager(
+            {"providers": {"databento_main": {"type": "databento", "api_key": "reference"}}}
+        )
+
+    assert not manager.is_available("databento_main")
+
 
 class TestMassiveProviderConfig:
     """Tests for Massive provider config and availability wiring."""

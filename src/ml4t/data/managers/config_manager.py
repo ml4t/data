@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
+from pydantic import ValidationError
 
 from ml4t.data.config.loader import ConfigLoader
 from ml4t.data.config.models import DataConfig
@@ -38,7 +39,7 @@ class ConfigManager:
 
     Example:
         >>> config_mgr = ConfigManager(config_path="ml4t-data.yaml")
-        >>> config_mgr.apply_overrides(providers={"yahoo": {"timeout": 30}})
+        >>> config_mgr.apply_overrides(providers={"yahoo": {"rate_limit": 2}})
         >>> print(config_mgr.config["providers"]["yahoo"])
     """
 
@@ -200,9 +201,22 @@ class ConfigManager:
             **kwargs: Additional default overrides
         """
         if providers:
-            validated_providers = DataConfig.model_validate(
-                {"providers": providers}
-            ).to_runtime_dict()["providers"]
+            configured_providers = self.config.get("providers", {})
+            overrides: dict[str, dict[str, Any]] = {}
+            for name, override in providers.items():
+                configured = configured_providers.get(name, {})
+                provider_type = override.get("type", configured.get("type", name))
+                overrides[name] = {"type": provider_type, **override}
+            try:
+                validated_providers = DataConfig.model_validate(
+                    {"providers": overrides}
+                ).to_runtime_dict()["providers"]
+            except ValidationError as exc:
+                details = "; ".join(
+                    f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                    for error in exc.errors(include_url=False, include_input=False)
+                )
+                raise ValueError(f"Invalid provider overrides: {details}") from exc
             self.config["providers"] = self._merge_configs(
                 self.config.get("providers", {}),
                 validated_providers,
