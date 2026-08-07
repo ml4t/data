@@ -160,16 +160,13 @@ class TestContinuousContractBuilderBuild:
 
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build("ES", data_source="quandl_chris")
 
             # Verify parsers were called
-            mock_raw.assert_called_once_with("ES")
-            mock_cont.assert_called_once_with("ES")
+            mock_raw.assert_called_once_with("ES", contract_spec=None)
 
             # Verify result has expected columns
             assert "date" in result.columns
@@ -181,17 +178,14 @@ class TestContinuousContractBuilderBuild:
 
         with (
             patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build("ES", data_source="databento")
 
             # Verify parsers were called with default path
             expected_path = resolve_storage_path(None, "futures")
             mock_raw.assert_called_once_with("ES", expected_path)
-            mock_cont.assert_called_once_with("ES", expected_path)
 
             # Verify result
             assert "date" in result.columns
@@ -204,16 +198,13 @@ class TestContinuousContractBuilderBuild:
 
         with (
             patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             _result = builder.build("ES", data_source="databento", storage_path=custom_path)  # noqa: F841
 
             # Verify custom path was used
             mock_raw.assert_called_once_with("ES", Path(custom_path).expanduser())
-            mock_cont.assert_called_once_with("ES", Path(custom_path).expanduser())
 
     def test_build_unknown_data_source_raises(self):
         """Test that unknown data source raises ValueError."""
@@ -225,7 +216,11 @@ class TestContinuousContractBuilderBuild:
     def test_build_applies_roll_strategy(self, sample_raw_data, sample_continuous_data):
         """Test that roll strategy is applied."""
         mock_roll_strategy = MagicMock()
-        mock_roll_strategy.identify_rolls.return_value = [date(2024, 2, 1)]
+        selections = pl.DataFrame(
+            {"date": [date(2024, 1, 2), date(2024, 2, 1)], "symbol": ["ESH24", "ESM24"]}
+        )
+        mock_roll_strategy.select_contracts.return_value = selections
+        mock_roll_strategy.identify_roll_events.return_value = []
 
         mock_adjustment = MagicMock()
         mock_adjustment.adjust.return_value = sample_continuous_data
@@ -235,33 +230,32 @@ class TestContinuousContractBuilderBuild:
             adjustment_method=mock_adjustment,
         )
 
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             _result = builder.build("ES")  # noqa: F841
 
             # Verify roll strategy was called with raw data
-            mock_roll_strategy.identify_rolls.assert_called_once()
-            call_args = mock_roll_strategy.identify_rolls.call_args
+            mock_roll_strategy.select_contracts.assert_called_once()
+            call_args = mock_roll_strategy.select_contracts.call_args
             assert call_args[0][0].equals(sample_raw_data)
 
     def test_build_applies_adjustment(self, sample_raw_data, sample_continuous_data):
         """Test that adjustment method is applied."""
         mock_adjustment = MagicMock()
         mock_adjustment.adjust.return_value = sample_continuous_data
+        mock_roll_strategy = MagicMock()
+        mock_roll_strategy.select_contracts.return_value = pl.DataFrame(
+            {"date": sample_continuous_data["date"], "symbol": ["ESH24"] * 4}
+        )
+        mock_roll_strategy.identify_roll_events.return_value = []
+        builder = ContinuousContractBuilder(
+            roll_strategy=mock_roll_strategy, adjustment_method=mock_adjustment
+        )
 
-        builder = ContinuousContractBuilder(adjustment_method=mock_adjustment)
-
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
-            mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
+        raw = sample_continuous_data.with_columns(pl.lit("ESH24").alias("symbol"))
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
+            mock_raw.return_value = raw
 
             _result = builder.build("ES")  # noqa: F841
 
@@ -272,12 +266,8 @@ class TestContinuousContractBuilderBuild:
         """Test that is_roll_date column is added."""
         builder = ContinuousContractBuilder()
 
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build("ES")
 
@@ -289,7 +279,10 @@ class TestContinuousContractBuilderBuild:
     ):
         """Test that contract spec is passed to roll strategy."""
         mock_roll_strategy = MagicMock()
-        mock_roll_strategy.identify_rolls.return_value = []
+        mock_roll_strategy.select_contracts.return_value = pl.DataFrame(
+            {"date": sample_continuous_data["date"], "symbol": ["ESH24"] * 4}
+        )
+        mock_roll_strategy.identify_roll_events.return_value = []
 
         mock_adjustment = MagicMock()
         mock_adjustment.adjust.return_value = sample_continuous_data
@@ -300,17 +293,14 @@ class TestContinuousContractBuilderBuild:
             adjustment_method=mock_adjustment,
         )
 
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
-            mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
+        raw = sample_continuous_data.with_columns(pl.lit("ESH24").alias("symbol"))
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
+            mock_raw.return_value = raw
 
             builder.build("ES")
 
             # Verify contract spec was passed to roll strategy
-            call_args = mock_roll_strategy.identify_rolls.call_args
+            call_args = mock_roll_strategy.select_contracts.call_args
             assert call_args[0][1] is es_contract_spec
 
 
@@ -323,10 +313,8 @@ class TestContinuousContractBuilderBuildMultiple:
 
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build_multiple(["ES", "CL", "GC"])
 
@@ -337,7 +325,6 @@ class TestContinuousContractBuilderBuildMultiple:
 
             # Verify parsers were called for each ticker
             assert mock_raw.call_count == 3
-            assert mock_cont.call_count == 3
 
     def test_build_multiple_empty_list(self):
         """Test building with empty ticker list."""
@@ -353,10 +340,8 @@ class TestContinuousContractBuilderBuildMultiple:
 
         with (
             patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build_multiple(
                 ["ES", "CL"], data_source="databento", storage_path="/data/path"
@@ -370,10 +355,8 @@ class TestContinuousContractBuilderBuildMultiple:
 
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build_multiple(["ES"])
 
@@ -387,10 +370,8 @@ class TestBuildContinuousContractFunction:
         """Test convenience function with default parameters."""
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = build_continuous_contract("ES")
 
@@ -401,10 +382,8 @@ class TestBuildContinuousContractFunction:
         """Test convenience function with custom roll strategy."""
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             roll_strategy = TimeBasedRoll(days_before_expiration=5)
 
@@ -422,10 +401,8 @@ class TestBuildContinuousContractFunction:
         """Test convenience function with custom adjustment method."""
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = build_continuous_contract("ES", adjustment_method=RatioAdjustment())
 
@@ -437,10 +414,8 @@ class TestBuildContinuousContractFunction:
         """Test convenience function with contract spec."""
         with (
             patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = build_continuous_contract("ES", contract_spec=es_contract_spec)
 
@@ -450,10 +425,8 @@ class TestBuildContinuousContractFunction:
         """Test convenience function with Databento data source."""
         with (
             patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
         ):
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             result = build_continuous_contract(
                 "ES", data_source="databento", storage_path="/data/path"
@@ -478,60 +451,40 @@ class TestContinuousContractEdgeCases:
         single_contract_data = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "symbol": ["ESH24", "ESH24"],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
                 "volume": [10000.0, 10000.0],
             }
         )
 
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
             mock_raw.return_value = single_contract_data
-            mock_cont.return_value = sample_continuous_data
 
             result = builder.build("ES")
 
             # All is_roll_date should be False
             assert result["is_roll_date"].sum() == 0
 
-    def test_all_dates_are_roll_dates(self, sample_continuous_data):
-        """Test when all dates are roll dates."""
-        # Mock adjustment that returns data with roll dates set
-        mock_adjustment = MagicMock()
-        mock_adjustment.adjust.return_value = sample_continuous_data
+    def test_only_effective_switch_dates_are_marked(self, sample_raw_data):
+        """The marker follows lagged symbol changes, not ranking observation dates."""
+        builder = ContinuousContractBuilder(roll_strategy=VolumeBasedRoll(min_days_between_rolls=0))
 
-        mock_roll_strategy = MagicMock()
-        # Return all dates as roll dates
-        all_dates = sample_continuous_data["date"].to_list()
-        mock_roll_strategy.identify_rolls.return_value = all_dates
-
-        builder = ContinuousContractBuilder(
-            roll_strategy=mock_roll_strategy,
-            adjustment_method=mock_adjustment,
-        )
-
-        with (
-            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
-            patch("ml4t.data.futures.continuous.parse_quandl_chris") as mock_cont,
-        ):
-            mock_raw.return_value = sample_continuous_data
-            mock_cont.return_value = sample_continuous_data
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
+            mock_raw.return_value = sample_raw_data
 
             result = builder.build("ES")
 
-            # All is_roll_date should be True
-            assert result["is_roll_date"].sum() == len(all_dates)
+            assert result.filter(pl.col("is_roll_date"))["date"].to_list() == [date(2024, 3, 1)]
 
     def test_storage_path_as_string(self, sample_raw_data, sample_continuous_data):
         """Test storage path handling with string."""
         builder = ContinuousContractBuilder()
 
-        with (
-            patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
-        ):
+        with patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw:
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             _result = builder.build("ES", data_source="databento", storage_path="~/my-data")  # noqa: F841
 
@@ -544,12 +497,8 @@ class TestContinuousContractEdgeCases:
         """Test storage path handling with Path object."""
         builder = ContinuousContractBuilder()
 
-        with (
-            patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw,
-            patch("ml4t.data.futures.databento_parser.parse_databento") as mock_cont,
-        ):
+        with patch("ml4t.data.futures.databento_parser.parse_databento_raw") as mock_raw:
             mock_raw.return_value = sample_raw_data
-            mock_cont.return_value = sample_continuous_data
 
             _result = builder.build(  # noqa: F841
                 "ES", data_source="databento", storage_path=Path("/data/futures")

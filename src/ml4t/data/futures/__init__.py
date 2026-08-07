@@ -73,6 +73,7 @@ from ml4t.data.futures.roll import (
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     OpenInterestBasedRoll,
+    RollEvent,
     RollStrategy,
     TimeBasedRoll,
     VolumeBasedRoll,
@@ -115,6 +116,7 @@ __all__ = [
     "STAT_TYPE_CLEARED_VOLUME",
     # Roll strategies (original crossover-based)
     "RollStrategy",
+    "RollEvent",
     "VolumeBasedRoll",
     "OpenInterestBasedRoll",
     "TimeBasedRoll",

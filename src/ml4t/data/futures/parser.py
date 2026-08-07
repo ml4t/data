@@ -79,8 +79,7 @@ def parse_quandl_chris_raw(
     # Normalize price units (cents → dollars)
     ticker_data = _normalize_price_units(ticker_data, _resolve_contract_spec(ticker, contract_spec))
 
-    # Select relevant columns (NO deduplication)
-    result = ticker_data.select(
+    columns = [
         pl.col("date").cast(pl.Date).alias("date"),
         pl.col("open").cast(pl.Float64),
         pl.col("high").cast(pl.Float64),
@@ -88,7 +87,10 @@ def parse_quandl_chris_raw(
         pl.col("close").cast(pl.Float64),
         pl.col("volume").cast(pl.Float64),
         pl.col("open_interest").cast(pl.Float64),
-    ).sort("date")
+    ]
+    if "symbol" in ticker_data.columns:
+        columns.append(pl.col("symbol").cast(pl.String))
+    result = ticker_data.select(columns).sort("date")
 
     return result
 

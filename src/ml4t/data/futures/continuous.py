@@ -15,7 +15,7 @@ import polars as pl
 
 from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.adjustment import AdjustmentMethod, BackAdjustment
-from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
+from ml4t.data.futures.parser import parse_quandl_chris_raw
 from ml4t.data.futures.roll import RollStrategy, VolumeBasedRoll
 from ml4t.data.futures.schema import ContractSpec
 
@@ -90,17 +90,10 @@ class ContinuousContractBuilder:
         """
         # 1. Parse data based on source
         if data_source == "quandl_chris":
-            # Get raw multi-contract data for roll detection
-            raw_data = parse_quandl_chris_raw(ticker)
-
-            # Get clean continuous data (front month only)
-            continuous_data = parse_quandl_chris(ticker)
+            raw_data = parse_quandl_chris_raw(ticker, contract_spec=self.contract_spec)
 
         elif data_source == "databento":
-            from ml4t.data.futures.databento_parser import (
-                parse_databento,
-                parse_databento_raw,
-            )
+            from ml4t.data.futures.databento_parser import parse_databento_raw
 
             # Default storage path
             if storage_path is None:
@@ -111,21 +104,21 @@ class ContinuousContractBuilder:
             # Get raw multi-contract data (includes expiration dates)
             raw_data = parse_databento_raw(ticker, storage_path)
 
-            # Get clean continuous data (front month only)
-            continuous_data = parse_databento(ticker, storage_path)
-
         else:
             raise ValueError(
                 f"Unknown data source: {data_source}. Supported: 'quandl_chris', 'databento'"
             )
 
-        # 2. Identify rolls using raw multi-contract data
-        roll_dates = self.roll_strategy.identify_rolls(raw_data, self.contract_spec)
+        selections = self.roll_strategy.select_contracts(raw_data, self.contract_spec)
+        if selections.is_empty():
+            raise ValueError(f"Roll strategy produced no point-in-time selections for '{ticker}'")
+        continuous_data = raw_data.join(selections, on=["date", "symbol"], how="inner").sort("date")
+        if continuous_data.height != selections.height:
+            raise ValueError("Selected contracts do not map one-to-one to source observations")
 
-        # 3. Apply adjustment to continuous data
-        adjusted_data = self.adjustment_method.adjust(continuous_data, roll_dates)
-
-        # 4. Add is_roll_date column
+        roll_events = self.roll_strategy.identify_roll_events(raw_data, self.contract_spec)
+        adjusted_data = self.adjustment_method.adjust(continuous_data, roll_events)
+        roll_dates = [event.date for event in roll_events]
         result = adjusted_data.with_columns(pl.col("date").is_in(roll_dates).alias("is_roll_date"))
 
         return result
