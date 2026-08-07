@@ -321,6 +321,15 @@ class ITCHSampleProvider:
         )
 
         resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
+        expected_size = self.KNOWN_FILES[filename]
+        if verify_size and resume_offset >= expected_size:
+            self.logger.warning(
+                "Discarding invalid ITCH resume checkpoint",
+                partial_size=resume_offset,
+                expected_size=expected_size,
+            )
+            partial_path.unlink()
+            resume_offset = 0
         headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
         timeout = httpx.Timeout(
             connect=self.CONNECT_TIMEOUT,
@@ -374,12 +383,12 @@ class ITCHSampleProvider:
 
         actual_size = partial_path.stat().st_size
         if verify_size:
-            expected_size = self.KNOWN_FILES[filename]
             if actual_size != expected_size:
+                partial_path.unlink()
                 raise RuntimeError(
                     "Downloaded file size differs from expected: "
                     f"actual={actual_size}, expected={expected_size}; "
-                    f"partial retained at {partial_path}"
+                    "partial file discarded so the next attempt starts cleanly"
                 )
 
         partial_path.replace(out_path)

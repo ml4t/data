@@ -103,4 +103,6 @@ def test_nasdaq_itch_sample_catalogue_contract(tmp_path) -> None:
         for sample in provider.list_available_files():
             response = client.head(sample["url"])
             response.raise_for_status()
-            assert int(response.headers["content-length"]) == provider.KNOWN_FILES[sample["name"]]
+            content_length = response.headers.get("content-length")
+            assert content_length is not None, sample["name"]
+            assert int(content_length) == provider.KNOWN_FILES[sample["name"]], sample["name"]

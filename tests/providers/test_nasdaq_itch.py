@@ -187,6 +187,35 @@ class TestDownload:
         assert destination.read_bytes() == b"data"
 
     @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_size_mismatch_preserves_destination_and_restarts(
+        self,
+        mock_stream,
+        monkeypatch,
+        tmp_path,
+    ):
+        filename = "01302019.NASDAQ_ITCH50.gz"
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 5)
+        destination = tmp_path / filename
+        destination.write_bytes(b"old")
+        response = MagicMock(status_code=200)
+        response.headers = {"content-length": "4"}
+        response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = response
+        provider = ITCHSampleProvider(download_path=tmp_path)
+
+        with pytest.raises(RuntimeError, match="differs from expected"):
+            provider.download("01302019")
+
+        partial = destination.with_name(f"{destination.name}.part")
+        assert destination.read_bytes() == b"old"
+        assert not partial.exists()
+
+        with pytest.raises(RuntimeError, match="differs from expected"):
+            provider.download("01302019")
+
+        assert mock_stream.call_args.kwargs["headers"] == {}
+
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
     def test_download_creates_directory(self, mock_stream, tmp_path):
         """Download should create directory if needed."""
         # Setup mock response
