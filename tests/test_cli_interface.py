@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 from click.testing import CliRunner
@@ -328,6 +329,45 @@ class TestUpdateCommand:
 
             assert result.exit_code == 0, result.output
             assert storage.exists("equities/daily/AAPL")
+
+    def test_update_rejects_initial_range_for_existing_dataset(self):
+        """Initial-load bounds cannot silently change an incremental update request."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            first = runner.invoke(
+                cli,
+                [
+                    "update",
+                    "--symbol",
+                    "AAPL",
+                    "--provider",
+                    "mock",
+                    "--initial-start",
+                    "2024-01-01",
+                    "--initial-end",
+                    "2024-01-03",
+                    "--storage-path",
+                    "data",
+                ],
+            )
+            second = runner.invoke(
+                cli,
+                [
+                    "update",
+                    "--symbol",
+                    "AAPL",
+                    "--provider",
+                    "mock",
+                    "--initial-start",
+                    "2023-01-01",
+                    "--storage-path",
+                    "data",
+                ],
+            )
+
+        assert first.exit_code == 0, first.output
+        assert second.exit_code == 2
+        assert "apply only when the dataset does not exist" in second.output
 
 
 class TestValidateCommand:
@@ -926,7 +966,7 @@ class TestExportCommand:
                 cli, ["export", "--symbol", "BTC", "--output", "data.csv", "--format", "csv"]
             )
 
-            # Should indicate no data found
+            assert result.exit_code != 0
             assert "No data found" in result.output
 
 
@@ -946,7 +986,7 @@ class TestInfoCommand:
         with runner.isolated_filesystem():
             result = runner.invoke(cli, ["info", "--symbol", "UNKNOWN", "--storage-path", "data"])
 
-            assert result.exit_code == 0
+            assert result.exit_code != 0
             assert "No data found" in result.output
 
     def test_info_reads_canonical_metadata_and_key(self):
@@ -1134,6 +1174,31 @@ class TestFetchCommandExtended:
         # Should fail because no symbols provided
         assert result.exit_code != 0
         assert "No symbols specified" in result.output or "Error" in result.output
+
+    @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_materializes_configured_pandas_output(self, mock_dm_class):
+        """The CLI renders the supported pandas DataManager output format."""
+        mock_dm = MagicMock()
+        mock_dm.fetch.return_value = pd.DataFrame(
+            {"timestamp": [datetime(2024, 1, 1)], "close": [100.0]}
+        )
+        mock_dm_class.return_value = mock_dm
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "AAPL",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Fetched 1 rows" in result.output
 
     @patch("ml4t.data.cli.core.DataManager")
     def test_fetch_with_frequency(self, mock_dm_class):
@@ -1599,6 +1664,33 @@ class TestDownloadCotCommand:
 
         assert result.exit_code != 0
         assert "end_year must be greater than or equal to start_year" in result.output
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["update", "--symbol", "AAPL"],
+        ["validate", "--symbol", "AAPL"],
+        ["status"],
+        ["export", "--symbol", "AAPL", "--output", "aapl.csv"],
+        ["info", "--symbol", "AAPL"],
+        ["list"],
+    ],
+)
+def test_storage_commands_report_mutually_exclusive_options_as_usage_errors(command_args):
+    """Storage option conflicts retain Click's usage output and exit status."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("config.yaml").write_text("storage:\n  base_path: data\n")
+        Path("data").mkdir()
+        result = runner.invoke(
+            cli,
+            [*command_args, "--config", "config.yaml", "--storage-path", "data"],
+        )
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Use either --config or --storage-path" in result.output
 
 
 def test_unimplemented_server_command_is_not_advertised():

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+import pandas as pd
 import polars as pl
 from rich import box
 from rich.table import Table
@@ -54,17 +55,35 @@ def _collect_dataframe(data: Any) -> pl.DataFrame:
         return data.collect()
     if isinstance(data, pl.DataFrame):
         return data
+    if isinstance(data, pd.DataFrame):
+        return pl.from_pandas(data)
     raise TypeError(f"Expected a Polars DataFrame, received {type(data).__name__}")
 
 
-def _format_row_count(value: object) -> str:
-    """Format an integer storage row count without coercing arbitrary objects."""
-    if isinstance(value, bool) or not isinstance(value, int | str):
-        return "-"
+def _parse_row_count(value: object) -> int | None:
+    """Return a non-negative integral storage row count when one is encoded."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return None
     try:
-        return f"{int(value):,}"
+        parsed = float(value)
     except ValueError:
+        return None
+    if not parsed.is_integer() or parsed < 0:
+        return None
+    return int(parsed)
+
+
+def _format_row_count(value: object) -> str:
+    """Format a validated storage row count."""
+    parsed = _parse_row_count(value)
+    if parsed is None:
         return "-"
+    return f"{parsed:,}"
+
+
+def _storage_row_count(storage: StorageBackend, key: str) -> int:
+    """Count stored rows without materializing the full dataset."""
+    return int(storage.read(key).select(pl.len()).collect().item())
 
 
 @click.command()
@@ -270,8 +289,20 @@ def fetch(
 @click.option("--lookback-days", type=click.IntRange(min=0), default=7, show_default=True)
 @click.option("--fill-gaps/--no-fill-gaps", default=True, show_default=True)
 @click.option("--provider", "-p", help="Provider to use for fetching")
-@click.option("--start", "initial_start", callback=validate_date, help="First-load start date")
-@click.option("--end", "initial_end", callback=validate_date, help="First-load end date")
+@click.option(
+    "--initial-start",
+    "--start",
+    "initial_start",
+    callback=validate_date,
+    help="Start date used only when the dataset does not exist",
+)
+@click.option(
+    "--initial-end",
+    "--end",
+    "initial_end",
+    callback=validate_date,
+    help="End date used only when the dataset does not exist",
+)
 @click.option("--initial-load-days", type=click.IntRange(min=1), default=365, show_default=True)
 @click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
 @click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
@@ -297,7 +328,12 @@ def update(
     try:
         storage, _ = _resolve_storage(config_path, storage_path)
         key = f"{asset_class}/{frequency}/{symbol}"
-        rows_before = len(storage.read(key).collect()) if storage.exists(key) else 0
+        key_exists = storage.exists(key)
+        if key_exists and (initial_start is not None or initial_end is not None):
+            raise click.UsageError(
+                "--initial-start and --initial-end apply only when the dataset does not exist."
+            )
+        rows_before = _storage_row_count(storage, key) if key_exists and not quiet else 0
         manager = DataManager(config_path=config_path, storage=storage)
         updated_key = manager.update(
             symbol,
@@ -310,11 +346,13 @@ def update(
             initial_end=initial_end,
             initial_load_days=initial_load_days,
         )
-        rows_after = len(storage.read(updated_key).collect())
+        rows_after = _storage_row_count(storage, updated_key) if not quiet else 0
         if not quiet:
             print_success(f"Updated {updated_key}")
             console.print(f"   Rows: {rows_before:,} -> {rows_after:,}")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
@@ -331,8 +369,20 @@ def update(
     type=click.Choice(["info", "warning", "error", "critical"]),
     help="Minimum severity to display",
 )
-@click.option("--frequency", default="daily", show_default=True)
-@click.option("--asset-class", default="equities", show_default=True)
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
 @click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
 @click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
@@ -472,6 +522,8 @@ def validate(
         if total_issues > 0:
             ctx.exit(1)
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
@@ -523,10 +575,11 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
         for key in storage.list_keys():
             metadata = metadata_manager.get_metadata_for_key(key) or {}
             health = _metadata_health(metadata, stale_days)
-            try:
-                total_rows += int(metadata.get("row_count") or 0)
-            except (TypeError, ValueError):
+            row_count = _parse_row_count(metadata.get("row_count"))
+            if row_count is None:
                 health = "error"
+            else:
+                total_rows += row_count
             datasets.append((key, metadata, health))
 
         status_counts = {
@@ -574,6 +627,8 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
         if verbose:
             console.print(f"\n[dim]Storage path: {resolved_storage_path}[/dim]")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
@@ -590,8 +645,20 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
     type=click.Choice(["csv", "json", "parquet"]),
     help="Export format",
 )
-@click.option("--frequency", default="daily", show_default=True)
-@click.option("--asset-class", default="equities", show_default=True)
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
 @click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
 @click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 def export(symbol, output, format_type, frequency, asset_class, config_path, storage_path):
@@ -602,13 +669,11 @@ def export(symbol, output, format_type, frequency, asset_class, config_path, sto
 
         console.print(f"[bold]Reading data for {symbol}...[/bold]")
         if not storage.exists(key):
-            console.print(f"[yellow]No data found for {symbol}[/yellow]")
-            return
+            raise click.ClickException(f"No data found for {symbol}")
         df = storage.read(key).collect()
 
         if df.is_empty():
-            console.print(f"[yellow]No data found for {symbol}[/yellow]")
-            return
+            raise click.ClickException(f"No data found for {symbol}")
 
         output_path = Path(output)
         console.print(f"[bold]Exporting to {output_path}...[/bold]")
@@ -622,6 +687,8 @@ def export(symbol, output, format_type, frequency, asset_class, config_path, sto
 
         print_success(f"Exported {len(df)} rows to {output_path}")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()
@@ -629,8 +696,20 @@ def export(symbol, output, format_type, frequency, asset_class, config_path, sto
 
 @click.command()
 @click.option("--symbol", "-s", required=True, help="Symbol to show info for")
-@click.option("--frequency", default="daily", show_default=True)
-@click.option("--asset-class", default="equities", show_default=True)
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
 @click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
 @click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 def info(symbol, frequency, asset_class, config_path, storage_path):
@@ -639,8 +718,7 @@ def info(symbol, frequency, asset_class, config_path, storage_path):
         storage, _ = _resolve_storage(config_path, storage_path)
         key = f"{asset_class}/{frequency}/{symbol}"
         if not storage.exists(key):
-            console.print(f"[yellow]No data found for {symbol}[/yellow]")
-            return
+            raise click.ClickException(f"No data found for {symbol}")
 
         df = storage.read(key).collect()
         metadata = MetadataManager(storage).get_metadata_for_key(key) or {}
@@ -661,6 +739,8 @@ def info(symbol, frequency, asset_class, config_path, storage_path):
         console.print("\n[bold]Data Preview:[/bold]")
         console.print(df.head(5))
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()
@@ -672,6 +752,8 @@ def info(symbol, frequency, asset_class, config_path, storage_path):
 @click.pass_context
 def list_data(_ctx, config, storage_path):
     """List all stored datasets."""
+    if config and storage_path:
+        raise click.UsageError("Use either --config or --storage-path, not both.")
     try:
         if config:
             from ml4t.data.config import load_config
@@ -716,6 +798,8 @@ def list_data(_ctx, config, storage_path):
         console.print(table)
         console.print(f"[bold]Total:[/bold] {len(keys)} dataset(s)")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()
