@@ -735,7 +735,23 @@ class TestParsePremiumIndexZip:
         assert "symbol" in df.columns
         assert "premium_index_open" in df.columns
         assert df["symbol"][0] == "BTCUSDT"
-        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+
+    @pytest.mark.asyncio
+    async def test_parse_premium_index_async_preserves_canonical_dtype(self, provider):
+        """Test the async parser returns the same timestamp dtype as the sync parser."""
+        csv_content = """1704067200000,0.001,0.002,0.0005,0.0015,0,1704067200999,0,0,0,0,0"""
+        mock_response = MagicMock(status_code=200)
+        mock_response.content = self._create_mock_zip_response(csv_content)
+        provider._async_client = MagicMock()
+        provider._async_client.get = AsyncMock(return_value=mock_response)
+
+        df = await provider._download_and_parse_premium_index_zip_async(
+            "http://test.url/premium.zip", "BTCUSDT"
+        )
+
+        assert df is not None
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
 
     def test_parse_premium_index_404_returns_none(self, provider):
         """Test 404 response returns None."""

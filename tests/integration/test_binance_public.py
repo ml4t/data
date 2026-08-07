@@ -184,7 +184,7 @@ class TestBinancePublicProvider:
         df = spot_provider._create_empty_dataframe()
         assert df.is_empty()
         assert "timestamp" in df.columns
-        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
         assert df["open"].dtype == pl.Float64
 
     def test_unsupported_frequency(self, spot_provider):
@@ -264,7 +264,7 @@ class TestFetchPremiumIndex:
         assert len(df) >= 18, f"Expected ~21 rows, got {len(df)}"
 
         # Check data types
-        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
         assert df["symbol"].dtype == pl.Utf8
         assert df["premium_index_close"].dtype == pl.Float64
 
@@ -372,7 +372,7 @@ class TestFetchPremiumIndex:
         assert "premium_index_high" in df.columns
         assert "premium_index_low" in df.columns
         assert "premium_index_close" in df.columns
-        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
         assert df["premium_index_close"].dtype == pl.Float64
 
 

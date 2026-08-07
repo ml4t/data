@@ -1153,7 +1153,7 @@ class BinancePublicProvider(BaseProvider):
                 [
                     pl.from_epoch(pl.col("open_time"), time_unit="ms")
                     .dt.replace_time_zone("UTC")
-                    .cast(pl.Datetime("ms", "UTC"))
+                    .cast(pl.Datetime("us", "UTC"))
                     .alias("timestamp"),
                     pl.lit(symbol).alias("symbol"),
                     pl.col("open").cast(pl.Float64).alias("premium_index_open"),
@@ -1182,7 +1182,7 @@ class BinancePublicProvider(BaseProvider):
                 "premium_index_close": [],
             },
             schema={
-                "timestamp": pl.Datetime("ms", "UTC"),
+                "timestamp": pl.Datetime("us", "UTC"),
                 "symbol": pl.Utf8,
                 "premium_index_open": pl.Float64,
                 "premium_index_high": pl.Float64,
@@ -1718,7 +1718,7 @@ class BinancePublicProvider(BaseProvider):
                     [
                         pl.from_epoch(pl.col("open_time"), time_unit="ms")
                         .dt.replace_time_zone("UTC")
-                        .cast(pl.Datetime("ms", "UTC"))
+                        .cast(pl.Datetime("us", "UTC"))
                         .alias("timestamp"),
                         pl.lit(symbol).alias("symbol"),
                         pl.col("open").cast(pl.Float64).alias("premium_index_open"),
