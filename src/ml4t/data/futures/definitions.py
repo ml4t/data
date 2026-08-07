@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import structlog
@@ -290,7 +291,7 @@ class DefinitionsDownloader:
 
         return merged
 
-    def check_coverage(self) -> dict[str, dict]:
+    def check_coverage(self) -> dict[str, dict[str, Any]]:
         """Check definition coverage against OHLCV data.
 
         Returns:
@@ -299,7 +300,7 @@ class DefinitionsDownloader:
         ohlcv_dir = self.storage_path / "ohlcv_1d"
         defn_dir = self.storage_path / "definition"
 
-        report = {}
+        report: dict[str, dict[str, Any]] = {}
 
         for product in self.products:
             ohlcv_path = ohlcv_dir / f"product={product}"

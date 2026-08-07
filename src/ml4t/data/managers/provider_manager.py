@@ -40,7 +40,7 @@ class ProviderRouter:
 
     def __init__(self) -> None:
         """Initialize provider router."""
-        self.patterns: list[tuple[re.Pattern, str]] = []
+        self.patterns: list[tuple[re.Pattern[str], str]] = []
         self._cache: dict[str, str] = {}
 
     def add_pattern(self, pattern: str, provider: str) -> None:

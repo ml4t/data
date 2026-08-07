@@ -43,7 +43,7 @@ import io
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import httpx
 import polars as pl
@@ -286,7 +286,7 @@ class FamaFrenchProvider(BaseProvider):
     BASE_URL: ClassVar[str] = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp"
 
     # Complete file mapping
-    FILES: ClassVar[dict[str, dict]] = {
+    FILES: ClassVar[dict[str, dict[str, Any]]] = {
         # === CORE FACTORS ===
         "ff3": {
             "file": "F-F_Research_Data_Factors",
@@ -424,7 +424,7 @@ class FamaFrenchProvider(BaseProvider):
     }
 
     # Dataset metadata with educational descriptions
-    DATASETS: ClassVar[dict[str, dict]] = {
+    DATASETS: ClassVar[dict[str, dict[str, Any]]] = {
         # === CORE FACTORS ===
         "ff3": {
             "name": "Fama-French 3 Factors",
@@ -619,7 +619,7 @@ class FamaFrenchProvider(BaseProvider):
             return FF_CATEGORIES[category]
         return list(self.FILES.keys())
 
-    def get_dataset_info(self, dataset: str) -> dict:
+    def get_dataset_info(self, dataset: str) -> dict[str, Any]:
         """
         Get metadata for a specific dataset.
 

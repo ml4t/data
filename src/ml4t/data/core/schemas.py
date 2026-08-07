@@ -19,12 +19,15 @@ Schema Design:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, ClassVar
 
 import polars as pl
 
+PolarsDataType = pl.DataType | type[pl.DataType]
 
-def _build_fill_expression(name: str, value: Any, dtype: pl.DataType | None) -> pl.Expr:
+
+def _build_fill_expression(name: str, value: Any, dtype: PolarsDataType | None) -> pl.Expr:
     if dtype is not None:
         return pl.lit(value, dtype=dtype).alias(name)
     return pl.lit(value).alias(name)
@@ -33,7 +36,7 @@ def _build_fill_expression(name: str, value: Any, dtype: pl.DataType | None) -> 
 def _align_frame_columns(
     df: pl.DataFrame,
     columns: list[str],
-    schema: dict[str, pl.DataType],
+    schema: Mapping[str, PolarsDataType],
     fill_values: dict[str, Any] | None = None,
 ) -> pl.DataFrame:
     fill_values = fill_values or {}
@@ -131,7 +134,7 @@ class MultiAssetSchema:
     """
 
     # Required columns with their Polars data types
-    SCHEMA: ClassVar[dict[str, pl.DataType]] = {
+    SCHEMA: ClassVar[dict[str, PolarsDataType]] = {
         "timestamp": pl.Datetime("us", "UTC"),
         "symbol": pl.Utf8,
         "open": pl.Float64,
@@ -142,7 +145,7 @@ class MultiAssetSchema:
     }
 
     # Optional columns by asset class
-    OPTIONAL_COLUMNS: ClassVar[dict[str, dict[str, pl.DataType]]] = {
+    OPTIONAL_COLUMNS: ClassVar[dict[str, dict[str, PolarsDataType]]] = {
         "equities": {
             "dividends": pl.Float64,
             "splits": pl.Float64,

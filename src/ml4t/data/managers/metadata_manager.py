@@ -96,7 +96,7 @@ class MetadataManager:
         symbol: str,
         asset_class: str = "equities",
         frequency: str = "daily",
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Get metadata for a specific symbol.
 
         Args:
@@ -113,7 +113,7 @@ class MetadataManager:
         key = f"{asset_class}/{frequency}/{symbol}"
         return self.get_metadata_for_key(key)
 
-    def get_metadata_for_key(self, key: str) -> dict | None:
+    def get_metadata_for_key(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a storage key.
 
         Args:
@@ -135,7 +135,7 @@ class MetadataManager:
             logger.warning(f"Failed to read metadata for {key}: {e}")
             return None
 
-    def get_all_metadata(self) -> dict[str, dict]:
+    def get_all_metadata(self) -> dict[str, dict[str, Any]]:
         """Get metadata for all stored symbols.
 
         Returns:

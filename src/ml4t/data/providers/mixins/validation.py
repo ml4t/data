@@ -48,7 +48,7 @@ class ValidationMixin:
     )
     NUMERIC_COLUMNS: ClassVar[tuple[str, ...]] = ("open", "high", "low", "close", "volume")
     REQUIRED_COLUMNS: ClassVar[tuple[str, ...]] = CANONICAL_COLUMNS
-    CANONICAL_SCHEMA: ClassVar[dict[str, pl.DataType]] = {
+    CANONICAL_SCHEMA: ClassVar[dict[str, pl.DataType | type[pl.DataType]]] = {
         "timestamp": pl.Datetime("us", "UTC"),
         "symbol": pl.String,
         "open": pl.Float64,

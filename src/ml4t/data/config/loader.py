@@ -67,7 +67,7 @@ class ConfigLoader:
             return [self._interpolate_env_vars(item, environment) for item in data]
         if isinstance(data, str):
             # Replace ${VAR} with environment variable value
-            def replace_env(match):
+            def replace_env(match: re.Match[str]) -> str:
                 var_name = match.group(1)
                 # Support default values: ${VAR:default}
                 if ":" in var_name:
@@ -82,7 +82,7 @@ class ConfigLoader:
             return self.env_pattern.sub(replace_env, data)
         return data
 
-    def _merge_configs(self, base: dict, override: dict) -> dict:
+    def _merge_configs(self, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         """
         Recursively merge configuration dictionaries.
 
@@ -129,7 +129,7 @@ class ConfigLoader:
                 if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
                     provider._set_credential_reference(field, value)
 
-    def _load_yaml(self, path: Path) -> dict:
+    def _load_yaml(self, path: Path) -> dict[str, Any]:
         """
         Load YAML file.
 
@@ -142,13 +142,17 @@ class ConfigLoader:
         try:
             with open(path) as f:
                 data = yaml.safe_load(f)
-                return data or {}
+                if data is None:
+                    return {}
+                if not isinstance(data, dict):
+                    raise ValueError(f"Configuration root in {path} must be a mapping")
+                return data
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in {path}: {e}") from e
         except Exception as e:
             raise ValueError(f"Error loading {path}: {e}") from e
 
-    def _process_includes(self, data: dict, base_dir: Path) -> dict:
+    def _process_includes(self, data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         """
         Process include directives in configuration.
 
@@ -164,7 +168,7 @@ class ConfigLoader:
             if isinstance(includes, str):
                 includes = [includes]
 
-            base_config = {}
+            base_config: dict[str, Any] = {}
             for include_path in includes:
                 # Resolve relative paths
                 if not Path(include_path).is_absolute():
