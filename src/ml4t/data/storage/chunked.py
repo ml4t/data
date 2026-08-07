@@ -105,8 +105,8 @@ class ChunkedStorage:
 
         if self.chunk_size_days <= 7:
             # Weekly chunks
-            week = start_date.isocalendar()[1]
-            return f"{symbol}_{frequency}_{year}_W{week:02d}"
+            iso_year, iso_week, _ = start_date.isocalendar()
+            return f"{symbol}_{frequency}_{iso_year}_W{iso_week:02d}"
         if self.chunk_size_days <= 31:
             # Monthly chunks
             return f"{symbol}_{frequency}_{year}_{month:02d}"
@@ -212,20 +212,20 @@ class ChunkedStorage:
 
         return chunks
 
-    def _load_chunk_index(self, key: str) -> dict[str, ChunkInfo]:
+    def _load_index(self, key: str) -> tuple[dict[str, ChunkInfo], Metadata | None]:
         """
-        Load chunk index for a data key.
+        Load chunk information and stored metadata for a data key.
 
         Args:
             key: Storage key
 
         Returns:
-            Dictionary mapping chunk_id to ChunkInfo
+            Chunk information and optional metadata
         """
         index_file = storage_key_path(self.metadata_path, key, "_index.json")
 
         if not index_file.exists():
-            return {}
+            return {}, None
 
         with file_lock(index_file):
             import json
@@ -233,9 +233,18 @@ class ChunkedStorage:
             with open(index_file) as f:
                 index_data = json.load(f)
 
+        if not isinstance(index_data, dict):
+            raise ValueError(f"Invalid chunk index for {key}")
+        if index_data.get("format_version") == 2 and isinstance(index_data.get("chunks"), dict):
+            raw_chunks = index_data["chunks"]
+            raw_metadata = index_data.get("metadata")
+        else:
+            raw_chunks = index_data
+            raw_metadata = None
+
         # Convert to ChunkInfo objects
         chunks = {}
-        for chunk_id, info in index_data.items():
+        for chunk_id, info in raw_chunks.items():
             chunks[chunk_id] = ChunkInfo(
                 chunk_id=chunk_id,
                 start_date=datetime.fromisoformat(info["start_date"]),
@@ -245,12 +254,24 @@ class ChunkedStorage:
                 size_bytes=info["size_bytes"],
             )
 
+        metadata = None
+        if raw_metadata is not None:
+            try:
+                metadata = Metadata.model_validate(raw_metadata)
+            except (TypeError, ValueError) as error:
+                logger.warning("Ignoring invalid stored chunk metadata", key=key, error=str(error))
+        return chunks, metadata
+
+    def _load_chunk_index(self, key: str) -> dict[str, ChunkInfo]:
+        """Load chunk information for a data key."""
+        chunks, _ = self._load_index(key)
         return chunks
 
     def _save_chunk_index(
         self,
         key: str,
         chunks: dict[str, ChunkInfo],
+        metadata: Metadata,
     ) -> None:
         """
         Save chunk index for a data key.
@@ -258,13 +279,14 @@ class ChunkedStorage:
         Args:
             key: Storage key
             chunks: Chunk information dictionary
+            metadata: Metadata to preserve with the chunks
         """
         index_file = storage_key_path(self.metadata_path, key, "_index.json")
 
         # Convert to JSON-serializable format
-        index_data = {}
+        chunk_data = {}
         for chunk_id, info in chunks.items():
-            index_data[chunk_id] = {
+            chunk_data[chunk_id] = {
                 "chunk_id": info.chunk_id,
                 "start_date": info.start_date.isoformat(),
                 "end_date": info.end_date.isoformat(),
@@ -272,6 +294,11 @@ class ChunkedStorage:
                 "file_path": str(info.file_path),
                 "size_bytes": info.size_bytes,
             }
+        index_data = {
+            "format_version": 2,
+            "metadata": metadata.model_dump(mode="json"),
+            "chunks": chunk_data,
+        }
 
         with file_lock(index_file):
             import json
@@ -316,7 +343,7 @@ class ChunkedStorage:
             raise KeyError(f"Key {key} not found")
 
         # Load chunk index
-        chunks = self._load_chunk_index(key)
+        chunks, stored_metadata = self._load_index(key)
 
         if not chunks:
             raise ValueError(f"No chunks found for {key}")
@@ -338,7 +365,8 @@ class ChunkedStorage:
                 end_date=end_date,
             )
             return DataObject(
-                data=self._empty_frame(key, chunks), metadata=self._metadata_for_key(key)
+                data=self._empty_frame(key, chunks),
+                metadata=self._metadata_for_key(key, stored_metadata),
             )
 
         # Sort chunks by start date
@@ -371,7 +399,7 @@ class ChunkedStorage:
         # Combine all chunks
         combined_df = pl.concat(dfs) if dfs else pl.DataFrame()
 
-        metadata = self._metadata_for_key(key)
+        metadata = self._metadata_for_key(key, stored_metadata)
 
         # Update metadata with actual data range
         if not combined_df.is_empty():
@@ -382,8 +410,10 @@ class ChunkedStorage:
 
         return DataObject(data=combined_df, metadata=metadata)
 
-    def _metadata_for_key(self, key: str) -> Metadata:
+    def _metadata_for_key(self, key: str, stored_metadata: Metadata | None = None) -> Metadata:
         """Reconstruct the metadata encoded in a chunked-storage key."""
+        if stored_metadata is not None:
+            return stored_metadata.model_copy(deep=True)
         parts = key.split("/")
         if len(parts) == 3:
             asset_class, frequency, symbol = parts
@@ -398,9 +428,18 @@ class ChunkedStorage:
 
     def _empty_frame(self, key: str, chunks: dict[str, ChunkInfo]) -> pl.DataFrame:
         """Return an empty frame with the stored data schema."""
-        first_chunk = min(chunks.values(), key=lambda chunk: chunk.start_date)
-        chunk_path = self._chunk_path(key, first_chunk.chunk_id)
-        return pl.DataFrame(schema=pl.read_parquet_schema(chunk_path))
+        for chunk in sorted(chunks.values(), key=lambda item: item.start_date):
+            chunk_path = self._chunk_path(key, chunk.chunk_id)
+            try:
+                return pl.DataFrame(schema=pl.read_parquet_schema(chunk_path))
+            except (FileNotFoundError, OSError) as error:
+                logger.warning(
+                    "Cannot read chunk schema; trying next indexed chunk",
+                    key=key,
+                    chunk_id=chunk.chunk_id,
+                    error=str(error),
+                )
+        raise RuntimeError(f"No readable chunks remain for {key}")
 
     def write(self, data_object: DataObject) -> str:
         """
@@ -490,7 +529,7 @@ class ChunkedStorage:
                 chunk_index[chunk_id] = info
 
         # Save chunk index
-        self._save_chunk_index(key, chunk_index)
+        self._save_chunk_index(key, chunk_index, metadata)
 
         logger.info(
             "Chunked storage complete",

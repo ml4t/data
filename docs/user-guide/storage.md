@@ -149,6 +149,9 @@ lf = storage.read(
 lf = storage.read("equities/daily/AAPL", columns=["timestamp", "close", "volume"])
 ```
 
+Date ranges use half-open intervals: `start_date` is inclusive and `end_date` is
+exclusive. This convention is consistent across Flat, Hive, and Chunked storage.
+
 With Hive storage, date filters prune entire partition directories before
 any Parquet file is opened, giving measured 7x speedup on typical queries.
 

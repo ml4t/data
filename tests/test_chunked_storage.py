@@ -1,5 +1,6 @@
 """Tests for chunked storage implementation."""
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,6 +58,95 @@ class TestChunkedStorage:
         result = storage.read(key)
         assert len(result.data) == len(df)
         assert result.data["close"].to_list() == df["close"].to_list()
+
+    def test_metadata_round_trips_through_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_type="volume",
+            bar_params={"threshold": 1000},
+            exchange="XCME",
+            calendar="CME_Equity",
+            attributes={"dataset": "GLBX.MDP3"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read(key)
+
+        assert result.metadata.provider == "databento"
+        assert result.metadata.bar_type == "volume"
+        assert result.metadata.bar_params == {"threshold": 1000}
+        assert result.metadata.exchange == "XCME"
+        assert result.metadata.calendar == "CME_Equity"
+        assert result.metadata.attributes == {"dataset": "GLBX.MDP3"}
+
+    def test_reads_version_one_chunk_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        index_path = next(storage.metadata_path.glob("k1_*_index.json"))
+        current_index = json.loads(index_path.read_text(encoding="utf-8"))
+        index_path.write_text(json.dumps(current_index["chunks"]), encoding="utf-8")
+
+        result = storage.read(key)
+
+        assert result.data.equals(frame)
+        assert result.metadata.symbol == "TEST"
+        assert result.metadata.frequency == "daily"
+
+    def test_empty_range_uses_next_readable_chunk_schema(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2), datetime(2024, 2, 2)],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        first_chunk = storage.get_chunk_info(key)[0]
+        storage._chunk_path(key, first_chunk.chunk_id).unlink()
+
+        result = storage.read(key, start_date=datetime(2025, 1, 1))
+
+        assert result.data.is_empty()
+        assert result.data.schema == frame.schema
 
     @pytest.mark.parametrize(
         ("chunk_size_days", "boundary"),
@@ -398,6 +488,34 @@ class TestChunkedStorage:
 
         # Verify chunk IDs contain week numbers
         assert any("_W" in chunk.chunk_id for chunk in chunks)
+
+    def test_weekly_chunks_use_iso_year_at_calendar_boundary(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=7)
+        dates = [datetime(2024, 1, 1), datetime(2024, 12, 30)]
+        frame = pl.DataFrame(
+            {
+                "timestamp": dates,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert [chunk.chunk_id for chunk in storage.get_chunk_info(key)] == [
+            "TEST_daily_2024_W01",
+            "TEST_daily_2025_W01",
+        ]
+        assert storage.read(key).data["timestamp"].to_list() == dates
 
     def test_quarterly_chunks(self, tmp_path: Path) -> None:
         """Test quarterly chunk size."""
