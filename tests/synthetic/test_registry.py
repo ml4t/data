@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
 from ml4t.data.synthetic.registry import SyntheticRegistry
 
 # =============================================================================
@@ -335,6 +336,45 @@ class TestRegistryMetadata:
         assert metadata1 == metadata2
         # Check cache was used (same object)
         assert len(registry._cache) == 1
+
+    def test_get_metadata_rejects_oversized_file(
+        self,
+        registry: SyntheticRegistry,
+        mock_checkpoint_dir: Path,
+        monkeypatch,
+    ):
+        metadata_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "metadata.json"
+        )
+        monkeypatch.setattr(LearnedSyntheticProvider, "MAX_METADATA_FILE_BYTES", 8)
+
+        with pytest.raises(ValueError, match="Metadata file exceeds"):
+            registry.get_metadata("timegan", "etf_returns")
+
+        assert metadata_file.stat().st_size > 8
+
+    def test_get_metadata_rejects_non_mapping_file(
+        self,
+        registry: SyntheticRegistry,
+        mock_checkpoint_dir: Path,
+    ):
+        metadata_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "metadata.json"
+        )
+        metadata_file.write_text("[]", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="JSON object"):
+            registry.get_metadata("timegan", "etf_returns")
 
     def test_get_metadata_different_experiments_cached_separately(
         self, registry: SyntheticRegistry

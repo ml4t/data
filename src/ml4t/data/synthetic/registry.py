@@ -23,7 +23,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -233,8 +232,9 @@ class SyntheticRegistry:
             return self._cache[cache_key]
 
         metadata_file = checkpoint_path / "metadata.json"
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+
+        metadata = LearnedSyntheticProvider._load_metadata_file(metadata_file)
 
         self._cache[cache_key] = metadata
         return metadata

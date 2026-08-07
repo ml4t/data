@@ -238,6 +238,25 @@ class TestLearnedSyntheticFromSamples:
         provider = LearnedSyntheticProvider.from_samples(samples_file, seed=42)
         assert provider.seed == 42
 
+    def test_from_samples_returns_writable_samples(self, samples_file: Path):
+        """Loaded arrays retain the writable in-memory public contract."""
+        provider = LearnedSyntheticProvider.from_samples(samples_file)
+
+        samples = provider.get_samples(shuffle=False)
+
+        assert samples.flags.writeable
+        assert not isinstance(samples, np.memmap)
+        samples[0, 0, 0] = 1.0
+
+    def test_from_samples_accepts_float16(self, tmp_path: Path):
+        """Compact floating-point training artifacts remain supported."""
+        samples_path = tmp_path / "float16-samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.float16))
+
+        provider = LearnedSyntheticProvider.from_samples(samples_path)
+
+        assert provider.get_samples(shuffle=False).dtype == np.float16
+
     def test_from_samples_no_metadata(self, samples_file: Path):
         """Test loading works without metadata file."""
         provider = LearnedSyntheticProvider.from_samples(samples_file)
@@ -258,7 +277,7 @@ class TestLearnedSyntheticFromSamples:
         np.save(samples_path, np.ones((2, 3, 1), dtype=np.float32))
         monkeypatch.setattr(LearnedSyntheticProvider, "MAX_SAMPLE_FILE_BYTES", 16)
 
-        with pytest.raises(ValueError, match="size limit"):
+        with pytest.raises(ValueError, match="Sample file exceeds"):
             LearnedSyntheticProvider.from_samples(samples_path)
 
     def test_from_samples_rejects_non_mapping_metadata(self, samples_file: Path, tmp_path: Path):

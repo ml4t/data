@@ -64,7 +64,9 @@ class LearnedSyntheticProvider(BaseProvider):
     Parameters
     ----------
     samples : np.ndarray
-        Pre-loaded samples of shape (n_samples, seq_length, n_features)
+        Writable samples of shape ``(n_samples, seq_length, n_features)``.
+        Supported dtypes are float16, float32, and float64. Every dimension
+        must be positive.
     metadata : dict
         Metadata about the generator and training
     seed : int, optional
@@ -86,7 +88,7 @@ class LearnedSyntheticProvider(BaseProvider):
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 1.0)
     MAX_SAMPLE_FILE_BYTES: ClassVar[int] = 4 * 1024**3
     MAX_METADATA_FILE_BYTES: ClassVar[int] = 1024**2
-    SUPPORTED_SAMPLE_DTYPES: ClassVar[frozenset[str]] = frozenset({"float32", "float64"})
+    SUPPORTED_SAMPLE_DTYPES: ClassVar[frozenset[str]] = frozenset({"float16", "float32", "float64"})
 
     @classmethod
     def _validate_samples(cls, samples: np.ndarray) -> None:
@@ -99,7 +101,7 @@ class LearnedSyntheticProvider(BaseProvider):
             raise ValueError(f"Sample dimensions must be positive, got {samples.shape}")
         if samples.dtype.name not in cls.SUPPORTED_SAMPLE_DTYPES:
             raise ValueError(
-                f"Unsupported sample dtype {samples.dtype}; expected float32 or float64"
+                f"Unsupported sample dtype {samples.dtype}; expected float16, float32, or float64"
             )
         if samples.nbytes > cls.MAX_SAMPLE_FILE_BYTES:
             raise ValueError(
@@ -114,7 +116,7 @@ class LearnedSyntheticProvider(BaseProvider):
         if samples_path.stat().st_size > cls.MAX_SAMPLE_FILE_BYTES:
             raise ValueError(f"Sample file exceeds size limit of {cls.MAX_SAMPLE_FILE_BYTES} bytes")
         try:
-            samples = np.load(samples_path, allow_pickle=False, mmap_mode="r")
+            samples = np.load(samples_path, allow_pickle=False)
         except (OSError, ValueError) as error:
             raise ValueError(f"Failed to load safe NumPy sample array: {samples_path}") from error
         if not isinstance(samples, np.ndarray):
@@ -153,6 +155,10 @@ class LearnedSyntheticProvider(BaseProvider):
 
         Note: Prefer using class methods from_samples() or from_checkpoint()
         instead of calling __init__ directly.
+
+        Raises:
+            TypeError: If samples is not a NumPy array.
+            ValueError: If samples or metadata violates the documented contract.
         """
         if not isinstance(samples, np.ndarray):
             raise TypeError("samples must be a NumPy array")
@@ -209,6 +215,13 @@ class LearnedSyntheticProvider(BaseProvider):
         -------
         LearnedSyntheticProvider
             Configured provider instance
+
+        Raises
+        ------
+        FileNotFoundError
+            If the sample file does not exist.
+        ValueError
+            If the sample or metadata file violates its type or size contract.
         """
         samples_path = Path(samples_path)
 
@@ -269,6 +282,13 @@ class LearnedSyntheticProvider(BaseProvider):
         -------
         LearnedSyntheticProvider
             Configured provider instance
+
+        Raises
+        ------
+        FileNotFoundError
+            If the artifact directory, metadata, or samples are missing.
+        ValueError
+            If the sample or metadata file violates its type or size contract.
         """
         checkpoint_path = Path(checkpoint_path)
 
