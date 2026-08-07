@@ -68,7 +68,8 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
     }
 
     MAX_CANDLES = 100  # OKX returns max 100 candles per request
-    MAX_PAGES: ClassVar[int] = 10000
+    MAX_BARS: ClassVar[int] = 10_000_000
+    MAX_PAGES: ClassVar[int] = MAX_BARS // MAX_CANDLES
 
     # Rate limit: 20 requests per 2 seconds for market data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (20, 2.0)

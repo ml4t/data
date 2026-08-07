@@ -27,6 +27,12 @@ def provider():
     instance.close()
 
 
+def test_page_budget_scales_with_exchange_page_size() -> None:
+    """The safety cap permits multi-year minute history at 100 rows per page."""
+    assert OKXProvider.MAX_PAGES == OKXProvider.MAX_BARS // OKXProvider.MAX_CANDLES
+    assert OKXProvider.MAX_BARS >= 4 * 366 * 24 * 60
+
+
 def test_repeated_candle_cursor_terminates_public_fetch(provider) -> None:
     """The sync public path rejects a timestamp cursor that stops moving backward."""
     repeated = _response([_candle(1_704_153_600_000)])
@@ -104,9 +110,9 @@ def test_repeated_funding_cursor_terminates_fetch(provider) -> None:
     assert mock_get.call_count == 2
 
 
-def test_candle_page_limit_terminates_public_fetch(provider) -> None:
+def test_candle_page_limit_terminates_public_fetch(provider, monkeypatch) -> None:
     """A unique but endless cursor sequence stops at the declared page limit."""
-    provider.MAX_PAGES = 2
+    monkeypatch.setattr(OKXProvider, "MAX_PAGES", 2)
     timestamps = iter([1_704_758_400_000, 1_704_672_000_000])
 
     def next_page(*args, **kwargs):
