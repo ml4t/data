@@ -1586,6 +1586,20 @@ class TestDownloadCotCommand:
         assert result.exit_code == 0
         # Should show some product codes or product listing
 
+    def test_download_cot_revalidates_config_overrides(self):
+        """Reject CLI year overrides that reverse a configured range."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            config = Path("cot.yaml")
+            config.write_text("products: [ES]\nstart_year: 2024\nend_year: 2025\n")
+            result = runner.invoke(
+                cli,
+                ["download-cot", "--config", str(config), "--end-year", "2023", "--dry-run"],
+            )
+
+        assert result.exit_code != 0
+        assert "end_year must be greater than or equal to start_year" in result.output
+
 
 def test_unimplemented_server_command_is_not_advertised():
     """The stable CLI must not expose a command backed by a missing module."""
