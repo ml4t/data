@@ -25,7 +25,6 @@ Usage examples:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,10 +36,12 @@ import structlog
 
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.synthetic import (
+    CalendarMode,
+    create_rng,
+    derive_symbol_seed,
     generate_ohlc_from_close,
     generate_timestamps,
     generate_volume,
-    get_bars_per_day,
     returns_to_prices,
 )
 
@@ -70,6 +71,8 @@ class LearnedSyntheticProvider(BaseProvider):
         Loaded model for generating new samples (checkpoint mode only)
     seed : int, optional
         Random seed for reproducibility
+    calendar_mode : {"equity", "continuous"}, default="equity"
+        Calendar used to generate output timestamps.
 
     Examples
     --------
@@ -84,9 +87,6 @@ class LearnedSyntheticProvider(BaseProvider):
     # No rate limiting needed for synthetic data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 1.0)
 
-    # Trading days per year
-    TRADING_DAYS = 252
-
     def __init__(
         self,
         samples: np.ndarray,
@@ -94,6 +94,7 @@ class LearnedSyntheticProvider(BaseProvider):
         model: Any = None,
         seed: int | None = None,
         rate_limit: tuple[int, float] | None = None,
+        calendar_mode: CalendarMode = "equity",
     ) -> None:
         """Initialize provider with samples or model.
 
@@ -104,7 +105,10 @@ class LearnedSyntheticProvider(BaseProvider):
         self._metadata = metadata or {}
         self._model = model
         self.seed = seed
-        self._rng = np.random.default_rng(seed)
+        if calendar_mode not in {"equity", "continuous"}:
+            raise ValueError("calendar_mode must be 'equity' or 'continuous'")
+        self.calendar_mode = calendar_mode
+        self._rng = create_rng(seed)
 
         # Validate samples shape
         if samples.ndim != 3:
@@ -130,6 +134,7 @@ class LearnedSyntheticProvider(BaseProvider):
         samples_path: str | Path,
         metadata_path: str | Path | None = None,
         seed: int | None = None,
+        calendar_mode: CalendarMode = "equity",
     ) -> LearnedSyntheticProvider:
         """Create provider from pre-generated samples.
 
@@ -145,6 +150,8 @@ class LearnedSyntheticProvider(BaseProvider):
             next to the samples file.
         seed : int, optional
             Random seed for reproducibility
+        calendar_mode : {"equity", "continuous"}, default="equity"
+            Calendar used to generate output timestamps.
 
         Returns
         -------
@@ -178,7 +185,13 @@ class LearnedSyntheticProvider(BaseProvider):
                 metadata = json.load(f)
             logger.info(f"Loaded metadata from {metadata_path}")
 
-        return cls(samples=samples, metadata=metadata, model=None, seed=seed)
+        return cls(
+            samples=samples,
+            metadata=metadata,
+            model=None,
+            seed=seed,
+            calendar_mode=calendar_mode,
+        )
 
     @classmethod
     def from_checkpoint(
@@ -186,6 +199,7 @@ class LearnedSyntheticProvider(BaseProvider):
         checkpoint_path: str | Path,
         device: str = "cpu",  # noqa: ARG003 - retained for beta API compatibility
         seed: int | None = None,
+        calendar_mode: CalendarMode = "equity",
     ) -> LearnedSyntheticProvider:
         """Create a provider from a safe training-artifact directory.
 
@@ -202,6 +216,8 @@ class LearnedSyntheticProvider(BaseProvider):
             Retained for compatibility and ignored.
         seed : int, optional
             Random seed for reproducibility
+        calendar_mode : {"equity", "continuous"}, default="equity"
+            Calendar used to generate output timestamps.
 
         Returns
         -------
@@ -230,7 +246,13 @@ class LearnedSyntheticProvider(BaseProvider):
 
         samples = np.load(samples_file, allow_pickle=False)
         logger.info("Loaded pre-generated samples", path=samples_file, shape=samples.shape)
-        return cls(samples=samples, metadata=metadata, model=None, seed=seed)
+        return cls(
+            samples=samples,
+            metadata=metadata,
+            model=None,
+            seed=seed,
+            calendar_mode=calendar_mode,
+        )
 
     @staticmethod
     def _generate_from_model(
@@ -406,7 +428,7 @@ class LearnedSyntheticProvider(BaseProvider):
         )
 
         # Generate timestamps
-        timestamps = generate_timestamps(start_dt, end_dt, frequency)
+        timestamps = generate_timestamps(start_dt, end_dt, frequency, self.calendar_mode)
         n_steps = len(timestamps)
 
         if n_steps == 0:
@@ -421,12 +443,7 @@ class LearnedSyntheticProvider(BaseProvider):
 
         # Modify RNG state based on symbol for reproducibility.
         if self.seed is not None:
-            normalized_symbol = symbol.upper()
-            symbol_hash = int.from_bytes(
-                hashlib.blake2b(normalized_symbol.encode(), digest_size=8).digest(),
-                byteorder="big",
-            ) % (2**31)
-            self._rng = np.random.default_rng(self.seed + symbol_hash)
+            self._rng = create_rng(derive_symbol_seed(self.seed, symbol))
 
         # Calculate how many sequences we need
         n_sequences_needed = (n_steps // self._seq_length) + 1
@@ -448,13 +465,10 @@ class LearnedSyntheticProvider(BaseProvider):
         # Convert returns to prices
         closes = returns_to_prices(returns, base_price=100.0, log_returns=True)
 
-        # Calculate daily volatility from returns for OHLC generation
-        bars_per_day = get_bars_per_day(frequency)
-        realized_vol = np.std(returns) * np.sqrt(self.TRADING_DAYS * bars_per_day)
-        daily_vol = realized_vol / np.sqrt(self.TRADING_DAYS * bars_per_day)
+        bar_volatility = float(np.std(returns))
 
         # Generate OHLC using shared utility
-        opens, highs, lows = generate_ohlc_from_close(closes, daily_vol, rng=self._rng)
+        opens, highs, lows = generate_ohlc_from_close(closes, bar_volatility, rng=self._rng)
 
         # Generate volume using shared utility
         volume = generate_volume(returns, base_volume=1_000_000, rng=self._rng)
@@ -498,4 +512,4 @@ class LearnedSyntheticProvider(BaseProvider):
             New seed value. If None, uses original seed.
         """
         self.seed = seed if seed is not None else self.seed
-        self._rng = np.random.default_rng(self.seed)
+        self._rng = create_rng(self.seed)

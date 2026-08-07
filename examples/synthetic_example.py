@@ -404,13 +404,14 @@ def main():
         model="gbm_jump",
         annual_return=0.50,  # 50% drift (bull market)
         annual_volatility=0.80,  # 80% vol (typical crypto)
+        calendar_mode="continuous",
         base_price=50000.0,  # BTC-like
         seed=123,
     )
     crypto_data = crypto.fetch_ohlcv("CRYPTO", "2024-01-01", "2024-12-31")
     crypto_returns = crypto_data["close"].pct_change().drop_nulls()
     print(f"     Start: ${crypto_data['open'][0]:,.0f} -> End: ${crypto_data['close'][-1]:,.0f}")
-    print(f"     Annual vol: {crypto_returns.std() * np.sqrt(252) * 100:.0f}%")
+    print(f"     Annual vol: {crypto_returns.std() * np.sqrt(365) * 100:.0f}%")
     print()
 
     # Low-volatility bond-like
@@ -431,7 +432,7 @@ def main():
     print("  3. High-frequency minute bars:")
     hf = SyntheticProvider(model="gbm", annual_volatility=0.25, seed=789)
     hf_data = hf.fetch_ohlcv("HF_TEST", "2024-01-15", "2024-01-16", frequency="minute")
-    print(f"     Generated {len(hf_data)} minute bars for one day")
+    print(f"     Generated {len(hf_data)} minute bars for two days")
     print(f"     Sample: {hf_data.head(5)}")
     print()
 

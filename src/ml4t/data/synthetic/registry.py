@@ -32,6 +32,7 @@ import structlog
 
 if TYPE_CHECKING:
     from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+    from ml4t.data.synthetic.ohlcv_utils import CalendarMode
 
 logger = structlog.get_logger()
 
@@ -290,6 +291,7 @@ class SyntheticRegistry:
         generator: str,
         experiment: str | None = None,
         seed: int | None = None,
+        calendar_mode: CalendarMode = "equity",
     ) -> LearnedSyntheticProvider:
         """Get a LearnedSyntheticProvider for OHLCV generation.
 
@@ -301,6 +303,8 @@ class SyntheticRegistry:
             Experiment name. If None, uses the first available.
         seed : int, optional
             Random seed for reproducibility.
+        calendar_mode : {"equity", "continuous"}, default="equity"
+            Calendar used to generate output timestamps.
 
         Returns
         -------
@@ -319,12 +323,14 @@ class SyntheticRegistry:
                 samples_path=samples_file,
                 metadata_path=checkpoint_path / "metadata.json",
                 seed=seed,
+                calendar_mode=calendar_mode,
             )
         else:
             # Fall back to checkpoint loading
             return LearnedSyntheticProvider.from_checkpoint(
                 checkpoint_path=checkpoint_path,
                 seed=seed,
+                calendar_mode=calendar_mode,
             )
 
     def get_info(self, generator: str, experiment: str | None = None) -> str:

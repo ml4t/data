@@ -4,11 +4,17 @@ These tests verify the synthetic data generator creates realistic OHLCV data
 with proper relationships and statistical properties.
 """
 
+import json
+import os
+import subprocess
+import sys
+
 import numpy as np
 import polars as pl
 import pytest
 
 from ml4t.data.providers.synthetic import SyntheticProvider
+from ml4t.data.synthetic import get_bars_per_day
 
 
 class TestSyntheticProviderBasics:
@@ -106,6 +112,31 @@ class TestSyntheticProviderDataGeneration:
 
         # Should be identical
         assert df1["close"].to_list() == df2["close"].to_list()
+
+    def test_reproducibility_across_python_hash_seeds(self):
+        """The public seed is stable across clean interpreter processes."""
+        script = """
+import json
+from ml4t.data.providers.synthetic import SyntheticProvider
+
+provider = SyntheticProvider(seed=42)
+data = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-10", "daily")
+print(json.dumps(data.get_column("close").to_list()))
+"""
+        outputs = []
+        for hash_seed in ("1", "2"):
+            environment = os.environ.copy()
+            environment["PYTHONHASHSEED"] = hash_seed
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            outputs.append(json.loads(completed.stdout.splitlines()[-1]))
+
+        assert outputs[0] == outputs[1]
 
     def test_different_symbols_different_data(self):
         """Test that different symbols produce different data."""
@@ -255,6 +286,55 @@ class TestStatisticalProperties:
 
         # Should be positive correlation
         assert corr > 0
+
+    @pytest.mark.parametrize("calendar_mode", ["equity", "continuous"])
+    @pytest.mark.parametrize("frequency", ["daily", "hourly", "4hour", "minute"])
+    def test_annual_volatility_matches_frequency_and_calendar(self, calendar_mode, frequency):
+        """Annual volatility uses the periods emitted by the timestamp model."""
+        provider = SyntheticProvider(
+            annual_return=0.0,
+            annual_volatility=0.20,
+            calendar_mode=calendar_mode,
+            seed=42,
+        )
+        df = provider.fetch_ohlcv("SYNTH", "2023-01-01", "2024-12-31", frequency)
+        log_returns = np.diff(np.log(df.get_column("close").to_numpy()))
+        annual_days = 252 if calendar_mode == "equity" else 365
+        periods_per_year = annual_days * get_bars_per_day(frequency, calendar_mode)
+        realized = np.std(log_returns, ddof=1) * np.sqrt(periods_per_year)
+
+        assert realized == pytest.approx(0.20, rel=0.10)
+
+
+class TestSyntheticCalendarModes:
+    """Timestamp counts and inclusions follow the declared calendar mode."""
+
+    @pytest.mark.parametrize(
+        ("frequency", "equity_bars", "continuous_bars"),
+        [
+            ("daily", 1, 1),
+            ("hourly", 7, 24),
+            ("4hour", 2, 6),
+            ("minute", 390, 1440),
+        ],
+    )
+    def test_bars_per_day_matches_generated_rows(self, frequency, equity_bars, continuous_bars):
+        equity = SyntheticProvider(calendar_mode="equity", seed=42).fetch_ohlcv(
+            "SYNTH", "2024-01-02", "2024-01-02", frequency
+        )
+        continuous = SyntheticProvider(calendar_mode="continuous", seed=42).fetch_ohlcv(
+            "SYNTH", "2024-01-02", "2024-01-02", frequency
+        )
+
+        assert get_bars_per_day(frequency, "equity") == equity_bars == len(equity)
+        assert get_bars_per_day(frequency, "continuous") == continuous_bars == len(continuous)
+
+    def test_continuous_calendar_includes_weekends(self):
+        provider = SyntheticProvider(calendar_mode="continuous", seed=42)
+
+        result = provider.fetch_ohlcv("SYNTH", "2024-01-06", "2024-01-07", "daily")
+
+        assert len(result) == 2
 
 
 class TestEdgeCases:

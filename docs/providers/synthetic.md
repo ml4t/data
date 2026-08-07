@@ -36,12 +36,23 @@ provider.close()
 
 ```python
 provider = SyntheticProvider(
-    base_price=100.0,      # Starting price
-    volatility=0.02,       # Daily volatility (2%)
-    trend=0.0001,          # Daily drift
-    seed=42                # Reproducible results
+    base_price=100.0,
+    annual_return=0.08,
+    annual_volatility=0.20,
+    calendar_mode="equity",
+    seed=42,
 )
 ```
+
+`calendar_mode="equity"` emits a simplified weekday 09:30-16:00 UTC session. It does
+not model exchange holidays, early closes, or daylight-saving changes. Intraday
+timestamps are bar starts and exclude 16:00. Use `calendar_mode="continuous"` for
+24-hour UTC sessions that include weekends. Annual return and volatility use 252
+sessions for equity mode and 365 days for continuous mode.
+
+With a seed, the provider derives a symbol-specific stream using BLAKE2b and NumPy's
+PCG64 generator. Identical seed, symbol, date, frequency, model, and calendar inputs
+produce identical results across interpreter processes and supported platforms.
 
 ---
 
@@ -59,7 +70,7 @@ provider = SyntheticProvider(
 - Realistic OHLCV patterns (geometric Brownian motion)
 - Proper OHLC relationships (High >= Open, Close, Low)
 - Volume follows log-normal distribution
-- Weekdays only (no weekends)
+- Equity-session or continuous UTC calendars
 
 ---
 

@@ -21,6 +21,9 @@ Usage:
 """
 
 from ml4t.data.synthetic.ohlcv_utils import (
+    CalendarMode,
+    create_rng,
+    derive_symbol_seed,
     generate_ohlc_from_close,
     generate_timestamps,
     generate_volume,
@@ -31,6 +34,9 @@ from ml4t.data.synthetic.registry import SyntheticRegistry
 
 __all__ = [
     # OHLCV utilities
+    "CalendarMode",
+    "create_rng",
+    "derive_symbol_seed",
     "generate_ohlc_from_close",
     "generate_timestamps",
     "generate_volume",

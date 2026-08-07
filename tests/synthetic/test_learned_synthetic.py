@@ -452,6 +452,20 @@ class TestLearnedSyntheticOHLCV:
         assert isinstance(df, pl.DataFrame)
         assert "timestamp" in df.columns
 
+    def test_continuous_calendar_includes_weekends(
+        self, sample_3d_array: np.ndarray, mock_metadata: dict
+    ):
+        provider = LearnedSyntheticProvider(
+            samples=sample_3d_array,
+            metadata=mock_metadata,
+            seed=42,
+            calendar_mode="continuous",
+        )
+
+        df = provider.fetch_ohlcv("SYNTH", "2024-01-06", "2024-01-07", "daily")
+
+        assert len(df) == 2
+
     def test_ohlcv_high_gte_low(self, provider: LearnedSyntheticProvider):
         """Test OHLC invariant: high >= low."""
         df = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-03-31", "daily")
