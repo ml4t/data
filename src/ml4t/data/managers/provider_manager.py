@@ -84,27 +84,25 @@ class ProviderRouter:
         self._cache.clear()
 
     def setup_default_patterns(self) -> None:
-        """Setup default routing patterns if none configured.
+        """Set up routing only for symbol formats with one clear asset class.
 
         Default patterns:
-        - Forex: EURUSD or EUR_USD format → oanda
-        - Crypto: BTC/ETH/SOL prefixes → cryptocompare
-        - Futures: Continuous (.v.) or contracts (ESZ4) → databento
+        - Forex: ``EUR_USD`` format routes to OANDA
+        - Crypto: known ``BASE-QUOTE`` or ``BASE/QUOTE`` pairs route to CryptoCompare
+        - Futures: continuous ``ROOT.v.N`` symbols route to Databento
+
+        Bare tickers and compact pairs are intentionally not inferred because their
+        formats overlap across equities, crypto, forex, and futures.
         """
         if self.patterns:
             return  # Don't override existing patterns
 
-        # Forex patterns
-        self.add_pattern(r"^[A-Z]{6}$", "oanda")  # EURUSD format
-        self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")  # EUR_USD format
-
-        # Crypto patterns
-        self.add_pattern(r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC)", "cryptocompare")
-        self.add_pattern(r"^[A-Z]{3,5}(-USD)?$", "cryptocompare")
-
-        # Futures patterns
-        self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")  # Continuous
-        self.add_pattern(r"^[A-Z]{2,3}[FGHJKMNQUVXZ][0-9]$", "databento")  # Contracts
+        self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")
+        self.add_pattern(
+            r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC)[-/](USD|USDT|EUR|GBP|BTC|ETH)$",
+            "cryptocompare",
+        )
+        self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")
 
 
 class ProviderManager:

@@ -164,9 +164,43 @@ class TestProviderRouting:
         assert router.get_provider("UNKNOWN") is None
         assert router.get_provider("") is None
 
+    @pytest.mark.parametrize(
+        ("symbol", "expected"),
+        [
+            ("EUR_USD", "oanda"),
+            ("BTC-USD", "cryptocompare"),
+            ("ETH/USDT", "cryptocompare"),
+            ("ES.v.0", "databento"),
+            ("AAPL", None),
+            ("SPY", None),
+            ("GOOGL", None),
+            ("BTC", None),
+            ("BTCUSD", None),
+            ("EURUSD", None),
+            ("ESH4", None),
+            ("^GSPC", None),
+        ],
+    )
+    def test_default_routing_rejects_ambiguous_symbols(self, symbol, expected):
+        """Default routing never guesses among overlapping asset-class formats."""
+        router = ProviderRouter()
+        router.setup_default_patterns()
+
+        assert router.get_provider(symbol) == expected
+
 
 class TestDataManagerFetch:
     """Test DataManager fetch functionality."""
+
+    def test_ambiguous_bare_symbol_fails_before_provider_access(self):
+        """A bare ticker requires an explicit provider before any provider call."""
+        manager = DataManager()
+
+        with patch.object(manager._provider_manager, "get_provider") as get_provider:
+            with pytest.raises(ValueError, match="specify provider explicitly"):
+                manager.fetch("AAPL", "2024-01-01", "2024-01-05")
+
+        get_provider.assert_not_called()
 
     def test_fetch_basic(self):
         """Test basic fetch operation."""
