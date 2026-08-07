@@ -36,6 +36,8 @@ def _timestamp_expr(
     if dtype == pl.Null and frame.is_empty():
         return expression.cast(pl.Datetime("us", "UTC"))
     if dtype == pl.Date:
+        if require_timezone:
+            raise ValueError(f"'{column}' must contain timezone-aware timestamps")
         return (
             expression.cast(pl.Datetime("us"))
             .dt.replace_time_zone(naive_timezone)
@@ -47,7 +49,7 @@ def _timestamp_expr(
         if require_timezone:
             raise ValueError(f"'{column}' must contain timezone-aware timestamps")
         expression = expression.dt.replace_time_zone(naive_timezone)
-    return expression.dt.convert_time_zone("UTC")
+    return expression.dt.convert_time_zone("UTC").dt.cast_time_unit("us")
 
 
 def attach_cot_release_schedule(
@@ -73,6 +75,8 @@ def attach_cot_release_schedule(
         raise ValueError(f"COT data already contains '{available_at_col}'")
     if schedule.get_column(schedule_date_col).null_count():
         raise ValueError("Release schedule report dates cannot contain null values")
+    if schedule.get_column(available_at_col).null_count():
+        raise ValueError("Release schedule timestamps cannot contain null values")
     if schedule.get_column(schedule_date_col).n_unique() != schedule.height:
         raise ValueError("Release schedule must contain exactly one row per report date")
 
@@ -117,9 +121,6 @@ def _prepare_cot_for_join(
         raise ValueError("COT report dates and release timestamps cannot contain null values")
     if cot.get_column(cot_date_col).n_unique() != cot.height:
         raise ValueError("COT data must contain exactly one row per report date")
-    if cot.get_column(available_at_col).n_unique() != cot.height:
-        raise ValueError("Each COT report must have a distinct release timestamp")
-
     release_expr = _timestamp_expr(
         cot,
         available_at_col,
@@ -145,7 +146,7 @@ def _prepare_cot_for_join(
     return (
         cot.with_columns(release_expr.alias(available_at_col))
         .rename(rename_map)
-        .sort("cot_available_at")
+        .sort("cot_available_at", "cot_report_date")
     )
 
 
@@ -243,14 +244,21 @@ def create_cot_features(
             None,
         )
     if open_interest_col is None:
-        open_interest_col = next(
-            (column for column in ("cot_open_interest", "open_interest") if column in df.columns),
-            None,
+        candidates = (
+            ("cot_open_interest",)
+            if report_date_col == "cot_report_date"
+            else ("cot_open_interest", "open_interest")
         )
+        open_interest_col = next((column for column in candidates if column in df.columns), None)
 
     # Detect report type based on columns
     is_financial = "dealer_net" in df.columns or "lev_money_net" in df.columns
     is_commodity = "commercial_net" in df.columns or "managed_money_net" in df.columns
+    requires_open_interest = is_financial or is_commodity or "nonrept_net" in df.columns
+    requires_open_interest = requires_open_interest or "oi_change" in df.columns
+    if requires_open_interest and open_interest_col is None:
+        expected = "cot_open_interest" if report_date_col == "cot_report_date" else "open_interest"
+        raise ValueError(f"COT feature input '{expected}' is required")
     feature_inputs = [
         column
         for column in (
@@ -276,7 +284,18 @@ def create_cot_features(
             .unique()
         )
         if report_rows.get_column(report_date_col).n_unique() != report_rows.height:
-            raise ValueError("COT feature inputs conflict within a report date")
+            conflicts = (
+                report_rows.group_by(report_date_col)
+                .len()
+                .filter(pl.col("len") > 1)
+                .get_column(report_date_col)
+                .sort()
+                .to_list()
+            )
+            dates = ", ".join(str(value) for value in conflicts)
+            raise ValueError(
+                f"COT feature inputs {feature_inputs} conflict for report dates: {dates}"
+            )
         report_frame = report_rows.sort(report_date_col)
 
     exprs: list[pl.Expr] = []
@@ -418,6 +437,7 @@ def load_combined_futures_data(
     cot_path: str | None = None,
     start_date: str | date | datetime | None = None,
     end_date: str | date | datetime | None = None,
+    release_schedule: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Load and combine futures OHLCV + COT data for a product.
 
@@ -429,12 +449,15 @@ def load_combined_futures_data(
         cot_path: Path to COT Hive-partitioned storage
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
+        release_schedule: Authoritative schedule for stored COT data without ``available_at``
 
     Returns:
         Combined DataFrame with OHLCV + COT features
 
     Example:
-        >>> df = load_combined_futures_data("ES", start_date="2020-01-01")
+        >>> df = load_combined_futures_data(
+        ...     "ES", release_schedule=official_schedule, start_date="2020-01-01"
+        ... )
         >>> print(df.columns)
         ['timestamp', 'open', 'high', 'low', 'close', 'volume',
          'open_interest', 'cot_open_interest', 'lev_money_net', ...]
@@ -455,6 +478,15 @@ def load_combined_futures_data(
         raise FileNotFoundError(f"COT data not found: {cot_file}")
 
     cot = pl.read_parquet(cot_file)
+    if "available_at" not in cot.columns:
+        if release_schedule is None:
+            raise ValueError(
+                "Stored COT data has no 'available_at' timestamps; pass release_schedule "
+                "with an authoritative mapping"
+            )
+        cot = attach_cot_release_schedule(cot, release_schedule)
+    elif release_schedule is not None:
+        raise ValueError("Stored COT data already contains 'available_at'; omit release_schedule")
 
     cot = create_cot_features(cot)
     combined = combine_cot_ohlcv(ohlcv, cot)

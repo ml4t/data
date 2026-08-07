@@ -161,17 +161,31 @@ profile = fm.generate_profile("ES")
 CFTC weekly positioning data for futures markets:
 
 ```python
-from ml4t.data.cot import COTFetcher, create_cot_features, combine_cot_ohlcv_pit
+import polars as pl
 
-fetcher = COTFetcher(config)
-cot_data = fetcher.fetch_product("ES", start_year=2015, end_year=2024)
+from ml4t.data.cot import COTFetcher, combine_cot_ohlcv, create_cot_features
 
-# Point-in-time combination with OHLCV (no look-ahead)
-combined = combine_cot_ohlcv_pit(cot_data, ohlcv_data)
+fetcher = COTFetcher()
+official_schedule = pl.read_parquet("cot-release-schedule.parquet")
+cot_data = fetcher.fetch_product(
+    "ES",
+    start_year=2015,
+    end_year=2024,
+    release_schedule=official_schedule,
+)
 
-# Generate features from COT data
-features = create_cot_features(cot_data)
+# Point-in-time combination with OHLCV
+combined = combine_cot_ohlcv(ohlcv_data, cot_data)
+
+# Generate weekly features without counting forward-filled daily rows as new reports
+features = create_cot_features(combined)
 ```
+
+The schedule must contain one `report_date` and timezone-aware `available_at` timestamp per
+report. CFTC publishes a tentative schedule for only the latest 13 months, so retain the exact
+release timestamps you use for historical research. Shutdown catch-up releases and other
+exceptions must use their actual publication timestamps. See the
+[official CFTC release schedule](https://www.cftc.gov/MarketReports/CommitmentsofTraders/ReleaseSchedule/index.htm).
 
 ### Book Data Managers
 

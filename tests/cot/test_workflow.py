@@ -68,6 +68,30 @@ class TestAttachCOTReleaseSchedule:
         with pytest.raises(ValueError, match="timezone-aware"):
             attach_cot_release_schedule(cot, schedule)
 
+    def test_rejects_date_only_schedule_timestamps(self):
+        cot = pl.DataFrame({"report_date": [date(2024, 1, 2)]})
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [date(2024, 1, 5)],
+            }
+        )
+
+        with pytest.raises(ValueError, match="timezone-aware"):
+            attach_cot_release_schedule(cot, schedule)
+
+    def test_rejects_null_schedule_timestamps(self):
+        cot = pl.DataFrame({"report_date": [date(2024, 1, 2)]})
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": pl.Series("available_at", [None], dtype=pl.Datetime("us", "UTC")),
+            }
+        )
+
+        with pytest.raises(ValueError, match="timestamps cannot contain null"):
+            attach_cot_release_schedule(cot, schedule)
+
 
 class TestCombineCOTOHLCV:
     """Tests for combine_cot_ohlcv function."""
@@ -250,6 +274,49 @@ class TestCombineCOTOHLCV:
         result = combine_cot_ohlcv(ohlcv, cot)
         assert result.is_empty()
 
+    def test_normalizes_timestamp_units_before_asof_join(self):
+        ohlcv = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    "timestamp",
+                    [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+                    dtype=pl.Datetime("ns", "UTC"),
+                ),
+                "close": [100.0],
+            }
+        )
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": pl.Series(
+                    "available_at",
+                    [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+                    dtype=pl.Datetime("ms", "UTC"),
+                ),
+                "open_interest": [100_000],
+            }
+        )
+
+        result = combine_cot_ohlcv(ohlcv, cot)
+
+        assert result["cot_open_interest"].to_list() == [100_000]
+
+    def test_latest_report_wins_when_backlog_is_released_together(self):
+        released_at = datetime(2025, 11, 19, 20, 30, tzinfo=UTC)
+        ohlcv = pl.DataFrame({"timestamp": [released_at], "close": [100.0]})
+        cot = pl.DataFrame(
+            {
+                "report_date": [date(2025, 9, 23), date(2025, 9, 30)],
+                "available_at": [released_at, released_at],
+                "open_interest": [90_000, 100_000],
+            }
+        )
+
+        result = combine_cot_ohlcv(ohlcv, cot)
+
+        assert result["cot_report_date"].to_list() == [date(2025, 9, 30)]
+        assert result["cot_open_interest"].to_list() == [100_000]
+
 
 class TestCombineCOTOHLCVPIT:
     """Tests for combine_cot_ohlcv_pit (point-in-time) function."""
@@ -358,6 +425,31 @@ class TestCreateCOTFeatures:
         result = create_cot_features(combined)
 
         assert result["cot_lev_money_pct_oi"][0] == pytest.approx(10.0)
+
+    def test_joined_features_do_not_fall_back_to_market_open_interest(self):
+        combined = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 8, tzinfo=UTC)],
+                "open_interest": [50.0],
+                "cot_report_date": [date(2024, 1, 2)],
+                "lev_money_net": [10.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="cot_open_interest"):
+            create_cot_features(combined)
+
+    def test_raw_weekly_rows_without_report_date_remain_supported(self):
+        weekly = pl.DataFrame(
+            {
+                "open_interest": [100.0, 200.0],
+                "lev_money_net": [10.0, 40.0],
+            }
+        )
+
+        result = create_cot_features(weekly)
+
+        assert result["cot_lev_money_pct_oi"].to_list() == [10.0, 20.0]
 
     def test_four_week_change_counts_reports_not_daily_rows(self):
         """A four-week feature compares distinct weekly reports after daily expansion."""
@@ -587,6 +679,60 @@ class TestLoadCombinedFuturesData:
 
         assert "close" in result.columns
         assert "cot_open_interest" in result.columns
+
+    def test_attaches_schedule_to_raw_stored_fetcher_output(self, tmp_path):
+        ohlcv_path = tmp_path / "ohlcv" / "product=ES"
+        ohlcv_path.mkdir(parents=True)
+        pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+                "close": [100.0],
+            }
+        ).write_parquet(ohlcv_path / "data.parquet")
+
+        cot_path = tmp_path / "cot" / "product=ES"
+        cot_path.mkdir(parents=True)
+        pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "open_interest": [100_000],
+                "lev_money_net": [10_000],
+            }
+        ).write_parquet(cot_path / "data.parquet")
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+            }
+        )
+
+        result = load_combined_futures_data(
+            "ES",
+            ohlcv_path=str(tmp_path / "ohlcv"),
+            cot_path=str(tmp_path / "cot"),
+            release_schedule=schedule,
+        )
+
+        assert result["cot_open_interest"].to_list() == [100_000]
+
+    def test_requires_schedule_for_raw_stored_fetcher_output(self, tmp_path):
+        ohlcv_path = tmp_path / "ohlcv" / "product=ES"
+        ohlcv_path.mkdir(parents=True)
+        pl.DataFrame(
+            {"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)], "close": [100.0]}
+        ).write_parquet(ohlcv_path / "data.parquet")
+        cot_path = tmp_path / "cot" / "product=ES"
+        cot_path.mkdir(parents=True)
+        pl.DataFrame({"report_date": [date(2024, 1, 2)], "open_interest": [100_000]}).write_parquet(
+            cot_path / "data.parquet"
+        )
+
+        with pytest.raises(ValueError, match="pass release_schedule"):
+            load_combined_futures_data(
+                "ES",
+                ohlcv_path=str(tmp_path / "ohlcv"),
+                cot_path=str(tmp_path / "cot"),
+            )
 
     def test_date_filtering(self, tmp_path):
         """Test date filtering in load function."""
