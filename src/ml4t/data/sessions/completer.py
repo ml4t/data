@@ -5,7 +5,7 @@ Ported from crypto-data-pipeline with enhancements for ml4t.data.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import polars as pl
 import structlog
@@ -79,6 +79,8 @@ class SessionCompleter:
         """
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
+        if fill_method not in {"forward", "backward", "none"}:
+            raise ValueError("fill_method must be 'forward', 'backward', or 'none'")
 
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot complete sessions")
@@ -88,7 +90,7 @@ class SessionCompleter:
         if start_date is None:
             start_date = df["timestamp"].min()
         if end_date is None:
-            end_date = df["timestamp"].max()
+            end_date = df["timestamp"].max() + timedelta(minutes=1)
 
         logger.info(
             f"Completing sessions for {len(df)} rows",
@@ -100,10 +102,21 @@ class SessionCompleter:
         try:
             import pandas as pd
 
-            # Convert to pandas Timestamps
-            start_pd = pd.Timestamp(start_date.date())
-            # Add 1 day to capture sessions that contain end_date
-            end_pd = pd.Timestamp(end_date.date()) + pd.Timedelta(days=1)
+            request_start = pd.Timestamp(start_date)
+            request_end = pd.Timestamp(end_date)
+            if request_start.tzinfo is None:
+                request_start = request_start.tz_localize("UTC")
+            else:
+                request_start = request_start.tz_convert("UTC")
+            if request_end.tzinfo is None:
+                request_end = request_end.tz_localize("UTC")
+            else:
+                request_end = request_end.tz_convert("UTC")
+            if request_start >= request_end:
+                raise ValueError("start_date must be earlier than the exclusive end_date")
+
+            start_pd = request_start.normalize() - pd.Timedelta(days=1)
+            end_pd = request_end.normalize() + pd.Timedelta(days=1)
 
             # Get trading schedule
             schedule = self.calendar.schedule(start_date=start_pd, end_date=end_pd)
@@ -121,38 +134,53 @@ class SessionCompleter:
             for session_date, row in schedule.iterrows():
                 market_open = row["market_open"]
                 market_close = row["market_close"]
-
-                # Generate minute range for session
-                # Use inclusive="left" to exclude market_close (avoid overlap)
-                minutes = pd.date_range(
-                    start=market_open,
-                    end=market_close,
-                    freq="1min",
-                    inclusive="left",
-                )
-
-                all_minutes.extend(minutes)
-                # Session date is the END date (market close date)
-                session_dates.extend([session_date.date()] * len(minutes))
+                intervals = [(market_open, market_close)]
+                if "break_start" in schedule.columns and not pd.isna(row["break_start"]):
+                    intervals = [
+                        (market_open, row["break_start"]),
+                        (row["break_end"], market_close),
+                    ]
+                for interval_start, interval_end in intervals:
+                    clipped_start = max(interval_start, request_start)
+                    clipped_end = min(interval_end, request_end)
+                    if clipped_start >= clipped_end:
+                        continue
+                    minutes = pd.date_range(
+                        start=clipped_start,
+                        end=clipped_end,
+                        freq="1min",
+                        inclusive="left",
+                    )
+                    all_minutes.extend(minutes)
+                    session_dates.extend([session_date.date()] * len(minutes))
 
             # Create complete minute template
             minute_template = pl.DataFrame(
                 {
-                    "timestamp": [m.to_pydatetime() for m in all_minutes],
-                    "session_date": session_dates,
+                    "timestamp": pl.Series(
+                        "timestamp",
+                        [minute.to_pydatetime() for minute in all_minutes],
+                        dtype=pl.Datetime("ns", "UTC"),
+                    ),
+                    "session_date": pl.Series("session_date", session_dates, dtype=pl.Date),
                 }
             )
 
-            # Ensure proper timezone and types
-            minute_template = minute_template.with_columns(
-                [
-                    pl.col("timestamp").dt.replace_time_zone("UTC").cast(pl.Datetime("ns", "UTC")),
-                    pl.col("session_date").cast(pl.Date),
-                ]
-            )
-
             # Ensure input data has matching timestamp type
-            df_with_tz = df.with_columns(pl.col("timestamp").cast(pl.Datetime("ns", "UTC")))
+            timestamp_dtype = df.schema["timestamp"]
+            if not isinstance(timestamp_dtype, pl.Datetime):
+                raise TypeError("'timestamp' must contain Datetime values")
+            timestamp_expr = pl.col("timestamp")
+            if timestamp_dtype.time_zone is None:
+                timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
+            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
+                pl.Datetime("ns", "UTC")
+            )
+            df_with_tz = df.with_columns(
+                timestamp_expr.alias("timestamp"), pl.lit(True).alias("_is_observed")
+            )
+            if df_with_tz.get_column("timestamp").n_unique() != df_with_tz.height:
+                raise ValueError("Session completion requires unique input timestamps")
 
             # Left join: keep all minutes from template
             complete_df = minute_template.join(df_with_tz, on="timestamp", how="left")
@@ -160,6 +188,9 @@ class SessionCompleter:
             # Drop duplicate session_date column if exists
             if "session_date_right" in complete_df.columns:
                 complete_df = complete_df.drop("session_date_right")
+            complete_df = complete_df.with_columns(
+                pl.col("_is_observed").is_null().alias("is_imputed")
+            )
 
             # Fill missing data based on method
             if fill_method != "none":
@@ -169,7 +200,8 @@ class SessionCompleter:
                     zero_volume=zero_volume,
                 )
 
-            rows_added = len(complete_df) - len(df)
+            complete_df = complete_df.drop("_is_observed")
+            rows_added = complete_df.get_column("is_imputed").sum()
             logger.info(f"Completed sessions: added {rows_added} rows ({len(complete_df)} total)")
 
             return complete_df.sort("timestamp")
@@ -201,23 +233,32 @@ class SessionCompleter:
         """
         price_columns = ["open", "high", "low", "close"]
 
-        # Fill price columns
+        reference_price: pl.Expr | None = None
         if method == "forward":
-            filled_df = df.with_columns(
-                [pl.col(col).forward_fill() for col in price_columns if col in df.columns]
-            )
+            if "close" in df.columns:
+                reference_price = pl.col("close").forward_fill().over("session_date")
         elif method == "backward":
-            filled_df = df.with_columns(
-                [pl.col(col).backward_fill() for col in price_columns if col in df.columns]
+            if "close" in df.columns:
+                reference_price = pl.col("close").backward_fill().over("session_date")
+
+        filled_df = df
+        if reference_price is not None:
+            filled_df = filled_df.with_columns(
+                *[
+                    pl.when(pl.col("is_imputed"))
+                    .then(reference_price)
+                    .otherwise(pl.col(column))
+                    .alias(column)
+                    for column in price_columns
+                    if column in df.columns
+                ]
             )
-        else:
-            filled_df = df
 
         # Handle volume
         if "volume" in df.columns:
             if zero_volume:
                 filled_df = filled_df.with_columns(
-                    pl.when(pl.col("volume").is_null())
+                    pl.when(pl.col("is_imputed"))
                     .then(pl.lit(0.0))
                     .otherwise(pl.col("volume"))
                     .alias("volume")
@@ -236,7 +277,7 @@ class SessionCompleter:
 
         for col in metadata_columns:
             if col in filled_df.columns:
-                filled_df = filled_df.with_columns(pl.col(col).forward_fill())
+                filled_df = filled_df.with_columns(pl.col(col).forward_fill().over("session_date"))
 
         return filled_df
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 import polars as pl
 import structlog
@@ -82,6 +83,7 @@ class SessionAssigner:
         df: pl.DataFrame,
         start_date: datetime | date | str | None = None,
         end_date: datetime | date | str | None = None,
+        outside_session: Literal["null", "raise", "drop"] = "null",
     ) -> pl.DataFrame:
         """Assign session_date column to DataFrame.
 
@@ -89,6 +91,7 @@ class SessionAssigner:
             df: DataFrame with timestamp column
             start_date: Optional start date (auto-detected from data if not provided)
             end_date: Optional end date (auto-detected from data if not provided)
+            outside_session: Treatment for observations outside a trading interval
 
         Returns:
             DataFrame with session_date column added
@@ -98,6 +101,8 @@ class SessionAssigner:
         """
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
+        if outside_session not in {"null", "raise", "drop"}:
+            raise ValueError("outside_session must be 'null', 'raise', or 'drop'")
 
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot assign sessions")
@@ -119,58 +124,101 @@ class SessionAssigner:
         try:
             import pandas as pd
 
-            # Convert to pandas Timestamp
-            if (
-                isinstance(start_date, str)
-                or isinstance(start_date, date)
-                and not isinstance(start_date, datetime)
-            ):
-                start_pd = pd.Timestamp(start_date)
-            else:
-                start_pd = pd.Timestamp(start_date)
-
-            if (
-                isinstance(end_date, str)
-                or isinstance(end_date, date)
-                and not isinstance(end_date, datetime)
-            ):
-                end_pd = pd.Timestamp(end_date)
-            else:
-                end_pd = pd.Timestamp(end_date)
-
+            start_pd = pd.Timestamp(start_date).normalize() - pd.Timedelta(days=1)
+            end_pd = pd.Timestamp(end_date).normalize() + pd.Timedelta(days=1)
             schedule = self.calendar.schedule(start_date=start_pd, end_date=end_pd)
             logger.debug(f"Got {len(schedule)} sessions from calendar")
 
-            # Build session mapping: timestamp → session_date
             session_map = []
             for session_date, row in schedule.iterrows():
-                market_open = row["market_open"]
-                market_close = row["market_close"]
-
-                # Session date is the END date (when market closes)
-                session_map.append(
-                    {
-                        "session_start": market_open.to_pydatetime(),
-                        "session_end": market_close.to_pydatetime(),
-                        "session_date": session_date.date(),
-                    }
-                )
+                entry = {
+                    "_calendar_session_start": row["market_open"].to_pydatetime(),
+                    "_calendar_session_end": row["market_close"].to_pydatetime(),
+                    "_assigned_session_date": session_date.date(),
+                }
+                if "break_start" in schedule.columns:
+                    entry["_calendar_break_start"] = (
+                        None if pd.isna(row["break_start"]) else row["break_start"].to_pydatetime()
+                    )
+                    entry["_calendar_break_end"] = (
+                        None if pd.isna(row["break_end"]) else row["break_end"].to_pydatetime()
+                    )
+                session_map.append(entry)
 
             if not session_map:
                 logger.warning("No trading sessions found in date range")
-                return df.with_columns(pl.lit(None).cast(pl.Date).alias("session_date"))
+                result = df.with_columns(pl.lit(None).cast(pl.Date).alias("session_date"))
+                if outside_session == "raise":
+                    raise ValueError("Observations outside a trading session: no sessions found")
+                if outside_session == "drop":
+                    return result.head(0)
+                return result
 
-            # Create session mapping DataFrame
-            session_df = pl.DataFrame(session_map)
+            timestamp_dtype = df.schema["timestamp"]
+            if not isinstance(timestamp_dtype, pl.Datetime):
+                raise TypeError("'timestamp' must contain Datetime values")
+            timestamp_expr = pl.col("timestamp")
+            if timestamp_dtype.time_zone is None:
+                timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
+            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC")
 
-            # Join with data using inequality join
-            # For each timestamp, find the session where:
-            # session_start <= timestamp < session_end
-            df_with_sessions = df.join_asof(
-                session_df.select(["session_end", "session_date"]),
-                left_on="timestamp",
-                right_on="session_end",
+            session_df = pl.DataFrame(session_map).sort("_calendar_session_end")
+            after_last_session = session_df.get_column(
+                "_calendar_session_end"
+            ).max() + pd.Timedelta(minutes=1)
+            observations = (
+                df.with_row_index("_session_row_index")
+                .with_columns(timestamp_expr.alias("_session_timestamp"))
+                .with_columns(
+                    pl.col("_session_timestamp")
+                    .fill_null(pl.lit(after_last_session))
+                    .alias("_session_join_timestamp")
+                )
+                .sort("_session_join_timestamp")
+            )
+            joined = observations.join_asof(
+                session_df,
+                left_on="_session_join_timestamp",
+                right_on="_calendar_session_end",
                 strategy="forward",
+            )
+            in_session = (pl.col("_session_timestamp") >= pl.col("_calendar_session_start")) & (
+                pl.col("_session_timestamp") < pl.col("_calendar_session_end")
+            )
+            if "_calendar_break_start" in joined.columns:
+                in_break = (
+                    pl.col("_calendar_break_start").is_not_null()
+                    & (pl.col("_session_timestamp") >= pl.col("_calendar_break_start"))
+                    & (pl.col("_session_timestamp") < pl.col("_calendar_break_end"))
+                )
+                in_session &= ~in_break
+            result = joined.with_columns(
+                pl.when(in_session)
+                .then(pl.col("_assigned_session_date"))
+                .otherwise(None)
+                .alias("session_date")
+            )
+            outside = result.filter(pl.col("session_date").is_null())
+            if outside_session == "raise" and not outside.is_empty():
+                timestamps = ", ".join(
+                    str(value) for value in outside.get_column("timestamp").head(5).to_list()
+                )
+                raise ValueError(f"Observations outside a trading session: {timestamps}")
+            if outside_session == "drop":
+                result = result.filter(pl.col("session_date").is_not_null())
+
+            helper_columns = [
+                "_session_row_index",
+                "_session_timestamp",
+                "_session_join_timestamp",
+                "_calendar_session_start",
+                "_calendar_session_end",
+                "_assigned_session_date",
+                "_calendar_break_start",
+                "_calendar_break_end",
+            ]
+            df_with_sessions = result.sort("_session_row_index").drop(
+                *[column for column in helper_columns if column in result.columns]
             )
 
             logger.info(f"Assigned sessions to {len(df_with_sessions)} rows")
