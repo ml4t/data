@@ -123,6 +123,18 @@ class TestDownloadProgress:
         assert "ES" in progress.completed_products
         assert progress.total_bytes == 1000
 
+    def test_mark_complete_notifies_observer(self):
+        """Progress observers receive completion after state is updated."""
+        events = []
+        progress = DownloadProgress(
+            on_complete=lambda product, size: events.append((product, size))
+        )
+
+        progress.mark_complete("ES", bytes_downloaded=1000)
+
+        assert events == [("ES", 1000)]
+        assert "ES" in progress.completed_products
+
     def test_mark_complete_removes_failed(self):
         """Test that marking complete removes from failed."""
         progress = DownloadProgress()

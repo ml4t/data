@@ -6,6 +6,7 @@ utilities for the futures downloader.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -92,6 +93,11 @@ class DownloadProgress:
     completed_products: set[str] = field(default_factory=set)
     failed_products: dict[str, str] = field(default_factory=dict)
     total_bytes: int = 0
+    on_complete: Callable[[str, int], None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def mark_complete(self, product: str, bytes_downloaded: int = 0) -> None:
         """Mark a product as successfully downloaded."""
@@ -99,6 +105,8 @@ class DownloadProgress:
         self.total_bytes += bytes_downloaded
         if product in self.failed_products:
             del self.failed_products[product]
+        if self.on_complete is not None:
+            self.on_complete(product, bytes_downloaded)
 
     def mark_failed(self, product: str, error: str) -> None:
         """Mark a product as failed."""

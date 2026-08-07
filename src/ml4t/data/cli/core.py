@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import click
 import polars as pl
@@ -16,7 +17,7 @@ from rich.table import Table
 from ml4t.data.config import load_config
 from ml4t.data.data_manager import DataManager
 from ml4t.data.managers.metadata_manager import MetadataManager
-from ml4t.data.storage.backend import StorageConfig
+from ml4t.data.storage.backend import StorageBackend, StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 
 from .batch import _as_date_string, _build_storage_from_config
@@ -35,7 +36,7 @@ from .utils import (
 def _resolve_storage(
     config_path: str | None,
     storage_path: str | None,
-) -> tuple[object, Path]:
+) -> tuple[StorageBackend, Path]:
     """Build configured storage for a CLI command."""
     if config_path and storage_path:
         raise click.UsageError("Use either --config or --storage-path, not both.")
@@ -45,6 +46,25 @@ def _resolve_storage(
         return _build_storage_from_config(cfg, resolved_config)
     resolved_storage_path = Path(storage_path or "./data").expanduser()
     return HiveStorage(StorageConfig(base_path=resolved_storage_path)), resolved_storage_path
+
+
+def _collect_dataframe(data: Any) -> pl.DataFrame:
+    """Materialize a DataManager result for CLI rendering and file output."""
+    if isinstance(data, pl.LazyFrame):
+        return data.collect()
+    if isinstance(data, pl.DataFrame):
+        return data
+    raise TypeError(f"Expected a Polars DataFrame, received {type(data).__name__}")
+
+
+def _format_row_count(value: object) -> str:
+    """Format an integer storage row count without coercing arbitrary objects."""
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        return "-"
+    try:
+        return f"{int(value):,}"
+    except ValueError:
+        return "-"
 
 
 @click.command()
@@ -129,6 +149,8 @@ def fetch(
     if missing_options:
         options = " and ".join(f"'{name}'" for name in missing_options)
         raise click.UsageError(f"Missing option {options} unless supplied by --config.")
+    assert isinstance(start, str)
+    assert isinstance(end, str)
 
     # Collect symbols
     symbols = list(symbol)
@@ -151,7 +173,9 @@ def fetch(
             if not quiet:
                 console.print(f"Fetching {sym} from {start} to {end}")
 
-            df = dm.fetch(sym, start, end, frequency=frequency, provider=provider)
+            df = _collect_dataframe(
+                dm.fetch(sym, start, end, frequency=frequency, provider=provider)
+            )
 
             if not quiet:
                 print_success(f"Fetched {len(df)} rows")
@@ -170,11 +194,17 @@ def fetch(
             if progress and not quiet:
                 with create_progress_bar() as progress_bar:
                     task = progress_bar.add_task("Fetching...", total=len(symbols))
-                    results = {}
+                    results: dict[str, pl.DataFrame | None] = {}
                     for sym in symbols:
                         try:
-                            results[sym] = dm.fetch(
-                                sym, start, end, frequency=frequency, provider=provider
+                            results[sym] = _collect_dataframe(
+                                dm.fetch(
+                                    sym,
+                                    start,
+                                    end,
+                                    frequency=frequency,
+                                    provider=provider,
+                                )
                             )
                             progress_bar.update(task, advance=1, description=f"Fetched {sym}")
                         except Exception as e:
@@ -189,12 +219,14 @@ def fetch(
                 results = {}
                 for sym in symbols:
                     try:
-                        results[sym] = dm.fetch(
-                            sym,
-                            start,
-                            end,
-                            frequency=frequency,
-                            provider=provider,
+                        results[sym] = _collect_dataframe(
+                            dm.fetch(
+                                sym,
+                                start,
+                                end,
+                                frequency=frequency,
+                                provider=provider,
+                            )
                         )
                     except Exception as e:
                         failures[sym] = str(e)
@@ -202,15 +234,17 @@ def fetch(
                         if verbose:
                             console.print(f"[yellow]Warning: Failed to fetch {sym}: {e}[/yellow]")
 
-            successful = sum(1 for v in results.values() if v is not None)
-            if successful == 0:
+            successful_results = {
+                symbol: data for symbol, data in results.items() if data is not None
+            }
+            if not successful_results:
                 detail = next(iter(failures.values()), "all provider requests failed")
                 raise ValueError(f"No symbols were fetched: {detail}")
             if not quiet:
-                print_success(f"Successfully fetched {successful} symbols")
+                print_success(f"Successfully fetched {len(successful_results)} symbols")
 
             if output:
-                save_batch_results(results, output)
+                save_batch_results(successful_results, output)
                 if not quiet:
                     console.print(f"[green]Saved to {output}[/green]")
 
@@ -297,37 +331,53 @@ def update(
     type=click.Choice(["info", "warning", "error", "critical"]),
     help="Minimum severity to display",
 )
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--frequency", default="daily", show_default=True)
+@click.option("--asset-class", default="equities", show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storage_path):
+def validate(
+    ctx,
+    symbol,
+    validate_all,
+    anomalies,
+    save_report,
+    severity,
+    frequency,
+    asset_class,
+    config_path,
+    storage_path,
+):
     """Validate data quality and integrity."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
+        storage, _ = _resolve_storage(config_path, storage_path)
 
-        symbols = []
+        keys: list[str] = []
         if validate_all:
-            symbols = storage.list_keys()
+            keys = storage.list_keys()
         elif symbol:
-            symbols = [symbol]
+            keys = [f"{asset_class}/{frequency}/{symbol}"]
         else:
             console.print("[red]Error: Specify --symbol or --all[/red]")
             ctx.exit(1)
 
         total_issues = 0
+        metadata_manager = MetadataManager(storage)
 
-        for sym in symbols:
+        for key in keys:
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            sym = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
             if not quiet:
                 console.print(f"Validating {sym}...")
 
-            if not storage.exists(sym):
+            if not storage.exists(key):
                 console.print(f"[yellow]  Symbol {sym} not found in storage[/yellow]")
                 continue
 
-            df = storage.read(sym).collect()
+            df = storage.read(key).collect()
             issues = []
 
             # Schema check
@@ -373,17 +423,14 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
                     from ml4t.data.anomaly import (
                         AnomalyManager,
                         AnomalySeverity,
-                        PriceStalenessDetector,
-                        ReturnOutlierDetector,
-                        VolumeSpikeDetector,
                     )
 
                     manager = AnomalyManager()
-                    manager.detectors.append(PriceStalenessDetector(max_gap_days=3))
-                    manager.detectors.append(ReturnOutlierDetector(threshold=5.0))
-                    manager.detectors.append(VolumeSpikeDetector(threshold=10.0))
-
-                    report = manager.analyze(df, symbol=sym, asset_class="unknown")
+                    report = manager.analyze(
+                        df,
+                        symbol=sym,
+                        asset_class=str(metadata.get("asset_class") or asset_class),
+                    )
 
                     if severity != "info":
                         report = manager.filter_by_severity(report, severity)
@@ -512,10 +559,7 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
             colors = {"healthy": "green", "stale": "yellow", "error": "red"}
             for key, metadata, health in datasets:
                 row_count = metadata.get("row_count")
-                try:
-                    rows = f"{int(row_count):,}"
-                except (TypeError, ValueError):
-                    rows = "-"
+                rows = _format_row_count(row_count)
                 detail_table.add_row(
                     f"[{colors[health]}]{health.title()}[/{colors[health]}]",
                     key,
@@ -546,16 +590,21 @@ def status(ctx, detailed, stale_days, config_path, storage_path):
     type=click.Choice(["csv", "json", "parquet"]),
     help="Export format",
 )
-@click.option("--storage-path", default=None, help="Storage directory")
-def export(symbol, output, format_type, storage_path):
+@click.option("--frequency", default="daily", show_default=True)
+@click.option("--asset-class", default="equities", show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
+def export(symbol, output, format_type, frequency, asset_class, config_path, storage_path):
     """Export data to various formats (CSV, JSON, Parquet)."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
-        config = StorageConfig(base_path=storage_path)
-        storage = HiveStorage(config)
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
 
         console.print(f"[bold]Reading data for {symbol}...[/bold]")
-        df = storage.read(symbol).collect()
+        if not storage.exists(key):
+            console.print(f"[yellow]No data found for {symbol}[/yellow]")
+            return
+        df = storage.read(key).collect()
 
         if df.is_empty():
             console.print(f"[yellow]No data found for {symbol}[/yellow]")
@@ -658,10 +707,7 @@ def list_data(_ctx, config, storage_path):
             symbol = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
             provider = str(metadata.get("provider") or "")
             row_count = metadata.get("row_count")
-            try:
-                rows = f"{int(row_count):,}"
-            except (TypeError, ValueError):
-                rows = "-"
+            rows = _format_row_count(row_count)
             start = str(metadata.get("start_date") or "")[:10]
             end = str(metadata.get("end_date") or "")[:10]
             updated = str(metadata.get("last_updated") or "")[:19]

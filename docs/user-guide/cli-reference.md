@@ -98,7 +98,7 @@ ml4t-data validate --all --storage-path ./data
 ml4t-data validate -s AAPL --anomalies --storage-path ./data
 
 # Filter by severity and save report
-ml4t-data validate -s AAPL --anomalies --severity error --save-report
+ml4t-data validate -s AAPL --anomalies --severity error --save-report --config ml4t-data.yaml
 ```
 
 | Option | Description |
@@ -108,7 +108,9 @@ ml4t-data validate -s AAPL --anomalies --severity error --save-report
 | `--anomalies` | Run anomaly detection (return outliers, volume spikes, staleness) |
 | `--save-report` | Save anomaly report to `./anomaly_reports/` |
 | `--severity` | Minimum severity: `info`, `warning`, `error`, `critical` |
-| `--storage-path` | Storage directory (default: `./data`) |
+| `--frequency`, `--asset-class` | Select the canonical dataset key |
+| `--config` | Configuration file selecting Hive or flat storage |
+| `--storage-path` | Hive storage directory (default: `./data`) |
 
 ### status
 
@@ -128,10 +130,13 @@ last update, and health status. Use `--config` to select a configured Hive or fl
 Export stored data to CSV, JSON, or Parquet.
 
 ```bash
-ml4t-data export -s AAPL -o aapl.csv --format csv
-ml4t-data export -s AAPL -o aapl.json --format json
-ml4t-data export -s AAPL -o aapl.parquet --format parquet
+ml4t-data export -s AAPL -o aapl.csv --format csv --storage-path ./data
+ml4t-data export -s AAPL -o aapl.json --format json --config ml4t-data.yaml
+ml4t-data export -s BTC --asset-class crypto -o btc.parquet --format parquet
 ```
+
+Use `--frequency` and `--asset-class` to select the dataset key. Use either
+`--config` for configured Hive or flat storage, or `--storage-path` for Hive storage.
 
 ### list
 

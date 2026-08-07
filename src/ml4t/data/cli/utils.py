@@ -44,15 +44,15 @@ def save_dataframe(df: pl.DataFrame, path: str) -> None:
         df: Polars DataFrame to save
         path: Output file path (.csv, .parquet, .pq)
     """
-    path = Path(path)
+    output_path = Path(path)
 
-    if path.suffix == ".csv":
-        df.write_csv(path)
-    elif path.suffix in [".parquet", ".pq"]:
-        df.write_parquet(path)
+    if output_path.suffix == ".csv":
+        df.write_csv(output_path)
+    elif output_path.suffix in [".parquet", ".pq"]:
+        df.write_parquet(output_path)
     else:
         # Default to parquet
-        df.write_parquet(path.with_suffix(".parquet"))
+        df.write_parquet(output_path.with_suffix(".parquet"))
 
 
 def save_batch_results(results: dict[str, pl.DataFrame], path: str) -> None:
@@ -62,9 +62,9 @@ def save_batch_results(results: dict[str, pl.DataFrame], path: str) -> None:
         results: Dictionary mapping symbols to DataFrames
         path: Output file path
     """
-    path = Path(path)
+    output_path = Path(path)
 
-    if path.suffix == ".parquet":
+    if output_path.suffix == ".parquet":
         # Save as single parquet with symbol column
         dfs = []
         for symbol, df in results.items():
@@ -74,12 +74,15 @@ def save_batch_results(results: dict[str, pl.DataFrame], path: str) -> None:
 
         if dfs:
             combined_df = pl.concat(dfs)
-            combined_df.write_parquet(path)
+            combined_df.write_parquet(output_path)
     else:
         # Save each symbol to separate file
         for symbol, df in results.items():
             if df is not None:
-                symbol_path = path.parent / f"{path.stem}_{symbol}{path.suffix or '.parquet'}"
+                symbol_path = (
+                    output_path.parent
+                    / f"{output_path.stem}_{symbol}{output_path.suffix or '.parquet'}"
+                )
                 save_dataframe(df, str(symbol_path))
 
 

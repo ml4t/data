@@ -398,6 +398,50 @@ class TestValidateCommand:
             assert "❌ Validation issues found" in result.output
             assert "High < Low" in result.output
 
+    def test_validate_canonical_dataset_with_anomaly_analysis(self):
+        """Validation resolves canonical keys and constructs the anomaly pipeline."""
+        from datetime import timedelta
+
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("data")
+            timestamps = [datetime(2024, 1, 1) + timedelta(days=day) for day in range(30)]
+            closes = [100.0 + day for day in range(30)]
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": timestamps,
+                        "open": closes,
+                        "high": [close + 1.0 for close in closes],
+                        "low": [close - 1.0 for close in closes],
+                        "close": closes,
+                        "volume": [1_000.0 + day for day in range(30)],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(
+                cli,
+                [
+                    "validate",
+                    "--symbol",
+                    "AAPL",
+                    "--storage-path",
+                    "data",
+                    "--anomalies",
+                    "--severity",
+                    "critical",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Validating AAPL" in result.output
+        assert "Running anomaly detection" in result.output
+
 
 class TestStatusCommand:
     """Test the status command."""
@@ -823,6 +867,49 @@ class TestExportCommand:
 
             assert result.exit_code == 0
             assert "Exported 1 rows" in result.output
+
+    def test_export_reads_configured_flat_store(self):
+        """Export resolves canonical keys in a configured flat store."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+            result = runner.invoke(
+                cli,
+                [
+                    "export",
+                    "--symbol",
+                    "AAPL",
+                    "--output",
+                    "aapl.csv",
+                    "--config",
+                    "config.yaml",
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert Path("aapl.csv").is_file()
+            assert len(pl.read_csv("aapl.csv")) == 1
 
     @patch("ml4t.data.cli.core.HiveStorage")
     def test_export_empty_data(self, mock_storage_class):
