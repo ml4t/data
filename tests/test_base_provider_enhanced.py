@@ -500,6 +500,28 @@ class TestBaseProvider:
         assert isinstance(df, pl.DataFrame)
         assert call_count == 3
 
+    def test_retry_honors_provider_retry_after(self, monkeypatch):
+        provider = MockProvider()
+        original_fetch = provider._fetch_raw_data
+        delays = []
+        call_count = 0
+
+        def rate_limited_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RateLimitError("mock", retry_after=12.0)
+            return original_fetch(*args, **kwargs)
+
+        provider._fetch_raw_data = rate_limited_once
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "sleep", delays.append)
+
+        result = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        assert isinstance(result, pl.DataFrame)
+        assert call_count == 2
+        assert delays == [12.0]
+
     @pytest.mark.parametrize(
         "error",
         [

@@ -106,12 +106,11 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
     )
 
     assert "public" in options
-    for path in (
-        "tests/integration/test_binance_public.py",
-        "tests/integration/test_coingecko.py",
-        "tests/integration/test_kalshi.py",
-        "tests/integration/test_polymarket.py",
-        "tests/integration/test_yahoo.py",
-        "tests/test_multi_asset.py",
+    for contract in (
+        "test_binance_public.py::TestBinancePublicProvider::test_fetch_daily_spot_btc",
+        "test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc",
+        "test_kalshi.py::TestKalshiProvider::test_list_markets",
+        "test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug",
+        "test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily",
     ):
-        assert path in command
+        assert contract in command

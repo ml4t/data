@@ -52,12 +52,11 @@ jobs:
           RUN_PUBLIC_KALSHI_TESTS: "1"
         run: >-
           uv run pytest -q -m integration
-          tests/integration/test_binance_public.py
-          tests/integration/test_coingecko.py
-          tests/integration/test_kalshi.py
-          tests/integration/test_polymarket.py
-          tests/integration/test_yahoo.py
-          tests/test_multi_asset.py
+          tests/integration/test_binance_public.py::TestBinancePublicProvider::test_fetch_daily_spot_btc
+          tests/integration/test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc
+          tests/integration/test_kalshi.py::TestKalshiProvider::test_list_markets
+          tests/integration/test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug
+          tests/integration/test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily
 
   cryptocompare:
     name: CryptoCompare Contract

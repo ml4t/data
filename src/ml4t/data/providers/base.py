@@ -37,7 +37,13 @@ from typing import Any, ClassVar
 
 import polars as pl
 import structlog
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ml4t.data.core.exceptions import NetworkError, RateLimitError
 from ml4t.data.providers.mixins.circuit_breaker import CircuitBreaker, CircuitBreakerMixin
@@ -47,6 +53,18 @@ from ml4t.data.providers.mixins.validation import ValidationMixin
 from ml4t.data.providers.protocols import OHLCVProvider, ProviderCapabilities
 
 logger = structlog.get_logger()
+_DEFAULT_RETRY_WAIT = wait_exponential(multiplier=1, min=4, max=10)
+
+
+def _provider_retry_wait(retry_state: RetryCallState) -> float:
+    """Honor provider retry hints without shortening exponential backoff."""
+    delay = float(_DEFAULT_RETRY_WAIT(retry_state))
+    if retry_state.outcome is None:
+        return delay
+    error = retry_state.outcome.exception()
+    if isinstance(error, NetworkError) and error.retry_after is not None:
+        return max(delay, max(0.0, error.retry_after))
+    return delay
 
 
 # Re-export for backward compatibility
@@ -174,7 +192,7 @@ class BaseProvider(
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
+        wait=_provider_retry_wait,
         retry=retry_if_exception_type((NetworkError, RateLimitError)),
         reraise=True,
     )
