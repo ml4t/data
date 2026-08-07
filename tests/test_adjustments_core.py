@@ -318,6 +318,20 @@ class TestApplySplits:
         assert "adj_price" in result.columns
         assert "adj_close" not in result.columns  # Not in price_cols
 
+    def test_custom_price_column_does_not_require_close(self):
+        """Split-only adjustment is independent of a close column."""
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "price": [100.0, 50.0],
+                "split_ratio": [1.0, 2.0],
+            }
+        )
+
+        result = apply_splits(df, price_cols=["price"], volume_col=None)
+
+        assert result["adj_price"].to_list() == [50.0, 50.0]
+
     def test_no_volume_adjustment(self):
         """Test without volume adjustment."""
         df = pl.DataFrame(
@@ -390,6 +404,33 @@ class TestApplyDividends:
         assert adjusted_gross_return == pytest.approx(expected_gross_return)
         assert result["adj_close"][1] == 103.0
 
+    def test_composes_with_split_adjustment(self):
+        """The two-step adapters equal the canonical combined adjustment."""
+        df = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1), date(2024, 1, 2), date(2024, 1, 3)],
+                "open": [100.0, 100.0, 50.0],
+                "high": [100.0, 100.0, 50.0],
+                "low": [100.0, 100.0, 50.0],
+                "close": [100.0, 100.0, 50.0],
+                "volume": [1000.0, 1000.0, 2000.0],
+                "split_ratio": [1.0, 1.0, 2.0],
+                "ex-dividend": [0.0, 1.0, 0.0],
+            }
+        )
+
+        chained = apply_dividends(apply_splits(df))
+        canonical = apply_corporate_actions(df)
+
+        for column in (
+            "adj_open",
+            "adj_high",
+            "adj_low",
+            "adj_close",
+            "price_adjustment_factor",
+        ):
+            np.testing.assert_allclose(chained[column], canonical[column])
+
     def test_custom_price_cols(self):
         """Test with custom price columns."""
         df = pl.DataFrame(
@@ -444,6 +485,18 @@ class TestEdgeCases:
 
         assert len(result) == 1
         assert result["adj_close"][0] == 102.0
+
+    def test_missing_date_uses_public_validation_error(self):
+        df = pl.DataFrame(
+            {
+                "close": [100.0],
+                "split_ratio": [1.0],
+                "ex-dividend": [0.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="Missing required adjustment columns: date"):
+            apply_corporate_actions(df)
 
     @pytest.mark.parametrize("ratio", [0.0, -1.0, float("nan"), float("inf")])
     def test_invalid_split_ratios_are_rejected(self, ratio):

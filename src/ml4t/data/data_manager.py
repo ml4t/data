@@ -17,7 +17,7 @@ Architecture:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 import polars as pl
 import structlog
@@ -454,8 +454,9 @@ class DataManager:
         df: pl.DataFrame,
         exchange: str | None = None,
         calendar: str | None = None,
+        bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
     ) -> pl.DataFrame:
-        """Assign session_date column to DataFrame based on exchange calendar."""
+        """Assign sessions to daily period labels or intraday timestamps."""
         if not self._metadata_manager:
             # Fall back to direct implementation
             from ml4t.data.sessions import SessionAssigner
@@ -466,9 +467,9 @@ class DataManager:
                 assigner = SessionAssigner.from_exchange(exchange)
             else:
                 assigner = SessionAssigner(calendar)
-            return assigner.assign_sessions(df)
+            return assigner.assign_sessions(df, bar_frequency=bar_frequency)
 
-        return self._metadata_manager.assign_sessions(df, exchange, calendar)
+        return self._metadata_manager.assign_sessions(df, exchange, calendar, bar_frequency)
 
     def complete_sessions(
         self,

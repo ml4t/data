@@ -11,9 +11,9 @@ def _validate_adjustment_inputs(
     price_cols: list[str],
     volume_col: str | None,
 ) -> None:
-    required = {"date", "close", split_col, *price_cols}
+    required = {"date", split_col, *price_cols}
     if dividend_col is not None:
-        required.add(dividend_col)
+        required.update(("close", dividend_col))
     missing = sorted(required.difference(df.columns))
     if missing:
         raise ValueError(f"Missing required adjustment columns: {', '.join(missing)}")
@@ -22,9 +22,9 @@ def _validate_adjustment_inputs(
     if df.get_column("date").n_unique() != df.height:
         raise ValueError("Corporate-action input must contain exactly one row per date")
 
-    finite_columns = ["close", split_col, *price_cols]
+    finite_columns = [split_col, *price_cols]
     if dividend_col is not None:
-        finite_columns.append(dividend_col)
+        finite_columns.extend(("close", dividend_col))
     if volume_col is not None and volume_col in df.columns:
         finite_columns.append(volume_col)
     for column in dict.fromkeys(finite_columns):
@@ -34,7 +34,7 @@ def _validate_adjustment_inputs(
 
     if not df.filter(pl.col(split_col) <= 0).is_empty():
         raise ValueError(f"Split ratios in '{split_col}' must be positive")
-    if not df.filter(pl.col("close") <= 0).is_empty():
+    if dividend_col is not None and not df.filter(pl.col("close") <= 0).is_empty():
         raise ValueError("Close prices must be positive")
     if dividend_col is not None and not df.filter(pl.col(dividend_col) < 0).is_empty():
         raise ValueError(f"Dividends in '{dividend_col}' cannot be negative")
@@ -55,20 +55,23 @@ def _apply_canonical_adjustments(
     price_cols: list[str],
     volume_col: str | None,
 ) -> pl.DataFrame:
-    df = prices.sort("date").clone()
     _validate_adjustment_inputs(
-        df,
+        prices,
         split_col=split_col,
         dividend_col=dividend_col,
         price_cols=price_cols,
         volume_col=volume_col,
     )
+    df = prices.sort("date").clone()
 
-    dividend = pl.col(dividend_col) if dividend_col is not None else pl.lit(0.0)
+    price_event_factor = (
+        pl.col("close")
+        / (pl.col(split_col).cast(pl.Float64) * (pl.col("close") + pl.col(dividend_col)))
+        if dividend_col is not None
+        else 1.0 / pl.col(split_col).cast(pl.Float64)
+    )
     df = df.with_columns(
-        (
-            pl.col("close") / (pl.col(split_col).cast(pl.Float64) * (pl.col("close") + dividend))
-        ).alias("_price_event_factor"),
+        price_event_factor.alias("_price_event_factor"),
         pl.col(split_col).cast(pl.Float64).alias("_volume_event_factor"),
     ).with_columns(
         _future_cumulative_product("_price_event_factor").alias("price_adjustment_factor"),
@@ -100,6 +103,8 @@ def apply_corporate_actions(
     share basis. Earlier prices are divided by subsequent split ratios and
     earlier volume is multiplied by them. A dividend is cash per post-event
     share on its ex-date. Adjusted close-to-close returns include that cash.
+    The dividend factor uses the ex-date close. This differs from data vendors
+    that discount dividends using the prior close.
 
     Args:
         prices: DataFrame with date-sorted prices and corporate action data
@@ -165,7 +170,9 @@ def apply_dividends(
 
     A dividend on date ``t`` is cash per share paid between the preceding
     observation and ``t``. The event row remains unchanged. This adapter is for
-    data whose split adjustments have already been handled consistently.
+    data whose split adjustments have already been handled consistently. When
+    split factors are present, dividends are converted to the latest share basis
+    and the dividend factor is composed with the existing price factor.
 
     Args:
         prices: DataFrame with date-sorted prices and ex-dividend column
@@ -200,20 +207,46 @@ def apply_dividends(
     if not df.filter(pl.col(close_col) <= 0).is_empty():
         raise ValueError(f"Close prices in '{close_col}' must be positive")
 
+    for factor_column in ("price_adjustment_factor", "volume_adjustment_factor"):
+        if (
+            factor_column in df.columns
+            and not df.filter(
+                pl.col(factor_column).is_null()
+                | ~pl.col(factor_column).is_finite()
+                | (pl.col(factor_column) <= 0)
+            ).is_empty()
+        ):
+            raise ValueError(f"Adjustment factor '{factor_column}' must be finite and positive")
+
+    rebased_dividend = pl.col(dividend_col)
+    if "volume_adjustment_factor" in df.columns:
+        rebased_dividend = rebased_dividend / pl.col("volume_adjustment_factor")
+    existing_factor = (
+        pl.col("price_adjustment_factor")
+        if "price_adjustment_factor" in df.columns
+        else pl.lit(1.0)
+    )
+
     return (
-        df.with_columns(
-            (pl.col(close_col) / (pl.col(close_col) + pl.col(dividend_col))).alias(
+        df.with_columns(rebased_dividend.alias("_rebased_dividend"))
+        .with_columns(
+            (pl.col(close_col) / (pl.col(close_col) + pl.col("_rebased_dividend"))).alias(
                 "_dividend_event_factor"
             )
         )
         .with_columns(
-            _future_cumulative_product("_dividend_event_factor").alias("price_adjustment_factor")
+            _future_cumulative_product("_dividend_event_factor").alias(
+                "_dividend_adjustment_factor"
+            )
         )
         .with_columns(
             *[
-                (pl.col(column) * pl.col("price_adjustment_factor")).alias(column)
+                (pl.col(column) * pl.col("_dividend_adjustment_factor")).alias(column)
                 for column in price_cols
-            ]
+            ],
+            (existing_factor * pl.col("_dividend_adjustment_factor")).alias(
+                "price_adjustment_factor"
+            ),
         )
-        .drop("_dividend_event_factor")
+        .drop("_rebased_dividend", "_dividend_event_factor", "_dividend_adjustment_factor")
     )

@@ -9,7 +9,7 @@ This module handles metadata management and symbol discovery:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import structlog
@@ -157,6 +157,7 @@ class MetadataManager:
         df: pl.DataFrame,
         exchange: str | None = None,
         calendar: str | None = None,
+        bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
     ) -> pl.DataFrame:
         """Assign session_date column to DataFrame based on exchange calendar.
 
@@ -164,6 +165,7 @@ class MetadataManager:
             df: DataFrame with timestamp column
             exchange: Exchange code (e.g., "CME", "NYSE")
             calendar: Calendar name override
+            bar_frequency: Daily period-label handling, intraday containment, or inference
 
         Returns:
             DataFrame with session_date column added
@@ -180,7 +182,7 @@ class MetadataManager:
         else:
             assigner = SessionAssigner(calendar)
 
-        return assigner.assign_sessions(df)
+        return assigner.assign_sessions(df, bar_frequency=bar_frequency)
 
     def complete_sessions(
         self,
@@ -202,7 +204,9 @@ class MetadataManager:
             zero_volume: If True, set volume=0 for filled rows
 
         Returns:
-            DataFrame with complete sessions
+            DataFrame with complete minute sessions and an is_imputed column. Input must
+            contain one symbol, unique minute-aligned timestamps, and no observations
+            outside the inferred completion range.
 
         Raises:
             ValueError: If neither exchange nor calendar provided

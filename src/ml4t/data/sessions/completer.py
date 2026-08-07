@@ -73,15 +73,17 @@ class SessionCompleter:
         Args:
             df: Input DataFrame with timestamp, open, high, low, close, volume
             start_date: Optional start date (auto-detected if not provided)
-            end_date: Optional end date (auto-detected if not provided)
+            end_date: Optional exclusive end date (auto-detected if not provided)
             fill_method: Method for filling prices ("forward", "backward", "none")
             zero_volume: If True, set volume=0 for filled rows; if False, use NaN
 
         Returns:
-            DataFrame with complete sessions (no gaps), sorted by timestamp
+            DataFrame with complete sessions, an is_imputed column, and timestamp order
 
         Raises:
-            ValueError: If required columns missing or data is invalid
+            ValueError: If required columns are missing, timestamps are duplicated or
+                not minute-aligned, multiple symbols share a timestamp, or an observation
+                falls outside a scheduled session or the requested half-open range
         """
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
@@ -128,6 +130,11 @@ class SessionCompleter:
                 request_end = request_end.tz_convert("UTC")
             if request_start >= request_end:
                 raise ValueError("start_date must be earlier than the exclusive end_date")
+            if any(
+                value.second or value.microsecond or value.nanosecond
+                for value in (request_start, request_end)
+            ):
+                raise ValueError("start_date and end_date must be minute-aligned")
 
             start_pd = request_start.normalize() - pd.Timedelta(days=1)
             end_pd = request_end.normalize() + pd.Timedelta(days=1)
@@ -193,7 +200,29 @@ class SessionCompleter:
                 timestamp_expr.alias("timestamp"), pl.lit(True).alias("_is_observed")
             )
             if df_with_tz.get_column("timestamp").n_unique() != df_with_tz.height:
-                raise ValueError("Session completion requires unique input timestamps")
+                duplicates = (
+                    df_with_tz.group_by("timestamp")
+                    .len()
+                    .filter(pl.col("len") > 1)
+                    .get_column("timestamp")
+                    .head(5)
+                    .to_list()
+                )
+                raise ValueError(
+                    "Session completion requires one symbol and unique input timestamps; "
+                    f"duplicates: {', '.join(str(value) for value in duplicates)}"
+                )
+
+            unmatched = df_with_tz.join(
+                minute_template.select("timestamp"), on="timestamp", how="anti"
+            )
+            if not unmatched.is_empty():
+                timestamps = ", ".join(
+                    str(value) for value in unmatched.get_column("timestamp").head(5).to_list()
+                )
+                raise ValueError(
+                    f"Input observations fall outside the completion template: {timestamps}"
+                )
 
             # Left join: keep all minutes from template
             complete_df = minute_template.join(df_with_tz, on="timestamp", how="left")
@@ -247,12 +276,17 @@ class SessionCompleter:
         price_columns = ["open", "high", "low", "close"]
 
         reference_price: pl.Expr | None = None
+        reference_column = next((column for column in price_columns if column in df.columns), None)
         if method == "forward":
             if "close" in df.columns:
-                reference_price = pl.col("close").forward_fill().over("session_date")
+                reference_column = "close"
+            if reference_column is not None:
+                reference_price = pl.col(reference_column).forward_fill()
         elif method == "backward":
             if "close" in df.columns:
-                reference_price = pl.col("close").backward_fill().over("session_date")
+                reference_column = "close"
+            if reference_column is not None:
+                reference_price = pl.col(reference_column).backward_fill().over("session_date")
 
         filled_df = df
         if reference_price is not None:
@@ -290,7 +324,7 @@ class SessionCompleter:
 
         for col in metadata_columns:
             if col in filled_df.columns:
-                filled_df = filled_df.with_columns(pl.col(col).forward_fill().over("session_date"))
+                filled_df = filled_df.with_columns(pl.col(col).forward_fill())
 
         return filled_df
 

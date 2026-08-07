@@ -102,6 +102,54 @@ class TestSessionAssigner:
         assert "session_date" in result.columns
         assert len(result) == 3
 
+    def test_assigns_daily_period_labels_by_session_date(self):
+        """Midnight daily labels map to the exchange session on that date."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 8, tzinfo=UTC),
+                    datetime(2024, 1, 9, tzinfo=UTC),
+                    datetime(2024, 1, 6, tzinfo=UTC),
+                ],
+                "close": [100.0, 101.0, 99.0],
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [date(2024, 1, 8), date(2024, 1, 9), None]
+
+    def test_midnight_can_be_forced_to_intraday_containment(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)]})
+
+        result = assigner.assign_sessions(df, bar_frequency="intraday")
+
+        assert result["session_date"].to_list() == [None]
+
+    def test_assigns_nanosecond_provider_timestamps(self):
+        """Provider nanosecond timestamps match the calendar join unit."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2024, 1, 8, 14, 30, tzinfo=UTC)],
+                    dtype=pl.Datetime("ns", "UTC"),
+                )
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [date(2024, 1, 8)]
+
     def test_assign_sessions_with_explicit_dates(self):
         """Test session assignment with explicit start/end dates."""
         from ml4t.data.sessions.assigner import SessionAssigner
@@ -381,6 +429,66 @@ class TestSessionCompleter:
             105.0,
         )
         assert result["volume"].to_list() == [1000.0, 0.0]
+
+    def test_second_session_open_uses_previous_close_and_metadata(self):
+        """A session-opening gap carries the prior close and symbol forward."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        first_close = datetime(2024, 1, 2, 20, 59, tzinfo=UTC)
+        second_observation = datetime(2024, 1, 3, 14, 32, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "timestamp": [first_close, second_observation],
+                "open": [100.0, 102.0],
+                "high": [100.0, 102.0],
+                "low": [100.0, 102.0],
+                "close": [100.0, 102.0],
+                "volume": [1000.0, 1200.0],
+                "symbol": ["AAPL", "AAPL"],
+            }
+        )
+
+        result = completer.complete_sessions(
+            df,
+            start_date=first_close,
+            end_date=second_observation + timedelta(minutes=1),
+        )
+
+        opening_gap = result.filter(
+            pl.col("timestamp").is_between(
+                datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
+                second_observation,
+                closed="left",
+            )
+        )
+        assert opening_gap["close"].to_list() == [100.0, 100.0]
+        assert opening_gap["symbol"].to_list() == ["AAPL", "AAPL"]
+
+    def test_rejects_observations_outside_the_minute_template(self):
+        """Completion never silently replaces unmatched observations."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        daily = pl.DataFrame({"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="outside the completion template"):
+            completer.complete_sessions(daily)
+
+    def test_forward_fill_uses_available_price_when_close_is_absent(self):
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        start = datetime(2024, 1, 8, 14, 30, tzinfo=UTC)
+        df = pl.DataFrame({"timestamp": [start], "open": [100.0]})
+
+        result = completer.complete_sessions(
+            df,
+            start_date=start,
+            end_date=start + timedelta(minutes=2),
+        )
+
+        assert result["open"].to_list() == [100.0, 100.0]
 
     def test_early_close_and_break_minutes_are_excluded(self):
         from ml4t.data.sessions.completer import SessionCompleter

@@ -91,6 +91,7 @@ class SessionAssigner:
         start_date: datetime | date | str | None = None,
         end_date: datetime | date | str | None = None,
         outside_session: Literal["null", "raise", "drop"] = "null",
+        bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
     ) -> pl.DataFrame:
         """Assign session_date column to DataFrame.
 
@@ -99,6 +100,8 @@ class SessionAssigner:
             start_date: Optional start date (auto-detected from data if not provided)
             end_date: Optional end date (auto-detected from data if not provided)
             outside_session: Treatment for observations outside a trading interval
+            bar_frequency: Treat timestamps as daily period labels, intraday instants,
+                or infer daily labels when every non-null timestamp is midnight
 
         Returns:
             DataFrame with session_date column added
@@ -110,6 +113,8 @@ class SessionAssigner:
             raise ValueError("DataFrame must have 'timestamp' column")
         if outside_session not in {"null", "raise", "drop"}:
             raise ValueError("outside_session must be 'null', 'raise', or 'drop'")
+        if bar_frequency not in {"auto", "daily", "intraday"}:
+            raise ValueError("bar_frequency must be 'auto', 'daily', or 'intraday'")
 
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot assign sessions")
@@ -176,9 +181,45 @@ class SessionAssigner:
             timestamp_expr = pl.col("timestamp")
             if timestamp_dtype.time_zone is None:
                 timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
-            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC")
+            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
+                pl.Datetime("us", "UTC")
+            )
 
             session_df = pl.DataFrame(session_map).sort("_calendar_session_end")
+            non_null_timestamps = df.get_column("timestamp").drop_nulls().to_list()
+            inferred_daily = bool(non_null_timestamps) and all(
+                value.hour == value.minute == value.second == value.microsecond == 0
+                for value in non_null_timestamps
+                if isinstance(value, datetime)
+            )
+            daily_labels = bar_frequency == "daily" or (bar_frequency == "auto" and inferred_daily)
+            if daily_labels:
+                result = (
+                    df.with_row_index("_session_row_index")
+                    .with_columns(timestamp_expr.dt.date().alias("_session_date_label"))
+                    .join(
+                        session_df.select(
+                            pl.col("_assigned_session_date").alias("_calendar_session_date_label"),
+                            "_assigned_session_date",
+                        ),
+                        left_on="_session_date_label",
+                        right_on="_calendar_session_date_label",
+                        how="left",
+                    )
+                    .with_columns(pl.col("_assigned_session_date").alias("session_date"))
+                )
+                outside = result.filter(pl.col("session_date").is_null())
+                if outside_session == "raise" and not outside.is_empty():
+                    timestamps = ", ".join(
+                        str(value) for value in outside.get_column("timestamp").head(5).to_list()
+                    )
+                    raise ValueError(f"Observations outside a trading session: {timestamps}")
+                if outside_session == "drop":
+                    result = result.filter(pl.col("session_date").is_not_null())
+                return result.sort("_session_row_index").drop(
+                    "_session_row_index", "_session_date_label", "_assigned_session_date"
+                )
+
             after_last_session = _datetime_scalar(
                 session_df.get_column("_calendar_session_end").max(),
                 "_calendar_session_end",
