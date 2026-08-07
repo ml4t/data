@@ -164,13 +164,42 @@ class TestAnomalyManager:
         assert "return_outliers" not in skipped.detectors_used
         assert "return_outliers" in restored.detectors_used
 
-    def test_invalid_timestamp_schema_is_rejected(self, sample_data):
-        """Reports reject timestamp columns that cannot satisfy their datetime contract."""
-        invalid = sample_data.with_columns(pl.col("timestamp").dt.to_string())
+    def test_symbol_override_can_enable_disabled_detector(self, sample_data):
+        """A symbol override can enable a detector disabled by the base config."""
+        config = AnomalyConfig(
+            return_outliers={"enabled": False},
+            volume_spikes={"enabled": False},
+            price_staleness={"enabled": False},
+            symbol_overrides={"CHECK": {"return_outliers": {"enabled": True}}},
+        )
+        manager = AnomalyManager(config)
+
+        skipped = manager.analyze(sample_data, "SKIP")
+        enabled = manager.analyze(sample_data, "CHECK")
+
+        assert "return_outliers" not in skipped.detectors_used
+        assert "return_outliers" in enabled.detectors_used
+
+    def test_string_timestamp_schema_is_normalized(self, sample_data):
+        """ISO timestamp strings retain the anomaly analysis contract."""
+        string_data = sample_data.with_columns(pl.col("timestamp").dt.to_string())
         manager = AnomalyManager()
 
-        with pytest.raises(ValueError, match="timestamp must contain non-null datetime values"):
-            manager.analyze(invalid, "TEST")
+        report = manager.analyze(string_data, "TEST")
+
+        assert report.total_rows == len(string_data)
+        assert report.detectors_used
+
+    def test_invalid_timestamps_do_not_abort_batch(self, sample_data):
+        """One malformed timestamp dataset does not discard other symbol reports."""
+        invalid = sample_data.with_columns(pl.lit("not-a-date").alias("timestamp"))
+        manager = AnomalyManager()
+
+        reports = manager.analyze_batch({"BAD": invalid, "GOOD": sample_data})
+
+        assert reports["BAD"].total_rows == len(invalid)
+        assert reports["BAD"].detectors_used == []
+        assert reports["GOOD"].detectors_used
 
     def test_save_report(self, sample_data):
         """Test saving report to disk."""
