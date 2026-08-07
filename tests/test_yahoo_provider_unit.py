@@ -66,6 +66,12 @@ class TestYahooProviderInit:
         provider = YahooFinanceProvider(enable_progress=True)
         assert provider.enable_progress is True
 
+    def test_init_with_custom_rate_limit(self):
+        """Test custom rate limits are accepted by provider configuration."""
+        provider = YahooFinanceProvider(rate_limit=(7, 11.0))
+        assert provider.rate_limiter.max_calls == 7
+        assert provider.rate_limiter.period == 11.0
+
     def test_name_property(self):
         """Test name property returns correct value."""
         provider = YahooFinanceProvider()

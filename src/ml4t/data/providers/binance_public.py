@@ -1153,6 +1153,7 @@ class BinancePublicProvider(BaseProvider):
                 [
                     pl.from_epoch(pl.col("open_time"), time_unit="ms")
                     .dt.replace_time_zone("UTC")
+                    .cast(pl.Datetime("ms", "UTC"))
                     .alias("timestamp"),
                     pl.lit(symbol).alias("symbol"),
                     pl.col("open").cast(pl.Float64).alias("premium_index_open"),
@@ -1717,6 +1718,7 @@ class BinancePublicProvider(BaseProvider):
                     [
                         pl.from_epoch(pl.col("open_time"), time_unit="ms")
                         .dt.replace_time_zone("UTC")
+                        .cast(pl.Datetime("ms", "UTC"))
                         .alias("timestamp"),
                         pl.lit(symbol).alias("symbol"),
                         pl.col("open").cast(pl.Float64).alias("premium_index_open"),

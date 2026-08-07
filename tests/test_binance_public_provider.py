@@ -735,6 +735,7 @@ class TestParsePremiumIndexZip:
         assert "symbol" in df.columns
         assert "premium_index_open" in df.columns
         assert df["symbol"][0] == "BTCUSDT"
+        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
 
     def test_parse_premium_index_404_returns_none(self, provider):
         """Test 404 response returns None."""

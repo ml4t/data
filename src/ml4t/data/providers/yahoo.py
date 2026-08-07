@@ -104,12 +104,17 @@ class YahooFinanceProvider(BaseProvider):
         "cashflow": "get_cash_flow",
     }
 
-    def __init__(self, enable_progress: bool = False) -> None:
+    def __init__(
+        self,
+        enable_progress: bool = False,
+        rate_limit: tuple[int, float] | None = None,
+    ) -> None:
         """
         Initialize Yahoo Finance provider.
 
         Args:
             enable_progress: Show progress bars for downloads (default False)
+            rate_limit: Optional custom rate limit as (calls, period_seconds)
 
         Raises:
             ImportError: If yfinance is not installed
@@ -119,8 +124,7 @@ class YahooFinanceProvider(BaseProvider):
                 "YahooFinanceProvider requires yfinance. "
                 "Install with: pip install 'ml4t-data[yahoo]'"
             )
-        # Don't use BaseProvider's rate limiting - yfinance handles this
-        super().__init__(rate_limit=None)
+        super().__init__(rate_limit=rate_limit)
         self.enable_progress = enable_progress
 
     @property

@@ -95,7 +95,7 @@ class TestBinancePublicProvider:
         assert "volume" in df.columns
 
         # Verify data types
-        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
         assert df["open"].dtype == pl.Float64
         assert df["volume"].dtype == pl.Float64
 
@@ -184,7 +184,7 @@ class TestBinancePublicProvider:
         df = spot_provider._create_empty_dataframe()
         assert df.is_empty()
         assert "timestamp" in df.columns
-        assert df["timestamp"].dtype == pl.Datetime("ms", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
         assert df["open"].dtype == pl.Float64
 
     def test_unsupported_frequency(self, spot_provider):
