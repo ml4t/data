@@ -100,4 +100,12 @@ def validate_path_component(component: str, name: str = "path component") -> str
 
 def encode_path_component(component: str, name: str = "path component") -> str:
     """Validate and encode one user-controlled directory component."""
-    return encode_storage_key(validate_path_component(component, name))
+    if not isinstance(component, str) or not component:
+        raise ValueError(f"{name} must be a non-empty string")
+    if component in {".", ".."} or "/" in component or "\\" in component:
+        raise ValueError(f"{name} cannot contain path separators or relative components")
+    if any(ord(character) < 32 or ord(character) == 127 for character in component):
+        raise ValueError(f"{name} cannot contain control characters")
+    if len(component.encode("utf-8")) > MAX_KEY_BYTES:
+        raise ValueError(f"{name} exceeds the {MAX_KEY_BYTES}-byte limit")
+    return encode_storage_key(component)

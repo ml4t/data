@@ -9,6 +9,7 @@ import pytest
 from ml4t.data.storage.keys import (
     MAX_KEY_BYTES,
     decode_storage_key,
+    encode_path_component,
     encode_storage_key,
     storage_key_path,
     validate_path_component,
@@ -51,6 +52,15 @@ def test_storage_key_rejects_ambiguous_or_unsafe_values(key: str) -> None:
 def test_storage_key_rejects_values_above_maximum() -> None:
     with pytest.raises(ValueError, match="byte limit"):
         validate_storage_key("x" * (MAX_KEY_BYTES + 1))
+
+
+def test_encoded_component_reports_its_own_length_limit() -> None:
+    with pytest.raises(ValueError, match=f"provider exceeds the {MAX_KEY_BYTES}-byte limit"):
+        encode_path_component("x" * (MAX_KEY_BYTES + 1), "provider")
+
+
+def test_encoded_component_accepts_names_made_portable_by_encoding() -> None:
+    assert decode_storage_key(encode_path_component("NUL")) == "NUL"
 
 
 @pytest.mark.parametrize(

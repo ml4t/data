@@ -635,6 +635,12 @@ class TestChunkedStorage:
         assert storage.list_keys() == ["equities/daily/BRK_B"]
         assert storage.read("equities/daily/BRK_B").data["close"].item() == 100.5
 
+    def test_list_keys_ignores_malformed_encoded_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        (storage.metadata_path / "k1_invalid$_index.json").write_text("{}", encoding="utf-8")
+
+        assert storage.list_keys() == []
+
     def test_chunk_info_properties(self) -> None:
         """Test ChunkInfo class properties."""
         chunk = ChunkInfo(

@@ -119,6 +119,7 @@ class StorageBackend(ABC):
         Args:
             config: Storage configuration
         """
+        config.base_path = config.base_path.expanduser().resolve()
         self.config = config
         self.base_path = config.base_path
         self.base_path.mkdir(parents=True, exist_ok=True)

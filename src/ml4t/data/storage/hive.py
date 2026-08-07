@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
+import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 
@@ -24,6 +25,8 @@ from .keys import (
 
 if TYPE_CHECKING:
     from ml4t.data.core.models import DataObject
+
+logger = structlog.get_logger()
 
 
 class HiveStorage(StorageBackend):
@@ -393,7 +396,23 @@ class HiveStorage(StorageBackend):
         keys = []
         for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
             if path.is_dir() and (path / "CURRENT").is_file():
-                keys.append(decode_storage_key(path.name))
+                try:
+                    keys.append(decode_storage_key(path.name))
+                except ValueError as error:
+                    logger.warning("Ignoring invalid storage entry", path=path, error=str(error))
+        legacy_entries = [
+            path
+            for path in self.base_path.iterdir()
+            if path.is_dir()
+            and not path.name.startswith((".", KEY_ENCODING_PREFIX))
+            and any(path.glob("year=*/**/data.parquet"))
+        ]
+        if legacy_entries:
+            logger.warning(
+                "Legacy Hive storage entries require explicit migration",
+                base_path=self.base_path,
+                entries=len(legacy_entries),
+            )
         return sorted(keys)
 
     def exists(self, key: str) -> bool:

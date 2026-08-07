@@ -20,7 +20,7 @@ class TestPathValidator:
         ]
 
         for key in valid_keys:
-            asset_class, frequency, symbol = PathValidator.validate_storage_key(key)
+            asset_class, frequency, symbol = PathValidator.parse_storage_key(key)
             assert asset_class
             assert frequency
             assert symbol
@@ -47,7 +47,7 @@ class TestPathValidator:
 
         for key in dangerous_keys:
             with pytest.raises(PathTraversalError):
-                PathValidator.validate_storage_key(key)
+                PathValidator.parse_storage_key(key)
 
     def test_url_encoded_attacks(self):
         """Test that URL-encoded path traversal is detected."""
@@ -63,7 +63,7 @@ class TestPathValidator:
 
         for key in encoded_attacks:
             with pytest.raises((PathTraversalError, ValueError)):
-                PathValidator.validate_storage_key(key)
+                PathValidator.parse_storage_key(key)
 
     def test_invalid_key_formats(self):
         """Test that invalid key formats are rejected."""
@@ -84,7 +84,7 @@ class TestPathValidator:
 
         for key in invalid_keys:
             with pytest.raises((ValueError, PathTraversalError)):
-                PathValidator.validate_storage_key(key)
+                PathValidator.parse_storage_key(key)
 
     def test_special_characters_rejected(self):
         """Test that special characters are rejected."""
@@ -104,7 +104,7 @@ class TestPathValidator:
 
         for key in special_char_keys:
             with pytest.raises((PathTraversalError, ValueError)):
-                PathValidator.validate_storage_key(key)
+                PathValidator.parse_storage_key(key)
 
     def test_control_characters_rejected(self):
         """Test that control characters are rejected."""
@@ -119,7 +119,7 @@ class TestPathValidator:
 
         for key in control_char_keys:
             with pytest.raises((PathTraversalError, ValueError)):
-                PathValidator.validate_storage_key(key)
+                PathValidator.parse_storage_key(key)
 
     def test_component_validation(self):
         """Test individual component validation."""

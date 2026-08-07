@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+import structlog
 
 from .backend import StorageBackend, StorageConfig
 from .keys import KEY_ENCODING_PREFIX, decode_storage_key
+
+logger = structlog.get_logger()
 
 
 class FlatStorage(StorageBackend):
@@ -124,7 +127,15 @@ class FlatStorage(StorageBackend):
         keys = []
         for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
             if path.is_dir() and (path / "CURRENT").is_file():
-                keys.append(decode_storage_key(path.name))
+                try:
+                    keys.append(decode_storage_key(path.name))
+                except ValueError as error:
+                    logger.warning("Ignoring invalid storage entry", path=path, error=str(error))
+        if any(self.base_path.glob("*.parquet")):
+            logger.warning(
+                "Legacy flat storage entries require explicit migration",
+                base_path=self.base_path,
+            )
         return sorted(keys)
 
     def exists(self, key: str) -> bool:

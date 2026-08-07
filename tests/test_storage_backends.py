@@ -63,6 +63,17 @@ class TestStorageBackends:
         assert set(df.columns) == set(sample_data.columns)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_relative_base_path_is_resolved(self, tmp_path, monkeypatch, sample_data, strategy):
+        """Relative storage roots support a complete write and read cycle."""
+        monkeypatch.chdir(tmp_path)
+        storage = create_storage("relative-data", strategy=strategy)
+
+        storage.write(sample_data.lazy(), "test_key")
+
+        assert storage.base_path == (tmp_path / "relative-data").resolve()
+        assert len(storage.read("test_key").collect()) == len(sample_data)
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_date_filtering(self, temp_dir, sample_data, strategy):
         """Test reading with date filters."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -122,6 +133,17 @@ class TestStorageBackends:
         assert len(keys) == 2
         assert "key1" in keys
         assert "key2" in keys
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_list_keys_ignores_malformed_encoded_entry(self, temp_dir, sample_data, strategy):
+        """One malformed physical entry does not hide valid logical keys."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        storage.write(sample_data.lazy(), "valid_key")
+        malformed = storage.base_path / "k1_invalid$"
+        malformed.mkdir()
+        (malformed / "CURRENT").write_text("not-a-commit\n", encoding="utf-8")
+
+        assert storage.list_keys() == ["valid_key"]
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_logical_keys_do_not_alias(self, temp_dir, strategy):

@@ -66,7 +66,7 @@ class ChunkedStorage:
             chunk_size_days: Number of days per chunk
             compression: Compression algorithm for Parquet files
         """
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path).expanduser().resolve()
         self.chunk_size_days = chunk_size_days
         self.compression = compression
 
@@ -545,10 +545,23 @@ class ChunkedStorage:
         # List all index files
         for index_file in self.metadata_path.glob(f"{KEY_ENCODING_PREFIX}*_index.json"):
             encoded_key = index_file.name.removesuffix("_index.json")
-            key = decode_storage_key(encoded_key)
+            try:
+                key = decode_storage_key(encoded_key)
+            except ValueError as error:
+                logger.warning("Ignoring invalid chunk index", path=index_file, error=str(error))
+                continue
 
             if not prefix or key.startswith(prefix):
                 keys.append(key)
+
+        if any(
+            not path.name.startswith(KEY_ENCODING_PREFIX)
+            for path in self.metadata_path.glob("*_index.json")
+        ):
+            logger.warning(
+                "Legacy chunked storage entries require explicit migration",
+                base_path=self.base_path,
+            )
 
         return sorted(keys)
 
