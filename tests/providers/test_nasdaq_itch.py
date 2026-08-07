@@ -204,6 +204,82 @@ class TestDownload:
         # Partial file should be cleaned up
         assert not expected_path.exists()
 
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_download_uses_bounded_network_timeouts(self, mock_stream, tmp_path):
+        """Every network phase has a finite timeout."""
+        mock_response = MagicMock(status_code=200)
+        mock_response.headers = {"content-length": "4"}
+        mock_response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = mock_response
+
+        provider = ITCHSampleProvider(download_path=tmp_path)
+        provider.download("01302019", verify_size=False)
+
+        timeout = mock_stream.call_args.kwargs["timeout"]
+        assert timeout is not None
+        assert timeout.connect == provider.CONNECT_TIMEOUT
+        assert timeout.read == provider.READ_TIMEOUT
+        assert timeout.write == provider.WRITE_TIMEOUT
+        assert timeout.pool == provider.POOL_TIMEOUT
+
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_download_enforces_overall_elapsed_time(self, mock_stream, tmp_path):
+        """A slow but active stream cannot exceed the total operation bound."""
+        mock_response = MagicMock(status_code=200)
+        mock_response.headers = {"content-length": "4"}
+        mock_response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = mock_response
+
+        provider = ITCHSampleProvider(download_path=tmp_path)
+        with (
+            patch(
+                "ml4t.data.providers.nasdaq_itch.monotonic",
+                side_effect=[0.0, provider.MAX_DOWNLOAD_SECONDS + 1],
+            ),
+            pytest.raises(RuntimeError, match="download exceeded"),
+        ):
+            provider.download("01302019", verify_size=False)
+
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_failed_download_preserves_destination_and_resumes_partial(self, mock_stream, tmp_path):
+        """A failed stream preserves existing data and its safe resume checkpoint."""
+        import httpx
+
+        destination = tmp_path / "01302019.NASDAQ_ITCH50.gz"
+        destination.write_bytes(b"original")
+        partial = destination.with_name(f"{destination.name}.part")
+
+        def interrupted_chunks():
+            yield b"new-"
+            raise httpx.ReadTimeout("stalled")
+
+        failed_response = MagicMock(status_code=200)
+        failed_response.headers = {"content-length": "8"}
+        failed_response.iter_bytes.return_value = interrupted_chunks()
+
+        resumed_response = MagicMock(status_code=206)
+        resumed_response.headers = {
+            "content-length": "4",
+            "content-range": "bytes 4-7/8",
+        }
+        resumed_response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = failed_response
+
+        provider = ITCHSampleProvider(download_path=tmp_path)
+        with pytest.raises(RuntimeError, match="Download failed"):
+            provider.download("01302019", verify_size=False)
+
+        assert destination.read_bytes() == b"original"
+        assert partial.read_bytes() == b"new-"
+
+        mock_stream.return_value.__enter__.return_value = resumed_response
+        result = provider.download("01302019", verify_size=False)
+
+        assert result == destination
+        assert destination.read_bytes() == b"new-data"
+        assert not partial.exists()
+        assert mock_stream.call_args.kwargs["headers"] == {"Range": "bytes=4-"}
+
 
 class TestLoadParsedMessages:
     """Tests for load_parsed_messages method."""

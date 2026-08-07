@@ -9,7 +9,9 @@ Data Source: https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from time import monotonic
 from typing import ClassVar
 from urllib.parse import urljoin
 
@@ -120,6 +122,11 @@ class ITCHSampleProvider:
         "10302019.NASDAQ_ITCH50.gz": 4_155_000_000,  # ~3.87 GB
         "12302019.NASDAQ_ITCH50.gz": 3_780_000_000,  # ~3.52 GB
     }
+    CONNECT_TIMEOUT: ClassVar[float] = 30.0
+    READ_TIMEOUT: ClassVar[float] = 60.0
+    WRITE_TIMEOUT: ClassVar[float] = 60.0
+    POOL_TIMEOUT: ClassVar[float] = 30.0
+    MAX_DOWNLOAD_SECONDS: ClassVar[float] = 6 * 60 * 60
 
     @classmethod
     def default_download_path(cls) -> Path:
@@ -227,7 +234,7 @@ class ITCHSampleProvider:
         date_or_filename: str,
         output_path: str | Path | None = None,
         verify_size: bool = True,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> Path:
         """
         Download an ITCH sample file from NASDAQ.
@@ -266,6 +273,8 @@ class ITCHSampleProvider:
         else:
             self.download_path.mkdir(parents=True, exist_ok=True)
             out_path = self.download_path / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path = out_path.with_name(f"{out_path.name}.part")
 
         # Check if already downloaded
         if out_path.exists():
@@ -293,15 +302,42 @@ class ITCHSampleProvider:
             expected_size_gb=round(self.KNOWN_FILES[filename] / 1e9, 2),
         )
 
+        resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
+        headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
+        timeout = httpx.Timeout(
+            connect=self.CONNECT_TIMEOUT,
+            read=self.READ_TIMEOUT,
+            write=self.WRITE_TIMEOUT,
+            pool=self.POOL_TIMEOUT,
+        )
+        started_at = monotonic()
+
         try:
-            with httpx.stream("GET", url, timeout=None, follow_redirects=True) as response:
+            with httpx.stream(
+                "GET",
+                url,
+                headers=headers,
+                timeout=timeout,
+                follow_redirects=True,
+            ) as response:
                 response.raise_for_status()
 
-                total_size = int(response.headers.get("content-length", 0))
-                downloaded = 0
+                resumed = resume_offset > 0 and response.status_code == 206
+                if resumed:
+                    content_range = response.headers.get("content-range", "")
+                    if not content_range.startswith(f"bytes {resume_offset}-"):
+                        raise RuntimeError("server returned an invalid resume range")
+                downloaded = resume_offset if resumed else 0
+                content_length = int(response.headers.get("content-length", 0))
+                total_size = downloaded + content_length if resumed else content_length
+                mode = "ab" if resumed else "wb"
 
-                with open(out_path, "wb") as f:
+                with partial_path.open(mode) as f:
                     for chunk in response.iter_bytes(chunk_size=8192 * 1024):  # 8MB chunks
+                        if monotonic() - started_at > self.MAX_DOWNLOAD_SECONDS:
+                            raise RuntimeError(
+                                f"download exceeded {self.MAX_DOWNLOAD_SECONDS:.0f} seconds"
+                            )
                         f.write(chunk)
                         downloaded += len(chunk)
                         if progress_callback:
@@ -315,22 +351,20 @@ class ITCHSampleProvider:
                                 total_gb=round(total_size / 1e9, 2) if total_size else "unknown",
                             )
 
-        except httpx.HTTPError as e:
-            # Clean up partial download
-            if out_path.exists():
-                out_path.unlink()
+        except (httpx.HTTPError, OSError, ValueError) as e:
             raise RuntimeError(f"Download failed: {e}") from e
 
-        # Verify size
+        actual_size = partial_path.stat().st_size
         if verify_size:
-            actual_size = out_path.stat().st_size
             expected_size = self.KNOWN_FILES[filename]
             if abs(actual_size - expected_size) > 1e8:  # More than 100MB difference
-                self.logger.warning(
-                    "Downloaded file size differs from expected",
-                    actual_gb=round(actual_size / 1e9, 2),
-                    expected_gb=round(expected_size / 1e9, 2),
+                raise RuntimeError(
+                    "Downloaded file size differs from expected: "
+                    f"actual={actual_size}, expected={expected_size}; "
+                    f"partial retained at {partial_path}"
                 )
+
+        partial_path.replace(out_path)
 
         self.logger.info(
             "Download complete",
