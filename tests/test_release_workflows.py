@@ -83,15 +83,22 @@ def test_ci_does_not_run_an_empty_optional_dependency_lane() -> None:
 def test_provider_contract_jobs_isolate_credentials() -> None:
     jobs = _load("provider-contracts.yml")["jobs"]
     credentials = {
-        "cryptocompare": "CRYPTOCOMPARE_API_KEY",
-        "databento": "DATABENTO_API_KEY",
-        "oanda": "OANDA_API_KEY",
+        "alpaca": {"ALPACA_API_KEY", "ALPACA_API_SECRET"},
+        "cryptocompare": {"CRYPTOCOMPARE_API_KEY"},
+        "databento": {"DATABENTO_API_KEY"},
+        "finnhub": {"FINNHUB_API_KEY"},
+        "fred": {"FRED_API_KEY"},
+        "massive": {"MASSIVE_API_KEY"},
+        "oanda": {"OANDA_API_KEY"},
+        "tiingo": {"TIINGO_API_KEY"},
     }
+    all_credentials = set().union(*credentials.values())
 
-    for provider, expected_credential in credentials.items():
+    for provider, expected_credentials in credentials.items():
         serialized = yaml.safe_dump(jobs[provider])
-        assert expected_credential in serialized
-        for other_credential in set(credentials.values()) - {expected_credential}:
+        for expected_credential in expected_credentials:
+            assert expected_credential in serialized
+        for other_credential in all_credentials - expected_credentials:
             assert other_credential not in serialized
 
 
@@ -105,7 +112,17 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
         if step.get("name") == "Run public live integrations"
     )
 
-    assert "public" in options
+    assert set(options) == {
+        "alpaca",
+        "cryptocompare",
+        "databento",
+        "finnhub",
+        "fred",
+        "massive",
+        "oanda",
+        "public",
+        "tiingo",
+    }
     for contract in (
         "test_binance_public.py::TestBinancePublicProvider::test_fetch_daily_spot_btc",
         "test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc",
