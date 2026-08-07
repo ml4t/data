@@ -30,6 +30,18 @@ from ml4t.data.providers.base import BaseProvider
 logger = structlog.get_logger()
 
 
+async def _gather_or_cancel[ResultT](awaitables: list[Awaitable[ResultT]]) -> list[ResultT]:
+    """Collect concurrent results and finish cancelling every sibling after a failure."""
+    tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 class BinancePublicProvider(BaseProvider):
     """Provider for bulk historical data from Binance Public Data repository.
 
@@ -1404,7 +1416,7 @@ class BinancePublicProvider(BaseProvider):
                     return exc
 
         tasks = [fetch_one(date, url) for date, url in urls]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         # Collect successful results in order
         all_data: list[pl.DataFrame] = [first_df]
@@ -1569,7 +1581,7 @@ class BinancePublicProvider(BaseProvider):
                 return None
 
         tasks = [fetch_symbol(symbol) for symbol in symbols]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         all_data = [df for df in results if df is not None and not df.is_empty()]
 
@@ -1770,7 +1782,7 @@ class BinancePublicProvider(BaseProvider):
                     return exc
 
         tasks = [fetch_month(year, month) for year, month in months]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         all_data: list[pl.DataFrame] = []
         for i, result in enumerate(results):
@@ -1847,7 +1859,7 @@ class BinancePublicProvider(BaseProvider):
                 return None
 
         tasks = [fetch_symbol(s) for s in symbols]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         all_data: list[pl.DataFrame] = []
         for df in results:

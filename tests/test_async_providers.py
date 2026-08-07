@@ -168,27 +168,90 @@ class TestBinancePublicProviderAsync:
 
     @pytest.mark.asyncio
     async def test_fetch_daily_data_async_does_not_swallow_base_exception(self, sample_ohlcv_data):
-        """Cancellation-class failures propagate from concurrent downloads."""
+        """Cancellation-class failures propagate after sibling downloads stop."""
 
         class WorkerStopped(BaseException):
             pass
 
         provider = BinancePublicProvider()
         call_count = 0
+        concurrent_started = asyncio.Event()
+        never_complete = asyncio.Event()
+        active_calls: set[int] = set()
+        cancelled_calls: set[int] = set()
 
         async def mock_download(url):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 return sample_ohlcv_data
-            raise WorkerStopped("stopped")
+            call_id = call_count - 1
+            active_calls.add(call_id)
+            if len(active_calls) == 5:
+                concurrent_started.set()
+            await concurrent_started.wait()
+            if call_id == 2:
+                raise WorkerStopped("stopped")
+            try:
+                await never_complete.wait()
+            except asyncio.CancelledError:
+                cancelled_calls.add(call_id)
+                raise
 
         with patch.object(provider, "_download_and_parse_zip_async", side_effect=mock_download):
             with pytest.raises(WorkerStopped, match="stopped"):
                 await provider._fetch_daily_data_async(
-                    "BTCUSDT", "1d", datetime(2024, 1, 1), datetime(2024, 1, 2)
+                    "BTCUSDT", "1d", datetime(2024, 1, 1), datetime(2024, 1, 6)
                 )
 
+        assert active_calls == {1, 2, 3, 4, 5}
+        assert cancelled_calls == {1, 3, 4, 5}
+        await provider.close_async()
+
+    @pytest.mark.asyncio
+    async def test_fetch_premium_index_async_cancels_siblings_on_base_exception(self):
+        """Premium-index failures propagate after all monthly siblings stop."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = BinancePublicProvider(market="futures")
+        concurrent_started = asyncio.Event()
+        never_complete = asyncio.Event()
+        active_calls: set[int] = set()
+        cancelled_calls: set[int] = set()
+        call_count = 0
+
+        async def mock_download(url, symbol):
+            nonlocal call_count
+            call_count += 1
+            call_id = call_count
+            active_calls.add(call_id)
+            if len(active_calls) == 5:
+                concurrent_started.set()
+            await concurrent_started.wait()
+            if call_id == 2:
+                raise WorkerStopped("stopped")
+            try:
+                await never_complete.wait()
+            except asyncio.CancelledError:
+                cancelled_calls.add(call_id)
+                raise
+
+        with patch.object(
+            provider,
+            "_download_and_parse_premium_index_zip_async",
+            side_effect=mock_download,
+        ):
+            with pytest.raises(WorkerStopped, match="stopped"):
+                await provider.fetch_premium_index_async(
+                    "BTCUSDT",
+                    "2024-01-01",
+                    "2024-05-31",
+                )
+
+        assert active_calls == {1, 2, 3, 4, 5}
+        assert cancelled_calls == {1, 3, 4, 5}
         await provider.close_async()
 
     @pytest.mark.asyncio
