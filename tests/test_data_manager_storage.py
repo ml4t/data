@@ -343,6 +343,20 @@ class TestDataManagerUpdate:
         # Should not have duplicates
         assert stored_df["timestamp"].is_unique().all()
 
+    def test_update_rejects_all_null_merged_timestamps(self, manager, initial_data, new_data):
+        """Reject invalid merged data before writing empty timestamp metadata."""
+        manager.import_data(initial_data, symbol="AAPL", provider="mock")
+        invalid_merged = initial_data.head(1).with_columns(
+            pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias("timestamp")
+        )
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data),
+            patch.object(manager._storage_manager, "_merge_data", return_value=invalid_merged),
+            pytest.raises(TypeError, match="non-null Datetime"),
+        ):
+            manager.update("AAPL", provider="mock", fill_gaps=False)
+
     def test_merge_fills_optional_equity_columns_on_both_sides(self, manager):
         """Optional equity columns should get defaults regardless of which frame lacks them."""
         existing = pl.DataFrame(

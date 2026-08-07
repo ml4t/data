@@ -610,8 +610,7 @@ class StorageManager:
             # Update metadata with new range
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = merged_df["timestamp"].min()
-            max_ts = merged_df["timestamp"].max()
+            min_ts, max_ts = _timestamp_bounds(merged_df)
 
             updated_metadata = Metadata(
                 provider=provider or "auto",
@@ -620,8 +619,8 @@ class StorageManager:
                 bar_type="time",
                 bar_params={"frequency": frequency},
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
                 attributes={
                     "last_update": datetime.now().isoformat(),
