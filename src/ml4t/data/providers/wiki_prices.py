@@ -622,18 +622,12 @@ class WikiPricesProvider(BaseProvider):
                 "qopts.export": "true",
             }
 
-            try:
-                response = client.get(cls.NASDAQ_EXPORT_URL, params=params)
-                response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    raise ValueError("Invalid API key. Check your NASDAQ Data Link API key.") from e
-                elif e.response.status_code == 429:
-                    raise RuntimeError("Rate limited by NASDAQ Data Link. Try again later.") from e
-                else:
-                    raise RuntimeError(
-                        f"Export request failed: {e.response.status_code} - {e.response.text}"
-                    ) from e
+            response = cls._checked_download_request(
+                client,
+                cls.NASDAQ_EXPORT_URL,
+                params=params,
+                nasdaq_api=True,
+            )
 
             # Step 2: Parse export metadata CSV to get download link
             meta_df = pl.read_csv(BytesIO(response.content))
@@ -656,8 +650,12 @@ class WikiPricesProvider(BaseProvider):
                 time.sleep(wait_interval)
                 total_wait += wait_interval
 
-                response = client.get(cls.NASDAQ_EXPORT_URL, params=params)
-                response.raise_for_status()
+                response = cls._checked_download_request(
+                    client,
+                    cls.NASDAQ_EXPORT_URL,
+                    params=params,
+                    nasdaq_api=True,
+                )
                 meta_df = pl.read_csv(BytesIO(response.content))
                 download_url = meta_df["file.link"][0]
                 file_status = (
@@ -669,8 +667,11 @@ class WikiPricesProvider(BaseProvider):
 
             # Step 4: Download the ZIP file from S3
             log.info("Downloading ZIP file from S3 (this may take a few minutes)...")
-            zip_response = client.get(download_url, timeout=600.0)
-            zip_response.raise_for_status()
+            zip_response = cls._checked_download_request(
+                client,
+                download_url,
+                timeout=600.0,
+            )
 
             log.info(f"Downloaded {len(zip_response.content) / 1024 / 1024:.1f} MB")
 
@@ -773,3 +774,32 @@ class WikiPricesProvider(BaseProvider):
                 value=value,
             )
         return value.strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _checked_download_request(
+        client: httpx.Client,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        timeout: float | None = None,
+        nasdaq_api: bool = False,
+    ) -> httpx.Response:
+        """Issue a download request without exposing credential-bearing URLs in errors."""
+        request_kwargs: dict[str, Any] = {}
+        if params is not None:
+            request_kwargs["params"] = params
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
+        try:
+            response = client.get(url, **request_kwargs)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            status_code = error.response.status_code
+            if nasdaq_api and status_code == 401:
+                raise ValueError("Invalid API key. Check your NASDAQ Data Link API key.") from None
+            if nasdaq_api and status_code == 429:
+                raise RuntimeError("Rate limited by NASDAQ Data Link. Try again later.") from None
+            raise RuntimeError(f"Download request failed with HTTP {status_code}") from None
+        except httpx.RequestError:
+            raise RuntimeError("Download request failed due to a network error") from None
+        return response

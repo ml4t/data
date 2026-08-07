@@ -540,9 +540,44 @@ class TestDownload:
 
         captured = capsys.readouterr()
         combined_output = captured.out + captured.err
+        assert "Starting Wiki Prices download" in combined_output
         assert api_key not in combined_output
         assert api_key[:8] not in combined_output
         assert api_key[-8:] not in combined_output
+
+    def test_download_poll_failure_does_not_expose_api_key(self, tmp_path, capsys):
+        """Polling errors omit the credential-bearing request URL and exception cause."""
+        import httpx
+
+        api_key = "polling-SECRET-canary-value"
+        generating = MagicMock()
+        generating.content = (
+            b"file.link,file.status\nhttps://download.example/export.zip,generating\n"
+        )
+        generating.raise_for_status.return_value = None
+        request = httpx.Request(
+            "GET",
+            f"{WikiPricesProvider.NASDAQ_EXPORT_URL}?api_key={api_key}&qopts.export=true",
+        )
+        failed_poll = httpx.Response(503, request=request)
+
+        with (
+            patch("httpx.Client") as mock_client,
+            patch("ml4t.data.providers.wiki_prices.time.sleep"),
+        ):
+            mock_client.return_value.__enter__.return_value.get.side_effect = [
+                generating,
+                failed_poll,
+            ]
+
+            with pytest.raises(RuntimeError, match="HTTP 503") as error:
+                WikiPricesProvider.download(output_path=tmp_path, api_key=api_key)
+
+        captured = capsys.readouterr()
+        combined_output = captured.out + captured.err
+        assert error.value.__cause__ is None
+        assert api_key not in str(error.value)
+        assert api_key not in combined_output
 
 
 class TestResolveApiKey:
