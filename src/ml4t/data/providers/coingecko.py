@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import UTC, datetime, timedelta
-from typing import ClassVar
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, ClassVar
 
 import httpx
 import polars as pl
@@ -290,34 +290,49 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             if df.is_empty():
                 return df
 
-            volume_start = (start_date + timedelta(days=1)).isoformat()
-            volume_end = (end_date + timedelta(days=1)).isoformat()
             self._acquire_rate_limit()
             volumes = self._fetch_daily_volumes(
                 coin_id,
-                volume_start,
-                volume_end,
+                start_date + timedelta(days=1),
+                end_date + timedelta(days=1),
                 vs_currency,
             )
             df = self._join_daily_volumes(df, volumes, coin_id)
 
         return df
 
+    @staticmethod
+    def _epoch_seconds(day: date) -> int:
+        """Return the UNIX timestamp of a UTC day's opening boundary."""
+        return int(datetime.combine(day, time.min, tzinfo=UTC).timestamp())
+
+    def _volume_range_params(
+        self,
+        start: date,
+        end: date,
+        vs_currency: str,
+    ) -> dict[str, Any]:
+        """Build market-chart range parameters bounded by UTC day boundaries."""
+        params: dict[str, Any] = {
+            "vs_currency": vs_currency,
+            "from": self._epoch_seconds(start),
+            "to": self._epoch_seconds(end),
+        }
+        # `interval` is a paid-plan parameter; free plans infer granularity from the range.
+        if self.use_pro:
+            params["interval"] = "daily"
+        return params
+
     def _fetch_daily_volumes(
         self,
         coin_id: str,
-        start: str,
-        end: str,
+        start: date,
+        end: date,
         vs_currency: str = "usd",
     ) -> pl.DataFrame:
         """Fetch CoinGecko's 24-hour volume observations at UTC daily boundaries."""
         endpoint = f"{self.base_url}/coins/{coin_id}/market_chart/range"
-        params = {
-            "vs_currency": vs_currency,
-            "from": start,
-            "to": end,
-            "interval": "daily",
-        }
+        params = self._volume_range_params(start, end, vs_currency)
         try:
             response = self.session.get(endpoint, params=params)
             response.raise_for_status()
@@ -615,13 +630,11 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             if df.is_empty():
                 return df
 
-            volume_start = (start_date + timedelta(days=1)).isoformat()
-            volume_end = (end_date + timedelta(days=1)).isoformat()
             await asyncio.to_thread(self._acquire_rate_limit)
             volumes = await self._fetch_daily_volumes_async(
                 coin_id,
-                volume_start,
-                volume_end,
+                start_date + timedelta(days=1),
+                end_date + timedelta(days=1),
                 vs_currency,
             )
             df = self._join_daily_volumes(df, volumes, coin_id)
@@ -631,18 +644,13 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
     async def _fetch_daily_volumes_async(
         self,
         coin_id: str,
-        start: str,
-        end: str,
+        start: date,
+        end: date,
         vs_currency: str = "usd",
     ) -> pl.DataFrame:
         """Fetch UTC daily volume observations without blocking the event loop."""
         endpoint = f"{self.base_url}/coins/{coin_id}/market_chart/range"
-        params = {
-            "vs_currency": vs_currency,
-            "from": start,
-            "to": end,
-            "interval": "daily",
-        }
+        params = self._volume_range_params(start, end, vs_currency)
         try:
             response = await self._aget(endpoint, params=params)
             response.raise_for_status()

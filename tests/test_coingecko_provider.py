@@ -1,6 +1,6 @@
 """Tests for CoinGecko provider module."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -357,23 +357,22 @@ class TestFetchOhlc:
             }
         ]
 
-    def test_fetch_daily_volumes_requests_explicit_daily_interval(self, provider):
-        """Test daily volume comes from the bounded market-chart range endpoint."""
+    def test_fetch_daily_volumes_requests_epoch_second_bounds(self, provider):
+        """Test the market-chart range endpoint receives UNIX seconds, not date strings."""
         response = MagicMock()
         response.json.return_value = {
             "total_volumes": [[1704153600000, 1234.5], [1704240000000, 2345.6]]
         }
 
         with patch.object(provider.session, "get", return_value=response) as get:
-            result = provider._fetch_daily_volumes("bitcoin", "2024-01-01", "2024-01-02")
+            result = provider._fetch_daily_volumes("bitcoin", date(2024, 1, 1), date(2024, 1, 2))
 
         get.assert_called_once_with(
             "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range",
             params={
                 "vs_currency": "usd",
-                "from": "2024-01-01",
-                "to": "2024-01-02",
-                "interval": "daily",
+                "from": 1704067200,
+                "to": 1704153600,
             },
         )
         assert result["volume"].to_list() == [1234.5, 2345.6]
@@ -381,6 +380,25 @@ class TestFetchOhlc:
             datetime(2024, 1, 1, tzinfo=UTC),
             datetime(2024, 1, 2, tzinfo=UTC),
         ]
+
+    def test_fetch_daily_volumes_requests_daily_interval_only_on_pro(self):
+        """Test `interval` is sent only where the plan supports it."""
+        provider = CoinGeckoProvider(api_key="pro-key", use_pro=True)
+        response = MagicMock()
+        response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
+
+        with patch.object(provider.session, "get", return_value=response) as get:
+            provider._fetch_daily_volumes("bitcoin", date(2024, 1, 1), date(2024, 1, 1))
+
+        get.assert_called_once_with(
+            "https://pro-api.coingecko.com/api/v3/coins/bitcoin/market_chart/range",
+            params={
+                "vs_currency": "usd",
+                "from": 1704067200,
+                "to": 1704067200,
+                "interval": "daily",
+            },
+        )
 
     def test_parse_daily_volumes_rejects_missing_series(self, provider):
         """A response without volume observations is not accepted as OHLCV."""
@@ -414,12 +432,19 @@ class TestFetchOhlc:
 
         with patch.object(provider, "_aget", new=AsyncMock(return_value=response)) as get:
             result = await provider._fetch_daily_volumes_async(
-                "bitcoin", "2024-01-01", "2024-01-01"
+                "bitcoin", date(2024, 1, 1), date(2024, 1, 1)
             )
 
         assert result["volume"].to_list() == [1234.5]
         assert result["timestamp"].to_list() == [datetime(2024, 1, 1, tzinfo=UTC)]
-        get.assert_awaited_once()
+        get.assert_awaited_once_with(
+            "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range",
+            params={
+                "vs_currency": "usd",
+                "from": 1704067200,
+                "to": 1704067200,
+            },
+        )
 
     def test_fetch_ohlc_joins_completed_daily_volume(self, provider):
         """OHLC close times and trailing volumes map to the completed UTC date."""
