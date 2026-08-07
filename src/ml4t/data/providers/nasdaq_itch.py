@@ -284,6 +284,7 @@ class ITCHSampleProvider:
         if filename not in self.KNOWN_FILES:
             available = ", ".join(self.KNOWN_FILES.keys())
             raise ValueError(f"Unknown ITCH file: {filename}\nAvailable files: {available}")
+        expected_size = self.KNOWN_FILES[filename]
 
         # Resolve output path
         if output_path:
@@ -297,7 +298,6 @@ class ITCHSampleProvider:
         # Check if already downloaded
         if out_path.exists():
             existing_size = out_path.stat().st_size
-            expected_size = self.KNOWN_FILES[filename]
             if existing_size == expected_size:
                 self.logger.info(
                     "File already exists, skipping download",
@@ -317,18 +317,25 @@ class ITCHSampleProvider:
         self.logger.info(
             "Starting ITCH download",
             url=url,
-            expected_size_gb=round(self.KNOWN_FILES[filename] / 1e9, 2),
+            expected_size_gb=round(expected_size / 1e9, 2),
         )
 
         resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
-        expected_size = self.KNOWN_FILES[filename]
-        if verify_size and resume_offset >= expected_size:
+        if verify_size and resume_offset == expected_size:
+            partial_path.replace(out_path)
+            self.logger.info(
+                "Completed ITCH download from resume checkpoint",
+                path=str(out_path),
+                size_gb=round(expected_size / 1e9, 2),
+            )
+            return out_path
+        if verify_size and resume_offset > expected_size:
             self.logger.warning(
                 "Discarding invalid ITCH resume checkpoint",
                 partial_size=resume_offset,
                 expected_size=expected_size,
             )
-            partial_path.unlink()
+            partial_path.unlink(missing_ok=True)
             resume_offset = 0
         headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
         timeout = httpx.Timeout(
@@ -384,11 +391,19 @@ class ITCHSampleProvider:
         actual_size = partial_path.stat().st_size
         if verify_size:
             if actual_size != expected_size:
-                partial_path.unlink()
+                made_progress = actual_size > resume_offset
+                resumable = actual_size < expected_size and made_progress
+                if not resumable:
+                    partial_path.unlink(missing_ok=True)
+                disposition = (
+                    f"partial retained at {partial_path} for a ranged retry"
+                    if resumable
+                    else "partial file discarded so the next attempt starts cleanly"
+                )
                 raise RuntimeError(
                     "Downloaded file size differs from expected: "
                     f"actual={actual_size}, expected={expected_size}; "
-                    "partial file discarded so the next attempt starts cleanly"
+                    f"{disposition}"
                 )
 
         partial_path.replace(out_path)

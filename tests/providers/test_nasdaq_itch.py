@@ -187,12 +187,13 @@ class TestDownload:
         assert destination.read_bytes() == b"data"
 
     @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
-    def test_size_mismatch_preserves_destination_and_restarts(
+    def test_size_mismatch_preserves_destination_and_resumes(
         self,
         mock_stream,
         monkeypatch,
         tmp_path,
     ):
+        """Keep a progressing short download and resume it without replacing the destination."""
         filename = "01302019.NASDAQ_ITCH50.gz"
         monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 5)
         destination = tmp_path / filename
@@ -208,12 +209,54 @@ class TestDownload:
 
         partial = destination.with_name(f"{destination.name}.part")
         assert destination.read_bytes() == b"old"
+        assert partial.read_bytes() == b"data"
+
+        response.status_code = 206
+        response.headers = {"content-length": "1", "content-range": "bytes 4-4/5"}
+        response.iter_bytes.return_value = [b"x"]
+        result = provider.download("01302019")
+
+        assert mock_stream.call_args.kwargs["headers"] == {"Range": "bytes=4-"}
+        assert result == destination
+        assert destination.read_bytes() == b"datax"
         assert not partial.exists()
 
-        with pytest.raises(RuntimeError, match="differs from expected"):
-            provider.download("01302019")
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_oversized_resume_checkpoint_restarts(self, mock_stream, monkeypatch, tmp_path):
+        """Discard an oversized checkpoint before starting a fresh request."""
+        filename = "01302019.NASDAQ_ITCH50.gz"
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 4)
+        partial = tmp_path / f"{filename}.part"
+        partial.write_bytes(b"invalid")
+        response = MagicMock(status_code=200)
+        response.headers = {"content-length": "4"}
+        response.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.return_value = response
+
+        result = ITCHSampleProvider(download_path=tmp_path).download("01302019")
 
         assert mock_stream.call_args.kwargs["headers"] == {}
+        assert result.read_bytes() == b"data"
+        assert not partial.exists()
+
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_complete_resume_checkpoint_requires_no_request(
+        self,
+        mock_stream,
+        monkeypatch,
+        tmp_path,
+    ):
+        """Publish an exact-size checkpoint without downloading it again."""
+        filename = "01302019.NASDAQ_ITCH50.gz"
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 4)
+        partial = tmp_path / f"{filename}.part"
+        partial.write_bytes(b"data")
+
+        result = ITCHSampleProvider(download_path=tmp_path).download("01302019")
+
+        mock_stream.assert_not_called()
+        assert result.read_bytes() == b"data"
+        assert not partial.exists()
 
     @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
     def test_download_creates_directory(self, mock_stream, tmp_path):
