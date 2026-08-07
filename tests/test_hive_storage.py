@@ -311,6 +311,19 @@ class TestHiveStorageIncrementalMethods:
         result = storage.get_latest_timestamp("AAPL", "yahoo")
         assert result is None
 
+    def test_get_latest_timestamp_empty_generation(self, storage):
+        """Return no timestamp for a committed generation with no partitions."""
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series([], dtype=pl.Datetime("us", "UTC")),
+                "close": pl.Series([], dtype=pl.Float64),
+            }
+        )
+        storage.write(df, "yahoo/AAPL")
+
+        assert storage.exists("yahoo/AAPL")
+        assert storage.get_latest_timestamp("AAPL", "yahoo") is None
+
     def test_get_latest_timestamp_with_data(self, storage):
         """Test getting latest timestamp with existing data."""
         df = pl.DataFrame(

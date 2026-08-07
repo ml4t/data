@@ -436,7 +436,10 @@ class HiveStorage(StorageBackend):
         if not self.exists(key):
             return None
 
-        df = self.read(key).select("timestamp").collect()
+        stored = self.read(key)
+        if "timestamp" not in stored.collect_schema().names():
+            return None
+        df = stored.select("timestamp").collect()
         if df.is_empty():
             return None
         latest = df["timestamp"].max()
