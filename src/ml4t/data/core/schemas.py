@@ -20,11 +20,24 @@ Schema Design:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, ClassVar
 
 import polars as pl
 
 PolarsDataType = pl.DataType | type[pl.DataType]
+
+
+def timestamp_bounds(df: pl.DataFrame) -> tuple[datetime, datetime]:
+    """Return validated bounds for the canonical Datetime timestamp column."""
+    timestamp = df.get_column("timestamp")
+    if not isinstance(timestamp.dtype, pl.Datetime):
+        raise ValueError(f"'timestamp' must be a Datetime column, got {timestamp.dtype}")
+    start = timestamp.min()
+    end = timestamp.max()
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise ValueError("'timestamp' must contain non-null Datetime values")
+    return start, end
 
 
 def _build_fill_expression(name: str, value: Any, dtype: PolarsDataType | None) -> pl.Expr:

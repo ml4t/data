@@ -10,28 +10,20 @@ This module handles data storage operations including:
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import structlog
 from tenacity import RetryError
 
-from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.utils.conversion import pandas_to_polars
 
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
 
 logger = structlog.get_logger()
-
-
-def _timestamp_bounds(df: pl.DataFrame) -> tuple[datetime, datetime]:
-    start = df.get_column("timestamp").min()
-    end = df.get_column("timestamp").max()
-    if not isinstance(start, datetime) or not isinstance(end, datetime):
-        raise TypeError("'timestamp' must contain non-null Datetime values")
-    return start, end
 
 
 class StorageManager:
@@ -271,7 +263,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts, max_ts = _timestamp_bounds(df)
+            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -389,7 +381,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts, max_ts = _timestamp_bounds(df)
+            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -512,16 +504,11 @@ class StorageManager:
             logger.info("Found existing data", rows=len(existing_df))
 
             # Get the date range from existing data
-            last_timestamp = existing_df["timestamp"].max()
-            if isinstance(last_timestamp, datetime):
-                if last_timestamp.tzinfo is None:
-                    last_timestamp = last_timestamp.replace(tzinfo=UTC)
-                else:
-                    last_timestamp = last_timestamp.astimezone(UTC)
-            elif isinstance(last_timestamp, date):
-                last_timestamp = datetime.combine(last_timestamp, datetime.min.time(), tzinfo=UTC)
+            _, last_timestamp = timestamp_bounds(existing_df)
+            if last_timestamp.tzinfo is None:
+                last_timestamp = last_timestamp.replace(tzinfo=UTC)
             else:
-                raise ValueError(f"Invalid timestamp value for {symbol}: {last_timestamp!r}")
+                last_timestamp = last_timestamp.astimezone(UTC)
 
             # Calculate fetch range
             fetch_start = last_timestamp - timedelta(days=lookback_days)
@@ -610,7 +597,7 @@ class StorageManager:
             # Update metadata with new range
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts, max_ts = _timestamp_bounds(merged_df)
+            min_ts, max_ts = timestamp_bounds(merged_df)
 
             updated_metadata = Metadata(
                 provider=provider or "auto",

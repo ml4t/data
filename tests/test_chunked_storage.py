@@ -700,6 +700,33 @@ class TestChunkedStorage:
         # Should not create any chunks
         assert not storage.exists(key)
 
+    def test_read_rejects_all_null_chunk_timestamps(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        chunk = storage.get_chunk_info(key)[0]
+        frame.with_columns(pl.lit(None, dtype=pl.Datetime("us")).alias("timestamp")).write_parquet(
+            chunk.file_path
+        )
+
+        with pytest.raises(ValueError, match="non-null Datetime"):
+            storage.read(key)
+
     def test_delete_chunks(self, tmp_path: Path) -> None:
         """Test deleting all chunks for a key."""
         storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=30)

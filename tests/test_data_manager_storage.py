@@ -345,7 +345,8 @@ class TestDataManagerUpdate:
 
     def test_update_rejects_all_null_merged_timestamps(self, manager, initial_data, new_data):
         """Reject invalid merged data before writing empty timestamp metadata."""
-        manager.import_data(initial_data, symbol="AAPL", provider="mock")
+        key = manager.import_data(initial_data, symbol="AAPL", provider="mock")
+        metadata_before = manager._storage_manager.storage.get_metadata(key)
         invalid_merged = initial_data.head(1).with_columns(
             pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias("timestamp")
         )
@@ -353,9 +354,30 @@ class TestDataManagerUpdate:
         with (
             patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data),
             patch.object(manager._storage_manager, "_merge_data", return_value=invalid_merged),
-            pytest.raises(TypeError, match="non-null Datetime"),
+            pytest.raises(ValueError, match="non-null Datetime"),
         ):
             manager.update("AAPL", provider="mock", fill_gaps=False)
+
+        assert manager._storage_manager.storage.get_metadata(key) == metadata_before
+
+    def test_update_rejects_date_timestamps_before_fetch(
+        self,
+        manager,
+        storage,
+        initial_data,
+        new_data,
+    ):
+        key = "equities/daily/AAPL"
+        date_frame = initial_data.with_columns(pl.col("timestamp").cast(pl.Date))
+        storage.write(date_frame, key, {"provider": "mock"})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data) as fetch,
+            pytest.raises(ValueError, match="Datetime"),
+        ):
+            manager.update("AAPL", provider="mock", fill_gaps=False)
+
+        fetch.assert_not_called()
 
     def test_merge_fills_optional_equity_columns_on_both_sides(self, manager):
         """Optional equity columns should get defaults regardless of which frame lacks them."""
@@ -781,7 +803,7 @@ class TestDataManagerImportData:
             }
         )
 
-        with pytest.raises(TypeError, match="non-null Datetime"):
+        with pytest.raises(ValueError, match="non-null Datetime"):
             manager.import_data(data=data, symbol="AAPL", provider="test")
 
     def test_import_data_different_asset_classes(self, manager, storage, sample_data):

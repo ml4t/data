@@ -11,7 +11,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.models import DataObject, Metadata
-from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.storage.config import CompressionType, normalize_compression
 from ml4t.data.storage.keys import (
     KEY_ENCODING_PREFIX,
@@ -38,12 +38,6 @@ def _parquet_compression(
     if normalized is None:
         return "uncompressed"
     return cast(ParquetCompression, normalized.value)
-
-
-def _datetime_scalar(value: object, column: str = "timestamp") -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"'{column}' must contain non-null Datetime values")
-    return value
 
 
 @dataclass
@@ -211,8 +205,7 @@ class ChunkedStorage:
         df = df.sort("timestamp")
 
         chunks = []
-        min_ts = _datetime_scalar(df["timestamp"].min())
-        max_ts = _datetime_scalar(df["timestamp"].max())
+        min_ts, max_ts = timestamp_bounds(df)
 
         # Generate chunk boundaries
         current = min_ts
@@ -435,9 +428,10 @@ class ChunkedStorage:
 
         # Update metadata with actual data range
         if not combined_df.is_empty():
+            min_ts, max_ts = timestamp_bounds(combined_df)
             metadata.data_range = {
-                "start": str(combined_df["timestamp"].min()),
-                "end": str(combined_df["timestamp"].max()),
+                "start": str(min_ts),
+                "end": str(max_ts),
             }
 
         return DataObject(data=combined_df, metadata=metadata)
@@ -537,10 +531,11 @@ class ChunkedStorage:
                 chunk_df.write_parquet(chunk_path, compression=self.compression)
 
             # Create chunk info
+            min_ts, max_ts = timestamp_bounds(chunk_df)
             chunk_info = ChunkInfo(
                 chunk_id=chunk_id,
-                start_date=_datetime_scalar(chunk_df["timestamp"].min()),
-                end_date=_datetime_scalar(chunk_df["timestamp"].max()),
+                start_date=min_ts,
+                end_date=max_ts,
                 row_count=len(chunk_df),
                 file_path=chunk_path,
                 size_bytes=chunk_path.stat().st_size if chunk_path.exists() else 0,
