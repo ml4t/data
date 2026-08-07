@@ -233,7 +233,7 @@ class BaseProvider(
             data = self._fetch_and_transform_data(symbol, start, end, frequency)
 
             # Step 4: Validate and normalize (from ValidationMixin)
-            return self._validate_ohlcv(data, self.name)
+            return self._validate_ohlcv(data, self.name, symbol)
 
         # Execute with circuit breaker protection (from CircuitBreakerMixin)
         validated_data = self._with_circuit_breaker(_fetch_and_process)
@@ -250,11 +250,11 @@ class BaseProvider(
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with canonical OHLCV schema.
 
-        Override in subclasses that need a different schema (e.g. no symbol column).
+        Provider-specific optional columns may be added after the canonical columns.
         """
         return pl.DataFrame(
             schema={
-                "timestamp": pl.Datetime,
+                "timestamp": pl.Datetime("us", "UTC"),
                 "symbol": pl.Utf8,
                 "open": pl.Float64,
                 "high": pl.Float64,

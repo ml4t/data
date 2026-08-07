@@ -231,7 +231,17 @@ class TestBaseProvider:
 
         assert isinstance(df, pl.DataFrame)
         assert len(df) == 2
-        assert df.columns == ["timestamp", "open", "high", "low", "close", "volume"]
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+        assert df.schema == {
+            "timestamp": pl.Datetime("us", "UTC"),
+            "symbol": pl.String,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        }
+        assert df["symbol"].to_list() == ["AAPL", "AAPL"]
 
         # Check data is sorted by timestamp
         timestamps = df["timestamp"].to_list()
@@ -254,13 +264,21 @@ class TestBaseProvider:
             provider.fetch_ohlcv("AAPL", "2022-01-03", "2022-01-01")
 
     def test_data_validation_empty_dataframe(self):
-        """Test that empty DataFrame is valid when no data is available."""
+        """A provider's untyped empty sentinel becomes a typed canonical response."""
         provider = MockProvider()
         provider._raw_data = {"data": []}
 
-        # Empty DataFrame is now valid - provider logs info and returns empty
         result = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
         assert result.is_empty()
+        assert result.schema == {
+            "timestamp": pl.Datetime("us", "UTC"),
+            "symbol": pl.String,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        }
 
     def test_data_validation_missing_columns(self):
         """Test validation with missing required columns."""
@@ -277,15 +295,15 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match="Missing required column"):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    def test_data_validation_ohlc_invariants_drop_mode(self):
-        """Test default OHLC invariant handling drops invalid rows."""
+    def test_data_validation_ohlc_invariants_strict_by_default(self):
+        """Invalid OHLC data fails instead of becoming a successful empty response."""
         provider = MockProvider()
 
         def bad_transform(raw_data, symbol):
             return pl.DataFrame(
                 [
                     {
-                        "timestamp": datetime.now(),
+                        "timestamp": datetime.now(UTC),
                         "open": 100.0,
                         "high": 90.0,  # High < open (invalid)
                         "low": 85.0,
@@ -297,20 +315,19 @@ class TestBaseProvider:
 
         provider._transform_data = bad_transform
 
-        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        with pytest.raises(DataValidationError, match="invalid OHLC relationships"):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        assert df.is_empty()
-
-    def test_data_validation_ohlc_invariants_strict_mode(self):
-        """Test strict OHLC invariant handling raises validation errors."""
+    def test_data_validation_ohlc_invariants_drop_mode_is_explicit(self):
+        """Callers can explicitly opt into dropping invalid OHLC rows."""
         provider = MockProvider()
-        provider.ohlc_mode = "strict"
+        provider.ohlc_mode = "drop"
 
         def bad_transform(raw_data, symbol):
             return pl.DataFrame(
                 [
                     {
-                        "timestamp": datetime.now(),
+                        "timestamp": datetime.now(UTC),
                         "open": 100.0,
                         "high": 90.0,
                         "low": 85.0,
@@ -322,7 +339,77 @@ class TestBaseProvider:
 
         provider._transform_data = bad_transform
 
-        with pytest.raises(DataValidationError, match="invalid OHLC relationships"):
+        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert df.is_empty()
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+
+    def test_data_validation_canonicalizes_safe_types_and_column_order(self):
+        """Successful responses have one schema even when an adapter uses safe source types."""
+        provider = MockProvider()
+
+        def reordered_transform(raw_data, symbol):
+            return pl.DataFrame(
+                {
+                    "source_id": [7],
+                    "volume": [1000],
+                    "close": [103],
+                    "low": [98],
+                    "high": [105],
+                    "open": [100],
+                    "timestamp": [datetime(2022, 1, 1, tzinfo=UTC)],
+                }
+            )
+
+        provider._transform_data = reordered_transform
+        df = provider.fetch_ohlcv("aapl", "2022-01-01", "2022-01-03")
+
+        assert df.columns == [
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source_id",
+        ]
+        assert df["symbol"].to_list() == ["AAPL"]
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+        for column in ["open", "high", "low", "close", "volume"]:
+            assert df[column].dtype == pl.Float64
+
+    @pytest.mark.parametrize(
+        ("mutator", "message"),
+        [
+            (
+                lambda frame: frame.with_columns(pl.col("timestamp").dt.replace_time_zone(None)),
+                "timezone-aware",
+            ),
+            (lambda frame: frame.with_columns(pl.col("open").cast(pl.String)), "numeric"),
+            (lambda frame: frame.with_columns(pl.lit(float("nan")).alias("close")), "finite"),
+            (lambda frame: frame.with_columns(pl.lit(None).alias("volume")), "null"),
+            (lambda frame: frame.with_columns(pl.lit(-1.0).alias("volume")), "negative"),
+            (lambda frame: frame.with_columns(pl.lit("MSFT").alias("symbol")), "requested symbol"),
+        ],
+    )
+    def test_data_validation_rejects_malformed_successes(self, mutator, message):
+        """Malformed source data cannot be logged and returned as a successful fetch."""
+        provider = MockProvider()
+        valid = pl.DataFrame(
+            {
+                "timestamp": [datetime(2022, 1, 1, tzinfo=UTC)],
+                "symbol": ["AAPL"],
+                "open": [100.0],
+                "high": [105.0],
+                "low": [98.0],
+                "close": [103.0],
+                "volume": [1000.0],
+            }
+        )
+        invalid = mutator(valid)
+        provider._transform_data = lambda raw_data, symbol: invalid
+
+        with pytest.raises(DataValidationError, match=message):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
     @pytest.mark.skip(reason="Circuit breaker state pollution in parallel execution")
@@ -379,8 +466,8 @@ class TestBaseProvider:
         # Verify rate limiter was called
         mock_limiter.try_acquire.assert_called_with("api_call")
 
-    def test_duplicate_timestamp_removal(self):
-        """Test that duplicate timestamps are removed."""
+    def test_duplicate_timestamp_rejected(self):
+        """Conflicting duplicate bars are rejected instead of silently discarded."""
         provider = MockProvider()
         provider._raw_data = {
             "data": [
@@ -397,12 +484,8 @@ class TestBaseProvider:
             ]
         }
 
-        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
-
-        # Should have only unique timestamps
-        assert len(df) == 2
-        timestamps = df["timestamp"].to_list()
-        assert len(set(timestamps)) == len(timestamps)
+        with pytest.raises(DataValidationError, match="duplicate"):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
     def test_backward_compatibility(self):
         """Test backward compatibility with Provider alias."""

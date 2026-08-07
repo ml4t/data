@@ -1,6 +1,6 @@
 """Tests for CoinGecko provider module."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -474,7 +474,7 @@ class TestIntegration:
 
         mock_ohlc_df = pl.DataFrame(
             {
-                "timestamp": [datetime(2024, 1, 1, 12, 0)],
+                "timestamp": [datetime(2024, 1, 1, 12, 0, tzinfo=UTC)],
                 "open": [42000.0],
                 "high": [42500.0],
                 "low": [41800.0],
@@ -497,7 +497,7 @@ class TestIntegration:
 
         mock_ohlc_df = pl.DataFrame(
             {
-                "timestamp": [datetime(2024, 1, 1, 12, 0)],
+                "timestamp": [datetime(2024, 1, 1, 12, 0, tzinfo=UTC)],
                 "open": [42000.0],
                 "high": [42500.0],
                 "low": [41800.0],

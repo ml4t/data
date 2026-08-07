@@ -342,11 +342,19 @@ class DataBentoProvider(BaseProvider):
             else:
                 df = pl.DataFrame(raw_data)
 
-            # Ensure timestamp column exists and is datetime
+            # Databento timestamps are UTC. Integer values are Unix nanoseconds;
+            # pandas may return an aware Datetime or an unzoned UTC Datetime.
             if "timestamp" in df.columns:
                 if df["timestamp"].dtype == pl.Int64:
-                    # Convert nanoseconds to datetime
-                    df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("ns")))
+                    df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("ns", "UTC")))
+                elif isinstance(df["timestamp"].dtype, pl.Datetime):
+                    timestamp_type = df["timestamp"].dtype
+                    timestamp = pl.col("timestamp")
+                    if timestamp_type.time_zone is None:
+                        timestamp = timestamp.dt.replace_time_zone("UTC")
+                    else:
+                        timestamp = timestamp.dt.convert_time_zone("UTC")
+                    df = df.with_columns(timestamp)
 
             # Add symbol column
             if "symbol" not in df.columns:

@@ -241,7 +241,9 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         )
 
         # Convert timestamp from milliseconds to datetime
-        df = df.with_columns(pl.col("timestamp_ms").cast(pl.Datetime("ms")).alias("timestamp"))
+        df = df.with_columns(
+            pl.col("timestamp_ms").cast(pl.Datetime("ms", "UTC")).alias("timestamp")
+        )
 
         # Add volume column (CoinGecko OHLC endpoint doesn't provide volume)
         # Set to 0 as placeholder - use market_chart endpoint if volume needed
@@ -428,7 +430,9 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             schema=["timestamp_ms", "open", "high", "low", "close"],
             orient="row",
         )
-        df = df.with_columns(pl.col("timestamp_ms").cast(pl.Datetime("ms")).alias("timestamp"))
+        df = df.with_columns(
+            pl.col("timestamp_ms").cast(pl.Datetime("ms", "UTC")).alias("timestamp")
+        )
         df = df.with_columns(pl.lit(0.0).alias("volume"))
         df = df.select(["timestamp", "open", "high", "low", "close", "volume"])
 

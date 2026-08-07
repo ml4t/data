@@ -508,8 +508,7 @@ class CryptoCompareProvider(BaseProvider):
         raw_data = await self._fetch_raw_data_async(symbol, start, end, frequency)
         data = self._transform_data(raw_data, symbol)
 
-        if not data.is_empty():
-            data = self._validate_ohlcv(data, self.name)
+        data = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",

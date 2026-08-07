@@ -834,12 +834,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                     "v": "volume",
                 }
             )
-            # Alpaca timestamps are RFC-3339 with a UTC ("Z") offset; parse them
-            # tz-aware then drop the zone to match the canonical naive schema.
             df = df.with_columns(
                 pl.col("timestamp")
                 .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%.f%#z")
-                .dt.replace_time_zone(None)
+                .dt.convert_time_zone("UTC")
             )
             for col in ["open", "high", "low", "close", "volume"]:
                 df = df.with_columns(pl.col(col).cast(pl.Float64))
@@ -909,7 +907,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         def _fetch_and_process() -> pl.DataFrame:
             raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=resolved)
             df = self._transform_data(raw_data, symbol, asset_class=resolved)
-            return self._validate_ohlcv(df, self.name)
+            return self._validate_ohlcv(df, self.name, symbol)
 
         validated_data = self._with_circuit_breaker(_fetch_and_process)
 
@@ -980,7 +978,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 symbol, start, end, frequency, asset_class=resolved
             )
             df = self._transform_data(raw_data, symbol, asset_class=resolved)
-            return self._validate_ohlcv(df, self.name)
+            return self._validate_ohlcv(df, self.name, symbol)
 
         validated_data = await self._with_circuit_breaker_async(_fetch_and_process)
 

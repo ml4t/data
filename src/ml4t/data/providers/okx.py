@@ -183,6 +183,10 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         # Default: add -USDT-SWAP
         return f"{symbol}-USDT-SWAP"
 
+    def _expected_ohlcv_symbol(self, symbol: str) -> str:
+        """Return the exchange symbol emitted by OHLCV transformations."""
+        return self._normalize_symbol(symbol)
+
     def _fetch_and_transform_data(
         self, symbol: str, start: str, end: str, frequency: str
     ) -> pl.DataFrame:

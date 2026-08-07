@@ -143,7 +143,7 @@ class AsyncBaseProvider(
             data = await self._fetch_and_transform_data_async(symbol, start, end, frequency)
 
             # Validate
-            validated = self._validate_ohlcv(data, self.name)
+            validated = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",

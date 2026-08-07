@@ -165,6 +165,10 @@ class BinancePublicProvider(BaseProvider):
 
         return symbol
 
+    def _expected_ohlcv_symbol(self, symbol: str) -> str:
+        """Return the exchange symbol emitted by OHLCV transformations."""
+        return self._normalize_symbol(symbol)
+
     def _build_url(self, symbol: str, interval: str, date: datetime) -> str:
         """Build download URL for a specific date.
 
@@ -1520,7 +1524,7 @@ class BinancePublicProvider(BaseProvider):
         data = await self._fetch_and_transform_data_async(symbol, start, end, frequency)
 
         # Validate OHLCV data
-        validated = self._validate_ohlcv(data, self.name)
+        validated = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",

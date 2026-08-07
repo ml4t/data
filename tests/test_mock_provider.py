@@ -51,7 +51,7 @@ class TestMockProvider:
         assert "symbol" in df.columns
 
         # Verify data types
-        assert df["timestamp"].dtype == pl.Datetime("ns", "UTC")
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
         assert df["open"].dtype == pl.Float64
         assert df["close"].dtype == pl.Float64
         assert df["volume"].dtype == pl.Float64

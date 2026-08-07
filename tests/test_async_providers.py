@@ -10,7 +10,7 @@ Tests the async methods added to providers:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,9 +36,9 @@ def sample_ohlcv_data() -> pl.DataFrame:
     return pl.DataFrame(
         {
             "timestamp": [
-                datetime(2024, 1, 1),
-                datetime(2024, 1, 2),
-                datetime(2024, 1, 3),
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 1, 2, tzinfo=UTC),
+                datetime(2024, 1, 3, tzinfo=UTC),
             ],
             "open": [100.0, 101.0, 102.0],
             "high": [105.0, 106.0, 107.0],

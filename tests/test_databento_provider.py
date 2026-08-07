@@ -164,7 +164,7 @@ class TestDataBentoProvider:
         assert "symbol" in df.columns
 
         # Check data types
-        assert df["timestamp"].dtype == pl.Datetime("ns")
+        assert df["timestamp"].dtype == pl.Datetime("ns", "UTC")
         assert df["open"].dtype == pl.Float64
         assert df["symbol"][0] == "ES.v.0"
 

@@ -246,17 +246,21 @@ class YahooFinanceProvider(BaseProvider):
             }
         )
 
-        # Cast to proper types, add symbol, and select in standard order
+        timestamp_type = df.schema["timestamp"]
+        timestamp = pl.col("timestamp")
+        if isinstance(timestamp_type, pl.Datetime) and timestamp_type.time_zone is not None:
+            timestamp = timestamp.dt.convert_time_zone("UTC")
+        else:
+            timestamp = timestamp.cast(pl.Datetime).dt.replace_time_zone("UTC")
+
         return (
             df.with_columns(
-                [
-                    pl.col("timestamp").cast(pl.Datetime),
-                    pl.col("open").cast(pl.Float64),
-                    pl.col("high").cast(pl.Float64),
-                    pl.col("low").cast(pl.Float64),
-                    pl.col("close").cast(pl.Float64),
-                    pl.col("volume").cast(pl.Float64),
-                ]
+                timestamp,
+                pl.col("open").cast(pl.Float64),
+                pl.col("high").cast(pl.Float64),
+                pl.col("low").cast(pl.Float64),
+                pl.col("close").cast(pl.Float64),
+                pl.col("volume").cast(pl.Float64),
             )
             .with_columns(pl.lit(symbol.upper()).alias("symbol"))
             .select(["timestamp", "symbol", "open", "high", "low", "close", "volume"])
