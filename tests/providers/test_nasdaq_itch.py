@@ -258,6 +258,43 @@ class TestDownload:
         assert result.read_bytes() == b"data"
         assert not partial.exists()
 
+    @pytest.mark.parametrize(
+        ("status_code", "headers"),
+        [
+            (416, {}),
+            (206, {"content-length": "2", "content-range": "bytes 1-2/4"}),
+        ],
+    )
+    @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
+    def test_invalid_resume_response_restarts_once(
+        self,
+        mock_stream,
+        monkeypatch,
+        tmp_path,
+        status_code,
+        headers,
+    ):
+        """An unusable range checkpoint is discarded and fetched from byte zero."""
+        filename = "01302019.NASDAQ_ITCH50.gz"
+        monkeypatch.setitem(ITCHSampleProvider.KNOWN_FILES, filename, 4)
+        partial = tmp_path / f"{filename}.part"
+        partial.write_bytes(b"ol")
+        rejected = MagicMock(status_code=status_code)
+        rejected.headers = headers
+        fresh = MagicMock(status_code=200)
+        fresh.headers = {"content-length": "4"}
+        fresh.iter_bytes.return_value = [b"data"]
+        mock_stream.return_value.__enter__.side_effect = [rejected, fresh]
+
+        result = ITCHSampleProvider(download_path=tmp_path).download("01302019")
+
+        assert [call.kwargs["headers"] for call in mock_stream.call_args_list] == [
+            {"Range": "bytes=2-"},
+            {},
+        ]
+        assert result.read_bytes() == b"data"
+        assert not partial.exists()
+
     @patch("ml4t.data.providers.nasdaq_itch.httpx.stream")
     def test_download_creates_directory(self, mock_stream, tmp_path):
         """Download should create directory if needed."""

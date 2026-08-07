@@ -337,7 +337,6 @@ class ITCHSampleProvider:
             )
             partial_path.unlink(missing_ok=True)
             resume_offset = 0
-        headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
         timeout = httpx.Timeout(
             connect=self.CONNECT_TIMEOUT,
             read=self.READ_TIMEOUT,
@@ -346,47 +345,58 @@ class ITCHSampleProvider:
         )
         started_at = monotonic()
 
-        try:
-            with httpx.stream(
-                "GET",
-                url,
-                headers=headers,
-                timeout=timeout,
-                follow_redirects=True,
-            ) as response:
-                response.raise_for_status()
+        for attempt in range(2):
+            resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
+            headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
+            try:
+                with httpx.stream(
+                    "GET",
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    follow_redirects=True,
+                ) as response:
+                    if response.status_code == 416 and resume_offset and attempt == 0:
+                        partial_path.unlink(missing_ok=True)
+                        continue
+                    response.raise_for_status()
 
-                resumed = resume_offset > 0 and response.status_code == 206
-                if resumed:
-                    content_range = response.headers.get("content-range", "")
-                    if not content_range.startswith(f"bytes {resume_offset}-"):
-                        raise RuntimeError("server returned an invalid resume range")
-                downloaded = resume_offset if resumed else 0
-                content_length = int(response.headers.get("content-length", 0))
-                total_size = downloaded + content_length if resumed else content_length
-                mode = "ab" if resumed else "wb"
+                    resumed = resume_offset > 0 and response.status_code == 206
+                    if resumed:
+                        content_range = response.headers.get("content-range", "")
+                        if not content_range.startswith(f"bytes {resume_offset}-"):
+                            partial_path.unlink(missing_ok=True)
+                            if attempt == 0:
+                                continue
+                            raise RuntimeError("server returned an invalid resume range")
+                    downloaded = resume_offset if resumed else 0
+                    content_length = int(response.headers.get("content-length", 0))
+                    total_size = downloaded + content_length if resumed else content_length
+                    mode = "ab" if resumed else "wb"
 
-                with partial_path.open(mode) as f:
-                    for chunk in response.iter_bytes(chunk_size=8192 * 1024):  # 8MB chunks
-                        if monotonic() - started_at > self.MAX_DOWNLOAD_SECONDS:
-                            raise RuntimeError(
-                                f"download exceeded {self.MAX_DOWNLOAD_SECONDS:.0f} seconds"
-                            )
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_callback:
-                            progress_callback(downloaded, total_size)
+                    with partial_path.open(mode) as f:
+                        for chunk in response.iter_bytes(chunk_size=8192 * 1024):  # 8MB chunks
+                            if monotonic() - started_at > self.MAX_DOWNLOAD_SECONDS:
+                                raise RuntimeError(
+                                    f"download exceeded {self.MAX_DOWNLOAD_SECONDS:.0f} seconds"
+                                )
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if progress_callback:
+                                progress_callback(downloaded, total_size)
 
-                        # Log progress every ~500MB
-                        if downloaded % (500 * 1024 * 1024) < 8192 * 1024:
-                            self.logger.info(
-                                "Download progress",
-                                downloaded_gb=round(downloaded / 1e9, 2),
-                                total_gb=round(total_size / 1e9, 2) if total_size else "unknown",
-                            )
-
-        except (httpx.HTTPError, OSError, ValueError) as e:
-            raise RuntimeError(f"Download failed: {e}") from e
+                            # Log progress every ~500MB
+                            if downloaded % (500 * 1024 * 1024) < 8192 * 1024:
+                                self.logger.info(
+                                    "Download progress",
+                                    downloaded_gb=round(downloaded / 1e9, 2),
+                                    total_gb=(
+                                        round(total_size / 1e9, 2) if total_size else "unknown"
+                                    ),
+                                )
+                break
+            except (httpx.HTTPError, OSError, ValueError) as e:
+                raise RuntimeError(f"Download failed: {e}") from e
 
         actual_size = partial_path.stat().st_size
         if verify_size:
