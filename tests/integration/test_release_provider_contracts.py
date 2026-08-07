@@ -22,11 +22,20 @@ def _recent_dates() -> tuple[str, str]:
     return (end - timedelta(days=3)).isoformat(), end.isoformat()
 
 
-def _assert_ohlcv(frame: pl.DataFrame, symbol: str) -> None:
+def _assert_ohlcv(frame: pl.DataFrame, symbol: str, start: str, end: str) -> None:
     assert frame.height > 0
     assert frame.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
     assert frame.get_column("symbol").unique().to_list() == [symbol]
     assert frame.get_column("timestamp").is_sorted()
+    assert frame.schema["timestamp"] == pl.Datetime("us", "UTC")
+    assert all(
+        frame.schema[column] == pl.Float64 for column in ("open", "high", "low", "close", "volume")
+    )
+    start_bound = datetime.fromisoformat(start).replace(tzinfo=UTC) - timedelta(hours=12)
+    end_bound = datetime.fromisoformat(end).replace(tzinfo=UTC) + timedelta(days=1)
+    assert frame.get_column("timestamp").min() >= start_bound
+    assert frame.get_column("timestamp").max() < end_bound
+    assert frame.height <= (datetime.fromisoformat(end) - datetime.fromisoformat(start)).days + 2
     assert (
         frame.select("timestamp", "open", "high", "low", "close", "volume")
         .null_count()
@@ -47,6 +56,7 @@ def test_fama_french_current_ff3_contract(tmp_path) -> None:
 
 def test_aqr_current_qmj_contract(tmp_path) -> None:
     data_path = AQRFactorProvider.download(output_path=tmp_path, datasets=["qmj_factors"])
+    assert (data_path / "qmj_factors.parquet").exists()
     with AQRFactorProvider(data_path) as provider:
         frame = provider.fetch("qmj_factors", region="USA")
 
@@ -60,7 +70,7 @@ def test_binance_market_data_contract() -> None:
     with BinanceProvider() as provider:
         frame = provider.fetch_ohlcv("BTCUSDT", start, end, "daily")
 
-    _assert_ohlcv(frame, "BTCUSDT")
+    _assert_ohlcv(frame, "BTCUSDT", start, end)
 
 
 def test_okx_market_data_contract() -> None:
@@ -68,7 +78,7 @@ def test_okx_market_data_contract() -> None:
     with OKXProvider() as provider:
         frame = provider.fetch_ohlcv("BTC-USDT-SWAP", start, end, "daily")
 
-    _assert_ohlcv(frame, "BTC-USDT-SWAP")
+    _assert_ohlcv(frame, "BTC-USDT-SWAP", start, end)
 
 
 def test_fxmacrodata_public_catalogue_contract() -> None:
@@ -76,7 +86,7 @@ def test_fxmacrodata_public_catalogue_contract() -> None:
         health = provider.health()
         frame = provider.fetch_catalogue("usd")
 
-    assert health.get("status")
+    assert health.get("status") == "ok"
     assert frame.height > 0
     assert "indicator" in frame.columns
 
@@ -85,15 +95,14 @@ def test_eodhd_demo_contract() -> None:
     with EODHDProvider(api_key="demo") as provider:
         frame = provider.fetch_ohlcv("AAPL", "2025-01-02", "2025-01-10", "daily")
 
-    _assert_ohlcv(frame, "AAPL")
+    _assert_ohlcv(frame, "AAPL", "2025-01-02", "2025-01-10")
 
 
 def test_twelve_data_demo_contract() -> None:
     with TwelveDataProvider(api_key="demo") as provider:
         frame = provider.fetch_ohlcv("AAPL", "2025-01-02", "2025-01-10", "daily")
 
-    _assert_ohlcv(frame, "AAPL")
-    assert frame.schema["timestamp"].time_zone == "UTC"
+    _assert_ohlcv(frame, "AAPL", "2025-01-02", "2025-01-10")
 
 
 def test_nasdaq_itch_sample_catalogue_contract(tmp_path) -> None:
