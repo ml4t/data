@@ -142,15 +142,15 @@ class ConfigLoader:
         try:
             with open(path) as f:
                 data = yaml.safe_load(f)
-                if data is None:
-                    return {}
-                if not isinstance(data, dict):
-                    raise ValueError(f"Configuration root in {path} must be a mapping")
-                return data
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in {path}: {e}") from e
-        except Exception as e:
+        except OSError as e:
             raise ValueError(f"Error loading {path}: {e}") from e
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Configuration root in {path} must be a mapping")
+        return data
 
     def _process_includes(self, data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         """
@@ -259,9 +259,8 @@ class ConfigLoader:
         local_environment = dict(os.environ)
         configured_environment = data.get("env", {})
         if isinstance(configured_environment, dict):
-            local_environment.update(
-                {key: str(value) for key, value in configured_environment.items()}
-            )
+            for key, value in configured_environment.items():
+                local_environment.setdefault(key, str(value))
         data = self._interpolate_env_vars(data, local_environment)
         self._resolve_config_paths(data, config_path.parent)
 

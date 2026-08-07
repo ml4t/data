@@ -291,6 +291,25 @@ class TestConfigLoader:
             os.environ.pop("TEST_ENV_VAR", None)
             os.environ.pop("TEST_NUMBER", None)
 
+    def test_process_environment_takes_precedence_over_config_env(self, tmp_path, monkeypatch):
+        """Deployment environment overrides file-local interpolation defaults."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("env:\n  TEST_ENV_VAR: configured\nbase_dir: ${TEST_ENV_VAR}\n")
+        monkeypatch.setenv("TEST_ENV_VAR", "deployed")
+
+        config = ConfigLoader(config_file).load()
+
+        assert config.base_dir == (tmp_path / "deployed").resolve()
+
+    @pytest.mark.parametrize("root", ["[]\n", "value\n", "0\n"])
+    def test_non_mapping_root_is_rejected_without_wrapping(self, tmp_path, root):
+        """A non-mapping root reports one direct configuration error."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(root)
+
+        with pytest.raises(ValueError, match=r"^Configuration root .* must be a mapping$"):
+            ConfigLoader(config_file).load()
+
     def test_save_config(self, tmp_path):
         """Test saving configuration to file."""
         config = DataConfig(
