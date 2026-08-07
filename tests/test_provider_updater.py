@@ -177,6 +177,18 @@ class TestProviderUpdater:
         assert result["success"] is True
         assert updater.fetch_call_count == 1
 
+    def test_naive_provider_default_is_normalized_to_utc(self):
+        """Implicit bootstrap ranges have stable timezone awareness."""
+        storage = MockStorage()
+        updater = MockProviderUpdater(storage)
+
+        start, end = updater._get_time_range("AAPL", None, None, incremental=False)
+
+        assert start is not None
+        assert end is not None
+        assert start.utcoffset() == timedelta(0)
+        assert end.utcoffset() == timedelta(0)
+
     def test_incremental_aware_timestamp_uses_aware_end(self):
         """The implicit end time preserves the stored timestamp's timezone."""
         latest = datetime.now(UTC) - timedelta(hours=12)
@@ -187,8 +199,8 @@ class TestProviderUpdater:
 
         assert start is not None
         assert end is not None
-        assert start.tzinfo is UTC
-        assert end.tzinfo is UTC
+        assert start.utcoffset() == timedelta(0)
+        assert end.utcoffset() == timedelta(0)
 
     def test_mixed_timezone_awareness_is_rejected(self):
         """Explicit ranges cannot mix aware and naive datetimes."""

@@ -6,7 +6,7 @@ This integrates provider fetching, transformation, and storage in one workflow.
 
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import polars as pl
@@ -43,7 +43,7 @@ class ProviderUpdater(ABC):
                 return data  # Already in correct format
 
             def _get_default_start_time(self, symbol):
-                return datetime.now() - timedelta(days=365)
+                return datetime.now(UTC) - timedelta(days=365)
     """
 
     def __init__(
@@ -81,7 +81,8 @@ class ProviderUpdater(ABC):
 
         Args:
             symbol: Symbol to update (e.g., "AAPL", "BTC-USD")
-            start_time: Start time (uses latest timestamp if None and incremental)
+            start_time: Start time. Uses the latest stored timestamp for incremental updates or
+                the provider default for a full refresh.
             end_time: End time (uses current time if None)
             incremental: If True, fetch only data after latest timestamp
             dry_run: If True, don't write files
@@ -292,6 +293,7 @@ class ProviderUpdater(ABC):
             Tuple of (start_time, end_time), or (None, None) if no update needed
         """
         # Determine start time
+        used_default_start = False
         if start_time is None:
             latest_ts = (
                 self.storage.get_latest_timestamp(symbol, self.provider_name)
@@ -312,12 +314,17 @@ class ProviderUpdater(ABC):
             else:
                 # No existing data or a full refresh - use subclass default
                 start_time = self._get_default_start_time(symbol)
+                used_default_start = True
                 self.logger.info(
                     "Using default start time",
                     symbol=symbol,
                     start=start_time,
                     incremental=incremental,
                 )
+
+        if used_default_start and start_time.tzinfo is None:
+            default_timezone = end_time.tzinfo if end_time is not None else UTC
+            start_time = start_time.replace(tzinfo=default_timezone)
 
         # Determine end time
         if end_time is None:

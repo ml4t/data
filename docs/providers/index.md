@@ -63,7 +63,7 @@ provider.fetch_ohlcv(
 Returns a Polars DataFrame with columns:
 `timestamp`, `symbol`, `open`, `high`, `low`, `close`, `volume`
 
-Other providers expose capability-specific methods. Economic providers use methods such as
-`fetch_series()`, factor providers use `fetch()`, and specialized providers document their own
-contracts on their provider pages. Check the provider's capabilities before passing it to
-`DataManager` or `async_batch_load()`.
+Other providers expose capability-specific methods. FRED uses `fetch_ohlcv()` for one series,
+`fetch_multiple()` for batches, and `fetch_series_metadata()` for descriptors. Factor providers
+use `fetch()`. Specialized providers document their contracts on their provider pages. Check the
+provider's capabilities before passing it to `DataManager` or `async_batch_load()`.
