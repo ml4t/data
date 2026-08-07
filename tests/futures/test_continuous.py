@@ -303,6 +303,24 @@ class TestContinuousContractBuilderBuild:
             call_args = mock_roll_strategy.select_contracts.call_args
             assert call_args[0][1] is es_contract_spec
 
+    def test_build_accepts_per_call_contract_spec(
+        self, sample_raw_data, sample_continuous_data, es_contract_spec
+    ):
+        mock_roll_strategy = MagicMock()
+        mock_roll_strategy.select_contracts.return_value = pl.DataFrame(
+            {"date": sample_continuous_data["date"], "symbol": ["ESH24"] * 4}
+        )
+        mock_roll_strategy.identify_roll_events.return_value = []
+        builder = ContinuousContractBuilder(roll_strategy=mock_roll_strategy)
+        raw = sample_continuous_data.with_columns(pl.lit("ESH24").alias("symbol"))
+
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
+            mock_raw.return_value = raw
+            builder.build("ES", contract_spec=es_contract_spec)
+
+        mock_raw.assert_called_once_with("ES", contract_spec=es_contract_spec)
+        mock_roll_strategy.select_contracts.assert_called_once_with(raw, es_contract_spec)
+
 
 class TestContinuousContractBuilderBuildMultiple:
     """Tests for ContinuousContractBuilder.build_multiple method."""

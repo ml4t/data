@@ -19,9 +19,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
+import structlog
 
 from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.schema import ContractSpec
+
+logger = structlog.get_logger()
 
 # Month code to month number mapping (CME standard)
 MONTH_CODES = {
@@ -107,7 +110,7 @@ def parse_contract_symbol(symbol: str, *, reference_year: int | None = None) -> 
     else:
         if reference_year is None:
             raise ValueError(f"Ambiguous year in symbol '{symbol}'; reference_year is required")
-        year = _nearest_matching_year(int(year_text), len(year_text), reference_year)
+        year = _nearest_matching_year(int(year_text), len(year_text), reference_year, symbol)
     month = MONTH_CODES[month_code]
 
     return ContractInfo(
@@ -119,7 +122,7 @@ def parse_contract_symbol(symbol: str, *, reference_year: int | None = None) -> 
     )
 
 
-def _nearest_matching_year(short_year: int, digits: int, reference_year: int) -> int:
+def _nearest_matching_year(short_year: int, digits: int, reference_year: int, symbol: str) -> int:
     """Resolve a truncated year to the nearest year around an explicit reference."""
     if reference_year < 1:
         raise ValueError("reference_year must be positive")
@@ -135,7 +138,8 @@ def _nearest_matching_year(short_year: int, digits: int, reference_year: int) ->
     ]
     if len(nearest) != 1:
         raise ValueError(
-            f"Truncated year is equally close to two years around reference_year={reference_year}"
+            f"Truncated year in symbol '{symbol}' is equally close to two years around "
+            f"reference_year={reference_year}"
         )
     return nearest[0]
 
@@ -561,8 +565,9 @@ def get_contract_chain(
             info = parse_contract_symbol(symbol, reference_year=exp_date.year)
             info.expiration = exp_date
             contracts.append(info)
-        except ValueError:
+        except ValueError as error:
             # Skip invalid symbols (e.g., spreads)
+            logger.warning("Skipping invalid contract symbol", symbol=symbol, error=str(error))
             continue
 
     # Sort by expiration

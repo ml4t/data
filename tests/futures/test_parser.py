@@ -75,6 +75,7 @@ class TestParseQuandlCHRIS:
 
         assert len(data) == 3
         assert data.filter(pl.col("date") == date(2014, 3, 3)).height == 2
+        assert data["close"].to_list() == [63.9, 103.5, 104.5]
 
     def test_invalid_ticker(self, chris_data_path):
         with pytest.raises(ValueError, match="Ticker.*not found"):
@@ -142,3 +143,61 @@ class TestParseQuandlCHRIS:
         parsed = parse_quandl_chris("ES", data_path=path, contract_spec=cents_spec)
 
         assert parsed["close"].to_list() == [50.04, 0.99]
+
+    def test_parser_output_converts_to_contract_value_once(self, tmp_path):
+        data = pl.DataFrame(
+            {
+                "ticker": ["C"],
+                "date": [date(2026, 1, 2)],
+                "open": [450.0],
+                "high": [451.0],
+                "low": [449.0],
+                "close": [450.0],
+                "last": [450.0],
+                "settle": [450.0],
+                "volume": [100_000.0],
+                "open_interest": [1_000.0],
+            }
+        )
+        path = tmp_path / "corn.parquet"
+        data.write_parquet(path)
+
+        parsed = parse_quandl_chris("C", data_path=path)
+        spec = MAJOR_CONTRACTS["C"]
+
+        assert parsed["close"].item() == 4.5
+        assert spec.calculate_contract_value(4.5, price_unit="dollars") == 22_500.0
+        assert spec.calculate_contract_value(450.0, price_unit="cents") == 22_500.0
+
+    def test_unknown_ticker_requires_contract_spec(self, tmp_path):
+        data = pl.DataFrame(
+            {
+                "ticker": ["KC"],
+                "date": [date(2026, 1, 2)],
+                "open": [300.0],
+                "high": [301.0],
+                "low": [299.0],
+                "close": [300.0],
+                "last": [300.0],
+                "settle": [300.0],
+                "volume": [1_000.0],
+                "open_interest": [100.0],
+            }
+        )
+        path = tmp_path / "coffee.parquet"
+        data.write_parquet(path)
+
+        with pytest.raises(ValueError, match="Contract specification required for ticker 'KC'"):
+            parse_quandl_chris("KC", data_path=path)
+
+    def test_contract_spec_ticker_must_match_request(self, chris_data_path):
+        with pytest.raises(ValueError, match="does not match requested 'ES'"):
+            parse_quandl_chris(
+                "ES",
+                data_path=chris_data_path,
+                contract_spec=MAJOR_CONTRACTS["CL"],
+            )
+
+    def test_contract_spec_rejects_unsupported_price_unit(self):
+        with pytest.raises(ValueError, match="Unsupported price quote unit"):
+            replace(MAJOR_CONTRACTS["ES"], price_quote_unit="Cents")

@@ -10,7 +10,11 @@ from pathlib import Path
 import polars as pl
 
 from ml4t.data.core.config import resolve_storage_path
-from ml4t.data.futures.schema import ContractSpec, get_contract_spec
+from ml4t.data.futures.schema import (
+    ContractSpec,
+    get_contract_spec,
+    price_conversion_factor,
+)
 
 DEFAULT_CHRIS_ENV_VAR = "ML4T_QUANDL_CHRIS_PATH"
 
@@ -49,7 +53,8 @@ def parse_quandl_chris_raw(
     Args:
         ticker: Contract ticker (e.g., "CL" for crude oil, "ES" for E-mini S&P 500)
         data_path: Path to Quandl CHRIS parquet file
-        contract_spec: Optional contract specifications for price unit conversion
+        contract_spec: Contract specification. When omitted, the parser looks up
+            ``ticker`` in ``MAJOR_CONTRACTS``.
 
     Returns:
         DataFrame with potentially multiple rows per date (one per contract month):
@@ -57,6 +62,12 @@ def parse_quandl_chris_raw(
         - open, high, low, close: float
         - volume: float
         - open_interest: float (nullable)
+
+        Prices are normalized to dollars, except index futures remain in index points.
+
+    Raises:
+        FileNotFoundError: If the data file does not exist.
+        ValueError: If the ticker, contract specification, or source price unit is invalid.
 
     Note:
         Use this function for roll detection. For continuous series, use parse_quandl_chris().
@@ -111,7 +122,8 @@ def parse_quandl_chris(
     Args:
         ticker: Contract ticker (e.g., "CL" for crude oil, "ES" for E-mini S&P 500)
         data_path: Path to Quandl CHRIS parquet file
-        contract_spec: Optional contract specifications for price unit conversion
+        contract_spec: Contract specification. When omitted, the parser looks up
+            ``ticker`` in ``MAJOR_CONTRACTS``.
 
     Returns:
         Clean DataFrame with single row per date, columns:
@@ -123,8 +135,10 @@ def parse_quandl_chris(
         - volume: float
         - open_interest: float (nullable)
 
+        Prices are normalized to dollars, except index futures remain in index points.
+
     Raises:
-        ValueError: If ticker not found in data
+        ValueError: If the ticker, contract specification, or source price unit is invalid.
         FileNotFoundError: If data_path doesn't exist
 
     Examples:
@@ -233,8 +247,8 @@ def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> p
     """
     Normalize price units to consistent standard.
 
-    The contract specification declares the source unit. Values are never
-    reinterpreted from their magnitude.
+    The contract specification declares the source-specific unit. Magnitude is
+    consulted only for sources explicitly declared as mixed cents and dollars.
 
     Args:
         data: DataFrame with OHLC columns
@@ -243,16 +257,49 @@ def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> p
     Returns:
         DataFrame with normalized prices in standard units
     """
-    if contract_spec.price_quote_unit in {"dollars", "index_points"}:
-        return data
-    if contract_spec.price_quote_unit != "cents":
-        raise ValueError(
-            f"Unsupported price quote unit '{contract_spec.price_quote_unit}' for "
-            f"ticker '{contract_spec.ticker}'"
-        )
-    return data.with_columns(
-        (pl.col(column) / 100).alias(column) for column in ("open", "high", "low", "close")
+    source_unit = contract_spec.source_price_quote_units.get(
+        "quandl_chris", contract_spec.price_quote_unit
     )
+    target_unit = "index_points" if contract_spec.price_quote_unit == "index_points" else "dollars"
+    columns = ("open", "high", "low", "close")
+
+    if source_unit == "mixed_cents_dollars":
+        cents_factor = price_conversion_factor("cents", "dollars")
+        is_cents = pl.col("close").abs() >= 1000
+        normalized = data.with_columns(
+            pl.when(is_cents)
+            .then(pl.col(column) * cents_factor)
+            .otherwise(pl.col(column))
+            .alias(column)
+            for column in columns
+        )
+        _validate_mixed_price_consistency(normalized, contract_spec.ticker)
+        return normalized
+
+    try:
+        factor = price_conversion_factor(source_unit, target_unit)
+    except ValueError as error:
+        raise ValueError(
+            f"Unsupported price quote unit '{source_unit}' for ticker '{contract_spec.ticker}'"
+        ) from error
+    if factor == 1.0:
+        return data
+    return data.with_columns((pl.col(column) * factor).alias(column) for column in columns)
+
+
+def _validate_mixed_price_consistency(data: pl.DataFrame, ticker: str) -> None:
+    """Reject mixed-unit normalization that still contains an implausible scale split."""
+    closes = data["close"].drop_nulls().abs()
+    positive_closes = closes.filter(closes > 0)
+    if len(positive_closes) < 2:
+        return
+    median = positive_closes.median()
+    maximum = positive_closes.max()
+    if median is not None and maximum is not None and median > 0 and maximum / median > 10:
+        raise ValueError(
+            f"Normalized prices for ticker '{ticker}' remain inconsistent; "
+            "provide corrected source price-unit metadata"
+        )
 
 
 def _select_front_month_by_volume(data: pl.DataFrame) -> pl.DataFrame:

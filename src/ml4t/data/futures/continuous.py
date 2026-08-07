@@ -53,6 +53,7 @@ class ContinuousContractBuilder:
         ticker: str,
         data_source: str = "quandl_chris",
         storage_path: str | Path | None = None,
+        contract_spec: ContractSpec | None = None,
     ) -> pl.DataFrame:
         """
         Build continuous contract for a ticker.
@@ -64,6 +65,7 @@ class ContinuousContractBuilder:
                 - "databento": Databento downloaded data
             storage_path: For databento, path where data was downloaded.
                          Defaults to <data-root>/futures
+            contract_spec: Per-call contract specification. Overrides the builder default.
 
         Returns:
             DataFrame with columns:
@@ -88,9 +90,11 @@ class ContinuousContractBuilder:
             >>> builder = ContinuousContractBuilder(adjustment_method=RatioAdjustment())
             >>> cl_continuous = builder.build("CL")
         """
+        resolved_contract_spec = contract_spec or self.contract_spec
+
         # 1. Parse data based on source
         if data_source == "quandl_chris":
-            raw_data = parse_quandl_chris_raw(ticker, contract_spec=self.contract_spec)
+            raw_data = parse_quandl_chris_raw(ticker, contract_spec=resolved_contract_spec)
 
         elif data_source == "databento":
             from ml4t.data.futures.databento_parser import parse_databento_raw
@@ -109,14 +113,14 @@ class ContinuousContractBuilder:
                 f"Unknown data source: {data_source}. Supported: 'quandl_chris', 'databento'"
             )
 
-        selections = self.roll_strategy.select_contracts(raw_data, self.contract_spec)
+        selections = self.roll_strategy.select_contracts(raw_data, resolved_contract_spec)
         if selections.is_empty():
             raise ValueError(f"Roll strategy produced no point-in-time selections for '{ticker}'")
         continuous_data = raw_data.join(selections, on=["date", "symbol"], how="inner").sort("date")
         if continuous_data.height != selections.height:
             raise ValueError("Selected contracts do not map one-to-one to source observations")
 
-        roll_events = self.roll_strategy.identify_roll_events(raw_data, self.contract_spec)
+        roll_events = self.roll_strategy.identify_roll_events(raw_data, resolved_contract_spec)
         adjusted_data = self.adjustment_method.adjust(continuous_data, roll_events)
         roll_dates = [event.date for event in roll_events]
         result = adjusted_data.with_columns(pl.col("date").is_in(roll_dates).alias("is_roll_date"))

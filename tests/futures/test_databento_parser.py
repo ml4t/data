@@ -1,6 +1,6 @@
 """Tests for Databento futures parser."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 import polars as pl
@@ -53,6 +53,13 @@ class TestParseContractSymbol:
 
     def test_four_digit_year_is_unambiguous(self):
         assert parse_contract_symbol("ESH2030").year == 2030
+
+    def test_four_digit_year_with_digit_in_product(self):
+        info = parse_contract_symbol("6EH2025")
+
+        assert info.product == "6E"
+        assert info.month_code == "H"
+        assert info.year == 2025
 
     def test_parse_cl_december_2024(self):
         """Parse crude oil contract symbol."""
@@ -297,6 +304,38 @@ def test_numeric_expiration_is_interpreted_in_utc(tmp_path):
     definitions.write_parquet(definition_dir / "definition.parquet")
 
     assert get_expiration_dates("ES", tmp_path) == {"ESH25": date(2025, 3, 21)}
+
+
+@pytest.mark.parametrize(
+    ("expiration", "expected"),
+    [
+        (datetime(2025, 3, 21, 23, 30), date(2025, 3, 21)),
+        (
+            datetime(2025, 3, 21, 23, 30, tzinfo=timezone(-timedelta(hours=4))),
+            date(2025, 3, 22),
+        ),
+        (datetime(2025, 3, 21, 0, 0, tzinfo=UTC), date(2025, 3, 21)),
+    ],
+)
+def test_datetime_expiration_is_interpreted_in_utc(tmp_path, expiration, expected):
+    definitions = pl.DataFrame({"raw_symbol": ["ESH25"], "expiration": [expiration]})
+    definition_dir = tmp_path / "definition" / "product=ES"
+    definition_dir.mkdir(parents=True)
+    definitions.write_parquet(definition_dir / "definition.parquet")
+
+    assert get_expiration_dates("ES", tmp_path) == {"ESH25": expected}
+
+
+def test_contract_chain_warns_when_truncated_year_is_ambiguous(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ml4t.data.futures.databento_parser.get_expiration_dates",
+        lambda *_args, **_kwargs: {"ESH5": date(2000, 3, 17)},
+    )
+
+    assert get_contract_chain("ES") == []
+    output = capsys.readouterr().out
+    assert "ESH5" in output
+    assert "equally close" in output
 
 
 @pytest.mark.integration
