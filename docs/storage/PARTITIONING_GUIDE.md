@@ -274,5 +274,4 @@ def check_partitions(base_path: str):
 ## See Also
 
 - [Incremental Architecture](INCREMENTAL_ARCHITECTURE.md) - Update strategies
-- [Workflow Notebooks](../../notebooks/storage/01_hive_partitioning.py) - Interactive examples
-- [Provider README](../providers/README.md) - Provider-specific storage notes
+- [Provider reference](../providers/index.md) - Provider-specific storage notes

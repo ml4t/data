@@ -77,4 +77,4 @@ produce identical results across interpreter processes and supported platforms.
 ## See Also
 
 - [Mock Provider](mock.md)
-- [Provider README](README.md)
+- [Provider reference](index.md)

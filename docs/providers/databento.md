@@ -185,4 +185,4 @@ streaming, use `provider.client` directly.
 
 - [Databento Pricing](https://databento.com/pricing)
 - [Databento Reference](databento_reference.md) - Detailed schema guide
-- [Provider README](README.md)
+- [Provider reference](index.md)

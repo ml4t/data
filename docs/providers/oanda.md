@@ -72,4 +72,4 @@ Get credentials by opening a practice account at [oanda.com](https://www.oanda.c
 ## See Also
 
 - [Oanda API](https://developer.oanda.com)
-- [Provider README](README.md)
+- [Provider reference](index.md)

@@ -353,8 +353,10 @@ def get_data(symbol):
 
 - Read the [Configuration Guide](configuration.md) for advanced settings
 - Check the [CLI Reference](cli-reference.md) for all commands
-- Explore [Example Notebooks](../examples/notebooks/) for analysis workflows
-- Learn about [Provider Development](../developer-guide/providers.md) to add custom data sources
+- Explore the [example notebooks](https://github.com/ml4t/data/tree/main/examples/notebooks)
+  for analysis workflows
+- Learn about [provider development](../contributing/creating-a-provider.md) to add custom
+  data sources
 
 ## Getting Help
 

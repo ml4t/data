@@ -76,7 +76,7 @@ class DataManager:
         storage: Any | None = None,
         enable_validation: bool = True,
         progress_callback: Callable[[str, float], None] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize DataManager.
 
@@ -210,7 +210,7 @@ class DataManager:
         end: str,
         frequency: str = "daily",
         provider: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame | pl.LazyFrame | Any:
         """Fetch data for a symbol.
 
@@ -236,7 +236,7 @@ class DataManager:
         start: str,
         end: str,
         frequency: str = "daily",
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, pl.DataFrame | pl.LazyFrame | Any | None]:
         """Fetch data for multiple symbols.
 

@@ -65,4 +65,4 @@ except SymbolNotFoundError:
 ## See Also
 
 - [Synthetic Provider](synthetic.md)
-- [Provider README](README.md)
+- [Provider reference](index.md)

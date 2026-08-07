@@ -359,15 +359,16 @@ def fetch_data_robust(symbol: str, asset_class: str):
 - [Tutorial 05: Multi-Provider Strategies](../tutorials/05_multi_provider.md)
 
 **Provider Setup**:
-- [Provider Selection Guide](../provider-selection-guide.md)
-- [Creating a Custom Provider](../creating_a_provider.md)
-- [Extending ML4T Data](../extending_ml4t-data.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)
+- [Creating a Custom Provider](../contributing/creating-a-provider.md)
+- [Architecture](../contributing/architecture.md)
 
 **Getting Started**:
-- [Main README](../../README.md)
-- [Quick Start Guide](../../README.md#quick-start)
-- [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- [Documentation home](../index.md)
+- [Quick Start Guide](../getting-started/quickstart.md)
+- [Contribution guide](../contributing/index.md)
 
 ---
 
-**Questions or issues?** Open a GitHub issue or see [CONTRIBUTING.md](../../CONTRIBUTING.md) for help.
+**Questions or issues?** Open a GitHub issue or see the
+[contribution guide](../contributing/index.md) for help.

@@ -688,12 +688,12 @@ limit_price = 4750.25  # Valid ES tick (multiple of 0.25)
 ## Related Documentation
 
 **Getting Started**:
-- [Quick Start Guide](../README.md#quick-start)
+- [Quick Start Guide](../getting-started/quickstart.md)
 - [Tutorial 01: Understanding OHLCV Data](../tutorials/01_understanding_ohlcv.md)
 
 **Provider Setup**:
-- [Provider Selection Guide](../provider-selection-guide.md)
-- [Creating a Custom Provider](../creating_a_provider.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)
+- [Creating a Custom Provider](../contributing/creating-a-provider.md)
 
 **Best Practices**:
 - [Tutorial 02: Rate Limiting Best Practices](../tutorials/02_rate_limiting.md)
@@ -719,4 +719,5 @@ limit_price = 4750.25  # Valid ES tick (multiple of 0.25)
 
 **Important**: Futures trading carries significant risk due to leverage. Always backtest thoroughly and start with paper trading.
 
-**Questions or issues?** See [CONTRIBUTING.md](../../CONTRIBUTING.md) or open a GitHub issue.
+**Questions or issues?** See the [contribution guide](../contributing/index.md) or open a
+GitHub issue.

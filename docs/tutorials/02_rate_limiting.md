@@ -440,7 +440,7 @@ for symbol in global_symbols:
 **Next Steps**:
 - [Tutorial 03: Incremental Updates](03_incremental_updates.md) - Learn to minimize API calls
 - [Tutorial 04: Data Quality Validation](04_data_quality.md) - Ensure data integrity
-- [Provider Selection Guide](../provider-selection-guide.md) - Choose the right rate limits
+- [Provider Selection Guide](../getting-started/provider-selection.md) - Choose the right rate limits
 
 ---
 

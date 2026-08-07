@@ -118,5 +118,5 @@ Get your API key at [eodhd.com/register](https://eodhd.com/register).
 ## See Also
 
 - [EODHD Pricing](https://eodhd.com/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)
 - [Provider Audit](PROVIDER_AUDIT.md)

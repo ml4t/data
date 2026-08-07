@@ -74,4 +74,4 @@ Binance may block access from certain countries. Consider using `BinancePublicPr
 
 - [Binance API](https://www.binance.com/en/binance-api)
 - [BinancePublic Provider](binance_public.md)
-- [Provider README](README.md)
+- [Provider reference](index.md)
