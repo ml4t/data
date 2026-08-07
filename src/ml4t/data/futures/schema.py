@@ -65,6 +65,8 @@ def price_conversion_factor(from_unit: str, to_unit: str) -> float:
         raise ValueError(f"Unknown unit: {from_unit}")
     if to_unit not in PRICE_QUOTE_UNITS:
         raise ValueError(f"Unknown unit: {to_unit}")
+    if "index_points" in {from_unit, to_unit} and from_unit != to_unit:
+        raise ValueError(f"Cannot convert between {from_unit} and {to_unit}")
     dollars_per_unit = {"cents": 0.01, "dollars": 1.0, "index_points": 1.0}
     return dollars_per_unit[from_unit] / dollars_per_unit[to_unit]
 
@@ -94,6 +96,12 @@ class ContractSpec:
         trading_hours: Trading hours description
         point_value: Dollar value per point (alternative to multiplier)
         source_price_quote_units: Source-specific quote-unit overrides used during parsing
+        mixed_unit_dollar_range: Plausible normalized range used to disambiguate mixed monetary
+            source rows. Required when a source uses ``mixed_cents_dollars``.
+
+        ``multiplier``, ``tick_size``, and ``point_value`` use ``price_quote_unit``. Parsers may
+        normalize monetary output to dollars, so use ``calculate_contract_value`` instead of
+        multiplying parsed prices directly.
 
     Example:
         >>> es_spec = ContractSpec(
@@ -121,7 +129,7 @@ class ContractSpec:
     multiplier: float
     tick_size: float
     tick_value: float
-    price_quote_unit: str  # "dollars", "cents", "index_points", etc.
+    price_quote_unit: str  # "dollars", "cents", or "index_points"
     settlement_type: SettlementType
     contract_months: str  # e.g., "HMUZ" for Mar/Jun/Sep/Dec
 
@@ -132,6 +140,7 @@ class ContractSpec:
     trading_hours: str | None = None
     point_value: float | None = None  # Alternative to multiplier
     source_price_quote_units: dict[str, str] = field(default_factory=dict)
+    mixed_unit_dollar_range: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         """Validate and compute derived fields."""
@@ -146,6 +155,13 @@ class ContractSpec:
             raise ValueError(
                 f"Unsupported source price quote units: {sorted(invalid_source_units)}"
             )
+        uses_mixed_units = "mixed_cents_dollars" in self.source_price_quote_units.values()
+        if uses_mixed_units and self.mixed_unit_dollar_range is None:
+            raise ValueError("mixed_unit_dollar_range is required for mixed monetary source units")
+        if self.mixed_unit_dollar_range is not None:
+            lower, upper = self.mixed_unit_dollar_range
+            if lower >= upper:
+                raise ValueError("mixed_unit_dollar_range must have increasing bounds")
         if self.point_value is None:
             self.point_value = self.multiplier
 
@@ -186,13 +202,13 @@ class ContractSpec:
         """
         return price * price_conversion_factor(from_unit, to_unit)
 
-    def calculate_contract_value(self, price: float, *, price_unit: str) -> float:
+    def calculate_contract_value(self, price: float, *, price_unit: str | None = None) -> float:
         """
         Calculate total contract value (notional).
 
         Args:
             price: Contract price
-            price_unit: Unit of the supplied price
+            price_unit: Unit of the supplied price. Defaults to ``price_quote_unit``.
 
         Returns:
             Total contract value in dollars
@@ -204,7 +220,7 @@ class ContractSpec:
         """
         quote_price = self.convert_price(
             price,
-            from_unit=price_unit,
+            from_unit=price_unit or self.price_quote_unit,
             to_unit=self.price_quote_unit,
         )
         return quote_price * self.multiplier
@@ -257,6 +273,7 @@ MAJOR_CONTRACTS = {
         first_notice_days=25,  # Approximate
         trading_hours="Nearly 24 hours (Sunday-Friday)",
         source_price_quote_units={"quandl_chris": "mixed_cents_dollars"},
+        mixed_unit_dollar_range=(-100.0, 250.0),
     ),
     "GC": ContractSpec(
         ticker="GC",

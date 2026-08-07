@@ -77,6 +77,51 @@ class TestParseQuandlCHRIS:
         assert data.filter(pl.col("date") == date(2014, 3, 3)).height == 2
         assert data["close"].to_list() == [63.9, 103.5, 104.5]
 
+    def test_mixed_crude_units_use_declared_normalized_range(self, tmp_path):
+        """Sub-$10, negative, and ordinary dollar quotes normalize without a magnitude cutoff."""
+        data = pl.DataFrame(
+            {
+                "ticker": ["CL", "CL", "CL"],
+                "date": [date(1998, 12, 1), date(2020, 4, 20), date(2024, 1, 2)],
+                "open": [975.0, -3763.0, 72.0],
+                "high": [980.0, -3500.0, 73.0],
+                "low": [970.0, -4000.0, 71.0],
+                "close": [975.0, -3763.0, 72.0],
+                "last": [975.0, -3763.0, 72.0],
+                "settle": [975.0, -3763.0, 72.0],
+                "volume": [1000.0, 1000.0, 1000.0],
+                "open_interest": [100.0, 100.0, 100.0],
+            }
+        )
+        path = tmp_path / "mixed-crude.parquet"
+        data.write_parquet(path)
+
+        parsed = parse_quandl_chris_raw("CL", data_path=path)
+
+        assert parsed["close"].to_list() == [9.75, -37.63, 72.0]
+
+    def test_mixed_crude_units_reject_values_outside_declared_range(self, tmp_path):
+        """Ambiguous source corruption fails instead of returning a plausible wrong scale."""
+        data = pl.DataFrame(
+            {
+                "ticker": ["CL"],
+                "date": [date(2024, 1, 2)],
+                "open": [50_000.0],
+                "high": [50_000.0],
+                "low": [50_000.0],
+                "close": [50_000.0],
+                "last": [50_000.0],
+                "settle": [50_000.0],
+                "volume": [1000.0],
+                "open_interest": [100.0],
+            }
+        )
+        path = tmp_path / "invalid-crude.parquet"
+        data.write_parquet(path)
+
+        with pytest.raises(ValueError, match="fit neither dollars nor cents"):
+            parse_quandl_chris_raw("CL", data_path=path)
+
     def test_invalid_ticker(self, chris_data_path):
         with pytest.raises(ValueError, match="Ticker.*not found"):
             parse_quandl_chris("INVALID_TICKER_12345", data_path=chris_data_path)
@@ -168,6 +213,14 @@ class TestParseQuandlCHRIS:
         assert parsed["close"].item() == 4.5
         assert spec.calculate_contract_value(4.5, price_unit="dollars") == 22_500.0
         assert spec.calculate_contract_value(450.0, price_unit="cents") == 22_500.0
+        assert spec.calculate_contract_value(450.0) == 22_500.0
+
+    def test_index_points_cannot_be_converted_to_money(self):
+        """Index points require their contract multiplier, not a fabricated FX conversion."""
+        spec = MAJOR_CONTRACTS["ES"]
+
+        with pytest.raises(ValueError, match="Cannot convert between dollars and index_points"):
+            spec.calculate_contract_value(5000.0, price_unit="dollars")
 
     def test_unknown_ticker_requires_contract_spec(self, tmp_path):
         data = pl.DataFrame(

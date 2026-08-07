@@ -264,8 +264,22 @@ def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> p
     columns = ("open", "high", "low", "close")
 
     if source_unit == "mixed_cents_dollars":
+        if contract_spec.mixed_unit_dollar_range is None:
+            raise ValueError(
+                f"Ticker '{contract_spec.ticker}' requires a mixed-unit normalized price range"
+            )
+        lower, upper = contract_spec.mixed_unit_dollar_range
         cents_factor = price_conversion_factor("cents", "dollars")
-        is_cents = pl.col("close").abs() >= 1000
+        close = pl.col("close")
+        valid_dollars = close.is_between(lower, upper, closed="both")
+        valid_cents = (close * cents_factor).is_between(lower, upper, closed="both")
+        invalid_rows = data.filter(close.is_not_null() & ~valid_dollars & ~valid_cents)
+        if not invalid_rows.is_empty():
+            raise ValueError(
+                f"{len(invalid_rows)} source rows for ticker '{contract_spec.ticker}' fit neither "
+                f"dollars nor cents within the declared range [{lower}, {upper}]"
+            )
+        is_cents = ~valid_dollars & valid_cents
         normalized = data.with_columns(
             pl.when(is_cents)
             .then(pl.col(column) * cents_factor)
@@ -273,7 +287,6 @@ def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> p
             .alias(column)
             for column in columns
         )
-        _validate_mixed_price_consistency(normalized, contract_spec.ticker)
         return normalized
 
     try:
@@ -285,23 +298,6 @@ def _normalize_price_units(data: pl.DataFrame, contract_spec: ContractSpec) -> p
     if factor == 1.0:
         return data
     return data.with_columns((pl.col(column) * factor).alias(column) for column in columns)
-
-
-def _validate_mixed_price_consistency(data: pl.DataFrame, ticker: str) -> None:
-    """Reject mixed-unit normalization that still contains an implausible scale split."""
-    closes = data["close"].drop_nulls().abs()
-    positive_closes = closes.filter(closes > 0)
-    if len(positive_closes) < 2:
-        return
-    median = positive_closes.median()
-    maximum = positive_closes.max()
-    if not isinstance(median, int | float) or not isinstance(maximum, int | float):
-        raise TypeError("'close' must contain non-null numeric values")
-    if median > 0 and maximum / median > 10:
-        raise ValueError(
-            f"Normalized prices for ticker '{ticker}' remain inconsistent; "
-            "provide corrected source price-unit metadata"
-        )
 
 
 def _select_front_month_by_volume(data: pl.DataFrame) -> pl.DataFrame:
