@@ -13,6 +13,12 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _datetime_scalar(value: object, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"'{name}' must contain non-null Datetime values")
+    return value
+
+
 class SessionCompleter:
     """Fill gaps in trading data to create complete sessions.
 
@@ -82,15 +88,19 @@ class SessionCompleter:
         if fill_method not in {"forward", "backward", "none"}:
             raise ValueError("fill_method must be 'forward', 'backward', or 'none'")
 
+        timestamp_dtype = df.schema["timestamp"]
+        if not isinstance(timestamp_dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Datetime values")
+
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot complete sessions")
             return df
 
         # Auto-detect date range
         if start_date is None:
-            start_date = df["timestamp"].min()
+            start_date = _datetime_scalar(df["timestamp"].min(), "timestamp")
         if end_date is None:
-            end_date = df["timestamp"].max() + timedelta(minutes=1)
+            end_date = _datetime_scalar(df["timestamp"].max(), "timestamp") + timedelta(minutes=1)
 
         logger.info(
             f"Completing sessions for {len(df)} rows",
@@ -104,6 +114,10 @@ class SessionCompleter:
 
             request_start = pd.Timestamp(start_date)
             request_end = pd.Timestamp(end_date)
+            if not isinstance(request_start, pd.Timestamp) or not isinstance(
+                request_end, pd.Timestamp
+            ):
+                raise ValueError("start_date and end_date must not be NaT")
             if request_start.tzinfo is None:
                 request_start = request_start.tz_localize("UTC")
             else:
@@ -132,6 +146,8 @@ class SessionCompleter:
             session_dates: list[date] = []
 
             for session_date, row in schedule.iterrows():
+                if not isinstance(session_date, pd.Timestamp):
+                    raise TypeError("calendar returned a non-datetime session label")
                 market_open = row["market_open"]
                 market_close = row["market_close"]
                 intervals = [(market_open, market_close)]
@@ -167,9 +183,6 @@ class SessionCompleter:
             )
 
             # Ensure input data has matching timestamp type
-            timestamp_dtype = df.schema["timestamp"]
-            if not isinstance(timestamp_dtype, pl.Datetime):
-                raise TypeError("'timestamp' must contain Datetime values")
             timestamp_expr = pl.col("timestamp")
             if timestamp_dtype.time_zone is None:
                 timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")

@@ -10,6 +10,13 @@ import structlog
 
 logger = structlog.get_logger()
 
+
+def _datetime_scalar(value: object, name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"'{name}' must contain non-null Datetime values")
+    return value
+
+
 # Exchange to calendar mapping
 EXCHANGE_CALENDARS = {
     "CME": "CME Globex Crypto",
@@ -104,15 +111,19 @@ class SessionAssigner:
         if outside_session not in {"null", "raise", "drop"}:
             raise ValueError("outside_session must be 'null', 'raise', or 'drop'")
 
+        timestamp_dtype = df.schema["timestamp"]
+        if not isinstance(timestamp_dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Datetime values")
+
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot assign sessions")
             return df.with_columns(pl.lit(None).cast(pl.Date).alias("session_date"))
 
         # Auto-detect date range from data
         if start_date is None:
-            start_date = df["timestamp"].min()
+            start_date = _datetime_scalar(df["timestamp"].min(), "timestamp")
         if end_date is None:
-            end_date = df["timestamp"].max()
+            end_date = _datetime_scalar(df["timestamp"].max(), "timestamp")
 
         logger.info(
             f"Assigning sessions for {len(df)} rows",
@@ -124,13 +135,21 @@ class SessionAssigner:
         try:
             import pandas as pd
 
-            start_pd = pd.Timestamp(start_date).normalize() - pd.Timedelta(days=1)
-            end_pd = pd.Timestamp(end_date).normalize() + pd.Timedelta(days=1)
+            start_timestamp = pd.Timestamp(start_date)
+            end_timestamp = pd.Timestamp(end_date)
+            if not isinstance(start_timestamp, pd.Timestamp) or not isinstance(
+                end_timestamp, pd.Timestamp
+            ):
+                raise ValueError("start_date and end_date must not be NaT")
+            start_pd = start_timestamp.normalize() - pd.Timedelta(days=1)
+            end_pd = end_timestamp.normalize() + pd.Timedelta(days=1)
             schedule = self.calendar.schedule(start_date=start_pd, end_date=end_pd)
             logger.debug(f"Got {len(schedule)} sessions from calendar")
 
             session_map = []
             for session_date, row in schedule.iterrows():
+                if not isinstance(session_date, pd.Timestamp):
+                    raise TypeError("calendar returned a non-datetime session label")
                 entry = {
                     "_calendar_session_start": row["market_open"].to_pydatetime(),
                     "_calendar_session_end": row["market_close"].to_pydatetime(),
@@ -154,18 +173,16 @@ class SessionAssigner:
                     return result.head(0)
                 return result
 
-            timestamp_dtype = df.schema["timestamp"]
-            if not isinstance(timestamp_dtype, pl.Datetime):
-                raise TypeError("'timestamp' must contain Datetime values")
             timestamp_expr = pl.col("timestamp")
             if timestamp_dtype.time_zone is None:
                 timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
             timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC")
 
             session_df = pl.DataFrame(session_map).sort("_calendar_session_end")
-            after_last_session = session_df.get_column(
-                "_calendar_session_end"
-            ).max() + pd.Timedelta(minutes=1)
+            after_last_session = _datetime_scalar(
+                session_df.get_column("_calendar_session_end").max(),
+                "_calendar_session_end",
+            ) + pd.Timedelta(minutes=1)
             observations = (
                 df.with_row_index("_session_row_index")
                 .with_columns(timestamp_expr.alias("_session_timestamp"))

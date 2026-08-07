@@ -174,6 +174,15 @@ class TestSessionAssigner:
 
         assert result.get_column("session_date").to_list() == [date(2026, 1, 2), None]
 
+    def test_all_null_timestamps_are_rejected(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame({"timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC"))})
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            assigner.assign_sessions(df)
+
     def test_assignment_preserves_columns_with_calendar_names(self):
         """Calendar implementation details do not overwrite caller-owned columns."""
         from ml4t.data.sessions.assigner import SessionAssigner
@@ -294,6 +303,15 @@ class TestSessionCompleter:
 
         result = completer.complete_sessions(df)
         assert len(result) == 0
+
+    def test_all_null_timestamps_are_rejected(self):
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        df = pl.DataFrame({"timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC"))})
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            completer.complete_sessions(df)
 
     def test_complete_sessions_with_data(self):
         """Test session completion with real data."""
