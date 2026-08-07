@@ -166,7 +166,7 @@ class TestContinuousContractBuilderBuild:
             result = builder.build("ES", data_source="quandl_chris")
 
             # Verify parsers were called
-            mock_raw.assert_called_once_with("ES", contract_spec=None)
+            mock_raw.assert_called_once_with("ES", data_path=None, contract_spec=None)
 
             # Verify result has expected columns
             assert "date" in result.columns
@@ -212,6 +212,40 @@ class TestContinuousContractBuilderBuild:
 
         with pytest.raises(ValueError, match="Unknown data source"):
             builder.build("ES", data_source="invalid_source")
+
+    def test_build_rejects_symbol_less_chris_data(self, tmp_path):
+        path = tmp_path / "chris.parquet"
+        pl.DataFrame(
+            {
+                "ticker": ["CL", "CL"],
+                "date": [date(2024, 1, 2), date(2024, 1, 2)],
+                "open": [7000.0, 71.0],
+                "high": [7100.0, 72.0],
+                "low": [6900.0, 70.0],
+                "close": [7050.0, 71.5],
+                "last": [7050.0, 71.5],
+                "settle": [None, None],
+                "volume": [1000.0, 2000.0],
+                "open_interest": [100.0, 200.0],
+            }
+        ).write_parquet(path)
+
+        with pytest.raises(ValueError, match="contract identity.*Databento"):
+            ContinuousContractBuilder().build("CL", storage_path=path)
+
+    def test_build_reports_unmatched_selected_pair(self, sample_raw_data):
+        strategy = MagicMock()
+        strategy.select_contracts.return_value = pl.DataFrame(
+            {"date": [date(2024, 1, 2)], "symbol": ["MISSING"]}
+        )
+        builder = ContinuousContractBuilder(roll_strategy=strategy)
+
+        with (
+            patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw,
+            pytest.raises(ValueError, match="2024-01-02.*MISSING.*0 observations"),
+        ):
+            mock_raw.return_value = sample_raw_data
+            builder.build("ES")
 
     def test_build_applies_roll_strategy(self, sample_raw_data, sample_continuous_data):
         """Test that roll strategy is applied."""
@@ -318,7 +352,7 @@ class TestContinuousContractBuilderBuild:
             mock_raw.return_value = raw
             builder.build("ES", contract_spec=es_contract_spec)
 
-        mock_raw.assert_called_once_with("ES", contract_spec=es_contract_spec)
+        mock_raw.assert_called_once_with("ES", data_path=None, contract_spec=es_contract_spec)
         mock_roll_strategy.select_contracts.assert_called_once_with(raw, es_contract_spec)
 
 

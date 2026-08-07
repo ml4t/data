@@ -24,7 +24,7 @@ class RollEvent:
 
 
 class RollStrategy(ABC):
-    """Select one identified contract for each observation date."""
+    """Select one identified contract after the configured point-in-time warm-up."""
 
     @abstractmethod
     def select_contracts(
@@ -46,7 +46,7 @@ class RollStrategy(ABC):
     ) -> list[RollEvent]:
         """Return switches with old and new contract closes from the same date."""
         selections = self.select_contracts(data, contract_spec)
-        return _build_roll_events(data, selections)
+        return build_roll_events(data, selections)
 
 
 class VolumeBasedRoll(RollStrategy):
@@ -120,13 +120,18 @@ class TimeBasedRoll(RollStrategy):
         dates = _dates(data)
         if not dates:
             return _empty_selections()
-        contracts = _contract_expirations(data)
+        contracts = dict(_contract_expirations(data))
+        roll_dates = {
+            symbol: self._calculate_roll_date(expiration, dates)
+            for symbol, expiration in contracts.items()
+        }
+        available_by_date = _available_symbols_by_date(data)
         records = []
         for observation_date in dates:
             eligible = [
-                (symbol, expiration)
-                for symbol, expiration in contracts
-                if observation_date < self._calculate_roll_date(expiration, dates)
+                (symbol, contracts[symbol])
+                for symbol in available_by_date[observation_date]
+                if symbol in contracts and observation_date < roll_dates[symbol]
             ]
             if eligible:
                 records.append(
@@ -145,6 +150,8 @@ class TimeBasedRoll(RollStrategy):
                     days_counted += 1
         else:
             target -= timedelta(days=self.days_before_expiration)
+        if target >= trading_dates[-1] or target < trading_dates[0]:
+            return target
         observed = [trading_date for trading_date in trading_dates if trading_date <= target]
         return max(observed) if observed else target
 
@@ -266,14 +273,17 @@ def _lagged_rank_selections(
         return _empty_selections()
 
     observation_dates = _dates(data)
-    leaders: list[str | None] = []
-    for ranking_date in observation_dates:
-        ranked = (
-            valid.filter(pl.col("date") == ranking_date)
-            .sort([metric, "symbol"], descending=[True, False])
-            .select("symbol")
-        )
-        leaders.append(ranked["symbol"][rank] if ranked.height > rank else None)
+    ranked = (
+        valid.sort(["date", metric, "symbol"], descending=[False, True, False])
+        .group_by("date", maintain_order=True)
+        .agg(pl.col("symbol"))
+    )
+    rankings = {row["date"]: row["symbol"] for row in ranked.iter_rows(named=True)}
+    leaders = [
+        rankings[ranking_date][rank] if len(rankings.get(ranking_date, [])) > rank else None
+        for ranking_date in observation_dates
+    ]
+    available_by_date = _available_symbols_by_date(data)
 
     records = []
     selected: str | None = None
@@ -283,15 +293,30 @@ def _lagged_rank_selections(
         candidate = history[0] if history[0] is not None and len(set(history)) == 1 else None
         if candidate is not None:
             effective_date = observation_dates[index]
+            available = available_by_date[effective_date]
             if selected is None:
-                selected = candidate
-            elif candidate != selected and (
-                last_roll is None or (effective_date - last_roll).days >= min_days_between_rolls
+                prior_ranking = rankings.get(observation_dates[index - 1], [])
+                selected = next(
+                    (symbol for symbol in prior_ranking[rank:] if symbol in available),
+                    None,
+                )
+            elif (
+                candidate != selected
+                and (
+                    last_roll is None or (effective_date - last_roll).days >= min_days_between_rolls
+                )
+                and candidate in available
             ):
                 selected = candidate
                 last_roll = effective_date
         if selected is not None:
-            records.append({"date": observation_dates[index], "symbol": selected})
+            effective_date = observation_dates[index]
+            if selected not in available_by_date[effective_date]:
+                raise ValueError(
+                    f"Selection on {effective_date} cannot use contract '{selected}': "
+                    "it was not observed on that date"
+                )
+            records.append({"date": effective_date, "symbol": selected})
     return _selection_frame(records)
 
 
@@ -309,7 +334,7 @@ def _selection_changes(selections: pl.DataFrame) -> list[tuple[date, str, str]]:
     return changes
 
 
-def _build_roll_events(data: pl.DataFrame, selections: pl.DataFrame) -> list[RollEvent]:
+def build_roll_events(data: pl.DataFrame, selections: pl.DataFrame) -> list[RollEvent]:
     _require_columns(data, "date", "symbol", "close")
     events = []
     for roll_date, old_symbol, new_symbol in _selection_changes(selections):
@@ -361,6 +386,14 @@ def _dates(data: pl.DataFrame) -> list[date]:
     if "date" not in data.columns:
         raise ValueError("Data must have 'date' column")
     return sorted(data.select("date").unique().to_series().to_list())
+
+
+def _available_symbols_by_date(data: pl.DataFrame) -> dict[date, set[str]]:
+    _require_columns(data, "date", "symbol")
+    available = {observation_date: set() for observation_date in _dates(data)}
+    for observation_date, symbol in data.select("date", "symbol").unique().iter_rows():
+        available[observation_date].add(symbol)
+    return available
 
 
 def _require_columns(data: pl.DataFrame, *columns: str) -> None:

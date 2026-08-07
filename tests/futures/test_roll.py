@@ -58,9 +58,13 @@ class TestPointInTimeRollContract:
     def test_confirmation_window_delays_change_until_history_is_available(self):
         data = _ranked_history()
 
-        rolls = VolumeBasedRoll(lookback_days=2, min_days_between_rolls=0).identify_rolls(data)
+        strategy = VolumeBasedRoll(lookback_days=2, min_days_between_rolls=0)
 
-        assert rolls == []
+        assert strategy.select_contracts(data).to_dicts() == [
+            {"date": date(2026, 1, 3), "symbol": "A"},
+            {"date": date(2026, 1, 4), "symbol": "A"},
+        ]
+        assert strategy.identify_rolls(data) == []
 
     def test_roll_event_retains_contract_identity_and_paired_closes(self):
         data = _ranked_history()
@@ -84,6 +88,30 @@ class TestPointInTimeRollContract:
 
         with pytest.raises(ValueError, match="exactly one close for contract 'A'"):
             VolumeBasedRoll(min_days_between_rolls=0).identify_roll_events(data)
+
+    def test_lagged_selection_rejects_missing_selected_contract(self):
+        data = _ranked_history().filter(
+            ~((pl.col("date") == date(2026, 1, 4)) & (pl.col("symbol") == "A"))
+        )
+
+        with pytest.raises(ValueError, match="2026-01-04.*contract 'A'.*not observed"):
+            VolumeBasedRoll(lookback_days=2, min_days_between_rolls=0).select_contracts(data)
+
+    def test_time_roll_selects_only_contracts_observed_on_date(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 2), date(2026, 1, 2), date(2026, 1, 5)],
+                "symbol": ["A", "B", "B"],
+                "expiration": [date(2026, 1, 30), date(2026, 2, 27), date(2026, 2, 27)],
+            }
+        )
+
+        selections = TimeBasedRoll(days_before_expiration=0).select_contracts(data)
+
+        assert selections.to_dicts() == [
+            {"date": date(2026, 1, 2), "symbol": "A"},
+            {"date": date(2026, 1, 5), "symbol": "B"},
+        ]
 
     def test_open_interest_selection_is_lagged(self):
         data = _ranked_history()

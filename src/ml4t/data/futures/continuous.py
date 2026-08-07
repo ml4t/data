@@ -16,7 +16,7 @@ import polars as pl
 from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.futures.adjustment import AdjustmentMethod, BackAdjustment
 from ml4t.data.futures.parser import parse_quandl_chris_raw
-from ml4t.data.futures.roll import RollStrategy, VolumeBasedRoll
+from ml4t.data.futures.roll import RollStrategy, VolumeBasedRoll, build_roll_events
 from ml4t.data.futures.schema import ContractSpec
 
 
@@ -64,7 +64,8 @@ class ContinuousContractBuilder:
                 - "quandl_chris": Quandl CHRIS data (legacy)
                 - "databento": Databento downloaded data
             storage_path: For databento, path where data was downloaded.
-                         Defaults to <data-root>/futures
+                For CHRIS, an optional explicit parquet file. Databento defaults
+                to <data-root>/futures.
             contract_spec: Per-call contract specification. Overrides the builder default.
 
         Returns:
@@ -94,7 +95,17 @@ class ContinuousContractBuilder:
 
         # 1. Parse data based on source
         if data_source == "quandl_chris":
-            raw_data = parse_quandl_chris_raw(ticker, contract_spec=resolved_contract_spec)
+            raw_data = parse_quandl_chris_raw(
+                ticker,
+                data_path=storage_path,
+                contract_spec=resolved_contract_spec,
+            )
+            if "symbol" not in raw_data.columns:
+                raise ValueError(
+                    "Quandl CHRIS rows lack per-contract identity, so point-in-time rolls "
+                    "cannot be constructed safely. Use Databento or parse_quandl_chris() "
+                    "for the preselected front-month series."
+                )
 
         elif data_source == "databento":
             from ml4t.data.futures.databento_parser import parse_databento_raw
@@ -116,11 +127,20 @@ class ContinuousContractBuilder:
         selections = self.roll_strategy.select_contracts(raw_data, resolved_contract_spec)
         if selections.is_empty():
             raise ValueError(f"Roll strategy produced no point-in-time selections for '{ticker}'")
+        pair_counts = raw_data.group_by("date", "symbol").len(name="observations")
+        checked = selections.join(pair_counts, on=["date", "symbol"], how="left").with_columns(
+            pl.col("observations").fill_null(0)
+        )
+        invalid = checked.filter(pl.col("observations") != 1)
+        if not invalid.is_empty():
+            details = ", ".join(
+                f"({row['date']}, {row['symbol']}): {row['observations']} observations"
+                for row in invalid.iter_rows(named=True)
+            )
+            raise ValueError(f"Selected contracts do not map one-to-one: {details}")
         continuous_data = raw_data.join(selections, on=["date", "symbol"], how="inner").sort("date")
-        if continuous_data.height != selections.height:
-            raise ValueError("Selected contracts do not map one-to-one to source observations")
 
-        roll_events = self.roll_strategy.identify_roll_events(raw_data, resolved_contract_spec)
+        roll_events = build_roll_events(raw_data, selections)
         adjusted_data = self.adjustment_method.adjust(continuous_data, roll_events)
         roll_dates = [event.date for event in roll_events]
         result = adjusted_data.with_columns(pl.col("date").is_in(roll_dates).alias("is_roll_date"))
