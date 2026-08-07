@@ -51,21 +51,23 @@ keywords = [
     "parquet",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 # Core dependencies
 dependencies = [
@@ -106,6 +108,8 @@ databento = [
 ]
 oanda = [
     "oandapyV20>=0.7.0",
+    # oandapyV20 imports requests but does not declare it.
+    "requests>=2.32.0",
 ]
 cot = [
     "cot-reports>=0.1.0",  # CFTC Commitment of Traders data
@@ -210,9 +214,9 @@ timeout = 300
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 fix = true
-exclude = ["_version.py"]
+exclude = ["_version.py", "**/AGENTS.md"]
 
 [tool.ruff.lint]
 select = [
@@ -379,7 +383,7 @@ module = [
 ignore_errors = true
 
 [tool.ty.environment]
-python-version = "3.11"
+python-version = "3.12"
 root = ["src"]
 
 [tool.ty.src]

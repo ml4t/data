@@ -408,6 +408,7 @@ class TestDownloadProductOHLCV:
         # Should have 2 rows (deduplicated)
         df = pl.read_parquet(output_path)
         assert len(df) == 2
+        assert df.schema["ts_event"] == pl.Datetime("ns", "UTC")
 
 
 # ============================================================================

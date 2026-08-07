@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from datetime import time as datetime_time
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,14 +22,14 @@ def _exclude_resolved_credential(value: str | None) -> bool:
 
 
 # Storage configuration enums
-class StorageStrategy(str, Enum):
+class StorageStrategy(StrEnum):
     """Storage backend strategy options."""
 
     HIVE = "hive"
     FLAT = "flat"
 
 
-class CompressionType(str, Enum):
+class CompressionType(StrEnum):
     """Supported compression types for Parquet."""
 
     ZSTD = "zstd"
@@ -38,7 +38,7 @@ class CompressionType(str, Enum):
     NONE = "none"
 
 
-class PartitionGranularity(str, Enum):
+class PartitionGranularity(StrEnum):
     """Partition granularity for Hive storage.
 
     Choose based on data frequency:
@@ -54,7 +54,7 @@ class PartitionGranularity(str, Enum):
     HOUR = "hour"
 
 
-class ProviderType(str, Enum):
+class ProviderType(StrEnum):
     """Provider type enumeration."""
 
     YAHOO = "yahoo"
@@ -68,7 +68,7 @@ class ProviderType(str, Enum):
     MOCK = "mock"
 
 
-class ScheduleType(str, Enum):
+class ScheduleType(StrEnum):
     """Schedule type enumeration."""
 
     CRON = "cron"

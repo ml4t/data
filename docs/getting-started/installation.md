@@ -66,6 +66,7 @@ print(f"Fetched {len(df)} rows")
 
 ## Requirements
 
-- Python 3.9+
+- Stable CPython 3.12 through 3.14 on Linux, macOS, or Windows
+- Python 3.15 prereleases are tested but are not stable-supported until final
 - Polars (automatically installed)
 - Provider-specific SDKs (optional)

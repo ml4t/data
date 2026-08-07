@@ -1,6 +1,6 @@
 # ml4t-data
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12-3.14](https://img.shields.io/badge/python-3.12--3.14-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/ml4t-data)](https://pypi.org/project/ml4t-data/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -32,6 +32,10 @@ The goal is to support an ongoing research workflow rather than one-off download
 ![ml4t-data Architecture](docs/images/ml4t_data_architecture_print.jpeg)
 
 ## Installation
+
+ML4T Data supports stable CPython 3.12 through 3.14 on Linux, macOS, and Windows.
+Python 3.15 prereleases are tested as blocking compatibility checks but are not advertised
+as stable support until Python 3.15 is final.
 
 ```bash
 pip install ml4t-data

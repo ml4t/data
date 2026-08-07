@@ -6,7 +6,7 @@ This guide covers deploying ML4T Data in a production environment with proper CI
 
 ## Prerequisites
 
-- Python 3.9+
+- Stable CPython 3.12 through 3.14
 - Docker (optional but recommended)
 - Redis/PostgreSQL for production storage (optional)
 - Monitoring system (Prometheus/Grafana recommended)
@@ -20,7 +20,7 @@ The project includes comprehensive CI/CD workflows:
 #### 1. Continuous Integration (`ci.yml`)
 - **Triggers**: Push to `main`/`develop`, Pull Requests
 - **Jobs**:
-  - **Test**: Runs on Python 3.9-3.12, includes coverage reporting
+  - **Test**: Runs on Python 3.12-3.14 across Linux, macOS, and Windows
   - **Lint**: Code quality checks with ruff and mypy
   - **Security**: Bandit security scanning and dependency vulnerability checks
   - **Build**: Package building and validation

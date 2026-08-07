@@ -8,7 +8,7 @@ import tarfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ from ml4t.data.storage.keys import contained_path, validate_path_component
 logger = structlog.get_logger()
 
 
-class MigrationStatus(str, Enum):
+class MigrationStatus(StrEnum):
     """Status of a migration."""
 
     PENDING = "pending"

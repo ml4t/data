@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar
 
 
-class AssetClass(str, Enum):
+class AssetClass(StrEnum):
     """Supported asset classes.
 
     Canonical enum for all asset class references across ml4t-data.

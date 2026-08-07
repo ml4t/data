@@ -6,7 +6,7 @@ Welcome to ML4T Data (Quantitative Ledger Data Manager)! This guide will help yo
 
 ### System Requirements
 
-- Python 3.10 or higher
+- Stable CPython 3.12 through 3.14
 - 4GB RAM minimum (8GB recommended)
 - 10GB free disk space for data storage
 - Internet connection for data fetching

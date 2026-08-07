@@ -14,10 +14,10 @@ Educational Note:
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class FuturesAssetClass(str, Enum):
+class FuturesAssetClass(StrEnum):
     """Asset class classification for futures contracts.
 
     This is a futures-specific taxonomy, distinct from the general
@@ -37,7 +37,7 @@ class FuturesAssetClass(str, Enum):
 AssetClass = FuturesAssetClass
 
 
-class SettlementType(str, Enum):
+class SettlementType(StrEnum):
     """Settlement method for futures contracts."""
 
     CASH = "cash"  # Cash-settled (e.g., equity indices)

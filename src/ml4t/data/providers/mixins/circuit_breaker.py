@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from time import monotonic
-from typing import Any, ClassVar, Literal, TypeAlias, TypeVar
+from typing import Any, ClassVar, Literal, TypeVar
 
 import structlog
 
@@ -13,8 +13,8 @@ from ml4t.data.core.exceptions import CircuitBreakerOpenError, NetworkError, Rat
 logger = structlog.get_logger()
 
 T = TypeVar("T")
-CircuitState: TypeAlias = Literal["CLOSED", "OPEN", "HALF_OPEN"]
-ExceptionTypes: TypeAlias = type[Exception] | tuple[type[Exception], ...]
+type CircuitState = Literal["CLOSED", "OPEN", "HALF_OPEN"]
+type ExceptionTypes = type[Exception] | tuple[type[Exception], ...]
 
 
 class CircuitBreaker:

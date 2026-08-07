@@ -7,13 +7,13 @@ utilities for the futures downloader.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from ml4t.data.core.config import resolve_storage_path
 
 
-class FuturesCategory(str, Enum):
+class FuturesCategory(StrEnum):
     """Futures product categories."""
 
     EQUITY_INDEX = "equity_index"

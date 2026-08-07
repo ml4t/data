@@ -44,7 +44,22 @@ def _align_frame_columns(
             [_build_fill_expression(col, fill_values.get(col), schema.get(col)) for col in missing]
         )
 
-    return df.select(columns)
+    return df.select(pl.col(column).cast(schema[column]) for column in columns)
+
+
+def _concat_dtype(left: pl.DataType, right: pl.DataType) -> pl.DataType:
+    """Resolve a concat dtype without reducing timestamp precision."""
+    if left == right:
+        return left
+    if isinstance(left, pl.Datetime) and isinstance(right, pl.Datetime):
+        if left.time_zone == right.time_zone:
+            precision = {"ms": 0, "us": 1, "ns": 2}
+            time_unit = max((left.time_unit, right.time_unit), key=precision.__getitem__)
+            return pl.Datetime(time_unit, left.time_zone)
+
+    left_empty = pl.DataFrame({"value": pl.Series([], dtype=left)})
+    right_empty = pl.DataFrame({"value": pl.Series([], dtype=right)})
+    return pl.concat([left_empty, right_empty], how="vertical_relaxed").schema["value"]
 
 
 def align_frames_for_concat(
@@ -56,7 +71,16 @@ def align_frames_for_concat(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Align two DataFrames to a shared column set for safe vertical concatenation."""
     columns = [*left.columns, *[col for col in right.columns if col not in left.columns]]
-    schema = {**right.schema, **left.schema}
+    schema = {
+        column: (
+            _concat_dtype(left.schema[column], right.schema[column])
+            if column in left.schema and column in right.schema
+            else left.schema[column]
+            if column in left.schema
+            else right.schema[column]
+        )
+        for column in columns
+    }
 
     return (
         _align_frame_columns(left, columns, schema, left_fill_values),

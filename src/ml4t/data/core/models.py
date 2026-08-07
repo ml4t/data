@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import polars as pl
@@ -12,13 +12,13 @@ from pydantic import BaseModel, Field, model_validator
 from ml4t.data.assets.asset_class import AssetClass  # noqa: F401 — re-exported
 
 
-class SchemaVersion(str, Enum):
+class SchemaVersion(StrEnum):
     """Schema version for data storage."""
 
     V1_0 = "1.0"
 
 
-class Frequency(str, Enum):
+class Frequency(StrEnum):
     """Data frequency."""
 
     # High-frequency data
@@ -37,7 +37,7 @@ class Frequency(str, Enum):
     MONTHLY = "monthly"
 
 
-class BarType(str, Enum):
+class BarType(StrEnum):
     """Types of bars for OHLCV data."""
 
     TIME = "time"  # Time-based bars (1min, 5min, daily, etc.)
@@ -83,6 +83,7 @@ class Metadata(BaseModel):
     download_utc_timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data_range: dict[str, str] | None = None
     provider_params: dict[str, Any] = Field(default_factory=dict)
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"use_enum_values": True}
 

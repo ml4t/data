@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -65,7 +65,7 @@ def resolve_storage_path(
     return resolve_data_path(*default_parts, data_root=data_root)
 
 
-class StorageBackendType(str, Enum):
+class StorageBackendType(StrEnum):
     """Supported storage backend types."""
 
     FILESYSTEM = "filesystem"
@@ -73,7 +73,7 @@ class StorageBackendType(str, Enum):
     MEMORY = "memory"
 
 
-class CompressionType(str, Enum):
+class CompressionType(StrEnum):
     """Supported compression types."""
 
     NONE = "none"
