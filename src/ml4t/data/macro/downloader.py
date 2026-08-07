@@ -54,11 +54,18 @@ class MacroConfig:
 
     def __post_init__(self):
         self.storage_path = resolve_storage_path(self.storage_path, "macro")
+        self.get_treasury_symbols()
+        self.get_derived_series()
 
     def get_treasury_symbols(self) -> list[str]:
         """Get list of Treasury yield series IDs."""
         treasury = self.series.get("treasury_yields", {})
-        return treasury.get("symbols", ["DGS2", "DGS5", "DGS10", "DGS30"])
+        if not isinstance(treasury, dict):
+            raise ValueError("macro.series.treasury_yields must be a mapping")
+        symbols = treasury.get("symbols", ["DGS2", "DGS5", "DGS10", "DGS30"])
+        if not isinstance(symbols, list) or not all(isinstance(symbol, str) for symbol in symbols):
+            raise ValueError("macro.series.treasury_yields.symbols must be a list of strings")
+        return symbols
 
     def get_derived_series(self) -> list[dict[str, str]]:
         """Get list of derived series definitions."""
@@ -68,13 +75,15 @@ class MacroConfig:
 
         result: list[dict[str, str]] = []
         for index, item in enumerate(derived):
-            if not isinstance(item, dict) or not all(
-                isinstance(key, str) and isinstance(value, str) for key, value in item.items()
-            ):
+            if not isinstance(item, dict):
+                raise ValueError(f"macro.series.derived[{index}] must be a mapping")
+            name = item.get("name")
+            formula = item.get("formula")
+            if not isinstance(name, str) or not name or not isinstance(formula, str) or not formula:
                 raise ValueError(
-                    f"macro.series.derived[{index}] must map string keys to string values"
+                    f"macro.series.derived[{index}] requires non-empty string name and formula"
                 )
-            result.append(item)
+            result.append({"name": name, "formula": formula})
         return result
 
 
