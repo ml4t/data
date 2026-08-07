@@ -1,13 +1,11 @@
 """Tests for LearnedSyntheticProvider.
 
 These tests verify the learned synthetic data provider can load pre-generated
-samples or model checkpoints and generate realistic OHLCV data.
+samples and generate realistic OHLCV data.
 """
 
 from __future__ import annotations
 
-# Check if torch is available for checkpoint tests
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -18,11 +16,6 @@ import polars as pl
 import pytest
 
 from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
-
-HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-requires_torch = pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
-
 
 # =============================================================================
 # Fixtures
@@ -100,10 +93,7 @@ def checkpoint_dir(tmp_path: Path, sample_3d_array: np.ndarray, mock_metadata: d
     with open(checkpoint_path / "metadata.json", "w") as f:
         json.dump(mock_metadata, f)
 
-    if HAS_TORCH:
-        import torch  # type: ignore[import-unresolved]
-
-        torch.save({"state_dict": {}, "generator": "timegan"}, checkpoint_path / "checkpoint.pt")
+    (checkpoint_path / "checkpoint.pt").write_bytes(b"untrusted checkpoint bytes")
 
     return checkpoint_path
 
@@ -274,18 +264,12 @@ class TestLearnedSyntheticFromSamples:
 class TestLearnedSyntheticFromCheckpoint:
     """Test from_checkpoint class method."""
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_from_checkpoint_with_samples(self, checkpoint_dir: Path):
-        """Test loading from checkpoint with pre-generated samples."""
+        """Load safe samples without deserializing the adjacent checkpoint."""
         provider = LearnedSyntheticProvider.from_checkpoint(checkpoint_dir)
         assert provider.n_samples == 100
         assert provider.generator_name == "timegan"
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_from_checkpoint_string_path(self, checkpoint_dir: Path):
         """Test loading from string path."""
         provider = LearnedSyntheticProvider.from_checkpoint(str(checkpoint_dir))
@@ -305,9 +289,19 @@ class TestLearnedSyntheticFromCheckpoint:
         with pytest.raises(FileNotFoundError, match="Metadata file not found"):
             LearnedSyntheticProvider.from_checkpoint(checkpoint_path)
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
+    def test_from_checkpoint_requires_pre_generated_samples(
+        self, tmp_path: Path, mock_metadata: dict[str, Any]
+    ) -> None:
+        checkpoint_path = tmp_path / "checkpoint"
+        checkpoint_path.mkdir()
+        (checkpoint_path / "metadata.json").write_text(json.dumps(mock_metadata))
+        (checkpoint_path / "checkpoint.pt").write_bytes(b"untrusted checkpoint bytes")
+
+        with pytest.raises(
+            FileNotFoundError, match="Executable model checkpoints are not supported"
+        ):
+            LearnedSyntheticProvider.from_checkpoint(checkpoint_path)
+
     def test_from_checkpoint_with_seed(self, checkpoint_dir: Path):
         """Test from_checkpoint with seed parameter."""
         provider = LearnedSyntheticProvider.from_checkpoint(checkpoint_dir, seed=42)
@@ -689,9 +683,6 @@ class TestLearnedSyntheticIntegration:
         assert (df["high"] >= df["low"]).all()
         assert (df["close"] > 0).all()
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_full_workflow_from_checkpoint(self, checkpoint_dir: Path):
         """Test complete workflow from checkpoint directory."""
         # 1. Load from checkpoint
@@ -705,7 +696,7 @@ class TestLearnedSyntheticIntegration:
         assert provider.generator_name == "timegan"
 
         # 3. Generate multiple datasets
-        df_daily = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-31", "daily")
+        df_daily = provider.fetch_ohlcv("SYNTH", "2024-01-02", "2024-01-03", "daily")
         df_hourly = provider.fetch_ohlcv("SYNTH", "2024-01-02", "2024-01-03", "hourly")
 
         assert len(df_daily) > 0

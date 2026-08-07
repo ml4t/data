@@ -6,17 +6,6 @@ import os
 
 import pytest
 import structlog
-from dotenv import load_dotenv
-
-# Load .env file before running tests (module level)
-load_dotenv()
-
-
-def pytest_configure(config):
-    """Load environment variables before test collection."""
-    # Ensure .env is loaded before any test collection happens
-    load_dotenv(override=False)  # Don't override already-set vars
-
 
 # Set TESTING environment variable for all tests
 os.environ["TESTING"] = "true"

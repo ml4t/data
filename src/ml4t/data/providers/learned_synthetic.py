@@ -1,12 +1,12 @@
 """Provider for learned generative models (TimeGAN, Sig-CWGAN, etc.).
 
-This provider loads trained generative models or pre-generated samples
+This provider loads pre-generated samples from trained generative models
 from Chapter 6 notebooks and provides a consistent API for generating
 synthetic OHLCV data.
 
 Key differences from SyntheticProvider:
 - SyntheticProvider: Parameterize stochastic model → Generate on the fly
-- LearnedSyntheticProvider: Load checkpoint → Generate from trained model
+- LearnedSyntheticProvider: Load pre-generated samples from a training artifact
 
 Usage examples:
 
@@ -16,7 +16,7 @@ Usage examples:
     )
     df = provider.fetch_ohlcv("SYNTH_TIMEGAN", "2024-01-01", "2024-12-31", "daily")
 
-    # From checkpoint (can generate new samples)
+    # From a training artifact containing pre-generated samples
     provider = LearnedSyntheticProvider.from_checkpoint(
         DATA_DIR / "synthetic/checkpoints/timegan/etf_2010_2024"
     )
@@ -50,13 +50,12 @@ logger = structlog.get_logger()
 class LearnedSyntheticProvider(BaseProvider):
     """Provider for learned generative models.
 
-    This provider wraps trained generative models (TimeGAN, Sig-CWGAN,
-    Tail-GAN, TransFusion, GT-GAN, etc.) from Chapter 6 and provides
-    a consistent API for generating synthetic OHLCV data.
+    This provider wraps samples produced by trained generative models
+    (TimeGAN, Sig-CWGAN, Tail-GAN, TransFusion, GT-GAN, etc.) from Chapter 6
+    and provides a consistent API for generating synthetic OHLCV data.
 
-    There are two modes of operation:
-    1. Sample-based: Load pre-generated samples from .npy file
-    2. Checkpoint-based: Load trained model and generate new samples
+    Samples can be loaded directly from an ``.npy`` file or from a training
+    artifact directory containing ``samples.npy`` and ``metadata.json``.
 
     For ML training workflows (TSTR), use `get_samples()` to access
     raw return sequences directly.
@@ -185,22 +184,22 @@ class LearnedSyntheticProvider(BaseProvider):
     def from_checkpoint(
         cls,
         checkpoint_path: str | Path,
-        device: str = "cpu",
+        device: str = "cpu",  # noqa: ARG003 - retained for beta API compatibility
         seed: int | None = None,
     ) -> LearnedSyntheticProvider:
-        """Create provider from a trained model checkpoint.
+        """Create a provider from a safe training-artifact directory.
 
-        This allows generating new samples on the fly using the trained model.
+        Model checkpoints are not deserialized. The directory must contain
+        pre-generated samples in NumPy's non-pickle format.
 
         Parameters
         ----------
         checkpoint_path : str or Path
-            Path to checkpoint directory containing:
-            - checkpoint.pt: Model weights
-            - metadata.json: Training config and sample data
-            - samples.npy (optional): Pre-generated samples
+            Path to an artifact directory containing ``metadata.json`` and
+            ``samples.npy``. A ``checkpoint.pt`` file may be present but is
+            ignored because PyTorch checkpoints can execute pickle payloads.
         device : str, default="cpu"
-            Device to load model on ("cpu" or "cuda")
+            Retained for compatibility and ignored.
         seed : int, optional
             Random seed for reproducibility
 
@@ -222,63 +221,16 @@ class LearnedSyntheticProvider(BaseProvider):
         with open(metadata_file) as f:
             metadata = json.load(f)
 
-        generator_name = metadata.get("generator", {}).get("name", "unknown")
-        logger.info(f"Loading checkpoint for {generator_name}", path=checkpoint_path)
-
-        # Load model based on generator type
-        model = cls._load_model(checkpoint_path, generator_name, device)
-
-        # Load or generate initial samples
         samples_file = checkpoint_path / "samples.npy"
-        if samples_file.exists():
-            samples = np.load(samples_file)
-            logger.info("Loaded pre-generated samples", shape=samples.shape)
-        else:
-            # Generate initial batch of samples from model
-            n_initial = metadata.get("n_initial_samples", 1000)
-            seq_length = metadata.get("data", {}).get("seq_length", 24)
-            n_features = metadata.get("data", {}).get("n_features", 6)
-            samples = cls._generate_from_model(model, n_initial, seq_length, n_features)
-            logger.info("Generated initial samples from model", shape=samples.shape)
-
-        return cls(samples=samples, metadata=metadata, model=model, seed=seed)
-
-    @staticmethod
-    def _load_model(
-        checkpoint_path: Path,
-        generator_name: str,
-        device: str,
-    ) -> Any:
-        """Load the trained model from checkpoint.
-
-        This is a dispatch function that calls the appropriate loader
-        based on the generator type.
-        """
-        # Import torch lazily to avoid dependency if not using checkpoints
-        try:
-            import torch  # type: ignore[import-unresolved]
-        except ImportError:
-            raise ImportError(
-                "PyTorch is required to load model checkpoints. Install it with: pip install torch"
+        if not samples_file.is_file():
+            raise FileNotFoundError(
+                f"Pre-generated samples file not found: {samples_file}. "
+                "Executable model checkpoints are not supported."
             )
 
-        model_file = checkpoint_path / "checkpoint.pt"
-        if not model_file.exists():
-            raise FileNotFoundError(f"Model file not found: {model_file}")
-
-        # Load checkpoint
-        checkpoint = torch.load(model_file, map_location=device, weights_only=False)
-
-        # Different generators have different model structures
-        # For now, we just return the checkpoint dict
-        # Full model loading would require importing generator-specific code
-        logger.warning(
-            "Full model loading not yet implemented for all generators. "
-            "Using pre-generated samples mode.",
-            generator=generator_name,
-        )
-
-        return checkpoint
+        samples = np.load(samples_file, allow_pickle=False)
+        logger.info("Loaded pre-generated samples", path=samples_file, shape=samples.shape)
+        return cls(samples=samples, metadata=metadata, model=None, seed=seed)
 
     @staticmethod
     def _generate_from_model(
