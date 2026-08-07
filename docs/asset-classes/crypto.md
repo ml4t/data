@@ -40,17 +40,21 @@ ML4T Data provides two excellent **free-tier providers** for cryptocurrency data
 ### Quick Start
 
 ```python
+from datetime import UTC, datetime, timedelta
+
 from ml4t.data.providers import CoinGeckoProvider
 
 # Requires API key for Demo plan (free)
 # Get your key from: https://www.coingecko.com/en/api/pricing
 provider = CoinGeckoProvider()  # Reads COINGECKO_API_KEY from environment
+end = datetime.now(UTC).date() - timedelta(days=1)
+start = end - timedelta(days=29)
 
 # Fetch Bitcoin daily data (last 30 days)
 df = provider.fetch_ohlcv(
     symbol="BTC",  # Uses symbol_to_id mapping internally
-    start="2024-01-01",
-    end="2024-01-31",
+    start=str(start),
+    end=str(end),
     frequency="daily"
 )
 
@@ -114,6 +118,10 @@ df = provider.fetch_ohlcv(symbol="BTC", frequency="daily")
 # ❌ Not supported on free tier (requires CoinGecko Pro)
 df = provider.fetch_ohlcv(symbol="BTC", frequency="hourly")  # Error!
 ```
+
+Daily OHLCV is limited to the most recent 30 completed UTC days. CoinGecko returns
+four-day OHLC candles for older windows, so this provider rejects those requests instead
+of labeling coarse values as daily bars.
 
 ### Rate Limits
 

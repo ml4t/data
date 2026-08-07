@@ -73,6 +73,8 @@ metadata = dm.get_metadata("AAPL")
 All providers implement the same interface:
 
 ```python
+from datetime import UTC, datetime, timedelta
+
 from ml4t.data.providers import YahooFinanceProvider, CoinGeckoProvider, FREDProvider
 
 # Equities
@@ -80,7 +82,12 @@ provider = YahooFinanceProvider()
 data = provider.fetch_ohlcv("AAPL", "2020-01-01", "2024-12-31")
 
 # Crypto
-crypto = CoinGeckoProvider().fetch_ohlcv("bitcoin", "2024-01-01", "2024-12-31")
+last_complete_day = datetime.now(UTC).date() - timedelta(days=1)
+crypto = CoinGeckoProvider().fetch_ohlcv(
+    "bitcoin",
+    str(last_complete_day - timedelta(days=6)),
+    str(last_complete_day),
+)
 
 # Economic data
 fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
@@ -93,7 +100,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Provider | Coverage |
 |----------|----------|
 | Yahoo Finance | US/global equities, ETFs, crypto, forex |
-| CoinGecko | 10,000+ cryptocurrencies |
+| CoinGecko | 10,000+ cryptocurrencies; daily OHLCV for the most recent 30 days |
 | FRED | 850,000 economic series |
 | FXMacroData | FX macro releases, calendars, COT, commodities, sentiment |
 | Fama-French | Academic factor data |

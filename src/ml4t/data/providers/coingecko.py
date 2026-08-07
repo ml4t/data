@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 import httpx
@@ -183,7 +183,6 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
 
         # Fetch OHLC data (CoinGecko provides this in one endpoint)
         df = self._fetch_ohlc(coin_id, days=valid_days, start=start, end=end)
-        df = self._aggregate_daily_ohlcv(df)
 
         # Filter to requested date range
         df = df.filter(
@@ -223,6 +222,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         Returns:
             DataFrame with OHLCV data
         """
+        self._validate_daily_window(days)
+
         endpoint = f"{self.base_url}/coins/{coin_id}/ohlc"
         params = {"vs_currency": vs_currency, "days": days}
 
@@ -262,12 +263,24 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         df = self._aggregate_daily_ohlcv(df)
         if start is not None and end is not None:
             start_date = datetime.strptime(start, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end, "%Y-%m-%d").date()
+            requested_end = datetime.strptime(end, "%Y-%m-%d").date()
+            last_completed_date = datetime.now(UTC).date() - timedelta(days=1)
+            end_date = min(requested_end, last_completed_date)
             df = df.filter(
                 pl.col("timestamp").dt.date().is_between(start_date, end_date, closed="both")
             )
+            if df.is_empty():
+                return df
+
+            volume_start = (start_date + timedelta(days=1)).isoformat()
+            volume_end = (end_date + timedelta(days=1)).isoformat()
             self._acquire_rate_limit()
-            volumes = self._fetch_daily_volumes(coin_id, start, end, vs_currency)
+            volumes = self._fetch_daily_volumes(
+                coin_id,
+                volume_start,
+                volume_end,
+                vs_currency,
+            )
             df = self._join_daily_volumes(df, volumes, coin_id)
 
         return df
@@ -317,8 +330,12 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 orient="row",
             )
             .with_columns(
-                pl.col("timestamp_ms")
-                .cast(pl.Datetime("ms", "UTC"))
+                (
+                    pl.col("timestamp_ms")
+                    .cast(pl.Datetime("ms", "UTC"))
+                    .cast(pl.Datetime("us", "UTC"))
+                    - pl.duration(microseconds=1)
+                )
                 .dt.truncate("1d")
                 .alias("timestamp")
             )
@@ -333,7 +350,11 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             return df
         return (
             df.sort("timestamp")
-            .with_columns(pl.col("timestamp").dt.truncate("1d"))
+            .with_columns(
+                (
+                    pl.col("timestamp").cast(pl.Datetime("us", "UTC")) - pl.duration(microseconds=1)
+                ).dt.truncate("1d")
+            )
             .group_by("timestamp")
             .agg(
                 pl.col("open").first(),
@@ -360,6 +381,19 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
                 details={"error": "CoinGecko daily volume does not cover all OHLC days"},
             )
         return result
+
+    def _validate_daily_window(self, days: int | str) -> None:
+        """Reject source windows where CoinGecko returns four-day OHLC candles."""
+        if days == "max" or isinstance(days, int) and days > 30:
+            raise DataValidationError(
+                provider=self.name,
+                message=(
+                    "CoinGecko's OHLC endpoint returns four-day candles beyond 30 days; "
+                    "daily OHLCV is limited to the most recent 30 days"
+                ),
+                field="start",
+                value=days,
+            )
 
     def _round_to_valid_days(self, days: int) -> str | int:
         """Round days to valid CoinGecko API parameter.
@@ -517,6 +551,8 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         end: str | None = None,
     ) -> pl.DataFrame:
         """Async fetch OHLC data from CoinGecko."""
+        self._validate_daily_window(days)
+
         endpoint = f"{self.base_url}/coins/{coin_id}/ohlc"
         params = {"vs_currency": vs_currency, "days": days}
 
@@ -551,12 +587,24 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
         df = self._aggregate_daily_ohlcv(df)
         if start is not None and end is not None:
             start_date = datetime.strptime(start, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end, "%Y-%m-%d").date()
+            requested_end = datetime.strptime(end, "%Y-%m-%d").date()
+            last_completed_date = datetime.now(UTC).date() - timedelta(days=1)
+            end_date = min(requested_end, last_completed_date)
             df = df.filter(
                 pl.col("timestamp").dt.date().is_between(start_date, end_date, closed="both")
             )
+            if df.is_empty():
+                return df
+
+            volume_start = (start_date + timedelta(days=1)).isoformat()
+            volume_end = (end_date + timedelta(days=1)).isoformat()
             await asyncio.to_thread(self._acquire_rate_limit)
-            volumes = await self._fetch_daily_volumes_async(coin_id, start, end, vs_currency)
+            volumes = await self._fetch_daily_volumes_async(
+                coin_id,
+                volume_start,
+                volume_end,
+                vs_currency,
+            )
             df = self._join_daily_volumes(df, volumes, coin_id)
 
         return df
@@ -642,8 +690,6 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
             start=start,
             end=end,
         )
-        df = self._aggregate_daily_ohlcv(df)
-
         df = df.filter(
             (pl.col("timestamp").dt.truncate("1d") >= start_dt.date())
             & (pl.col("timestamp").dt.truncate("1d") <= end_dt.date())

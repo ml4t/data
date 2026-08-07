@@ -9,6 +9,7 @@ import pytest
 
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
+    DataValidationError,
     NetworkError,
     RateLimitError,
     SymbolNotFoundError,
@@ -224,6 +225,26 @@ class TestFetchOhlc:
 
         assert df.is_empty()
 
+    def test_fetch_ohlc_empty_range_skips_volume_request(self, provider):
+        """An empty OHLC response does not consume a second API request."""
+        response = MagicMock()
+        response.json.return_value = []
+
+        with (
+            patch.object(provider.session, "get", return_value=response) as get,
+            patch.object(provider, "_acquire_rate_limit") as acquire,
+        ):
+            result = provider._fetch_ohlc(
+                "bitcoin",
+                7,
+                start="2024-01-01",
+                end="2024-01-02",
+            )
+
+        assert result.is_empty()
+        assert get.call_count == 1
+        acquire.assert_not_called()
+
     def test_fetch_ohlc_rate_limit_error(self, provider):
         """Test rate limit (429) raises RateLimitError."""
         mock_response = MagicMock()
@@ -267,8 +288,8 @@ class TestFetchOhlc:
         source = pl.DataFrame(
             {
                 "timestamp": [
-                    datetime(2024, 1, 1, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 4, tzinfo=UTC),
+                    datetime(2024, 1, 1, 8, tzinfo=UTC),
                 ],
                 "open": [100.0, 102.0],
                 "high": [103.0, 106.0],
@@ -295,7 +316,7 @@ class TestFetchOhlc:
         """Test daily volume comes from the bounded market-chart range endpoint."""
         response = MagicMock()
         response.json.return_value = {
-            "total_volumes": [[1704067200000, 1234.5], [1704153600000, 2345.6]]
+            "total_volumes": [[1704153600000, 1234.5], [1704240000000, 2345.6]]
         }
 
         with patch.object(provider.session, "get", return_value=response) as get:
@@ -311,12 +332,23 @@ class TestFetchOhlc:
             },
         )
         assert result["volume"].to_list() == [1234.5, 2345.6]
+        assert result["timestamp"].to_list() == [
+            datetime(2024, 1, 1, tzinfo=UTC),
+            datetime(2024, 1, 2, tzinfo=UTC),
+        ]
+
+    def test_parse_daily_volumes_rejects_missing_series(self, provider):
+        """A response without volume observations is not accepted as OHLCV."""
+        with pytest.raises(DataNotAvailableError) as error:
+            provider._parse_daily_volumes({"prices": []}, "bitcoin")
+
+        assert error.value.details["error"] == "CoinGecko returned no daily volume data"
 
     @pytest.mark.asyncio
     async def test_fetch_daily_volumes_async_uses_async_transport(self, provider):
         """Test async daily volume retrieval uses the shared async request path."""
         response = MagicMock()
-        response.json.return_value = {"total_volumes": [[1704067200000, 1234.5]]}
+        response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
 
         with patch.object(provider, "_aget", new=AsyncMock(return_value=response)) as get:
             result = await provider._fetch_daily_volumes_async(
@@ -324,7 +356,90 @@ class TestFetchOhlc:
             )
 
         assert result["volume"].to_list() == [1234.5]
+        assert result["timestamp"].to_list() == [datetime(2024, 1, 1, tzinfo=UTC)]
         get.assert_awaited_once()
+
+    def test_fetch_ohlc_joins_completed_daily_volume(self, provider):
+        """OHLC close times and trailing volumes map to the completed UTC date."""
+        ohlc_response = MagicMock()
+        ohlc_response.json.return_value = [
+            [1704081600000, 100.0, 105.0, 99.0, 102.0],
+            [1704153600000, 102.0, 106.0, 101.0, 104.0],
+        ]
+        volume_response = MagicMock()
+        volume_response.json.return_value = {"total_volumes": [[1704153600000, 1234.5]]}
+
+        with (
+            patch.object(
+                provider.session,
+                "get",
+                side_effect=[ohlc_response, volume_response],
+            ),
+            patch.object(provider, "_acquire_rate_limit"),
+        ):
+            result = provider._fetch_ohlc(
+                "bitcoin",
+                7,
+                start="2024-01-01",
+                end="2024-01-01",
+            )
+
+        assert result.to_dicts() == [
+            {
+                "timestamp": datetime(2024, 1, 1, tzinfo=UTC),
+                "open": 100.0,
+                "high": 106.0,
+                "low": 99.0,
+                "close": 104.0,
+                "volume": 1234.5,
+            }
+        ]
+
+    def test_fetch_ohlc_rejects_four_day_source_candles(self, provider):
+        """Requests beyond CoinGecko's daily OHLC window fail before transport."""
+        with patch.object(provider.session, "get") as get:
+            with pytest.raises(DataValidationError, match="four-day candles"):
+                provider._fetch_ohlc("bitcoin", 90)
+
+        get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetch_ohlc_async_rejects_four_day_source_candles(self, provider):
+        """The async path enforces the same daily OHLC window."""
+        with patch.object(provider, "_aget", new=AsyncMock()) as get:
+            with pytest.raises(DataValidationError, match="four-day candles"):
+                await provider._fetch_ohlc_async("bitcoin", "max")
+
+        get.assert_not_awaited()
+
+    def test_join_daily_volumes_rejects_partial_coverage(self, provider):
+        """A daily OHLC result is not returned with missing volume values."""
+        ohlc = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 2, tzinfo=UTC),
+                ],
+                "open": [1.0, 2.0],
+                "high": [1.0, 2.0],
+                "low": [1.0, 2.0],
+                "close": [1.0, 2.0],
+                "volume": [0.0, 0.0],
+            }
+        )
+        volumes = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "volume": [100.0],
+            }
+        )
+
+        with pytest.raises(DataNotAvailableError) as error:
+            provider._join_daily_volumes(ohlc, volumes, "bitcoin")
+
+        assert error.value.details["error"] == (
+            "CoinGecko daily volume does not cover all OHLC days"
+        )
 
 
 class TestFetchAndTransformData:
