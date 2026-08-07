@@ -11,6 +11,7 @@ import polars as pl
 import pytest
 from click.testing import CliRunner
 
+from ml4t.data import ProviderRoutingError
 from ml4t.data.cli_interface import cli
 
 
@@ -126,10 +127,7 @@ class TestFetchCommand:
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = {
-            "BTC": mock_df,
-            "ETH": mock_df,
-        }
+        mock_dm.fetch.return_value = mock_df
 
         runner = CliRunner()
         result = runner.invoke(
@@ -150,6 +148,37 @@ class TestFetchCommand:
         assert result.exit_code == 0, result.output
         assert "Fetching 2 symbols" in result.output
         assert "✅ Successfully fetched 2 symbols" in result.output
+        assert mock_dm.fetch.call_count == 2
+
+    @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_batch_rejects_unroutable_symbols_before_fetch(self, mock_dm_class):
+        """CLI route validation aborts before any provider request."""
+        mock_dm = MagicMock()
+        mock_dm_class.return_value = mock_dm
+        mock_dm.validate_routes.side_effect = ProviderRoutingError(
+            "No provider found for symbols: UNKNOWN.",
+            parameter="provider",
+            details={"symbols": ["UNKNOWN"]},
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "BTC",
+                "--symbol",
+                "UNKNOWN",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-02",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "No provider found for symbols: UNKNOWN" in result.output
+        mock_dm.fetch.assert_not_called()
 
     @patch("ml4t.data.cli.core.DataManager")
     def test_fetch_batch_all_failures_exit_nonzero(self, mock_dm_class):
@@ -496,10 +525,7 @@ class TestBatchOperations:
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = {
-            "BTC": mock_df,
-            "ETH": mock_df,
-        }
+        mock_dm.fetch.return_value = mock_df
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -577,10 +603,7 @@ class TestProgressAndOutput:
         mock_dm_class.return_value = mock_dm
 
         # Simulate multiple symbols for batch operation
-        mock_results = {}
-        for symbol in ["BTC", "ETH", "SOL", "ADA", "DOT"]:
-            mock_results[symbol] = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = mock_results
+        mock_dm.fetch.return_value = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
 
         runner = CliRunner()
         result = runner.invoke(
@@ -608,6 +631,7 @@ class TestProgressAndOutput:
         assert result.exit_code == 0
         # Progress indicators should be in output
         assert "Fetching 5 symbols" in result.output
+        assert mock_dm.fetch.call_count == 5
 
     @patch("ml4t.data.cli.core.MetadataTracker")
     @patch("ml4t.data.cli.core.HiveStorage")
@@ -1453,6 +1477,29 @@ datasets: {}
         assert "AAPL" in result.output
         assert "yahoo" in result.output
         assert "Total: 1 dataset(s)" in result.output
+
+    @patch("ml4t.data.cli.core.MetadataManager")
+    @patch("ml4t.data.cli.core._build_storage_from_config")
+    def test_list_tolerates_invalid_row_counts(self, build_storage, metadata_manager):
+        """Malformed row counts render a placeholder without hiding valid datasets."""
+        storage = MagicMock()
+        storage.list_keys.return_value = ["equities/daily/AAPL", "equities/daily/MSFT"]
+        build_storage.return_value = (storage, Path("data"))
+        metadata_manager.return_value.get_metadata_for_key.side_effect = [
+            {"symbol": "AAPL", "row_count": None},
+            {"symbol": "MSFT", "row_count": "1000"},
+        ]
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("config.yaml").write_text("storage:\n  path: data\n", encoding="utf-8")
+            result = runner.invoke(cli, ["list", "--config", "config.yaml"])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "MSFT" in result.output
+        assert "1,000" in result.output
+        assert "Total: 2 dataset(s)" in result.output
 
 
 class TestDownloadFuturesCommand:

@@ -195,7 +195,19 @@ class FetchManager:
                 entire batch is rejected before the first provider request.
         """
         results: dict[str, pl.DataFrame | pl.LazyFrame | Any | None] = {}
-        provider = kwargs.get("provider")
+        self.validate_routes(symbols, provider=kwargs.get("provider"))
+
+        for symbol in symbols:
+            try:
+                results[symbol] = self.fetch(symbol, start, end, frequency, **kwargs)
+            except Exception as e:
+                logger.warning(f"Failed to fetch {symbol}: {e}")
+                results[symbol] = None
+
+        return results
+
+    def validate_routes(self, symbols: list[str], provider: str | None = None) -> None:
+        """Reject a batch whose symbols cannot all be routed before provider I/O."""
         unroutable = [
             symbol
             for symbol in symbols
@@ -209,15 +221,6 @@ class FetchManager:
                 parameter="provider",
                 details={"symbols": unroutable},
             )
-
-        for symbol in symbols:
-            try:
-                results[symbol] = self.fetch(symbol, start, end, frequency, **kwargs)
-            except Exception as e:
-                logger.warning(f"Failed to fetch {symbol}: {e}")
-                results[symbol] = None
-
-        return results
 
     def fetch_raw(
         self,

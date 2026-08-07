@@ -256,6 +256,10 @@ class DataManager:
         """
         return self._fetch_manager.fetch_batch(symbols, start, end, frequency, **kwargs)
 
+    def validate_routes(self, symbols: list[str], provider: str | None = None) -> None:
+        """Reject a batch whose symbols cannot all be routed before provider I/O."""
+        self._fetch_manager.validate_routes(symbols, provider)
+
     # ========================================================================
     # Batch operations (delegate to BatchManager)
     # ========================================================================

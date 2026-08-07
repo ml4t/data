@@ -12,6 +12,7 @@ import pytest
 from ml4t.data import ProviderRoutingError
 from ml4t.data.data_manager import DataManager, ProviderRouter
 from ml4t.data.managers.config_manager import ConfigManager
+from ml4t.data.managers.fetch_manager import FetchManager
 from ml4t.data.managers.provider_manager import ProviderManager
 
 
@@ -541,12 +542,13 @@ class TestDataManagerFetchBatch:
         dm = DataManager()
 
         with (
-            patch.object(dm._fetch_manager, "fetch") as fetch,
-            pytest.raises(ValueError, match="AAPL"),
+            patch.object(FetchManager, "fetch") as fetch,
+            pytest.raises(ProviderRoutingError, match="AAPL") as error,
         ):
             dm.fetch_batch(["EUR_USD", "AAPL"], "2024-01-01", "2024-01-31")
 
         fetch.assert_not_called()
+        assert error.value.details["symbols"] == ["AAPL"]
 
 
 class TestDataManagerDetectProviders:

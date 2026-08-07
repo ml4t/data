@@ -134,11 +134,11 @@ from ml4t.data.data_manager import DataManager
 storage = HiveStorage(config=StorageConfig(base_path="~/ml4t-data"))
 manager = DataManager(storage=storage)
 
-# Store data
-manager.store("AAPL", data)
+# Store data and retain the canonical key
+key = manager.import_data(data, "AAPL", provider="yahoo")
 
-# Retrieve later from the canonical storage key
-retrieved = storage.read("equities/daily/AAPL").collect()
+# Retrieve later
+retrieved = storage.read(key).collect()
 ```
 
 ### Validate Data

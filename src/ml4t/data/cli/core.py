@@ -15,7 +15,6 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 
-from ml4t.data.core.exceptions import ProviderRoutingError
 from ml4t.data.data_manager import DataManager
 from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
@@ -119,17 +118,7 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
                 console.print(f"Fetching {len(symbols)} symbols")
 
             failures: dict[str, str] = {}
-            unroutable = [
-                sym for sym in symbols if dm.router.get_provider(sym, override=provider) is None
-            ]
-            if unroutable:
-                joined = ", ".join(unroutable)
-                raise ProviderRoutingError(
-                    f"No provider found for symbols: {joined}. "
-                    "Configure routing patterns or specify provider explicitly.",
-                    parameter="provider",
-                    details={"symbols": unroutable},
-                )
+            dm.validate_routes(list(symbols), provider)
 
             if progress and not quiet:
                 with create_progress_bar() as progress_bar:
@@ -614,7 +603,10 @@ def list_data(_ctx, config, storage_path):
             symbol = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
             provider = str(metadata.get("provider") or "")
             row_count = metadata.get("row_count")
-            rows = f"{row_count:,}" if isinstance(row_count, int) else "-"
+            try:
+                rows = f"{int(row_count):,}"
+            except (TypeError, ValueError):
+                rows = "-"
             start = str(metadata.get("start_date") or "")[:10]
             end = str(metadata.get("end_date") or "")[:10]
             updated = str(metadata.get("last_updated") or "")[:19]
