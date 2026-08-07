@@ -50,7 +50,7 @@ class MacroConfig:
     start: str = "2000-01-01"
     end: str = "2025-12-31"
     storage_path: Path = field(default_factory=lambda: resolve_storage_path(None, "macro"))
-    series: dict[str, dict[str, Any]] = field(default_factory=dict)
+    series: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.storage_path = resolve_storage_path(self.storage_path, "macro")
@@ -62,7 +62,20 @@ class MacroConfig:
 
     def get_derived_series(self) -> list[dict[str, str]]:
         """Get list of derived series definitions."""
-        return self.series.get("derived", [])
+        derived = self.series.get("derived", [])
+        if not isinstance(derived, list):
+            raise ValueError("macro.series.derived must be a list")
+
+        result: list[dict[str, str]] = []
+        for index, item in enumerate(derived):
+            if not isinstance(item, dict) or not all(
+                isinstance(key, str) and isinstance(value, str) for key, value in item.items()
+            ):
+                raise ValueError(
+                    f"macro.series.derived[{index}] must map string keys to string values"
+                )
+            result.append(item)
+        return result
 
 
 class MacroDataManager:

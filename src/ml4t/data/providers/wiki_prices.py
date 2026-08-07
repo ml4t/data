@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import time
 import zipfile
+from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import httpx
 import polars as pl
@@ -480,12 +481,12 @@ class WikiPricesProvider(BaseProvider):
                 },
             )
 
-        start = symbol_data["date"].min().strftime("%Y-%m-%d")
-        end = symbol_data["date"].max().strftime("%Y-%m-%d")
+        start = self._format_date(symbol_data["date"].min())
+        end = self._format_date(symbol_data["date"].max())
 
         return start, end
 
-    def get_dataset_stats(self) -> dict[str, any]:
+    def get_dataset_stats(self) -> dict[str, Any]:
         """
         Get statistics about Wiki Prices dataset.
 
@@ -508,8 +509,8 @@ class WikiPricesProvider(BaseProvider):
         if self.cache_in_memory and self._data is not None:
             total_rows = len(self._data)
             total_symbols = self._data["ticker"].n_unique()
-            start = self._data["date"].min().strftime("%Y-%m-%d")
-            end = self._data["date"].max().strftime("%Y-%m-%d")
+            start = self._format_date(self._data["date"].min())
+            end = self._format_date(self._data["date"].max())
             memory_size_mb = self._data.estimated_size("mb")
         else:
             # Lazy scan for stats
@@ -522,8 +523,8 @@ class WikiPricesProvider(BaseProvider):
                     pl.col("date").max().alias("max_date"),
                 ]
             ).collect()
-            start = date_stats["min_date"][0].strftime("%Y-%m-%d")
-            end = date_stats["max_date"][0].strftime("%Y-%m-%d")
+            start = self._format_date(date_stats["min_date"][0])
+            end = self._format_date(date_stats["max_date"][0])
             memory_size_mb = None
 
         return {
@@ -761,3 +762,14 @@ class WikiPricesProvider(BaseProvider):
                                 return value
 
         return None
+
+    @staticmethod
+    def _format_date(value: object) -> str:
+        if not isinstance(value, date):
+            raise DataValidationError(
+                provider="wiki_prices",
+                message="Dataset date range contains no valid dates",
+                field="date",
+                value=value,
+            )
+        return value.strftime("%Y-%m-%d")

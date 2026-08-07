@@ -87,14 +87,14 @@ class GlobalRateLimitManager:
             for limiter in self._rate_limiters.values():
                 limiter.reset()
 
-    def get_limiter_status(self) -> dict[str, dict[str, Any]]:
+    def get_limiter_status(self) -> dict[str, list[dict[str, Any]]]:
         """
         Get status of all active rate limiters.
 
         Returns:
             Dictionary with limiter status information
         """
-        status = {}
+        status: dict[str, list[dict[str, Any]]] = {}
         with self._limiter_lock:
             for key, limiter in self._rate_limiters.items():
                 provider_name = key.split(":")[0]

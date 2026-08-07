@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from time import monotonic
-from typing import ClassVar
+from typing import Any, ClassVar, TypedDict
 from urllib.parse import urljoin
 
 import httpx
@@ -23,6 +23,24 @@ from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 
 logger = structlog.get_logger()
+
+
+class ParsedMessageTypeInfo(TypedDict):
+    """Summary of one locally parsed ITCH message type."""
+
+    code: str
+    description: str
+    files: int
+    path: str
+
+
+class AvailableFileInfo(TypedDict):
+    """Metadata for one downloadable ITCH sample."""
+
+    name: str
+    date: str
+    size_gb: float
+    url: str
 
 
 class ITCHSampleProvider:
@@ -197,7 +215,7 @@ class ITCHSampleProvider:
         """Return the provider name."""
         return "nasdaq_itch"
 
-    def list_available_files(self) -> list[dict[str, str]]:
+    def list_available_files(self) -> list[AvailableFileInfo]:
         """
         List known ITCH sample files available for download.
 
@@ -210,7 +228,7 @@ class ITCHSampleProvider:
             >>> for f in files:
             ...     print(f"{f['name']}: {f['date']} ({f['size_gb']} GB)")
         """
-        files = []
+        files: list[AvailableFileInfo] = []
         for filename, size_bytes in self.KNOWN_FILES.items():
             # Parse date from filename (MMDDYYYY format)
             date_str = filename.split(".")[0]
@@ -504,7 +522,7 @@ class ITCHSampleProvider:
 
     def list_parsed_message_types(
         self, parsed_dir: str | Path | None = None
-    ) -> list[dict[str, str]]:
+    ) -> list[ParsedMessageTypeInfo]:
         """
         List available parsed message types in the messages directory.
 
@@ -525,7 +543,7 @@ class ITCHSampleProvider:
         if not msg_root.exists():
             return []
 
-        result = []
+        result: list[ParsedMessageTypeInfo] = []
         for subdir in sorted(msg_root.iterdir()):
             if subdir.is_dir() and len(subdir.name) == 1:
                 code = subdir.name
@@ -542,7 +560,7 @@ class ITCHSampleProvider:
 
         return result
 
-    def get_dataset_info(self) -> dict[str, any]:
+    def get_dataset_info(self) -> dict[str, Any]:
         """
         Get information about local ITCH data.
 

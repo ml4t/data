@@ -67,6 +67,17 @@ class TestMacroConfig:
         assert len(derived) == 1
         assert derived[0]["name"] == "SLOPE"
 
+    @pytest.mark.parametrize(
+        "derived",
+        ["DGS10 - DGS2", [{"name": "SLOPE", "window": 10}]],
+    )
+    def test_get_derived_series_rejects_invalid_shape(self, derived):
+        """Malformed derived-series configuration fails before download work starts."""
+        config = MacroConfig(series={"derived": derived})
+
+        with pytest.raises(ValueError, match="macro.series.derived"):
+            config.get_derived_series()
+
 
 class TestMacroDataManager:
     """Tests for MacroDataManager class."""

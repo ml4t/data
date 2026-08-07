@@ -102,7 +102,7 @@ class AssetInfo:
 class MarketHours:
     """Market hours for different asset classes."""
 
-    SCHEDULES: ClassVar[dict] = {
+    SCHEDULES: ClassVar[dict[AssetClass, dict[str, dict[str, Any]]]] = {
         AssetClass.EQUITY: {
             "NYSE": {
                 "open": "09:30",
@@ -142,7 +142,9 @@ class MarketHours:
     }
 
     @classmethod
-    def get_schedule(cls, asset_class: AssetClass, exchange: str | None = None) -> dict[str, Any]:
+    def get_schedule(
+        cls, asset_class: AssetClass, exchange: str | None = None
+    ) -> dict[str, Any] | None:
         """
         Get market schedule for asset class and exchange.
 

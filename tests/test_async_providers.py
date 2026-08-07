@@ -18,7 +18,12 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
-from ml4t.data.managers.async_batch import AsyncBatchManager, async_batch_load
+from ml4t.data.managers.async_batch import (
+    AsyncBatchManager,
+    async_batch_load,
+    async_batch_load_dict,
+)
+from ml4t.data.providers.async_base import AsyncBaseProvider
 from ml4t.data.providers.binance_public import BinancePublicProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 from ml4t.data.providers.yahoo import YahooFinanceProvider
@@ -454,6 +459,63 @@ class TestAsyncBatchLoad:
 
         # Should never exceed max_concurrent
         assert max_observed_concurrent <= 3
+
+    @pytest.mark.asyncio
+    async def test_dict_does_not_swallow_base_exception(self):
+        """Cancellation-class failures must propagate out of batch collection."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        mock_provider = MagicMock()
+        mock_provider.fetch_ohlcv_async = AsyncMock(side_effect=WorkerStopped("stopped"))
+
+        with pytest.raises(WorkerStopped, match="stopped"):
+            await async_batch_load_dict(
+                mock_provider,
+                ["AAPL"],
+                "2024-01-01",
+                "2024-01-31",
+                return_exceptions=True,
+            )
+
+
+class TestAsyncBaseProviderBatch:
+    """Test exception boundaries in the abstract async provider batch API."""
+
+    class Provider(AsyncBaseProvider):
+        @property
+        def name(self) -> str:
+            return "test_async"
+
+        async def _fetch_and_transform_data_async(
+            self, symbol: str, start: str, end: str, frequency: str
+        ) -> pl.DataFrame:
+            return pl.DataFrame()
+
+    @pytest.mark.asyncio
+    async def test_returns_normal_exceptions(self):
+        provider = self.Provider()
+        provider.fetch_ohlcv_async = AsyncMock(side_effect=RuntimeError("failed"))
+
+        result = await provider.batch_fetch_async(
+            ["AAPL"], "2024-01-01", "2024-01-31", return_exceptions=True
+        )
+
+        assert isinstance(result["AAPL"], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_base_exception(self):
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = self.Provider()
+        provider.fetch_ohlcv_async = AsyncMock(side_effect=WorkerStopped("stopped"))
+
+        with pytest.raises(WorkerStopped, match="stopped"):
+            await provider.batch_fetch_async(
+                ["AAPL"], "2024-01-01", "2024-01-31", return_exceptions=True
+            )
 
 
 # ===== Protocol Conformance Tests =====

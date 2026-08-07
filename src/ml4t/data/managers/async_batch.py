@@ -191,21 +191,8 @@ async def async_batch_load_dict(
 
     # Create and execute tasks
     tasks = [fetch_with_semaphore(symbol) for symbol in symbols]
-    results = await asyncio.gather(*tasks, return_exceptions=return_exceptions)
-
-    # Build result dictionary
-    if return_exceptions:
-        # Results might be tuples or exceptions
-        result_dict: dict[str, pl.DataFrame | Exception] = {}
-        for item in results:
-            if isinstance(item, Exception):
-                # This happens when gather catches an exception
-                continue
-            symbol, data = item
-            result_dict[symbol] = data
-        return result_dict
-    else:
-        return dict(results)
+    results = await asyncio.gather(*tasks)
+    return dict(results)
 
 
 class AsyncBatchManager:
