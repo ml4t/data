@@ -3,7 +3,9 @@
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from ml4t.data.validation.rules import (
     AssetClass,
@@ -74,6 +76,26 @@ class TestValidationRuleConfig:
         # Other values should still be defaults
         assert config.check_price_consistency is True
         assert config.staleness_threshold == 5
+
+    def test_legacy_negative_price_flag_is_migrated(self):
+        with pytest.warns(DeprecationWarning, match="check_negative_prices"):
+            config = ValidationRuleConfig(check_negative_prices=False)
+
+        assert config.negative_price_policy == "allow"
+
+    def test_unknown_persisted_key_is_rejected(self):
+        with pytest.raises(ValidationError, match="unknown_rule"):
+            ValidationRuleConfig(unknown_rule=True)
+
+    @pytest.mark.parametrize("asset_class", ["commodity", "commodities", "future", "futures"])
+    def test_derivative_aliases_use_negative_price_warning_policy(self, asset_class):
+        config = ValidationRulePresets.for_asset_class(asset_class)
+
+        assert config.negative_price_policy == "warn"
+
+    def test_unknown_asset_class_is_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported asset class"):
+            ValidationRulePresets.for_asset_class("collectible")
 
 
 class TestValidationRuleSet:

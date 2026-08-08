@@ -10,6 +10,7 @@ Tests cover:
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
+import pytest
 
 from ml4t.data.validation.base import Severity
 from ml4t.data.validation.ohlcv import OHLCVValidator
@@ -287,6 +288,24 @@ class TestFiniteValueCheck:
         assert len(issues) == 1
         assert issues[0].severity == Severity.CRITICAL
         assert issues[0].details["columns"] == ["volume"]
+
+    def test_mixed_non_finite_rows_preserve_input_positions_and_columns(self):
+        df = create_valid_ohlcv_df(3).with_columns(
+            pl.Series("close", [100.0, float("nan"), 102.0]),
+            pl.Series("volume", [1000.0, 1100.0, float("inf")]),
+            pl.Series("_validation_row", ["caller-0", "caller-1", "caller-2"]),
+        )
+
+        result = OHLCVValidator().validate(df)
+
+        issues = {
+            issue.details["column"]: issue
+            for issue in result.issues
+            if issue.check == "non_finite_values"
+        }
+        assert issues["close"].sample_rows == [1]
+        assert issues["volume"].sample_rows == [2]
+        assert df["_validation_row"].to_list() == ["caller-0", "caller-1", "caller-2"]
 
 
 class TestPriceConsistencyCheck:
@@ -1037,11 +1056,11 @@ class TestValidationResult:
         assert len(result.issues) == 0
 
 
-class TestAllChecksDisabled:
-    """Test behavior with all checks disabled."""
+class TestConfigurableChecksDisabled:
+    """Configurable checks can be disabled while structural checks remain active."""
 
     def test_all_checks_disabled_passes_invalid_data(self):
-        """With all checks disabled, invalid data passes."""
+        """Disabling configurable checks permits finite numeric data."""
         validator = OHLCVValidator(
             check_nulls=False,
             check_price_consistency=False,
@@ -1071,6 +1090,18 @@ class TestAllChecksDisabled:
         # Only required columns check runs (and passes)
         assert result.passed is True
         assert len(result.issues) == 0
+
+
+def test_invalid_negative_price_policy_is_rejected():
+    with pytest.raises(ValueError, match="negative_price_policy"):
+        OHLCVValidator(negative_price_policy="sometimes")
+
+
+def test_legacy_negative_price_flag_is_mapped_with_deprecation():
+    with pytest.warns(DeprecationWarning, match="check_negative_prices"):
+        validator = OHLCVValidator(check_negative_prices=False)
+
+    assert validator.negative_price_policy == "allow"
 
 
 class TestEdgeCases:

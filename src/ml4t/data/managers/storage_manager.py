@@ -91,25 +91,15 @@ class StorageManager:
         Returns:
             ValidationReport with results
         """
+        from ml4t.data.assets.asset_class import AssetClass
         from ml4t.data.validation import OHLCVValidator, ValidationReport
         from ml4t.data.validation.cross_validation import CrossValidator
         from ml4t.data.validation.rules import ValidationRulePresets
 
         report = ValidationReport(symbol=symbol, provider="unknown")
 
-        # Select validation rules based on asset class
-        if asset_class.lower() == "crypto":
-            rules = ValidationRulePresets.crypto_rules()
-            is_crypto = True
-        elif asset_class.lower() == "forex":
-            rules = ValidationRulePresets.forex_rules()
-            is_crypto = False
-        elif asset_class.lower() == "commodity":
-            rules = ValidationRulePresets.commodity_rules()
-            is_crypto = False
-        else:
-            rules = ValidationRulePresets.equity_rules()
-            is_crypto = False
+        rules = ValidationRulePresets.for_asset_class(asset_class)
+        is_crypto = rules.asset_class == AssetClass.CRYPTO
 
         # Run OHLCV validation
         ohlcv_validator = OHLCVValidator(
