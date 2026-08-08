@@ -161,8 +161,10 @@ class GapDetector:
             frequency: Data frequency
 
         Returns:
-            List of gaps found in storage
+            List of gaps found in storage, with UTC-aware bounds
         """
+        start_date = _ensure_datetime(start_date)
+        end_date = _ensure_datetime(end_date)
         try:
             # Read data from storage
             df = storage.read(key, start_date, end_date).collect()
@@ -182,9 +184,6 @@ class GapDetector:
 
             # Check for gap at the beginning
             first_timestamp = _ensure_datetime(df["timestamp"].min())
-            start_date = _ensure_datetime(start_date)
-            end_date = _ensure_datetime(end_date)
-
             if first_timestamp > start_date:
                 gaps.insert(
                     0,
@@ -263,8 +262,10 @@ class IncrementalUpdater:
             requested_end: Requested end date
 
         Returns:
-            Tuple of (actual_start, actual_end, update_type)
+            Tuple of UTC-aware (actual_start, actual_end, update_type)
         """
+        requested_start = _ensure_datetime(requested_start)
+        requested_end = _ensure_datetime(requested_end)
         try:
             # Check if data exists
             if not storage.exists(key):
@@ -277,9 +278,6 @@ class IncrementalUpdater:
                 return requested_start, requested_end, "full"
 
             last_timestamp = _ensure_datetime(df["timestamp"].max())
-            requested_end = _ensure_datetime(requested_end)
-            requested_start = _ensure_datetime(requested_start)
-
             # If requested end is before last data, no update needed
             if requested_end <= last_timestamp:
                 logger.info(

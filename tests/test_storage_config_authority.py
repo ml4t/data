@@ -19,13 +19,16 @@ def test_every_public_import_exposes_the_same_storage_config():
 @pytest.mark.parametrize("strategy", ["hive", "flat"])
 def test_every_accepted_strategy_constructs_and_round_trips(tmp_path, strategy):
     data = pl.DataFrame({"timestamp": [datetime(2026, 1, 2)], "symbol": ["AAPL"], "close": [100.0]})
+    expected = data.with_columns(
+        pl.col("timestamp").dt.replace_time_zone("UTC").cast(pl.Datetime("us", "UTC"))
+    )
     config = StorageConfig(base_path=tmp_path / strategy, strategy=strategy)
 
     storage = create_storage(config)
     storage.write(data, "equity/daily/AAPL")
 
     assert storage.config is config
-    assert storage.read("equity/daily/AAPL").collect().equals(data)
+    assert storage.read("equity/daily/AAPL").collect().equals(expected)
 
 
 @pytest.mark.parametrize("backend", ["s3", "memory"])
@@ -59,13 +62,16 @@ def test_lock_timeout_reaches_backend_lock(tmp_path):
 @pytest.mark.parametrize("compression", ["zstd", "lz4", "snappy", "gzip", None, "none"])
 def test_every_accepted_compression_writes_readable_parquet(tmp_path, compression):
     data = pl.DataFrame({"timestamp": [datetime(2026, 1, 2)], "close": [100.0]})
+    expected = data.with_columns(
+        pl.col("timestamp").dt.replace_time_zone("UTC").cast(pl.Datetime("us", "UTC"))
+    )
     storage = create_storage(
         StorageConfig(base_path=tmp_path / str(compression), compression=compression)
     )
 
     storage.write(data, "prices")
 
-    assert storage.read("prices").collect().equals(data)
+    assert storage.read("prices").collect().equals(expected)
 
 
 @pytest.mark.parametrize(
@@ -90,9 +96,12 @@ def test_every_partition_granularity_changes_the_hive_layout(tmp_path, granulari
 
 def test_disabling_metadata_tracking_removes_domain_metadata(tmp_path):
     data = pl.DataFrame({"timestamp": [datetime(2026, 1, 2)], "close": [100.0]})
+    expected = data.with_columns(
+        pl.col("timestamp").dt.replace_time_zone("UTC").cast(pl.Datetime("us", "UTC"))
+    )
     storage = create_storage(StorageConfig(base_path=tmp_path, metadata_tracking=False))
 
     storage.write(data, "prices", metadata={"provider": "test"})
 
     assert storage.get_metadata("prices") is None
-    assert storage.read("prices").collect().equals(data)
+    assert storage.read("prices").collect().equals(expected)

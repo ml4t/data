@@ -35,6 +35,12 @@ def _market_frame() -> pl.DataFrame:
     )
 
 
+def _canonical_storage_frame(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        pl.col("timestamp").dt.replace_time_zone("UTC").cast(pl.Datetime("us", "UTC"))
+    )
+
+
 def test_flat_migration_requires_explicit_complete_mapping(tmp_path: Path) -> None:
     data_path = tmp_path / "equities_daily_BRK_B.parquet"
     _market_frame().write_parquet(data_path)
@@ -72,7 +78,7 @@ def test_flat_migration_verifies_data_and_preserves_legacy_backup(tmp_path: Path
     storage = FlatStorage(StorageConfig(base_path=tmp_path, strategy="flat"))
     actual = storage.read("equities/daily/BRK_B").collect()
     migrated_metadata = storage.get_metadata("equities/daily/BRK_B")
-    assert_frame_equal(actual, expected)
+    assert_frame_equal(actual, _canonical_storage_frame(expected))
     assert migrated_metadata is not None
     assert migrated_metadata["custom"] == {
         "source": "legacy",
@@ -136,7 +142,10 @@ def test_hive_migration_uses_caller_partition_granularity(tmp_path: Path) -> Non
     )
 
     storage = HiveStorage(config)
-    assert_frame_equal(storage.read("equities/daily/BRK_B").collect(), expected)
+    assert_frame_equal(
+        storage.read("equities/daily/BRK_B").collect(),
+        _canonical_storage_frame(expected),
+    )
     assert not legacy_root.exists()
     assert (
         tmp_path / ".legacy-v0-backup/hive/equities_daily_BRK_B/year=2024/month=1/data.parquet"

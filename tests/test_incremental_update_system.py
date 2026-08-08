@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -72,8 +72,8 @@ class TestGapDetector:
         gaps = detector.detect_gaps(df, frequency="daily")
 
         assert len(gaps) == 1
-        assert gaps[0]["start"] == datetime(2024, 1, 5)
-        assert gaps[0]["end"] == datetime(2024, 1, 6)
+        assert gaps[0]["start"] == datetime(2024, 1, 5, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 6, tzinfo=UTC)
         assert gaps[0]["size_days"] == 2
 
     def test_detect_multiple_gaps(self):
@@ -111,11 +111,11 @@ class TestGapDetector:
 
         assert len(gaps) == 2
         # First gap: Jan 4-5
-        assert gaps[0]["start"] == datetime(2024, 1, 4)
-        assert gaps[0]["end"] == datetime(2024, 1, 5)
+        assert gaps[0]["start"] == datetime(2024, 1, 4, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 5, tzinfo=UTC)
         # Second gap: Jan 9-11
-        assert gaps[1]["start"] == datetime(2024, 1, 9)
-        assert gaps[1]["end"] == datetime(2024, 1, 11)
+        assert gaps[1]["start"] == datetime(2024, 1, 9, tzinfo=UTC)
+        assert gaps[1]["end"] == datetime(2024, 1, 11, tzinfo=UTC)
 
     def test_detect_gaps_with_weekends(self):
         """Test gap detection excludes weekends for daily data."""
@@ -141,8 +141,8 @@ class TestGapDetector:
         gaps = detector.detect_gaps(df, frequency="daily")
 
         assert len(gaps) == 1
-        assert gaps[0]["start"] == datetime(2024, 1, 3)
-        assert gaps[0]["end"] == datetime(2024, 1, 3)
+        assert gaps[0]["start"] == datetime(2024, 1, 3, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 3, tzinfo=UTC)
         assert gaps[0]["size_days"] == 1
 
     def test_detect_gaps_in_hive_partitions(self):
@@ -190,11 +190,11 @@ class TestGapDetector:
 
             assert len(gaps) == 2  # One between datasets, one at the end
             # First gap: between Jan 15 and Feb 10
-            assert gaps[0]["start"] == datetime(2024, 1, 16)
-            assert gaps[0]["end"] == datetime(2024, 2, 9)
+            assert gaps[0]["start"] == datetime(2024, 1, 16, tzinfo=UTC)
+            assert gaps[0]["end"] == datetime(2024, 2, 9, tzinfo=UTC)
             # Second gap: from Feb 21 to Feb 28
-            assert gaps[1]["start"] == datetime(2024, 2, 21)
-            assert gaps[1]["end"] == datetime(2024, 2, 28)
+            assert gaps[1]["start"] == datetime(2024, 2, 21, tzinfo=UTC)
+            assert gaps[1]["end"] == datetime(2024, 2, 28, tzinfo=UTC)
 
 
 class TestIncrementalUpdater:
@@ -215,8 +215,8 @@ class TestIncrementalUpdater:
             )
 
             assert update_type == "full"
-            assert start == datetime(2024, 1, 1)
-            assert end == datetime(2024, 1, 31)
+            assert start == datetime(2024, 1, 1, tzinfo=UTC)
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)
 
     def test_determine_update_range_incremental(self):
         """Test incremental update from last available timestamp."""
@@ -249,8 +249,8 @@ class TestIncrementalUpdater:
             )
 
             assert update_type == "incremental"
-            assert start == datetime(2024, 1, 16)  # Day after last data
-            assert end == datetime(2024, 1, 31)
+            assert start == datetime(2024, 1, 16, tzinfo=UTC)  # Day after last data
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)
 
     def test_incremental_update_with_overlap_handling(self):
         """Test that incremental updates handle overlapping data correctly."""
@@ -740,5 +740,5 @@ class TestUpdateStrategyBehavior:
 
             assert update_type == "incremental"
 
-            assert start == datetime(2024, 1, 1)
-            assert end == datetime(2024, 1, 31)
+            assert start == datetime(2024, 1, 1, tzinfo=UTC)
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)

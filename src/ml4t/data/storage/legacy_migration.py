@@ -429,9 +429,25 @@ def _read_migrated(
     return backend.read(logical_key).collect()
 
 
+def _normalize_verification_timestamps(frame: pl.DataFrame) -> pl.DataFrame:
+    timestamp_type = frame.schema.get("timestamp")
+    if isinstance(timestamp_type, pl.Datetime):
+        timestamp = pl.col("timestamp")
+        if timestamp_type.time_zone is None:
+            timestamp = timestamp.dt.replace_time_zone("UTC")
+        else:
+            timestamp = timestamp.dt.convert_time_zone("UTC")
+        return frame.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
+    return frame
+
+
 def _verify_frame(expected: pl.DataFrame, actual: pl.DataFrame, logical_key: str) -> None:
     try:
-        assert_frame_equal(expected, actual, check_row_order=False)
+        assert_frame_equal(
+            _normalize_verification_timestamps(expected),
+            _normalize_verification_timestamps(actual),
+            check_row_order=False,
+        )
     except AssertionError as error:
         raise LegacyStorageMigrationError(
             f"Verification failed for migrated key '{logical_key}': {error}"

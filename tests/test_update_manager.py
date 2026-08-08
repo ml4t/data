@@ -297,8 +297,8 @@ class TestGapDetectorStorage:
         gaps = detector.detect_gaps_in_storage(storage, "nonexistent_key", start, end)
 
         assert len(gaps) == 1
-        assert gaps[0]["start"] == start
-        assert gaps[0]["end"] == end
+        assert gaps[0]["start"] == start.replace(tzinfo=UTC)
+        assert gaps[0]["end"] == end.replace(tzinfo=UTC)
 
     def test_detect_gaps_in_storage_with_data(
         self, storage: HiveStorage, sample_data: pl.DataFrame
@@ -372,8 +372,8 @@ class TestIncrementalUpdater:
             datetime(2024, 12, 31),
         )
 
-        assert start == datetime(2024, 1, 1)
-        assert end == datetime(2024, 12, 31)
+        assert start == datetime(2024, 1, 1, tzinfo=UTC)
+        assert end == datetime(2024, 12, 31, tzinfo=UTC)
         assert update_type == "full"
 
     def test_determine_update_range_with_existing(
