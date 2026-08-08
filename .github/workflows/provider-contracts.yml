@@ -19,7 +19,7 @@ on:
           - databento
           - oanda
       allow-paid-requests:
-        description: Authorize requests that may be billed (Databento, Finnhub, Massive)
+        description: Authorize requests that may be billed (Databento, Finnhub)
         required: false
         default: false
         type: boolean
@@ -163,13 +163,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --locked --dev
-      - name: Require cost authorization and the provider credential
+      - name: Require the provider credential
         env:
-          ALLOW_PAID_REQUESTS: ${{ inputs.allow-paid-requests }}
           PROVIDER_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
         run: >-
-          python -c "import os; assert os.environ.get('ALLOW_PAID_REQUESTS') == 'true',
-          'Massive requests require allow-paid-requests'; assert os.environ.get('PROVIDER_API_KEY'),
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
           'MASSIVE_API_KEY is not configured'"
       - name: Run the live contract
         env:

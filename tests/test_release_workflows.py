@@ -115,7 +115,7 @@ def test_provider_contract_guards_prevent_skipped_green_runs() -> None:
         "oanda": {"PROVIDER_API_KEY"},
         "tiingo": {"PROVIDER_API_KEY"},
     }
-    paid_providers = {"databento", "finnhub", "massive"}
+    paid_providers = {"databento", "finnhub"}
 
     for provider, expected_env in guarded_credentials.items():
         guard = next(
@@ -127,6 +127,8 @@ def test_provider_contract_guards_prevent_skipped_green_runs() -> None:
         if provider in paid_providers:
             assert "ALLOW_PAID_REQUESTS" in guard["env"]
             assert "os.environ.get('ALLOW_PAID_REQUESTS') == 'true'" in guard["run"]
+        else:
+            assert "ALLOW_PAID_REQUESTS" not in guard["env"]
 
 
 def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
@@ -142,7 +144,7 @@ def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
 
     assert "Databento" in inputs["allow-paid-requests"]["description"]
     assert "Finnhub" in inputs["allow-paid-requests"]["description"]
-    assert "Massive" in inputs["allow-paid-requests"]["description"]
+    assert "Massive" not in inputs["allow-paid-requests"]["description"]
 
 
 def test_release_requires_provider_contracts_for_the_tagged_commit() -> None:
