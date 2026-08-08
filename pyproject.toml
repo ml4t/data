@@ -19,6 +19,7 @@ namespaces = true
 include = [
     "/src",
     "/tests",
+    "/scripts/verify_distribution.py",
     "/README.md",
     "/LICENSE",
     "/CHANGELOG.md",

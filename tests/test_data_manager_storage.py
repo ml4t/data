@@ -544,16 +544,17 @@ class TestDataManagerTransactions:
 
         assert manager.storage is storage
 
-    @patch.object(DataManager, "fetch")
-    def test_load_publishes_atomic_storage_generation(self, mock_fetch, storage, sample_data):
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
+    def test_load_publishes_atomic_storage_generation(self, mock_fetch_raw, storage, sample_data):
         manager = DataManager(storage=storage)
-        mock_fetch.return_value = sample_data
+        mock_fetch_raw.return_value = sample_data
 
         # Load should use transaction
         key = manager.load("AAPL", "2024-01-01", "2024-01-10", provider="mock")
 
         # Data should be stored
         assert storage.exists(key)
+        mock_fetch_raw.assert_called_once_with("AAPL", "2024-01-01", "2024-01-10", "daily", "mock")
 
 
 class TestDataManagerBatchLoadFromStorage:
@@ -671,13 +672,13 @@ class TestDataManagerBatchLoadFromStorage:
         assert len(result) >= 14  # Combined data from both symbols
         assert set(result["symbol"].unique().to_list()) == {"AAPL", "MSFT"}
 
-    @patch.object(DataManager, "fetch")
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
     def test_batch_load_from_storage_strict_mode(
-        self, mock_fetch, manager, storage, sample_data_aapl
+        self, mock_fetch_raw, manager, storage, sample_data_aapl
     ):
         """Test strict mode (fetch_missing=False) raises on missing."""
         # Pre-populate storage with only AAPL
-        mock_fetch.return_value = sample_data_aapl
+        mock_fetch_raw.return_value = sample_data_aapl
         manager.load("AAPL", "2024-01-01", "2024-01-10", provider="mock")
 
         # Should raise because MSFT is not in storage
@@ -688,6 +689,7 @@ class TestDataManagerBatchLoadFromStorage:
                 end="2024-01-10",
                 fetch_missing=False,
             )
+        mock_fetch_raw.assert_called_once()
 
     def test_batch_load_from_storage_no_data_raises(self, manager):
         """Test that no data at all raises error."""
@@ -980,10 +982,10 @@ class TestDataManagerListSymbols:
 
         assert symbols == ["AAPL"]
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_filter_by_asset_class(self, mock_fetch, manager, sample_data):
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
+    def test_list_symbols_filter_by_asset_class(self, mock_fetch_raw, manager, sample_data):
         """Test filtering symbols by asset class."""
-        mock_fetch.return_value = sample_data
+        mock_fetch_raw.return_value = sample_data
 
         # Load different asset classes
         manager.load("AAPL", "2024-01-01", "2024-01-05", provider="mock", asset_class="equities")
@@ -999,6 +1001,7 @@ class TestDataManagerListSymbols:
         # Filter by asset class
         crypto_symbols = manager.list_symbols(asset_class="crypto")
         assert crypto_symbols == ["BTC"]
+        mock_fetch_raw.assert_called_once()
 
     @pytest.mark.parametrize("storage_type", [HiveStorage, FlatStorage])
     def test_loaded_symbol_is_discoverable_after_restart(self, temp_dir, storage_type):
