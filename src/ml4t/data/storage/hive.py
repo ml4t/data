@@ -294,7 +294,7 @@ class HiveStorage(StorageBackend):
                     partition_path.mkdir(parents=True, exist_ok=True)
                     partition_df = partition_df.drop(partition_cols)
                     self._atomic_write(partition_df, partition_path / "data.parquet")
-                    partitions_written.append(str(partition_path.relative_to(staging_path)))
+                    partitions_written.append(partition_path.relative_to(staging_path).as_posix())
 
                 commit_metadata = (
                     {

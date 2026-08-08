@@ -116,7 +116,7 @@ class TestCOTConfig:
         """Test storage_path string to Path conversion."""
         config = COTConfig(storage_path="~/test/path")
         assert isinstance(config.storage_path, Path)
-        assert str(config.storage_path).startswith("/")
+        assert config.storage_path.is_absolute()
 
     def test_storage_path_expansion(self):
         """Test storage_path home directory expansion."""

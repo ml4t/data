@@ -23,13 +23,14 @@ class TestConfig:
         assert config.storage.base_path == config.data_root
         assert config.log_level == "INFO"
 
-    def test_config_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_config_from_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Test configuration from environment variables."""
-        monkeypatch.setenv("QLDM_DATA_ROOT", "/custom/path")
+        data_root = tmp_path / "custom-path"
+        monkeypatch.setenv("QLDM_DATA_ROOT", str(data_root))
         monkeypatch.setenv("QLDM_LOG_LEVEL", "DEBUG")
 
         config = Config()
-        assert config.data_root == Path("/custom/path")
+        assert config.data_root == data_root
         assert config.log_level == "DEBUG"
 
     def test_storage_config_validation(self) -> None:
