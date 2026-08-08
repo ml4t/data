@@ -1620,7 +1620,6 @@ dev = [
     { name = "oandapyv20" },
     { name = "pip-audit" },
     { name = "pre-commit" },
-    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1636,7 +1635,6 @@ prerelease = [
     { name = "cot-reports" },
     { name = "hypothesis" },
     { name = "oandapyv20" },
-    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1649,7 +1647,6 @@ prerelease = [
 ]
 test = [
     { name = "hypothesis" },
-    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1743,7 +1740,6 @@ dev = [
     { name = "oandapyv20", specifier = ">=0.7.0" },
     { name = "pip-audit", specifier = ">=2.10.1" },
     { name = "pre-commit", specifier = ">=3.3.0" },
-    { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
@@ -1759,7 +1755,6 @@ prerelease = [
     { name = "cot-reports", specifier = ">=0.1.0" },
     { name = "hypothesis", specifier = ">=6.80.0" },
     { name = "oandapyv20", specifier = ">=0.7.0" },
-    { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
@@ -1772,7 +1767,6 @@ prerelease = [
 ]
 test = [
     { name = "hypothesis", specifier = ">=6.80.0" },
-    { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },

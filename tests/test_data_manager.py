@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import datetime
+from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -39,7 +40,8 @@ class TestDataManagerInitialization:
             dm = DataManager()
             assert "CRYPTOCOMPARE_API_KEY" in os.environ
             # Provider instances are created lazily
-            assert {"cryptocompare", "databento", "oanda"} <= set(dm._available_providers)
+            assert {"cryptocompare", "oanda"} <= set(dm._available_providers)
+            assert ("databento" in dm._available_providers) is (find_spec("databento") is not None)
 
     def test_init_with_yaml_config(self):
         """Test DataManager initialization from YAML config file."""

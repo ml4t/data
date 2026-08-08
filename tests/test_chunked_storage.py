@@ -7,13 +7,18 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import polars as pl
-import pyarrow.parquet as pq
 import pytest
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.storage.chunked import ChunkedStorage, ChunkInfo
 from ml4t.data.storage.config import CompressionType
 from ml4t.data.storage.keys import storage_key_path
+
+
+def _parquet_compression(path: Path) -> str:
+    parquet = pytest.importorskip("pyarrow.parquet")
+    metadata = parquet.ParquetFile(path).metadata
+    return metadata.row_group(0).column(0).compression
 
 
 class TestChunkedStorage:
@@ -71,8 +76,7 @@ class TestChunkedStorage:
         assert storage.compression == "uncompressed"
         assert storage.read(key).data.equals(frame)
         chunk = storage.get_chunk_info(key)[0]
-        parquet_metadata = pq.ParquetFile(chunk.file_path).metadata
-        assert parquet_metadata.row_group(0).column(0).compression == "UNCOMPRESSED"
+        assert _parquet_compression(chunk.file_path) == "UNCOMPRESSED"
 
     @pytest.mark.parametrize("compression", list(CompressionType))
     def test_canonical_compressions_round_trip(
@@ -103,8 +107,7 @@ class TestChunkedStorage:
         assert storage.compression == compression.value
         assert storage.read(key).data.equals(frame)
         chunk = storage.get_chunk_info(key)[0]
-        parquet_metadata = pq.ParquetFile(chunk.file_path).metadata
-        assert parquet_metadata.row_group(0).column(0).compression == compression.name
+        assert _parquet_compression(chunk.file_path) == compression.name
 
     @pytest.mark.parametrize("compression", [None, "none", "NONE", "null", "NULL"])
     def test_no_compression_aliases(self, tmp_path: Path, compression: str | None) -> None:

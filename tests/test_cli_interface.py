@@ -1557,8 +1557,11 @@ class TestDownloadFuturesCommand:
         # Missing required option
 
     @patch("ml4t.data.futures.FuturesDownloader", create=True)
+    @patch("ml4t.data.futures.require_databento")
     @patch("ml4t.data.futures.load_yaml_config")
-    def test_download_futures_dry_run(self, mock_load_config, mock_downloader_class):
+    def test_download_futures_dry_run(
+        self, mock_load_config, mock_require_databento, mock_downloader_class
+    ):
         """Test download-futures dry run."""
         # Setup mocks
         mock_config = MagicMock()
@@ -1585,6 +1588,7 @@ class TestDownloadFuturesCommand:
             result = runner.invoke(cli, ["download-futures", "-c", "config.yaml", "--dry-run"])
 
         assert result.exit_code == 0
+        mock_require_databento.assert_called_once_with("FuturesDownloader")
         assert "Dry run" in result.output
         assert "$15.50" in result.output
 

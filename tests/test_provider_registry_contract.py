@@ -28,7 +28,15 @@ def test_cli_provider_discovery_is_derived_from_registry():
 
 def test_advertised_provider_classes_are_exported_from_public_namespace():
     for spec in advertised_provider_specs():
-        assert getattr(provider_namespace, spec.class_name) is spec.load_class()
+        exported_class = getattr(provider_namespace, spec.class_name)
+        try:
+            registered_class = spec.load_class()
+        except ModuleNotFoundError as error:
+            assert spec.extra is not None
+            assert error.name is not None
+            assert exported_class is None
+        else:
+            assert exported_class is registered_class
 
 
 def test_manager_constructs_registered_ohlcv_provider_with_configuration():
