@@ -188,3 +188,21 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
         "test_release_provider_contracts.py",
     ):
         assert contract in command
+
+
+def test_credentialed_contract_jobs_run_one_bounded_test() -> None:
+    jobs = _load("provider-contracts.yml")["jobs"]
+    expected_tests = {
+        "cryptocompare": (
+            "test_cryptocompare.py::TestCryptoCompareProvider::test_fetch_ohlcv_btc_daily"
+        ),
+        "oanda": "test_oanda.py::TestOandaProvider::test_fetch_ohlcv_eurusd_daily",
+    }
+
+    for provider, expected_test in expected_tests.items():
+        command = next(
+            step["run"]
+            for step in jobs[provider]["steps"]
+            if step.get("name") == "Run the live contract"
+        )
+        assert expected_test in command

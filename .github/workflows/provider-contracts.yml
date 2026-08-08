@@ -230,7 +230,9 @@ jobs:
       - name: Run the live contract
         env:
           CRYPTOCOMPARE_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
-        run: uv run pytest tests/integration/test_cryptocompare.py -q -m integration
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_cryptocompare.py::TestCryptoCompareProvider::test_fetch_ohlcv_btc_daily
 
   databento:
     name: Databento Contract
@@ -283,4 +285,6 @@ jobs:
       - name: Run the live contract
         env:
           OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
-        run: uv run pytest tests/integration/test_oanda.py -q -m integration
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_oanda.py::TestOandaProvider::test_fetch_ohlcv_eurusd_daily

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import polars as pl
+import pytest
 
 from ml4t.data.providers import (
     AQRFactorProvider,
@@ -15,6 +16,8 @@ from ml4t.data.providers import (
     OKXProvider,
     TwelveDataProvider,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def _recent_dates() -> tuple[str, str]:
