@@ -23,10 +23,29 @@ jobs:
     permissions:
       contents: read
 
+  provider-contracts:
+    name: Verify Provider Contracts
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Require successful live contracts for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: >-
+          python scripts/verify_provider_contract_runs.py
+          --repository "${{ github.repository }}" --commit "$RELEASE_COMMIT"
+
   build:
     name: Build Validated Artifacts
     runs-on: ubuntu-latest
-    needs: compatibility
+    needs: [compatibility, provider-contracts]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

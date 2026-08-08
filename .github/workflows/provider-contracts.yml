@@ -1,4 +1,5 @@
 name: Provider Contract Tests
+run-name: Provider Contract - ${{ inputs.provider }}
 
 on:
   workflow_dispatch:

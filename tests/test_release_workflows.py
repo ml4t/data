@@ -46,7 +46,7 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     build = release["jobs"]["build"]
     publish = release["jobs"]["publish"]
 
-    assert build["needs"] == "compatibility"
+    assert build["needs"] == ["compatibility", "provider-contracts"]
     assert publish["needs"] == "build"
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}
@@ -135,6 +135,7 @@ def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     options = inputs["provider"]["options"]
 
+    assert workflow["run-name"] == "Provider Contract - ${{ inputs.provider }}"
     assert set(options) == set(jobs)
     for option in options:
         assert jobs[option]["if"] == f"inputs.provider == '{option}'"
@@ -142,6 +143,20 @@ def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
     assert "Databento" in inputs["allow-paid-requests"]["description"]
     assert "Finnhub" in inputs["allow-paid-requests"]["description"]
     assert "Massive" in inputs["allow-paid-requests"]["description"]
+
+
+def test_release_requires_provider_contracts_for_the_tagged_commit() -> None:
+    jobs = _load("release.yml")["jobs"]
+    verification = jobs["provider-contracts"]
+    step = next(
+        step
+        for step in verification["steps"]
+        if step.get("name") == "Require successful live contracts for this commit"
+    )
+
+    assert verification["permissions"] == {"actions": "read", "contents": "read"}
+    assert step["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
+    assert "verify_provider_contract_runs.py" in step["run"]
 
 
 def test_public_provider_integrations_are_manually_reachable() -> None:
