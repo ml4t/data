@@ -35,10 +35,12 @@ def test_external_actions_are_pinned_and_checkouts_do_not_persist_credentials() 
 
 
 def test_compatibility_matrix_covers_release_policy() -> None:
-    matrix = _load("compatibility.yml")["jobs"]["compatibility"]["strategy"]["matrix"]
+    compatibility = _load("compatibility.yml")["jobs"]["compatibility"]
+    matrix = compatibility["strategy"]["matrix"]
 
     assert matrix["os"] == ["ubuntu-latest", "macos-latest", "windows-latest"]
     assert matrix["python-version"] == ["3.12", "3.13", "3.14", "3.15"]
+    assert compatibility["continue-on-error"] == "${{ matrix.python-version == '3.15' }}"
 
 
 def test_publish_uses_only_the_validated_package_directory() -> None:
