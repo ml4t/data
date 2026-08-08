@@ -74,6 +74,22 @@ produce identical results across interpreter processes and supported platforms.
 - Volume follows log-normal distribution
 - Equity-session or continuous UTC calendars
 
+## Learned Samples
+
+`LearnedSyntheticProvider` converts pre-generated model samples into the same OHLCV contract. It
+accepts a non-pickle NumPy array with shape `(n_samples, sequence_length, n_features)` or an artifact
+directory containing `samples.npy` and `metadata.json`.
+
+```python
+from ml4t.data.providers import LearnedSyntheticProvider
+
+provider = LearnedSyntheticProvider.from_samples("timegan_sequences.npy", seed=42)
+df = provider.fetch_ohlcv("SYNTH_TIMEGAN", "2024-01-01", "2024-12-31", "daily")
+```
+
+Executable model checkpoints are not loaded. Generate `samples.npy` during model training before
+constructing the provider.
+
 ---
 
 ## See Also

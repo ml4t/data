@@ -106,4 +106,3 @@ These features are available via yfinance but not yet in ml4t-data:
 ## See Also
 
 - [Provider reference](index.md) - All providers
-- [Provider Audit](PROVIDER_AUDIT.md) - Detailed capabilities

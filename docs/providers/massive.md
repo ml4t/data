@@ -151,4 +151,3 @@ POLYGON_API_KEY=your_existing_polygon_key
 - [Massive Pricing](https://massive.com/pricing)
 - [Massive REST Docs](https://massive.com/docs)
 - [Polygon compatibility note](polygon.md)
-- [Provider Audit](PROVIDER_AUDIT.md)

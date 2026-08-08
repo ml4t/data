@@ -145,6 +145,7 @@ nav:
     - OKX: providers/okx.md
     - CryptoCompare: providers/cryptocompare.md
     - Oanda: providers/oanda.md
+    - Synthetic Data: providers/synthetic.md
 
   - Tutorials:
     - tutorials/index.md
@@ -183,3 +184,38 @@ extra:
 
 # Copyright
 copyright: Copyright &copy; 2024-2026 Stefan Jansen
+
+# These pages remain searchable but are intentionally outside the primary navigation.
+not_in_nav: |
+  /ASYNC_STORAGE.md
+  /FEATURES.md
+  /INCREMENTAL_UPDATES.md
+  /INSTALLATION.md
+  /INTEGRATION_TESTING.md
+  /SESSION_MANAGEMENT.md
+  /TESTING.md
+  /crypto_providers.md
+  /export_guide.md
+  /multi_asset_guide.md
+  /yahoo_provider.md
+  /asset-classes/README.md
+  /asset-classes/crypto.md
+  /asset-classes/equities.md
+  /asset-classes/forex.md
+  /asset-classes/futures.md
+  /providers/databento_reference.md
+  /providers/mock.md
+  /storage/INCREMENTAL_ARCHITECTURE.md
+  /storage/PARTITIONING_GUIDE.md
+  /user-guide/getting-started.md
+
+validation:
+  omitted_files: warn
+
+# Historical audits remain in the repository but are not published as current user documentation.
+exclude_docs: |
+  /FEATURE_INVENTORY.md
+  /GAP_ANALYSIS.md
+  /wiki_prices_status.md
+  /yahoo_bulk_download_analysis.md
+  /providers/PROVIDER_AUDIT.md
