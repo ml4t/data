@@ -369,9 +369,9 @@ class StorageBackend(ABC):
 
         try:
             df.write_parquet(tmp_path, compression=self._parquet_compression())
+            with tmp_path.open("rb+") as tmp_file:
+                os.fsync(tmp_file.fileno())
             tmp_path.replace(target_path)
-            with target_path.open("rb") as target_file:
-                os.fsync(target_file.fileno())
             self._fsync_directory(target_path.parent)
         finally:
             if tmp_path.exists():

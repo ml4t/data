@@ -149,7 +149,7 @@ def test_source_contains_no_hardcoded_home_storage_paths(
     for path in src_root.rglob("*.py"):
         if path.name in allowed_files:
             continue
-        if pattern in path.read_text():
+        if pattern in path.read_text(encoding="utf-8"):
             offenders.append(str(path.relative_to(src_root)))
 
     assert offenders == [], f"Found hardcoded storage path pattern {pattern!r} in: {offenders}"

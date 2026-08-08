@@ -730,15 +730,17 @@ class WikiPricesProvider(BaseProvider):
                 return key
 
         # 3. Load from .env file
-        env_paths = []
+        env_paths: list[Path] = []
         if env_file:
-            env_paths.append(Path(env_file).expanduser())
-        env_paths.extend(
-            [
-                Path("~/.env").expanduser(),
-                Path(".env"),
-            ]
-        )
+            try:
+                env_paths.append(Path(env_file).expanduser())
+            except RuntimeError:
+                pass
+        try:
+            env_paths.append(Path("~/.env").expanduser())
+        except RuntimeError:
+            pass
+        env_paths.append(Path(".env"))
 
         for env_path in env_paths:
             if env_path.exists():
@@ -751,7 +753,7 @@ class WikiPricesProvider(BaseProvider):
                             return values[env_var]
                 except ImportError:
                     # python-dotenv not installed, try manual parsing
-                    with open(env_path) as f:
+                    with env_path.open(encoding="utf-8") as f:
                         for line in f:
                             line = line.strip()
                             if line.startswith("#") or "=" not in line:

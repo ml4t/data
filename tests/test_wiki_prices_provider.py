@@ -604,19 +604,20 @@ class TestResolveApiKey:
     def test_resolve_from_env_file(self, tmp_path):
         """Test resolving API key from .env file."""
         env_file = tmp_path / ".env"
-        env_file.write_text("QUANDL_API_KEY=file_key")
+        env_file.write_text("QUANDL_API_KEY=file_key", encoding="utf-8")
 
         with patch.dict("os.environ", {}, clear=True):
             key = WikiPricesProvider._resolve_api_key(None, env_file)
             assert key == "file_key"
 
-    def test_resolve_returns_none_when_not_found(self):
+    def test_resolve_returns_none_when_home_cannot_be_resolved(self, monkeypatch, tmp_path):
         """Test resolve returns None when no key found."""
+        monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {}, clear=True):
-            with patch.object(WikiPricesProvider, "DEFAULT_PATHS", []):
-                _key = WikiPricesProvider._resolve_api_key(None, None)  # noqa: F841
-                # Might return None depending on system .env files
-                # Just ensure it doesn't crash
+            with patch.object(Path, "expanduser", side_effect=RuntimeError):
+                key = WikiPricesProvider._resolve_api_key(None, None)
+
+        assert key is None
 
 
 class TestDatasetConstants:

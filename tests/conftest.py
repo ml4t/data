@@ -3,6 +3,7 @@
 import asyncio
 import gc
 import ipaddress
+import logging
 import os
 import socket
 
@@ -27,6 +28,7 @@ structlog.configure(
     ],
     context_class=dict,
     logger_factory=structlog.PrintLoggerFactory(),
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
     cache_logger_on_first_use=False,
 )
 

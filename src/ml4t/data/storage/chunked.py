@@ -366,7 +366,7 @@ class ChunkedStorage:
         temporary_path = Path(temporary_name)
         try:
             frame.write_parquet(temporary_path, compression=self.compression)
-            with temporary_path.open("rb") as temporary_file:
+            with temporary_path.open("rb+") as temporary_file:
                 os.fsync(temporary_file.fileno())
             temporary_path.replace(path)
             self._fsync_directory(path.parent)
