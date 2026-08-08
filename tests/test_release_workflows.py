@@ -46,7 +46,7 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     build = release["jobs"]["build"]
     publish = release["jobs"]["publish"]
 
-    assert build["needs"] == ["compatibility", "provider-contracts"]
+    assert build["needs"] == ["compatibility", "provider-contracts", "quality"]
     assert publish["needs"] == "build"
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}
@@ -157,6 +157,17 @@ def test_release_requires_provider_contracts_for_the_tagged_commit() -> None:
     assert verification["permissions"] == {"actions": "read", "contents": "read"}
     assert step["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
     assert "verify_provider_contract_runs.py" in step["run"]
+
+
+def test_release_rechecks_quality_docs_and_dependencies() -> None:
+    quality = _load("release.yml")["jobs"]["quality"]
+    commands = "\n".join(step.get("run", "") for step in quality["steps"])
+
+    assert "ruff check" in commands
+    assert "ruff format --check" in commands
+    assert "ty check" in commands
+    assert "mkdocs build --strict" in commands
+    assert "pip-audit --requirement" in commands
 
 
 def test_public_provider_integrations_are_manually_reachable() -> None:
