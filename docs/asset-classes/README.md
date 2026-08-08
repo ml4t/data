@@ -152,7 +152,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 - ❌ **Futures**: Not available free
 
 **< $50/month**:
-- ✅ **Global Stocks**: EODHD (€19.99/month unlimited)
+- ✅ **Global Stocks**: EODHD with plan-dependent coverage and quotas
 - ✅ **Futures**: Databento ($30-50/month starter)
 - ✅ **Multi-asset**: Twelve Data ($49/month)
 
@@ -184,7 +184,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Optional | Crypto (beginners) |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Required | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | Required | US stocks |
-| **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Required | Global stocks (best value) |
+| **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 20 calls/day free | Required | Global stocks |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time only | Required | Professional stocks |
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo account | Required | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Required | Multi-asset |

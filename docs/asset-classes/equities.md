@@ -22,7 +22,7 @@ ML4T Data provides **multiple free-tier providers** for equity data, ranging fro
 |----------|-----------|--------|-----------|---------|----------|
 | **Tiingo** | ✅ | ❌ | 1000/day | Required | High-quality US stocks |
 | **Yahoo Finance** | ✅ | ⚠️ Limited | Unofficial | No | Quick experiments |
-| **EODHD** | ✅ | ✅ 60+ exchanges | 500/day | Required | Global coverage |
+| **EODHD** | ✅ | ✅ 60+ exchanges | 20 calls/day free | Required | Global coverage |
 | **Finnhub** | ✅ | ✅ 70+ exchanges | Real-time only | Required | Professional (paid OHLCV) |
 | **Twelve Data** | ✅ | ✅ | 800/day | Required | Multi-asset flexibility |
 | **Massive** | ✅ | ✅ | 5 calls/min | Required | Real-time + historical |
@@ -175,7 +175,7 @@ updater.update_incremental(storage, tracker, "tiingo/AAPL", new_data, provider="
 
 - ✅ **60+ global exchanges** - US, Europe, Asia, emerging markets
 - ✅ **150,000+ tickers** worldwide
-- ✅ **500 API calls/day free** or **€19.99/month unlimited**
+- ✅ **20 API calls/day free**; paid quotas depend on the selected plan
 - ✅ **Most affordable global data** vs competitors
 - ✅ **Adjusted close** for splits and dividends
 
@@ -262,15 +262,15 @@ EODHD uses **SYMBOL.EXCHANGE** notation:
 
 #### Free Tier vs Paid Tier
 
-**Free Tier** (500 API calls/day):
+**Free Tier** (20 API calls/day):
 - ✅ 1 year historical depth
 - ✅ 150,000+ tickers across 60+ exchanges
 - ✅ Daily, weekly, monthly OHLCV
 - ✅ Adjusted close (splits/dividends)
-- ⚠️ 500 calls/day limit
+- ⚠️ 20 calls/day limit
 
-**Paid Tier** (€19.99/month - **Best Value**):
-- ✅ **Unlimited API calls**
+**Paid tier**:
+- ✅ Higher daily API-call quotas
 - ✅ Extended historical coverage (up to 30 years)
 - ✅ Real-time data
 - ✅ Fundamentals and financials
@@ -280,23 +280,21 @@ EODHD uses **SYMBOL.EXCHANGE** notation:
 **Cost Comparison**:
 | Provider | Global Coverage | Free Tier | Paid Tier |
 |----------|-----------------|-----------|-----------|
-| EODHD | 60+ exchanges | 500/day | €19.99/month |
-| Finnhub | 70+ exchanges | Real-time only | $59.99/month |
-| Massive | Limited global | 5/min | $199/month |
-| **Winner** | EODHD | EODHD | **EODHD** (cheapest) |
+| EODHD | 60+ exchanges | 20 calls/day free | See current pricing |
+| Finnhub | Plan-dependent | US quotes | See current pricing |
+| Massive | Plan-dependent | Stocks Basic | See current pricing |
 
 #### Rate Limiting Strategy
 
 ```python
-# Free tier: 500 calls/day
+# Free tier: 20 calls/day
 # Strategy: Batch updates wisely
 
-# Example 1: Daily updates for 500 global stocks
-symbols = [f"AAPL.US", "VOD.LSE", "BMW.FRA", ...]  # 500 symbols
+# Example 1: Process at most 20 one-call symbol requests per day
+symbols = ["AAPL.US", "VOD.LSE", "BMW.FRA", ...]
 
-for symbol in symbols:
+for symbol in symbols[:20]:
     df = provider.fetch_ohlcv(symbol, start="2024-01-01", end="2024-12-31")
-    # 500 API calls = 1 day's quota (perfect fit!)
 
 # Example 2: Use date-windowed fetches to reduce repeated work
 for symbol in symbols:
@@ -675,7 +673,7 @@ START: What markets do you need?
 │
 ├─ Global stocks (60+ exchanges)?
 │  ├─ Budget-conscious?
-│  │  → EODHD (€19.99/month unlimited) ✅ BEST VALUE
+│  │  → EODHD with the required market coverage and quota
 │  │
 │  └─ Professional real-time needs?
 │     → Finnhub ($59.99/month) or Massive ($199/month)

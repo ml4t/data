@@ -9,11 +9,10 @@ Requirements:
 
 Pricing Tiers:
     - FREE TIER: Real-time quotes only (60 calls/min)
-      ✅ test_fetch_quote - Works on free tier
-      ✅ test_provider_initialization - Works on free tier
-      ✅ test_invalid_frequency - Works on free tier
+      test_fetch_quote works on the free tier
+      test_provider_initialization works without a request
 
-    - PAID TIER: Historical OHLCV data (requires $59.99+/month subscription)
+    - PAID TIER: Historical OHLCV data
       ❌ test_fetch_ohlcv_* - Requires paid subscription
       ❌ test_multiple_symbols - Requires paid subscription
       ❌ test_frequency_mapping - Requires paid subscription
@@ -44,11 +43,14 @@ from ml4t.data.providers.finnhub import FinnhubProvider
 # Get API key from environment
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 
-# Skip all tests if no API key
-pytestmark = pytest.mark.skipif(
-    not FINNHUB_API_KEY,
-    reason="FINNHUB_API_KEY not set - get free key at https://finnhub.io/register",
-)
+# Mark live tests and skip them if no API key is available.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not FINNHUB_API_KEY,
+        reason="FINNHUB_API_KEY not set - get free key at https://finnhub.io/register",
+    ),
+]
 
 
 @pytest.fixture
@@ -68,6 +70,16 @@ class TestFinnhubProvider:
         assert provider.name == "finnhub"
         assert provider.api_key == FINNHUB_API_KEY
         provider.close()
+
+    def test_fetch_quote(self, provider):
+        """Fetch and validate a US equity quote on the free tier."""
+        quote = provider.fetch_quote("AAPL")
+
+        assert quote["symbol"] == "AAPL"
+        assert quote["timestamp"] > 0
+        assert quote["current"] > 0
+        assert quote["high"] >= quote["low"]
+        assert quote["previous_close"] > 0
 
     @pytest.mark.paid_tier
     def test_fetch_ohlcv_daily(self, provider):

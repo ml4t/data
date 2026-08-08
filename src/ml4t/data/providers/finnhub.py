@@ -5,18 +5,15 @@ Finnhub provides comprehensive financial market data with global coverage.
 API Documentation: https://finnhub.io/docs/api
 Pricing: https://finnhub.io/pricing
 
-**IMPORTANT - Tier Limitations**:
+Tier limitations:
 
 FREE TIER (60 API calls/minute):
-- ✅ Real-time quotes - 60 calls/minute
-- ❌ Historical OHLCV - Only 30 candle calls/day (VERY limited)
-- Best for: Real-time market data, not historical analysis
+- Real-time US equity quotes
+- Selected US company data
 
-PAID TIER ($59.99+/month):
-- ✅ Historical OHLCV - 300-600 calls/minute
-- ✅ Global coverage (60+ exchanges)
-- ✅ Multiple resolutions (minute to monthly)
-- Required for: Backtesting, historical analysis
+PAID TIER:
+- Historical OHLCV
+- Global market data and extended history
 
 Example:
     >>> from ml4t.data.providers.finnhub import FinnhubProvider
@@ -62,8 +59,8 @@ class FinnhubProvider(BaseProvider):
     Supports stocks, ETFs, forex, and crypto with multiple resolutions.
 
     Rate Limits:
-    - Free tier: 60 requests/minute (but only 30 candle calls/day)
-    - Paid tier: 300-600 requests/minute ($59.99+/month)
+    - Free tier: 60 requests/minute for supported endpoints such as US quotes
+    - Paid tier: Historical OHLC and higher limits depend on the current plan
     """
 
     # Free tier: 60 requests/min = 1 per second
@@ -139,6 +136,69 @@ class FinnhubProvider(BaseProvider):
     def name(self) -> str:
         """Return provider name."""
         return "finnhub"
+
+    def fetch_quote(self, symbol: str) -> dict[str, str | int | float]:
+        """Fetch a real-time US equity quote available on Finnhub's free tier.
+
+        Args:
+            symbol: US equity symbol, such as ``AAPL``.
+
+        Returns:
+            Normalized quote values with a Unix timestamp in seconds.
+
+        Raises:
+            SymbolNotFoundError: If Finnhub returns no quote for the symbol.
+            DataValidationError: If the response is missing required quote values.
+        """
+        normalized_symbol = symbol.upper()
+        data = self._request_json(
+            "/quote",
+            params={"symbol": normalized_symbol, "token": self.api_key},
+            symbol=normalized_symbol,
+        )
+        if not data.get("t") or not data.get("c"):
+            raise SymbolNotFoundError(provider=self.name, symbol=normalized_symbol)
+
+        response_keys = {
+            "timestamp": "t",
+            "current": "c",
+            "high": "h",
+            "low": "l",
+            "open": "o",
+            "previous_close": "pc",
+        }
+        missing = [name for name, key in response_keys.items() if data.get(key) is None]
+        if missing:
+            raise DataValidationError(
+                provider=self.name,
+                message=f"Finnhub quote is missing required values: {', '.join(missing)}",
+            )
+
+        try:
+            current = float(data["c"])
+            previous_close = float(data["pc"])
+            change = float(data["d"]) if data.get("d") is not None else current - previous_close
+            percent_change = (
+                float(data["dp"])
+                if data.get("dp") is not None
+                else (change / previous_close * 100 if previous_close else 0.0)
+            )
+            return {
+                "symbol": normalized_symbol,
+                "timestamp": int(data["t"]),
+                "current": current,
+                "change": change,
+                "percent_change": percent_change,
+                "high": float(data["h"]),
+                "low": float(data["l"]),
+                "open": float(data["o"]),
+                "previous_close": previous_close,
+            }
+        except (TypeError, ValueError) as err:
+            raise DataValidationError(
+                provider=self.name,
+                message="Finnhub quote contains invalid numeric values",
+            ) from err
 
     def _fetch_raw_data(
         self,

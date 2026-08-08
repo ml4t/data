@@ -110,8 +110,8 @@ print(f"Fetched {len(df)} rows for {df['symbol'].n_unique()} symbols")
 |----------|-------------|-----------|-------|----------|
 | **Yahoo** | Stocks, ETFs, Crypto | Unlimited | Thread | Learning, backtesting |
 | **CoinGecko** | Crypto | 10K+ coins | Native | Crypto historical |
-| **EODHD** | Global Stocks | 500/day | Native | Global coverage |
-| **DataBento** | Futures, Options | $10 credits | Thread | Institutional data |
+| **EODHD** | Global Stocks | 20 calls/day | Native | Global coverage |
+| **DataBento** | Futures, Options | Free metadata; metered history | Thread | Institutional data |
 | **Fama-French** | Factors | Unlimited | Thread | Academic research |
 
 [:octicons-arrow-right-24: Full provider guide](providers/index.md)

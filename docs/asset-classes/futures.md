@@ -22,7 +22,7 @@ Futures markets have unique complexities:
 
 | Provider | Coverage | Free Tier | Data Quality | Best For |
 |----------|----------|-----------|--------------|----------|
-| **Databento** | CME/ICE/Eurex futures; OPRA options | Paid only | Institutional | Professional derivatives research |
+| **Databento** | CME/ICE/Eurex futures; OPRA options | Free metadata; metered history | Institutional | Professional derivatives research |
 | **Polygon** | Limited futures | 5/min | ⭐⭐⭐ Good | Multi-asset portfolios |
 
 **Important**: Futures data is not free. Databento requires a paid subscription
@@ -710,7 +710,7 @@ limit_price = 4750.25  # Valid ES tick (multiple of 0.25)
 
 ## Next Steps
 
-1. **Sign up for Databento** ($30-50/month): https://databento.com/
+1. **Sign up for Databento** and review current usage-based pricing: https://databento.com/pricing
 2. **Understand futures mechanics** - Expiration, rolling, margin, tick sizes
 3. **Start with simple strategies** - Single contract (ES or NQ) daily data
 4. **Use continuous contracts** (.v.0) for backtesting

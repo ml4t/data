@@ -287,7 +287,7 @@ datasets:
     frequency: daily
     update_strategy: incremental
 
-  # Free tier (500/day)
+  # Free tier (20 calls/day)
   nasdaq100_daily:
     provider: eodhd
     symbols_file: config/symbols/nasdaq100.txt

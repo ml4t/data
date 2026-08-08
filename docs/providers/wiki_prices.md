@@ -68,7 +68,9 @@ print(f"Total: {len(combined)} rows from 1990-2024")
 
 ## Data Source
 
-The Wiki Prices dataset was originally from Quandl's WIKI database before Quandl discontinued the free tier.
+The Wiki Prices dataset was originally published through Quandl's WIKI database. Updates stopped
+on March 27, 2018 after a source became unavailable. The provider therefore requires a local archive
+and rejects requested dates after the final observation.
 
 ---
 

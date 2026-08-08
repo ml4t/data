@@ -96,8 +96,7 @@ class TestDefaultRateLimit:
 
     def test_default_rate_limit_value(self):
         """Test DEFAULT_RATE_LIMIT has expected value."""
-        # Conservative: 1 per 180 seconds (500/day)
-        assert EODHDProvider.DEFAULT_RATE_LIMIT == (1, 180.0)
+        assert EODHDProvider.DEFAULT_RATE_LIMIT == (10, 1.0)
 
 
 class TestFetchRawData:

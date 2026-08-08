@@ -17,12 +17,12 @@ ML4T Data supports 20+ live and specialized data providers, plus synthetic and t
 | [Polymarket](polymarket.md) | Prediction Markets | Public data | Thread | No |
 | [Binance Public](binance_public.md) | Crypto | Bulk downloads | Thread | No |
 | [NASDAQ ITCH](nasdaq_itch.md) | Tick Data | Sample data | Thread | No |
-| [EODHD](eodhd.md) | Global Stocks | 500/day | Native | Yes |
+| [EODHD](eodhd.md) | Global Stocks | 20 calls/day | Native | Yes |
 | [Tiingo](tiingo.md) | US Stocks | 1000/day | Thread | Yes |
 | [TwelveData](twelve_data.md) | Multi-asset | 800/day | Native | Yes |
-| [DataBento](databento.md) | Futures, Options | $10 credits | Thread | Yes |
+| [DataBento](databento.md) | Futures, Options | Free metadata; metered history | Thread | Yes |
 | [Massive](massive.md) | Multi-asset | Free tier | Thread | Yes |
-| [Finnhub](finnhub.md) | Global Stocks | 30/day OHLCV | Thread | Yes |
+| [Finnhub](finnhub.md) | US quotes; premium OHLCV | 60 requests/minute | Thread | Yes |
 | [Binance](binance.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |
 | [CryptoCompare](cryptocompare.md) | Crypto | Good | Native | Required |

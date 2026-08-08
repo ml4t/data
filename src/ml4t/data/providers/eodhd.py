@@ -6,7 +6,7 @@ EODHD provides affordable global equities data with 60+ exchanges and
 API Documentation: https://eodhd.com/financial-apis/
 
 Free Tier Limits:
-- 500 API calls per day
+- 20 API calls per day
 - 1 year historical depth
 - Daily/weekly/monthly OHLCV data
 - Global coverage (60+ exchanges)
@@ -62,7 +62,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
     Supports global equities with daily/weekly/monthly OHLCV data.
 
     Rate Limits (Free Tier):
-    - 500 requests per day
+    - 20 API calls per day
     - 1 year historical depth
 
     Supports both sync and async operations:
@@ -75,8 +75,9 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
             df = await provider.fetch_ohlcv_async("AAPL", start, end)
     """
 
-    # Conservative: 500 requests/day = ~1 per 3 minutes
-    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1, 180.0)
+    # Stay below EODHD's documented 1,000 requests/minute server limit.
+    # Account-specific daily API-call budgets cannot be modeled as an inter-request delay.
+    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (10, 1.0)
 
     # Map frequency to EODHD period codes
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {

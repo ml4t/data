@@ -16,8 +16,8 @@ flowchart TD
     AssetType -->|Multiple Assets| MultiChoice{Which combination?}
 
     %% Crypto Path
-    CryptoChoice -->|No API key| CoinGecko[CoinGecko<br/>FREE unlimited]
-    CryptoChoice -->|Want real-time| CryptoCompare[CryptoCompare<br/>FREE/Paid]
+    CryptoChoice -->|No API key| CoinGecko[CoinGecko<br/>Public API]
+    CryptoChoice -->|API key is acceptable| CryptoCompare[CryptoCompare<br/>Free/Paid]
 
     %% US Stocks Path
     USChoice -->|FREE only| USFree{Call volume?}
@@ -26,13 +26,13 @@ flowchart TD
     USFree -->|Medium 1000/day| Tiingo[Tiingo<br/>FREE 1000/day]
     USFree -->|No API key| Yahoo[Yahoo Finance<br/>FREE unofficial]
 
-    USPaid -->|Budget €20/mo| EODHD[EODHD<br/>€19.99/mo]
-    USPaid -->|Professional $60+| Finnhub[Finnhub<br/>$59.99+/mo]
+    USPaid -->|Historical data| EODHD[EODHD<br/>Current paid plan]
+    USPaid -->|Real-time quote| Finnhub[Finnhub<br/>Free US quote]
 
     %% Global Stocks Path
-    GlobalChoice -->|FREE testing| EODHDFree[EODHD<br/>FREE 500/day]
-    GlobalChoice -->|Budget €20/mo| EODHDPaid[EODHD<br/>€19.99/mo<br/>60+ exchanges]
-    GlobalChoice -->|Professional| FinnhubGlobal[Finnhub<br/>$59.99+/mo<br/>70+ exchanges]
+    GlobalChoice -->|Free testing| EODHDFree[EODHD<br/>20 calls/day]
+    GlobalChoice -->|Historical data| EODHDPaid[EODHD<br/>Current paid plan]
+    GlobalChoice -->|Professional| FinnhubGlobal[Finnhub<br/>Paid OHLC plan]
 
     %% Forex Path
     ForexChoice -->|Macro context| FXMacroData[FXMacroData<br/>Public USD/free endpoints]
@@ -40,20 +40,20 @@ flowchart TD
     ForexChoice -->|Multi-asset| TwelveDataForex[Twelve Data<br/>800/day]
 
     %% Futures Path
-    FuturesChoice -->|Institutional| Databento[Databento<br/>Paid only]
+    FuturesChoice -->|Institutional| Databento[Databento<br/>Usage-based history]
 
     %% Multi-Asset Path
     MultiChoice -->|Stocks+Forex+Crypto| TwelveData[Twelve Data<br/>FREE 800/day]
-    MultiChoice -->|US Stocks+Global| EODHDMulti[EODHD<br/>€19.99/mo]
-    MultiChoice -->|Professional all| MassiveMulti[Massive<br/>Paid]
+    MultiChoice -->|US Stocks+Global| EODHDMulti[EODHD<br/>Current paid plan]
+    MultiChoice -->|US market data| MassiveMulti[Massive<br/>Free Basic plan]
 
     %% Style definitions
     classDef freeProvider fill:#90EE90,stroke:#228B22,stroke-width:2px
     classDef paidProvider fill:#FFB6C1,stroke:#DC143C,stroke-width:2px
     classDef decision fill:#87CEEB,stroke:#4682B4,stroke-width:2px
 
-    class CoinGecko,Tiingo,Yahoo,EODHDFree,TwelveData,CryptoCompare,FXMacroData freeProvider
-    class EODHD,Finnhub,EODHDPaid,FinnhubGlobal,OANDA,Databento,TwelveDataForex,EODHDMulti,MassiveMulti paidProvider
+    class CoinGecko,Tiingo,Yahoo,EODHDFree,TwelveData,CryptoCompare,FXMacroData,Finnhub,MassiveMulti freeProvider
+    class EODHD,EODHDPaid,FinnhubGlobal,OANDA,Databento,TwelveDataForex,EODHDMulti paidProvider
     class AssetType,CryptoChoice,USChoice,GlobalChoice,ForexChoice,USFree,USPaid,GlobalChoice,ForexChoice,MultiChoice decision
 ```
 
@@ -66,12 +66,12 @@ flowchart TD
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | ❌ | No | Unlimited | Crypto historical |
 | **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | ❌ | Yes | Good | Crypto real-time |
 | **Tiingo** | ✅ | ✅ | ❌ | ❌ | ❌ | Yes | 1000/day | High-quality stocks |
-| **EODHD** | ❌ | ✅ | ✅ | ❌ | ❌ | Yes | 500/day | Global stocks, best value |
-| **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | Paid only | Professional grade |
+| **EODHD** | ❌ | ✅ | ✅ | ❌ | ❌ | Yes | 20 calls/day, one-year history | Global stocks |
+| **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | US quotes; OHLC is paid | Quotes and company data |
 | **Twelve Data** | ✅ | ✅ | ❌ | ✅ | ❌ | Yes | 800/day | Multi-asset + indicators |
-| **OANDA** | ❌ | ❌ | ❌ | ✅ | ❌ | Yes | No | Professional forex |
-| **Databento** | ❌ | ✅ | ❌ | ❌ | ✅ | Yes | Paid only | Institutional futures |
-| **Massive** | ✅ | ✅ | ❌ | ✅ | ✅ | Yes | Paid only | Professional multi-asset |
+| **OANDA** | ❌ | ❌ | ❌ | ✅ | ❌ | Yes | Practice account | Professional forex |
+| **Databento** | ❌ | ✅ | ❌ | ❌ | ✅ | Yes | Free metadata; metered history | Institutional futures |
+| **Massive** | ✅ | ✅ | ❌ | ✅ | ✅ | Yes | Free Basic plan | Multi-asset market data |
 
 ### By Pricing
 
@@ -79,44 +79,45 @@ flowchart TD
 
 | Provider | Daily Limit | Monthly Limit | Best Use Case |
 |----------|-------------|---------------|---------------|
-| **CoinGecko** | 10-50 calls/min | Unlimited | Crypto research |
+| **CoinGecko** | Current public API limit | Current public API limit | Crypto research |
 | **Tiingo** | 1000 calls | 500 symbols | Daily stock updates |
-| **EODHD** | 500 calls | ~15K calls | Global stock testing |
+| **EODHD** | 20 calls | Account limit | Global stock testing |
 | **Twelve Data** | 800 calls | ~24K calls | Multi-asset research |
 | **CryptoCompare** | Varies | Varies | Crypto real-time |
+| **Massive Stocks Basic** | 5 calls/minute | Account limit | US aggregate data |
 
 #### Paid Tiers (Affordable)
 
 | Provider | Price | What You Get |
 |----------|-------|--------------|
-| **EODHD** | €19.99/mo | 150K+ global tickers, unlimited calls |
-| **Twelve Data** | $9.99/mo | 800 calls/min, multi-asset |
+| **EODHD** | See current pricing | Expanded global coverage and history |
+| **Twelve Data** | See current pricing | Higher API credits and market coverage |
 | **Tiingo** | $30/mo | 20K calls/hour, news, fundamentals |
 
 #### Professional Tiers
 
 | Provider | Starting Price | What You Get |
 |----------|----------------|--------------|
-| **Finnhub** | $59.99/mo | Historical OHLCV, 70+ exchanges |
-| **Massive** | $99/mo | Multi-asset, professional-grade |
-| **Databento** | Custom | Institutional futures and OPRA options |
+| **Finnhub** | See current pricing | Historical OHLC and additional datasets |
+| **Massive** | See current pricing | Longer history, trades, quotes, and real-time data |
+| **Databento** | Usage-based or subscription | Institutional futures and OPRA options |
 
 ## Decision Guidelines
 
 ### For Beginners
 1. **Start with CoinGecko** (crypto) - No API key, unlimited free tier
 2. **Try Tiingo** (stocks) - Generous free tier (1000/day), great quality
-3. **Experiment freely** - All providers have free tiers or trials
+3. **Check access terms** - Coverage and permitted use differ by account
 
 ### For Researchers
 1. **Tiingo** - High-quality stock data with generous limits
-2. **EODHD** - Global coverage, excellent value (€19.99/mo)
+2. **EODHD** - Global coverage with a small free evaluation allowance
 3. **Twelve Data** - Multi-asset research with a usable free tier
 
 ### For Traders
-1. **EODHD** - Best value for global stocks (€19.99/mo)
+1. **EODHD** - Global end-of-day stocks
 2. **OANDA** - Professional forex data
-3. **Finnhub** - Real-time + historical, professional grade
+3. **Finnhub** - Free US quotes; paid historical OHLC
 
 ### For Institutions
 1. **Databento** - Tick-level futures data
@@ -126,27 +127,27 @@ flowchart TD
 ## Quick Recommendations
 
 ### "I want crypto data"
-→ **CoinGecko** (no API key, unlimited)
+→ **CoinGecko** (no API key, subject to public API limits)
 
 ### "I want US stock data for free"
 → **Tiingo** (1000/day) or **Yahoo Finance** (no API key, unofficial)
 
 ### "I want global stock data"
-→ **EODHD** (€19.99/mo for 60+ exchanges)
+→ **EODHD** or **Twelve Data**, depending on the required market and history
 
 ### "I want stocks + forex + crypto"
 → **Twelve Data** (800/day free)
 
 ### "I'm building a trading system"
-→ **Finnhub** ($59.99+/mo) or **EODHD** (€19.99/mo)
+→ Choose by required endpoint, latency, history, and licensing terms
 
 ### "I need professional derivatives data"
-→ **Databento** (paid only)
+→ **Databento** (free discovery and cost estimates; metered time-series data)
 
 ## Rate Limit Considerations
 
 ### Conservative (Good for testing)
-- **EODHD Free**: 500/day
+- **EODHD Free**: 20 calls/day
 - **Twelve Data Free**: 800/day
 
 ### Moderate (Good for research)

@@ -1,4 +1,4 @@
-"""Opt-in live contract test for the Databento provider.
+"""Opt-in free live contract test for the Databento provider.
 
 The test process does not load ``.env`` files. Export both required variables explicitly.
 """
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 
-import polars as pl
 import pytest
 
 pytest.importorskip("databento")
@@ -28,23 +27,10 @@ def provider() -> DataBentoProvider:
 
 
 @pytest.mark.integration
-def test_databento_daily_futures_contract(provider: DataBentoProvider) -> None:
-    """Fetch one historical bar and verify the public output contract."""
-    data = provider.fetch_ohlcv("ESH4", "2024-01-02", "2024-01-02", "daily")
+def test_databento_metadata_contract(provider: DataBentoProvider) -> None:
+    """Authenticate and discover a dataset and its schemas without metered data."""
+    datasets = provider.get_available_datasets()
+    schemas = provider.get_available_schemas("GLBX.MDP3")
 
-    assert data.height == 1
-    canonical_schema = {
-        "timestamp": pl.Datetime("us", "UTC"),
-        "symbol": pl.String,
-        "open": pl.Float64,
-        "high": pl.Float64,
-        "low": pl.Float64,
-        "close": pl.Float64,
-        "volume": pl.Float64,
-    }
-    assert data.columns[:7] == list(canonical_schema)
-    assert {column: data.schema[column] for column in canonical_schema} == canonical_schema
-    assert data["symbol"].item() == "ESH4"
-    assert data["high"].item() >= max(data["open"].item(), data["close"].item())
-    assert data["low"].item() <= min(data["open"].item(), data["close"].item())
-    assert data["volume"].item() >= 0
+    assert "GLBX.MDP3" in datasets
+    assert "ohlcv-1d" in schemas

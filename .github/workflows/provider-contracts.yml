@@ -18,11 +18,6 @@ on:
           - cryptocompare
           - databento
           - oanda
-      allow-paid-requests:
-        description: Authorize requests that may be billed (Databento, Finnhub)
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -191,20 +186,18 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --locked --dev
-      - name: Require cost authorization and the provider credential
+      - name: Require the provider credential
         env:
-          ALLOW_PAID_REQUESTS: ${{ inputs.allow-paid-requests }}
           PROVIDER_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: >-
-          python -c "import os; assert os.environ.get('ALLOW_PAID_REQUESTS') == 'true',
-          'Finnhub OHLCV requests require allow-paid-requests'; assert os.environ.get('PROVIDER_API_KEY'),
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
           'FINNHUB_API_KEY is not configured'"
       - name: Run the live contract
         env:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: >-
-          uv run pytest -q -m "integration and paid_tier"
-          tests/integration/test_finnhub.py::TestFinnhubProvider::test_fetch_ohlcv_daily
+          uv run pytest -q -m integration
+          tests/integration/test_finnhub.py::TestFinnhubProvider::test_fetch_quote
 
   cryptocompare:
     name: CryptoCompare Contract
@@ -247,19 +240,19 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --locked --dev
-      - name: Require cost authorization and the provider credential
+      - name: Require the provider credential
         env:
-          ALLOW_PAID_REQUESTS: ${{ inputs.allow-paid-requests }}
           PROVIDER_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
         run: >-
-          python -c "import os; assert os.environ.get('ALLOW_PAID_REQUESTS') == 'true',
-          'Databento requests require allow-paid-requests'; assert os.environ.get('PROVIDER_API_KEY'),
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
           'DATABENTO_API_KEY is not configured'"
       - name: Run the live contract
         env:
           DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
           ML4T_RUN_DATABENTO_LIVE: "1"
-        run: uv run pytest tests/test_databento_acceptance.py -q -m integration
+        run: >-
+          uv run pytest -q -m integration
+          tests/test_databento_acceptance.py::test_databento_metadata_contract
 
   oanda:
     name: OANDA Contract

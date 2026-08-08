@@ -115,8 +115,6 @@ def test_provider_contract_guards_prevent_skipped_green_runs() -> None:
         "oanda": {"PROVIDER_API_KEY"},
         "tiingo": {"PROVIDER_API_KEY"},
     }
-    paid_providers = {"databento", "finnhub"}
-
     for provider, expected_env in guarded_credentials.items():
         guard = next(
             step for step in jobs[provider]["steps"] if step.get("name", "").startswith("Require")
@@ -124,11 +122,7 @@ def test_provider_contract_guards_prevent_skipped_green_runs() -> None:
         assert set(guard["env"]) >= expected_env
         for variable in expected_env:
             assert f"os.environ.get('{variable}')" in guard["run"]
-        if provider in paid_providers:
-            assert "ALLOW_PAID_REQUESTS" in guard["env"]
-            assert "os.environ.get('ALLOW_PAID_REQUESTS') == 'true'" in guard["run"]
-        else:
-            assert "ALLOW_PAID_REQUESTS" not in guard["env"]
+        assert "ALLOW_PAID_REQUESTS" not in guard["env"]
 
 
 def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
@@ -142,9 +136,7 @@ def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
     for option in options:
         assert jobs[option]["if"] == f"inputs.provider == '{option}'"
 
-    assert "Databento" in inputs["allow-paid-requests"]["description"]
-    assert "Finnhub" in inputs["allow-paid-requests"]["description"]
-    assert "Massive" not in inputs["allow-paid-requests"]["description"]
+    assert "allow-paid-requests" not in inputs
 
 
 def test_release_requires_provider_contracts_for_the_tagged_commit() -> None:
@@ -199,6 +191,8 @@ def test_credentialed_contract_jobs_run_one_bounded_test() -> None:
             "test_cryptocompare.py::TestCryptoCompareProvider::test_fetch_ohlcv_btc_daily"
         ),
         "oanda": "test_oanda.py::TestOandaProvider::test_fetch_ohlcv_eurusd_daily",
+        "finnhub": "test_finnhub.py::TestFinnhubProvider::test_fetch_quote",
+        "databento": "test_databento_acceptance.py::test_databento_metadata_contract",
     }
 
     for provider, expected_test in expected_tests.items():

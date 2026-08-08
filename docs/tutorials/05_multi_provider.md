@@ -74,7 +74,7 @@ class AssetClassRouter:
         # US Stocks: Tiingo (high quality, 1000/day)
         self.us_stocks_provider = TiingoProvider(api_key="tiingo_key")
 
-        # Global Stocks: EODHD (60+ exchanges, €19.99/mo)
+        # Global Stocks: EODHD (plan-dependent global coverage)
         self.global_stocks_provider = EODHDProvider(api_key="eodhd_key")
 
         # Forex: OANDA (professional forex)
@@ -273,7 +273,7 @@ class CostOptimizer:
                 "name": "EODHD",
                 "provider": EODHDProvider(api_key="key"),
                 "cost_per_call": 0.00,  # Paid tier (unlimited)
-                "monthly_cost": 19.99,  # €19.99/month
+                "monthly_cost": None,  # Supply the current account cost.
                 "asset_classes": ["stocks_global"],
             },
             {
@@ -325,7 +325,7 @@ crypto_provider = optimizer.get_cheapest_provider("crypto", calls_per_day=100)
 
 # High volume (5000 calls/day) → Use paid tier
 stocks_provider = optimizer.get_cheapest_provider("stocks", calls_per_day=5000)
-# → EODHD (€19.99/month, unlimited)
+# Use EODHD with a plan that covers the required markets and request volume.
 ```
 
 ## Strategy 6: Geographic Routing
