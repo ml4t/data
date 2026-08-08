@@ -8,13 +8,14 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 
 import numpy as np
 import polars as pl
 import pytest
 
 from ml4t.data.providers.synthetic import SyntheticProvider
-from ml4t.data.synthetic import get_bars_per_day
+from ml4t.data.synthetic import get_bars_per_day, get_periods_per_year
 
 
 class TestSyntheticProviderBasics:
@@ -28,6 +29,16 @@ class TestSyntheticProviderBasics:
     def test_provider_name(self, provider):
         """Test provider name is correct."""
         assert provider.name == "synthetic"
+
+    def test_legacy_garch_omega_is_accepted_with_deprecation(self):
+        with pytest.warns(DeprecationWarning, match="garch_omega"):
+            provider = SyntheticProvider(model="garch", garch_omega=0.000002, seed=42)
+
+        assert provider.model == "garch"
+
+    def test_invalid_calendar_mode_is_rejected(self):
+        with pytest.raises(ValueError, match="calendar_mode"):
+            SyntheticProvider(calendar_mode="weekdays")
 
     def test_default_parameters(self):
         """Test default parameter values."""
@@ -297,10 +308,10 @@ class TestStatisticalProperties:
             calendar_mode=calendar_mode,
             seed=42,
         )
-        df = provider.fetch_ohlcv("SYNTH", "2023-01-01", "2024-12-31", frequency)
+        end = "2023-01-31" if frequency == "minute" else "2024-12-31"
+        df = provider.fetch_ohlcv("SYNTH", "2023-01-01", end, frequency)
         log_returns = np.diff(np.log(df.get_column("close").to_numpy()))
-        annual_days = 252 if calendar_mode == "equity" else 365
-        periods_per_year = annual_days * get_bars_per_day(frequency, calendar_mode)
+        periods_per_year = get_periods_per_year(frequency, calendar_mode)
         realized = np.std(log_returns, ddof=1) * np.sqrt(periods_per_year)
 
         assert realized == pytest.approx(0.20, rel=0.10)
@@ -335,6 +346,46 @@ class TestSyntheticCalendarModes:
         result = provider.fetch_ohlcv("SYNTH", "2024-01-06", "2024-01-07", "daily")
 
         assert len(result) == 2
+
+    def test_weekly_and_monthly_period_labels(self):
+        provider = SyntheticProvider(calendar_mode="equity", seed=42)
+
+        weekly = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-31", "weekly")
+        monthly = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-02-29", "monthly")
+
+        assert all(value.weekday() == 4 and value.hour == 16 for value in weekly["timestamp"])
+        assert monthly["timestamp"].to_list() == [
+            datetime(2024, 1, 31, 16, tzinfo=UTC),
+            datetime(2024, 2, 29, 16, tzinfo=UTC),
+        ]
+
+    def test_invalid_frequency_does_not_affect_circuit_health(self):
+        provider = SyntheticProvider(seed=42)
+
+        for _ in range(6):
+            with pytest.raises(ValueError, match="Unsupported synthetic frequency"):
+                provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-02", "quarterly")
+
+        result = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-02", "daily")
+
+        assert not result.is_empty()
+        assert provider._get_circuit_status()["failure_count"] == 0
+
+    def test_symbol_seed_is_case_normalized(self):
+        provider = SyntheticProvider(seed=42)
+
+        lower = provider.fetch_ohlcv("aapl", "2024-01-02", "2024-01-05", "daily")
+        upper = provider.fetch_ohlcv("AAPL", "2024-01-02", "2024-01-05", "daily")
+
+        assert lower["close"].to_list() == upper["close"].to_list()
+
+    def test_equity_minute_boundaries(self):
+        result = SyntheticProvider(seed=42).fetch_ohlcv(
+            "SYNTH", "2024-01-02", "2024-01-02", "minute"
+        )
+
+        assert result["timestamp"].min() == datetime(2024, 1, 2, 9, 30, tzinfo=UTC)
+        assert result["timestamp"].max() == datetime(2024, 1, 2, 15, 59, tzinfo=UTC)
 
 
 class TestEdgeCases:

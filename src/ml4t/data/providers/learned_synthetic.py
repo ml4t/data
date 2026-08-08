@@ -43,6 +43,7 @@ from ml4t.data.synthetic import (
     generate_timestamps,
     generate_volume,
     returns_to_prices,
+    validate_synthetic_frequency,
 )
 
 logger = structlog.get_logger()
@@ -185,6 +186,10 @@ class LearnedSyntheticProvider(BaseProvider):
             n_features=self._n_features,
             generator=self._metadata.get("generator", {}).get("name", "unknown"),
         )
+
+    def _validate_inputs(self, symbol: str, start: str, end: str, frequency: str) -> None:
+        super()._validate_inputs(symbol, start, end, frequency)
+        validate_synthetic_frequency(frequency)
 
     @classmethod
     def from_samples(

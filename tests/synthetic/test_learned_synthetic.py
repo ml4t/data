@@ -122,6 +122,10 @@ class TestLearnedSyntheticInit:
         assert provider.seq_length == 24
         assert provider.n_features == 6
 
+    def test_invalid_calendar_mode_is_rejected(self, sample_3d_array: np.ndarray):
+        with pytest.raises(ValueError, match="calendar_mode"):
+            LearnedSyntheticProvider(samples=sample_3d_array, calendar_mode="weekdays")
+
     def test_init_invalid_shape_2d(self):
         """Test initialization fails with 2D array."""
         samples_2d = np.random.randn(100, 24)
@@ -477,6 +481,12 @@ class TestLearnedSyntheticOHLCV:
 
         # Should have many bars per day
         assert len(df) >= 100
+
+    def test_invalid_frequency_is_rejected_before_generation(
+        self, provider: LearnedSyntheticProvider
+    ):
+        with pytest.raises(ValueError, match="Unsupported synthetic frequency"):
+            provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-02", "quarterly")
 
     def test_fetch_ohlcv_empty_range(self, provider: LearnedSyntheticProvider):
         """Test OHLCV generation for empty date range (weekend)."""

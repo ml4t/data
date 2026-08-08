@@ -46,9 +46,11 @@ provider = SyntheticProvider(
 
 `calendar_mode="equity"` emits a simplified weekday 09:30-16:00 UTC session. It does
 not model exchange holidays, early closes, or daylight-saving changes. Intraday
-timestamps are bar starts and exclude 16:00. Use `calendar_mode="continuous"` for
-24-hour UTC sessions that include weekends. Annual return and volatility use 252
-sessions for equity mode and 365 days for continuous mode.
+timestamps are bar starts and exclude 16:00. Daily bars are labelled at 16:00 UTC.
+Use `calendar_mode="continuous"` for 24-hour UTC sessions that include weekends;
+continuous daily bars are labelled at 00:00 UTC. Weekly and monthly bars use period-end
+labels. Annual return and volatility use 261 weekdays for equity mode and 365 days for
+continuous mode, with 52 weekly or 12 monthly periods in either mode.
 
 With a seed, the provider derives a symbol-specific stream using BLAKE2b and NumPy's
 PCG64 generator. Identical seed, symbol, date, frequency, model, and calendar inputs

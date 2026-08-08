@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import ClassVar, Literal
+from warnings import warn
 
 import numpy as np
 import polars as pl
@@ -37,7 +38,8 @@ from ml4t.data.synthetic import (
     generate_ohlc_from_close,
     generate_timestamps,
     generate_volume,
-    get_bars_per_day,
+    get_periods_per_year,
+    validate_synthetic_frequency,
 )
 
 logger = structlog.get_logger()
@@ -84,6 +86,9 @@ class SyntheticProvider(BaseProvider):
         GARCH: ARCH term weight (reaction to recent shocks)
     garch_beta : float, default=0.85
         GARCH: GARCH term weight (persistence of variance)
+    garch_omega : float, optional
+        Deprecated compatibility parameter. Omega is derived from annual volatility,
+        frequency, alpha, and beta so the requested unconditional variance is preserved.
 
     Example
     -------
@@ -103,9 +108,6 @@ class SyntheticProvider(BaseProvider):
     # No rate limiting needed for synthetic data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 1.0)
 
-    # Trading days per year
-    TRADING_DAYS = 252
-
     def __init__(
         self,
         model: Literal["gbm", "gbm_jump", "mean_revert", "heston", "garch"] = "gbm",
@@ -121,6 +123,7 @@ class SyntheticProvider(BaseProvider):
         heston_xi: float = 0.3,
         heston_rho: float = -0.7,
         # GARCH parameters
+        garch_omega: float | None = None,
         garch_alpha: float = 0.1,
         garch_beta: float = 0.85,
         calendar_mode: CalendarMode = "equity",
@@ -145,6 +148,13 @@ class SyntheticProvider(BaseProvider):
         # GARCH model parameters
         self.garch_alpha = garch_alpha  # ARCH term
         self.garch_beta = garch_beta  # GARCH term
+        if garch_omega is not None:
+            warn(
+                "garch_omega is deprecated and ignored; omega is derived from "
+                "annual_volatility and the requested frequency",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Validate GARCH stationarity
         if model == "garch" and (garch_alpha + garch_beta) >= 1.0:
@@ -162,6 +172,10 @@ class SyntheticProvider(BaseProvider):
     def name(self) -> str:
         """Return the provider name."""
         return "synthetic"
+
+    def _validate_inputs(self, symbol: str, start: str, end: str, frequency: str) -> None:
+        super()._validate_inputs(symbol, start, end, frequency)
+        validate_synthetic_frequency(frequency)
 
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with the correct schema."""
@@ -363,7 +377,7 @@ class SyntheticProvider(BaseProvider):
         Where:
             r_t = return at time t
             σ²_t = conditional variance at time t
-            ω = constant term (garch_omega)
+            ω = constant term derived to preserve the configured unconditional variance
             α = ARCH term (garch_alpha) - reaction to recent shocks
             β = GARCH term (garch_beta) - persistence of variance
 
@@ -455,9 +469,7 @@ class SyntheticProvider(BaseProvider):
         if self.seed is not None:
             self._rng = create_rng(derive_symbol_seed(self.seed, symbol))
 
-        bars_per_day = get_bars_per_day(frequency, self.calendar_mode)
-        annual_days = self.TRADING_DAYS if self.calendar_mode == "equity" else 365
-        periods_per_year = annual_days * bars_per_day
+        periods_per_year = get_periods_per_year(frequency, self.calendar_mode)
         dt = 1.0 / periods_per_year
 
         # Generate returns based on model
