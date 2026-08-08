@@ -96,8 +96,6 @@ dependencies = [
     "aiofiles>=23.0.0", # Async file I/O for async storage backends
     # Exchange calendars for session-aware operations
     "pandas-market-calendars>=4.3.0",
-    "lxml>=6.0.2",
-    "html5lib>=1.1",
     "openpyxl>=3.1.5",
 ]
 
