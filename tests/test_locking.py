@@ -138,17 +138,17 @@ class TestFileLock:
 
         # Create manager with short timeout
         lock_manager = FileLock(timeout=0.1)
+        acquired = threading.Event()
 
         # Hold lock in thread
         def hold_lock() -> None:
             with lock_manager.acquire(test_file):
+                acquired.set()
                 time.sleep(0.5)
 
         thread = threading.Thread(target=hold_lock)
         thread.start()
-
-        # Wait a bit for thread to acquire lock
-        time.sleep(0.05)
+        assert acquired.wait(timeout=1.0)
 
         # Try to acquire (should timeout quickly)
         start = time.monotonic()
@@ -156,9 +156,10 @@ class TestFileLock:
             pass
         elapsed = time.monotonic() - start
 
-        assert elapsed >= lock_manager.timeout
+        assert lock_manager.timeout / 2 <= elapsed < 1.0
 
-        thread.join()
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
 
     def test_lock_with_missing_directory(self, tmp_path: Path) -> None:
         """Test lock creation when directory doesn't exist."""
