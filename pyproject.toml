@@ -20,6 +20,7 @@ include = [
     "/src",
     "/tests",
     "/scripts/verify_distribution.py",
+    "/scripts/verify_provider_contract_runs.py",
     "/README.md",
     "/LICENSE",
     "/CHANGELOG.md",

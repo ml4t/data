@@ -9,10 +9,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parents[1]
 
 
+def load_config() -> dict:
+    """Load the authoritative project configuration."""
+    with (PROJECT_ROOT / "pyproject.toml").open("rb") as config_file:
+        return tomllib.load(config_file)
+
+
 def load_project() -> dict:
     """Load the authoritative package metadata."""
-    with (PROJECT_ROOT / "pyproject.toml").open("rb") as config_file:
-        return tomllib.load(config_file)["project"]
+    return load_config()["project"]
 
 
 def test_supported_python_and_platform_metadata() -> None:
@@ -35,6 +40,16 @@ def test_supported_python_and_platform_metadata() -> None:
     } <= classifiers
     assert "Programming Language :: Python :: 3.11" not in classifiers
     assert "Programming Language :: Python :: 3.15" not in classifiers
+
+
+def test_source_distribution_contains_release_verifiers() -> None:
+    """Tests shipped in the source archive can import their release helpers."""
+    included = set(load_config()["tool"]["hatch"]["build"]["targets"]["sdist"]["include"])
+
+    assert {
+        "/scripts/verify_distribution.py",
+        "/scripts/verify_provider_contract_runs.py",
+    } <= included
 
 
 def test_oanda_extra_declares_undeclared_client_dependency() -> None:
