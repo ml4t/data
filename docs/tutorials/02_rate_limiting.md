@@ -388,7 +388,7 @@ for symbol in global_symbols:
     updater.update_symbol(symbol, incremental=True)
 ```
 
-### EODHD (500/day free, unlimited paid)
+### EODHD (20 calls/day free; paid quotas vary)
 
 **Most generous free tier** for global stocks.
 
@@ -399,7 +399,7 @@ for symbol in global_symbols:
 # - 100 symbols × 5 exchanges (if multi-exchange strategy)
 
 # Strategy: Use free tier for testing, upgrade for production
-# €19.99/month for unlimited is excellent value
+# Check the current plan quota before choosing a batch size.
 ```
 
 ## Troubleshooting
@@ -440,7 +440,7 @@ for symbol in global_symbols:
 **Next Steps**:
 - [Tutorial 03: Incremental Updates](03_incremental_updates.md) - Learn to minimize API calls
 - [Tutorial 04: Data Quality Validation](04_data_quality.md) - Ensure data integrity
-- [Provider Selection Guide](../provider-selection-guide.md) - Choose the right rate limits
+- [Provider Selection Guide](../getting-started/provider-selection.md) - Choose the right rate limits
 
 ---
 

@@ -31,6 +31,7 @@ Example:
 
 import json
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any, ClassVar
 
 import polars as pl
@@ -401,7 +402,24 @@ class PolymarketProvider(BaseProvider):
                     second=0,
                 )
 
-            deduped = {entry.get("t"): entry for entry in history if entry.get("t") is not None}
+            deduped: dict[int, dict[str, Any]] = {}
+            dropped = 0
+            for entry in history:
+                timestamp = entry.get("t")
+                if isinstance(timestamp, int) and not isinstance(timestamp, bool):
+                    normalized_timestamp = timestamp
+                    deduped[normalized_timestamp] = {**entry, "t": normalized_timestamp}
+                elif isinstance(timestamp, float) and isfinite(timestamp):
+                    normalized_timestamp = int(timestamp)
+                    deduped[normalized_timestamp] = {**entry, "t": normalized_timestamp}
+                else:
+                    dropped += 1
+            if dropped:
+                self.logger.warning(
+                    "Dropped Polymarket price history entries with invalid timestamps",
+                    dropped=dropped,
+                    total=len(history),
+                )
             return [deduped[timestamp] for timestamp in sorted(deduped)]
         except (RateLimitError, NetworkError, SymbolNotFoundError):
             raise
@@ -481,7 +499,9 @@ class PolymarketProvider(BaseProvider):
 
             # Convert timestamp from unix seconds
             df = df.with_columns(
-                pl.from_epoch("timestamp_raw", time_unit="s").alias("timestamp"),
+                pl.from_epoch("timestamp_raw", time_unit="s")
+                .dt.replace_time_zone("UTC")
+                .alias("timestamp"),
                 pl.col("price").cast(pl.Float64),
             )
 
@@ -700,8 +720,7 @@ class PolymarketProvider(BaseProvider):
         # Aggregate to OHLC
         df = self._aggregate_to_ohlc(price_data, display_symbol, frequency)
 
-        # Validate response
-        df = self._validate_response(df)
+        df = self._validate_ohlcv(df, self.name, display_symbol)
 
         self.logger.info(f"Fetched {len(df)} records", symbol=display_symbol)
 

@@ -47,7 +47,7 @@ class TestOHLCVValidator:
         validator = OHLCVValidator()
 
         assert validator.check_nulls is True
-        assert validator.check_negative_prices is True
+        assert validator.negative_price_policy == "forbid"
         assert validator.name() == "OHLCVValidator"
 
     def test_validate_valid_data(self):
@@ -94,7 +94,7 @@ class TestOHLCVValidator:
 
     def test_validate_disabled_checks(self):
         """Test validation with disabled checks."""
-        validator = OHLCVValidator(check_negative_prices=False, check_negative_volume=False)
+        validator = OHLCVValidator(negative_price_policy="allow", check_negative_volume=False)
 
         df = pl.DataFrame(
             {

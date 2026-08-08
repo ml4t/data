@@ -13,11 +13,11 @@ Educational Note:
     - Risk management (tick value, position sizing)
 """
 
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, field
+from enum import StrEnum
 
 
-class FuturesAssetClass(str, Enum):
+class FuturesAssetClass(StrEnum):
     """Asset class classification for futures contracts.
 
     This is a futures-specific taxonomy, distinct from the general
@@ -37,7 +37,7 @@ class FuturesAssetClass(str, Enum):
 AssetClass = FuturesAssetClass
 
 
-class SettlementType(str, Enum):
+class SettlementType(StrEnum):
     """Settlement method for futures contracts."""
 
     CASH = "cash"  # Cash-settled (e.g., equity indices)
@@ -53,6 +53,22 @@ class ExchangeInfo:
     COMEX = "COMEX"  # Commodity Exchange
     ICE = "ICE"  # Intercontinental Exchange
     EUREX = "EUREX"  # European Exchange
+
+
+PRICE_QUOTE_UNITS = frozenset({"cents", "dollars", "index_points"})
+SOURCE_PRICE_QUOTE_UNITS = PRICE_QUOTE_UNITS | {"mixed_cents_dollars"}
+
+
+def price_conversion_factor(from_unit: str, to_unit: str) -> float:
+    """Return the multiplicative factor between supported price units."""
+    if from_unit not in PRICE_QUOTE_UNITS:
+        raise ValueError(f"Unknown unit: {from_unit}")
+    if to_unit not in PRICE_QUOTE_UNITS:
+        raise ValueError(f"Unknown unit: {to_unit}")
+    if "index_points" in {from_unit, to_unit} and from_unit != to_unit:
+        raise ValueError(f"Cannot convert between {from_unit} and {to_unit}")
+    dollars_per_unit = {"cents": 0.01, "dollars": 1.0, "index_points": 1.0}
+    return dollars_per_unit[from_unit] / dollars_per_unit[to_unit]
 
 
 @dataclass
@@ -79,6 +95,13 @@ class ContractSpec:
         currency: Currency denomination
         trading_hours: Trading hours description
         point_value: Dollar value per point (alternative to multiplier)
+        source_price_quote_units: Source-specific quote-unit overrides used during parsing
+        mixed_unit_dollar_range: Plausible normalized range used to disambiguate mixed monetary
+            source rows. Required when a source uses ``mixed_cents_dollars``.
+
+        ``multiplier``, ``tick_size``, and ``point_value`` use ``price_quote_unit``. Parsers may
+        normalize monetary output to dollars, so use ``calculate_contract_value`` instead of
+        multiplying parsed prices directly.
 
     Example:
         >>> es_spec = ContractSpec(
@@ -106,7 +129,7 @@ class ContractSpec:
     multiplier: float
     tick_size: float
     tick_value: float
-    price_quote_unit: str  # "dollars", "cents", "index_points", etc.
+    price_quote_unit: str  # "dollars", "cents", or "index_points"
     settlement_type: SettlementType
     contract_months: str  # e.g., "HMUZ" for Mar/Jun/Sep/Dec
 
@@ -116,9 +139,29 @@ class ContractSpec:
     currency: str = "USD"
     trading_hours: str | None = None
     point_value: float | None = None  # Alternative to multiplier
+    source_price_quote_units: dict[str, str] = field(default_factory=dict)
+    mixed_unit_dollar_range: tuple[float, float] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate and compute derived fields."""
+        if self.price_quote_unit not in PRICE_QUOTE_UNITS:
+            raise ValueError(f"Unsupported price quote unit: {self.price_quote_unit}")
+        invalid_source_units = {
+            unit
+            for unit in self.source_price_quote_units.values()
+            if unit not in SOURCE_PRICE_QUOTE_UNITS
+        }
+        if invalid_source_units:
+            raise ValueError(
+                f"Unsupported source price quote units: {sorted(invalid_source_units)}"
+            )
+        uses_mixed_units = "mixed_cents_dollars" in self.source_price_quote_units.values()
+        if uses_mixed_units and self.mixed_unit_dollar_range is None:
+            raise ValueError("mixed_unit_dollar_range is required for mixed monetary source units")
+        if self.mixed_unit_dollar_range is not None:
+            lower, upper = self.mixed_unit_dollar_range
+            if lower >= upper:
+                raise ValueError("mixed_unit_dollar_range must have increasing bounds")
         if self.point_value is None:
             self.point_value = self.multiplier
 
@@ -157,44 +200,30 @@ class ContractSpec:
             >>> cl_spec.convert_price(6522, from_unit="cents", to_unit="dollars")
             65.22
         """
-        # Normalize to dollars first
-        if from_unit == "cents":
-            price_dollars = price / 100.0
-        elif from_unit == "index_points":
-            price_dollars = price  # Index points are the base unit
-        elif from_unit == "dollars":
-            price_dollars = price
-        else:
-            raise ValueError(f"Unknown unit: {from_unit}")
+        return price * price_conversion_factor(from_unit, to_unit)
 
-        # Convert to target unit
-        if to_unit == "cents":
-            return price_dollars * 100.0
-        elif to_unit == "dollars" or to_unit == "index_points":
-            return price_dollars
-        else:
-            raise ValueError(f"Unknown unit: {to_unit}")
-
-    def calculate_contract_value(self, price: float) -> float:
+    def calculate_contract_value(self, price: float, *, price_unit: str | None = None) -> float:
         """
         Calculate total contract value (notional).
 
         Args:
             price: Contract price
+            price_unit: Unit of the supplied price. Defaults to ``price_quote_unit``.
 
         Returns:
             Total contract value in dollars
 
         Example:
             >>> es_spec = ContractSpec(..., multiplier=50.0)
-            >>> es_spec.calculate_contract_value(4200.0)  # ES at 4200
+            >>> es_spec.calculate_contract_value(4200.0, price_unit="index_points")
             210000.0  # $210,000 notional
         """
-        # Ensure price is in the right unit
-        if self.price_quote_unit == "cents":
-            price = self.convert_price(price, from_unit="cents", to_unit="dollars")
-
-        return price * self.multiplier
+        quote_price = self.convert_price(
+            price,
+            from_unit=price_unit or self.price_quote_unit,
+            to_unit=self.price_quote_unit,
+        )
+        return quote_price * self.multiplier
 
     def calculate_tick_pnl(self, ticks: float) -> float:
         """
@@ -238,11 +267,13 @@ MAJOR_CONTRACTS = {
         multiplier=1000.0,  # 1000 barrels
         tick_size=0.01,
         tick_value=10.0,
-        price_quote_unit="dollars",  # Note: Quandl might have it in cents!
+        price_quote_unit="dollars",
         settlement_type=SettlementType.PHYSICAL,
         contract_months="FGHJKMNQUVXZ",  # All 12 months
         first_notice_days=25,  # Approximate
         trading_hours="Nearly 24 hours (Sunday-Friday)",
+        source_price_quote_units={"quandl_chris": "mixed_cents_dollars"},
+        mixed_unit_dollar_range=(-100.0, 250.0),
     ),
     "GC": ContractSpec(
         ticker="GC",

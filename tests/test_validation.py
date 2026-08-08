@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import polars as pl
 
+from ml4t.data.managers.storage_manager import StorageManager
 from ml4t.data.validation import OHLCVValidator, ValidationReport, ValidationResult
 from ml4t.data.validation.base import Severity, ValidationIssue
 from ml4t.data.validation.cross_validation import CrossValidator
@@ -144,7 +145,29 @@ class TestOHLCVValidator:
 
         assert not result.passed
         assert result.error_count > 0
-        assert result.critical_count > 0  # Negative prices are critical
+        assert result.critical_count == 0
+        assert any(issue.check == "negative_prices" for issue in result.issues)
+
+    def test_storage_manager_uses_futures_negative_price_policy(self):
+        manager = StorageManager(storage=None, fetch_manager=None)
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2020, 4, 20)],
+                "open": [-37.63],
+                "high": [-37.63],
+                "low": [-37.63],
+                "close": [-37.63],
+                "volume": [1000.0],
+            }
+        )
+
+        report = manager._validate_data(df, "CL", "futures")
+        ohlcv_result = report.results[0]
+
+        assert ohlcv_result.passed is True
+        issues = [issue for issue in ohlcv_result.issues if issue.check == "negative_prices"]
+        assert len(issues) == 4
+        assert all(issue.severity == Severity.WARNING for issue in issues)
 
     def test_null_detection(self):
         """Test null value detection."""

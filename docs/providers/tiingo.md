@@ -43,8 +43,8 @@ provider.close()
 ## API Key Setup
 
 ```bash
-# .env file
-TIINGO_API_KEY=your_api_key_here
+# Environment variable
+export TIINGO_API_KEY=your_api_key_here
 ```
 
 Get your API key at [tiingo.com/account/api/token](https://api.tiingo.com/account/api/token).
@@ -61,4 +61,4 @@ Get your API key at [tiingo.com/account/api/token](https://api.tiingo.com/accoun
 ## See Also
 
 - [Tiingo Pricing](https://tiingo.com/about/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)

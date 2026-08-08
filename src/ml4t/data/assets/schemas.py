@@ -16,7 +16,7 @@ class AssetSchema:
     CORE_COLUMNS: ClassVar[list[str]] = ["timestamp", "open", "high", "low", "close", "volume"]
 
     # Asset-specific schemas
-    SCHEMAS: ClassVar[dict] = {
+    SCHEMAS: ClassVar[dict[AssetClass, dict[str, Any]]] = {
         AssetClass.EQUITY: {
             "required": ["timestamp", "open", "high", "low", "close", "volume"],
             "optional": ["adjusted_close", "dividends", "splits", "turnover"],

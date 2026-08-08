@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import (
@@ -54,6 +55,87 @@ class TestNameProperty:
         """Test name property returns correct value."""
         provider = FinnhubProvider(api_key="test_key")
         assert provider.name == "finnhub"
+
+
+class TestFetchQuote:
+    """Tests for the free-tier quote contract."""
+
+    @pytest.fixture
+    def provider(self):
+        """Create provider instance."""
+        return FinnhubProvider(api_key="test_key")
+
+    def test_fetch_quote_normalizes_response(self, provider):
+        """Return stable names and numeric values for a valid quote."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "c": 261.74,
+            "d": 2.29,
+            "dp": 0.8826,
+            "h": 263.31,
+            "l": 260.68,
+            "o": 261.07,
+            "pc": 259.45,
+            "t": 1_582_641_000,
+        }
+
+        with patch.object(provider.session, "get", return_value=mock_response) as mock_get:
+            quote = provider.fetch_quote("aapl")
+
+        assert quote == {
+            "symbol": "AAPL",
+            "timestamp": 1_582_641_000,
+            "current": 261.74,
+            "change": 2.29,
+            "percent_change": 0.8826,
+            "high": 263.31,
+            "low": 260.68,
+            "open": 261.07,
+            "previous_close": 259.45,
+        }
+        assert mock_get.call_args.kwargs["params"] == {
+            "symbol": "AAPL",
+            "token": "test_key",
+        }
+
+    def test_fetch_quote_rejects_unknown_symbol(self, provider):
+        """Finnhub's zero-value response identifies an unavailable symbol."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "c": 0,
+            "d": None,
+            "dp": None,
+            "h": 0,
+            "l": 0,
+            "o": 0,
+            "pc": 0,
+            "t": 0,
+        }
+
+        with patch.object(provider.session, "get", return_value=mock_response):
+            with pytest.raises(SymbolNotFoundError):
+                provider.fetch_quote("NOT-A-SYMBOL")
+
+    def test_fetch_quote_derives_optional_change_fields(self, provider):
+        """Quote responses without change fields remain usable."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "c": 102.0,
+            "h": 103.0,
+            "l": 99.0,
+            "o": 100.0,
+            "pc": 100.0,
+            "t": 1_582_641_000,
+        }
+
+        with patch.object(provider.session, "get", return_value=mock_response):
+            quote = provider.fetch_quote("AAPL")
+
+        assert quote["change"] == 2.0
+        assert quote["percent_change"] == 2.0
 
 
 class TestFetchRawData:
@@ -211,6 +293,7 @@ class TestTransformData:
         assert "close" in df.columns
         assert "volume" in df.columns
         assert "symbol" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
         assert df["symbol"][0] == "AAPL"
 
     def test_transform_data_uppercase_symbol(self, provider):

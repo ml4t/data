@@ -11,6 +11,110 @@ from ml4t.data.futures.adjustment import (
     NoAdjustment,
     RatioAdjustment,
 )
+from ml4t.data.futures.roll import RollEvent
+
+
+class TestPairedRollAdjustments:
+    def test_additive_adjustment_removes_only_the_contract_gap(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2)],
+                "open": [99.0, 110.0],
+                "high": [99.0, 110.0],
+                "low": [99.0, 110.0],
+                "close": [99.0, 110.0],
+            }
+        )
+        event = RollEvent(date(2026, 1, 2), "A", "B", old_close=100.0, new_close=110.0)
+
+        result = BackAdjustment().adjust(data, [event])
+
+        assert result["adjusted_close"].to_list() == [109.0, 110.0]
+
+    def test_ratio_adjustment_preserves_old_contract_return(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2)],
+                "open": [99.0, 110.0],
+                "high": [99.0, 110.0],
+                "low": [99.0, 110.0],
+                "close": [99.0, 110.0],
+            }
+        )
+        event = RollEvent(date(2026, 1, 2), "A", "B", old_close=100.0, new_close=110.0)
+
+        result = RatioAdjustment().adjust(data, [event])
+
+        adjusted_return = result["adjusted_close"][1] / result["adjusted_close"][0]
+        assert adjusted_return == pytest.approx(100.0 / 99.0)
+
+    def test_multiple_additive_gaps_are_each_applied_once(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3)],
+                "open": [90.0, 110.0, 130.0],
+                "high": [90.0, 110.0, 130.0],
+                "low": [90.0, 110.0, 130.0],
+                "close": [90.0, 110.0, 130.0],
+            }
+        )
+        events = [
+            RollEvent(date(2026, 1, 2), "A", "B", old_close=100.0, new_close=110.0),
+            RollEvent(date(2026, 1, 3), "B", "C", old_close=120.0, new_close=130.0),
+        ]
+
+        result = BackAdjustment().adjust(data, events)
+
+        assert result["adjusted_close"].to_list() == [110.0, 120.0, 130.0]
+
+    def test_ratio_adjustment_rejects_zero_and_sign_changes(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2)],
+                "open": [1.0, 1.0],
+                "high": [1.0, 1.0],
+                "low": [1.0, 1.0],
+                "close": [1.0, 1.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="zero close"):
+            RatioAdjustment().adjust(data, [RollEvent(date(2026, 1, 2), "A", "B", 0.0, 1.0)])
+        with pytest.raises(ValueError, match="same sign"):
+            RatioAdjustment().adjust(data, [RollEvent(date(2026, 1, 2), "A", "B", -1.0, 1.0)])
+
+    def test_adjustment_rejects_event_that_disagrees_with_selected_symbol(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2)],
+                "symbol": ["A", "C"],
+                "open": [1.0, 1.0],
+                "high": [1.0, 1.0],
+                "low": [1.0, 1.0],
+                "close": [1.0, 1.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="must be 'B'"):
+            BackAdjustment().adjust(data, [RollEvent(date(2026, 1, 2), "A", "B", 1.0, 1.0)])
+
+    def test_adjustment_rejects_disconnected_event_chain(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3)],
+                "open": [1.0, 1.0, 1.0],
+                "high": [1.0, 1.0, 1.0],
+                "low": [1.0, 1.0, 1.0],
+                "close": [1.0, 1.0, 1.0],
+            }
+        )
+        events = [
+            RollEvent(date(2026, 1, 2), "A", "B", 1.0, 1.0),
+            RollEvent(date(2026, 1, 3), "X", "C", 1.0, 1.0),
+        ]
+
+        with pytest.raises(ValueError, match="unrelated 'X'"):
+            BackAdjustment().adjust(data, events)
 
 
 # Test fixtures
@@ -59,14 +163,17 @@ def data_with_gap():
 
 @pytest.fixture
 def roll_dates_single():
-    """Single roll date."""
-    return [date(2024, 1, 3)]
+    """Single paired roll event."""
+    return [RollEvent(date(2024, 1, 3), "A", "B", 105.0, 110.0)]
 
 
 @pytest.fixture
 def roll_dates_multiple():
-    """Multiple roll dates."""
-    return [date(2024, 1, 3), date(2024, 1, 5)]
+    """Multiple paired roll events."""
+    return [
+        RollEvent(date(2024, 1, 3), "A", "B", 105.0, 110.0),
+        RollEvent(date(2024, 1, 5), "B", "C", 107.0, 112.0),
+    ]
 
 
 class TestBackAdjustment:
@@ -132,11 +239,9 @@ class TestBackAdjustment:
         """Test with roll date not present in data."""
         adjustment = BackAdjustment()
 
-        # Roll date not in data - should skip
-        result = adjustment.adjust(sample_data, [date(2024, 2, 1)])
-
-        # Should not crash, and return data with adjustment columns
-        assert "adjusted_close" in result.columns
+        event = RollEvent(date(2024, 2, 1), "A", "B", 100.0, 110.0)
+        with pytest.raises(ValueError, match="absent from the selected series"):
+            adjustment.adjust(sample_data, [event])
 
     def test_multiple_rolls(self, sample_data, roll_dates_multiple):
         """Test with multiple roll dates."""
@@ -176,7 +281,10 @@ class TestBackAdjustment:
             }
         )
 
-        roll_dates = [date(2024, 1, 2), date(2024, 1, 4)]
+        roll_dates = [
+            RollEvent(date(2024, 1, 2), "A", "B", 100.0, 102.0),
+            RollEvent(date(2024, 1, 4), "B", "C", 104.0, 107.0),
+        ]
         adjustment = BackAdjustment()
 
         result = adjustment.adjust(data, roll_dates)
@@ -229,7 +337,7 @@ class TestRatioAdjustment:
 
         adjustment = RatioAdjustment()
 
-        result = adjustment.adjust(data, [date(2024, 1, 2)])
+        result = adjustment.adjust(data, [RollEvent(date(2024, 1, 2), "A", "B", 12.0, 52.0)])
 
         # Ratio adjustment should keep prices positive
         assert all(result["adjusted_close"] > 0)
@@ -280,10 +388,8 @@ class TestRatioAdjustment:
 
         adjustment = RatioAdjustment()
 
-        # Should not crash with division by zero
-        result = adjustment.adjust(data, [date(2024, 1, 2)])
-
-        assert "adjusted_close" in result.columns
+        with pytest.raises(ValueError, match="zero close"):
+            adjustment.adjust(data, [RollEvent(date(2024, 1, 2), "A", "B", 0.0, 52.0)])
 
     def test_multiple_rolls(self, sample_data, roll_dates_multiple):
         """Test with multiple roll dates."""
@@ -311,7 +417,9 @@ class TestNoAdjustment:
         """Test that no adjustment is applied."""
         adjustment = NoAdjustment()
 
-        result = adjustment.adjust(sample_data, [date(2024, 1, 3)])
+        result = adjustment.adjust(
+            sample_data, [RollEvent(date(2024, 1, 3), "A", "B", 105.0, 110.0)]
+        )
 
         # Adjusted should equal original
         assert result["adjusted_open"].to_list() == result["open"].to_list()
@@ -333,7 +441,11 @@ class TestNoAdjustment:
         """Test that roll dates are ignored."""
         adjustment = NoAdjustment()
 
-        roll_dates = [date(2024, 1, 2), date(2024, 1, 3), date(2024, 1, 4)]
+        roll_dates = [
+            RollEvent(date(2024, 1, 2), "A", "B", 104.0, 105.0),
+            RollEvent(date(2024, 1, 3), "B", "C", 105.0, 106.0),
+            RollEvent(date(2024, 1, 4), "C", "D", 106.0, 107.0),
+        ]
         result = adjustment.adjust(sample_data, roll_dates)
 
         # Should be same as with empty roll dates
@@ -345,7 +457,9 @@ class TestNoAdjustment:
         """Test that adjustment preserves data length."""
         adjustment = NoAdjustment()
 
-        result = adjustment.adjust(sample_data, [date(2024, 1, 3)])
+        result = adjustment.adjust(
+            sample_data, [RollEvent(date(2024, 1, 3), "A", "B", 105.0, 110.0)]
+        )
 
         assert len(result) == len(sample_data)
 
@@ -408,7 +522,9 @@ class TestEdgeCases:
         """Test roll on first date in data."""
         adjustment = BackAdjustment()
 
-        result = adjustment.adjust(sample_data, [date(2024, 1, 1)])
+        result = adjustment.adjust(
+            sample_data, [RollEvent(date(2024, 1, 1), "A", "B", 103.0, 104.0)]
+        )
 
         # Should handle gracefully (no data before roll)
         assert "adjusted_close" in result.columns
@@ -417,7 +533,9 @@ class TestEdgeCases:
         """Test roll on last date in data."""
         adjustment = BackAdjustment()
 
-        result = adjustment.adjust(sample_data, [date(2024, 1, 5)])
+        result = adjustment.adjust(
+            sample_data, [RollEvent(date(2024, 1, 5), "A", "B", 107.0, 108.0)]
+        )
 
         # Should handle gracefully
         assert "adjusted_close" in result.columns
@@ -427,7 +545,10 @@ class TestEdgeCases:
         adjustment = BackAdjustment()
 
         # Provide roll dates in unsorted order
-        unsorted_rolls = [date(2024, 1, 4), date(2024, 1, 2)]
+        unsorted_rolls = [
+            RollEvent(date(2024, 1, 4), "B", "C", 106.0, 107.0),
+            RollEvent(date(2024, 1, 2), "A", "B", 104.0, 105.0),
+        ]
 
         result = adjustment.adjust(sample_data, unsorted_rolls)
 

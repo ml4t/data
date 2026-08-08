@@ -31,7 +31,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -230,6 +230,8 @@ class ETFDataManager(ProfileMixin):
                 else:
                     # Start from day after last existing date
                     last_date = existing["timestamp"].max()
+                    if not isinstance(last_date, date):
+                        raise TypeError("'timestamp' must contain non-null Date or Datetime values")
                     start_date = (last_date + timedelta(days=1)).strftime("%Y-%m-%d")
 
                 # Check if we need to update
@@ -274,6 +276,8 @@ class ETFDataManager(ProfileMixin):
 
                 logger.info(f"Updated {symbol}: +{len(new_data)} rows")
 
+            except TypeError:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to update {symbol}: {e}")
                 stats[symbol] = 0

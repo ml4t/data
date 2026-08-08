@@ -10,9 +10,64 @@ with proper high/low relationships, volume patterns, and timestamps.
 
 from __future__ import annotations
 
+import hashlib
+from calendar import monthrange
 from datetime import datetime, timedelta
+from typing import Literal
 
 import numpy as np
+
+CalendarMode = Literal["equity", "continuous"]
+
+SUPPORTED_SYNTHETIC_FREQUENCIES = frozenset(
+    {
+        "minute",
+        "1minute",
+        "5minute",
+        "15minute",
+        "30minute",
+        "hourly",
+        "1hour",
+        "4hour",
+        "daily",
+        "1day",
+        "weekly",
+        "1week",
+        "monthly",
+        "1month",
+    }
+)
+
+_MINUTES_PER_BAR = {
+    "minute": 1,
+    "1minute": 1,
+    "5minute": 5,
+    "15minute": 15,
+    "30minute": 30,
+    "hourly": 60,
+    "1hour": 60,
+    "4hour": 240,
+    "daily": 1440,
+    "1day": 1440,
+}
+
+
+def create_rng(seed: int | None = None) -> np.random.Generator:
+    """Create an RNG with an explicit, stable bit generator."""
+    return np.random.Generator(np.random.PCG64(seed))
+
+
+def derive_symbol_seed(seed: int, symbol: str) -> int:
+    """Mix a public seed and normalized symbol without Python's randomized hash."""
+    payload = f"ml4t-data.synthetic.v1\0{seed}\0{symbol.upper()}".encode()
+    return int.from_bytes(hashlib.blake2b(payload, digest_size=16).digest(), byteorder="big")
+
+
+def validate_synthetic_frequency(frequency: str) -> None:
+    """Reject unsupported frequencies before provider health controls run."""
+    if frequency.lower() not in SUPPORTED_SYNTHETIC_FREQUENCIES:
+        supported = ", ".join(sorted(SUPPORTED_SYNTHETIC_FREQUENCIES))
+        raise ValueError(f"Unsupported synthetic frequency '{frequency}'; use {supported}")
 
 
 def returns_to_prices(
@@ -199,6 +254,7 @@ def generate_timestamps(
     start_dt: datetime,
     end_dt: datetime,
     frequency: str,
+    calendar_mode: CalendarMode = "equity",
 ) -> list[datetime]:
     """Generate trading timestamps for a date range.
 
@@ -210,6 +266,9 @@ def generate_timestamps(
         End datetime (should be timezone-aware)
     frequency : str
         Data frequency: "daily", "hourly", "minute", etc.
+    calendar_mode : {"equity", "continuous"}, default="equity"
+        Equity sessions use weekdays from 09:30 through 16:00. Continuous
+        sessions cover every UTC day.
 
     Returns
     -------
@@ -218,32 +277,73 @@ def generate_timestamps(
 
     Notes
     -----
-    - Daily: One timestamp per trading day at 16:00 (market close)
-    - Intraday: Bars during 9:30-16:00 trading hours
-    - Weekends are excluded
+    Intraday timestamps represent bar starts and session ends are excluded.
+    Equity daily bars use the weekday close at 16:00 UTC; continuous daily bars
+    use 00:00 UTC. Weekly bars use Friday 16:00 in equity mode and Sunday 00:00
+    in continuous mode. Monthly bars use the final weekday at 16:00 in equity
+    mode and the final calendar day at 00:00 in continuous mode.
     """
-    timestamps = []
-    minutes_per_bar = _get_minutes_per_bar(frequency)
+    if calendar_mode not in {"equity", "continuous"}:
+        raise ValueError("calendar_mode must be 'equity' or 'continuous'")
 
-    if frequency.lower() in ["daily", "1day"]:
-        # Daily: one timestamp per day at market close (16:00)
-        current = start_dt.replace(hour=16, minute=0, second=0, microsecond=0)
+    validate_synthetic_frequency(frequency)
+    timestamps = []
+    frequency_lower = frequency.lower()
+
+    if frequency_lower in {"daily", "1day"}:
+        timestamp_hour = 16 if calendar_mode == "equity" else 0
+        current = start_dt.replace(hour=timestamp_hour, minute=0, second=0, microsecond=0)
         while current <= end_dt:
-            # Skip weekends
-            if current.weekday() < 5:
+            if start_dt <= current and (calendar_mode == "continuous" or current.weekday() < 5):
                 timestamps.append(current)
             current += timedelta(days=1)
+    elif frequency_lower in {"weekly", "1week"}:
+        target_weekday = 4 if calendar_mode == "equity" else 6
+        timestamp_hour = 16 if calendar_mode == "equity" else 0
+        current = start_dt.replace(hour=timestamp_hour, minute=0, second=0, microsecond=0)
+        while current.weekday() != target_weekday:
+            current += timedelta(days=1)
+        while current <= end_dt:
+            if start_dt <= current:
+                timestamps.append(current)
+            current += timedelta(days=7)
+    elif frequency_lower in {"monthly", "1month"}:
+        year, month = start_dt.year, start_dt.month
+        while (year, month) <= (end_dt.year, end_dt.month):
+            last_day = monthrange(year, month)[1]
+            timestamp_hour = 16 if calendar_mode == "equity" else 0
+            current = start_dt.replace(
+                year=year,
+                month=month,
+                day=last_day,
+                hour=timestamp_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            if calendar_mode == "equity":
+                while current.weekday() >= 5:
+                    current -= timedelta(days=1)
+            if start_dt <= current <= end_dt:
+                timestamps.append(current)
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
     else:
-        # Intraday: generate bars during trading hours
+        minutes_per_bar = _get_minutes_per_bar(frequency)
         current_day = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
         while current_day <= end_dt:
-            if current_day.weekday() < 5:  # Skip weekends
-                # Trading hours: 9:30 - 16:00 (simplified)
-                bar_time = current_day.replace(hour=9, minute=30)
-                end_time = current_day.replace(hour=16, minute=0)
+            if calendar_mode == "continuous" or current_day.weekday() < 5:
+                if calendar_mode == "equity":
+                    bar_time = current_day.replace(hour=9, minute=30)
+                    end_time = current_day.replace(hour=16, minute=0)
+                else:
+                    bar_time = current_day
+                    end_time = current_day + timedelta(days=1)
 
-                while bar_time <= end_time:
+                while bar_time < end_time:
                     if start_dt <= bar_time <= end_dt:
                         timestamps.append(bar_time)
                     bar_time += timedelta(minutes=minutes_per_bar)
@@ -256,48 +356,49 @@ def generate_timestamps(
 def _get_minutes_per_bar(frequency: str) -> int:
     """Get minutes per bar for given frequency."""
     freq_lower = frequency.lower()
-    mapping = {
-        "minute": 1,
-        "1minute": 1,
-        "5minute": 5,
-        "15minute": 15,
-        "30minute": 30,
-        "hourly": 60,
-        "1hour": 60,
-        "4hour": 240,
-        "daily": 1440,
-        "1day": 1440,
-    }
-    return mapping.get(freq_lower, 1440)
+    try:
+        return _MINUTES_PER_BAR[freq_lower]
+    except KeyError as error:
+        supported = ", ".join(sorted(_MINUTES_PER_BAR))
+        raise ValueError(
+            f"Unsupported synthetic frequency '{frequency}'; use {supported}"
+        ) from error
 
 
-def get_bars_per_day(frequency: str) -> int:
+def get_bars_per_day(frequency: str, calendar_mode: CalendarMode = "equity") -> int:
     """Get number of bars per trading day for given frequency.
 
     Parameters
     ----------
     frequency : str
         Data frequency
+    calendar_mode : {"equity", "continuous"}, default="equity"
+        Timestamp calendar used by the synthetic provider.
 
     Returns
     -------
     int
         Number of bars per day
     """
-    freq_lower = frequency.lower()
-    if freq_lower in ["daily", "1day"]:
+    if calendar_mode not in {"equity", "continuous"}:
+        raise ValueError("calendar_mode must be 'equity' or 'continuous'")
+    validate_synthetic_frequency(frequency)
+    if frequency.lower() in {"daily", "1day", "weekly", "1week", "monthly", "1month"}:
         return 1
-    elif freq_lower in ["hourly", "1hour"]:
-        return 24  # Full day for crypto-like
-    elif freq_lower in ["4hour"]:
-        return 6
-    elif freq_lower in ["minute", "1minute"]:
-        return 390  # Standard equity trading hours
-    elif freq_lower in ["5minute"]:
-        return 78
-    elif freq_lower in ["15minute"]:
-        return 26
-    elif freq_lower in ["30minute"]:
-        return 13
-    else:
-        return 1
+    session_minutes = 390 if calendar_mode == "equity" else 1440
+    minutes_per_bar = _get_minutes_per_bar(frequency)
+    return (session_minutes + minutes_per_bar - 1) // minutes_per_bar
+
+
+def get_periods_per_year(frequency: str, calendar_mode: CalendarMode = "equity") -> int:
+    """Return the number of generated periods used for annual parameter scaling."""
+    if calendar_mode not in {"equity", "continuous"}:
+        raise ValueError("calendar_mode must be 'equity' or 'continuous'")
+    validate_synthetic_frequency(frequency)
+    frequency_lower = frequency.lower()
+    if frequency_lower in {"weekly", "1week"}:
+        return 52
+    if frequency_lower in {"monthly", "1month"}:
+        return 12
+    annual_days = 261 if calendar_mode == "equity" else 365
+    return annual_days * get_bars_per_day(frequency, calendar_mode)

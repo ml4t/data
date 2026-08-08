@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -90,13 +91,17 @@ class IndividualDownloadConfig:
     storage_path: str | Path = field(
         default_factory=lambda: resolve_storage_path(None, "futures", "individual")
     )
+    resolved_storage_path: Path = field(init=False, repr=False)
     dataset: str = "GLBX.MDP3"
     schema: str = "ohlcv-1h"
     api_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = resolve_storage_path(self.storage_path, "futures", "individual")
+        self.resolved_storage_path = resolve_storage_path(
+            self.storage_path, "futures", "individual"
+        )
+        self.storage_path = self.resolved_storage_path
 
     def get_product_config(self, product: str) -> IndividualProductConfig:
         """Get configuration for a specific product."""
@@ -204,7 +209,7 @@ class IndividualDownloader:
         self.client = Historical(self.api_key)
 
         # Ensure storage directory exists
-        self.config.storage_path.mkdir(parents=True, exist_ok=True)
+        self.config.resolved_storage_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(
             "Initialized IndividualDownloader",
@@ -237,7 +242,7 @@ class IndividualDownloader:
 
     def _get_output_path(self, product: str) -> Path:
         """Get output path for a product."""
-        return self.config.storage_path / product / "data.parquet"
+        return self.config.resolved_storage_path / product / "data.parquet"
 
     def _product_exists(self, product: str) -> bool:
         """Check if product data already exists and has rows."""
@@ -454,7 +459,7 @@ class IndividualDownloader:
             result[product] = self._generate_contract_symbols(product)
         return result
 
-    def get_status(self) -> dict[str, dict]:
+    def get_status(self) -> dict[str, dict[str, Any]]:
         """Get download status for all products.
 
         Returns:
@@ -474,13 +479,17 @@ class IndividualDownloader:
             else:
                 try:
                     df = pl.read_parquet(path)
+                    min_event = df["ts_event"].min()
+                    max_event = df["ts_event"].max()
+                    if not isinstance(min_event, date) or not isinstance(max_event, date):
+                        raise ValueError("ts_event must contain non-null date or datetime values")
                     status[product] = {
                         "exists": True,
                         "rows": df.height,
                         "contracts": df["symbol"].n_unique(),
                         "date_range": (
-                            df["ts_event"].min().isoformat(),
-                            df["ts_event"].max().isoformat(),
+                            min_event.isoformat(),
+                            max_event.isoformat(),
                         ),
                     }
                 except Exception as e:

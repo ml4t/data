@@ -153,7 +153,7 @@ class UpdateRecord:
 
 **Transaction Support**
 
-**File**: `storage/transaction.py` (485 lines)
+**File**: `storage/backend.py`
 
 **Features**:
 - ACID-like guarantees
@@ -666,7 +666,9 @@ class UpdateResult:
    ```bash
    ml4t-data fetch -s AAPL -s MSFT --start 2024-01-01 --end 2024-12-31
    ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-12-31
-   ml4t-data fetch -s BTC --provider coingecko --start 2024-01-01
+   # CoinGecko daily OHLC covers the last 29 completed UTC days only
+   # Replace the dates with a 29-day window ending yesterday in UTC
+   ml4t-data fetch -s BTC --provider coingecko --start START_DATE --end END_DATE
    ```
 
 2. **update-all** - Incremental updates from YAML config
@@ -1020,7 +1022,7 @@ ml4t-data export [options]
 ### Storage Performance
 
 **Hive Partitioning**:
-- 7x faster for time-based queries
+- Partition pruning for time-based queries
 - Atomic writes with temp file pattern
 - File locking for concurrent access
 
@@ -1043,7 +1045,6 @@ ml4t-data export [options]
 - polars >= 0.20.0
 - pandas >= 2.0.0
 - numpy >= 1.24.0
-- pyarrow >= 14.0.0
 - httpx >= 0.25.0
 - tenacity >= 8.0.0
 - pybreaker >= 1.0.0 (circuit breaker)
@@ -1073,7 +1074,7 @@ ml4t-data export [options]
 - pytest-asyncio >= 0.21.0
 - hypothesis >= 6.80.0
 - ruff >= 0.1.0
-- mypy >= 1.5.0
+- ty
 - ipython >= 8.14.0
 - ipdb >= 0.13.0
 - pre-commit >= 3.3.0
@@ -1127,7 +1128,7 @@ ml4t-data export [options]
 | Integration Tests | 10 ✅ |
 | Provider Coverage | 13/13 (100%) ✅ |
 | Code Coverage | ~80%+ (target) ✅ |
-| Type Hints | Partial (mypy strict excluded) ⚠️ |
+| Type Hints | Public interfaces checked with ty ⚠️ |
 | Pre-commit Hooks | Enabled ✅ |
 | CI/CD | GitHub Actions ✅ |
 
@@ -1141,7 +1142,7 @@ None identified
 ### Important (Should Fix)
 1. Binance integration tests - Requires VPN in US
 2. Async storage tests - Needs more coverage
-3. Type hints - mypy strict mode not yet enabled
+3. Type checking - reduce the remaining suppressed ty rules
 
 ### Nice-to-Have (Low Priority)
 1. WebSocket streaming support (Phase 2)
@@ -1159,7 +1160,7 @@ None identified
 | Category | Status | Confidence | Notes |
 |----------|--------|------------|-------|
 | **Providers** | ✅ Complete | High | 13 providers, 12 live + 1 historical |
-| **Storage** | ✅ Complete | High | Hive-partitioned, 7x faster |
+| **Storage** | ✅ Complete | High | Hive-partitioned and flat Parquet layouts |
 | **Validation** | ✅ Complete | High | Full OHLC invariant checks |
 | **Updates** | ✅ Complete | High | Incremental, gap detection |
 | **CLI** | ✅ Complete | High | fetch, update-all, list, validate, export |

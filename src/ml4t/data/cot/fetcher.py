@@ -16,6 +16,7 @@ import polars as pl
 import yaml
 
 from ml4t.data.core.config import resolve_storage_path
+from ml4t.data.utils.conversion import pandas_to_polars
 
 logger = logging.getLogger(__name__)
 
@@ -287,11 +288,16 @@ class COTConfig:
     def __post_init__(self):
         if self.end_year is None:
             self.end_year = datetime.now().year
+        if self.end_year < self.start_year:
+            raise ValueError("end_year must be greater than or equal to start_year")
         self.storage_path = resolve_storage_path(self.storage_path, "cot")
 
     def get_years(self) -> list[int]:
         """Get list of years to download."""
-        return list(range(self.start_year, self.end_year + 1))
+        end_year = self.end_year
+        if end_year is None:
+            raise RuntimeError("COTConfig.end_year was not initialized")
+        return list(range(self.start_year, end_year + 1))
 
 
 def load_cot_config(config_path: str | Path) -> COTConfig:
@@ -439,7 +445,7 @@ class COTFetcher:
                 os.chdir(original_dir)
 
         # Convert to Polars
-        df = pl.from_pandas(df_pandas)
+        df = pandas_to_polars(df_pandas)
         self._cache[cache_key] = df
 
         return df
@@ -471,6 +477,7 @@ class COTFetcher:
         product_code: str,
         start_year: int | None = None,
         end_year: int | None = None,
+        release_schedule: pl.DataFrame | None = None,
     ) -> pl.DataFrame:
         """Fetch COT data for a specific product.
 
@@ -478,6 +485,7 @@ class COTFetcher:
             product_code: Exchange product code (e.g., 'ES', 'CL')
             start_year: Start year (default: config start_year)
             end_year: End year (default: config end_year)
+            release_schedule: Authoritative report-date to release-timestamp mapping
 
         Returns:
             DataFrame with COT positioning data
@@ -493,12 +501,19 @@ class COTFetcher:
         mapping = PRODUCT_MAPPINGS[product_code]
         start_year = start_year or self.config.start_year
         end_year = end_year or self.config.end_year
+        if end_year is None:
+            raise RuntimeError("COTConfig.end_year was not initialized")
         years = list(range(start_year, end_year + 1))
 
         # Determine report type (use *_futopt if include_options)
         report_type = mapping.report_type
         if self.config.include_options and report_type.endswith("_fut"):
-            report_type = report_type + "opt"
+            option_report_types: dict[COTReportType, COTReportType] = {
+                "legacy_fut": "legacy_futopt",
+                "disaggregated_fut": "disaggregated_futopt",
+                "traders_in_financial_futures_fut": "traders_in_financial_futures_futopt",
+            }
+            report_type = option_report_types[report_type]
 
         # Get raw COT data
         df = self._get_report_for_years(report_type, years)
@@ -543,6 +558,11 @@ class COTFetcher:
 
         # Add computed columns (net positions)
         df_final = self._add_computed_columns(df_final, report_type)
+
+        if release_schedule is not None:
+            from ml4t.data.cot.workflow import attach_cot_release_schedule
+
+            df_final = attach_cot_release_schedule(df_final, release_schedule)
 
         return df_final
 
@@ -592,8 +612,11 @@ class COTFetcher:
 
         return df
 
-    def fetch_all(self) -> dict[str, pl.DataFrame]:
+    def fetch_all(self, release_schedule: pl.DataFrame | None = None) -> dict[str, pl.DataFrame]:
         """Fetch COT data for all configured products.
+
+        Args:
+            release_schedule: Authoritative report-date to release-timestamp mapping
 
         Returns:
             Dictionary mapping product code to DataFrame
@@ -601,7 +624,7 @@ class COTFetcher:
         results = {}
         for product in self.config.products:
             try:
-                df = self.fetch_product(product)
+                df = self.fetch_product(product, release_schedule=release_schedule)
                 if not df.is_empty():
                     results[product] = df
                     logger.info(f"Fetched {len(df)} rows for {product}")
@@ -629,11 +652,16 @@ class COTFetcher:
         logger.info(f"Saved {len(df)} rows to {file_path}")
         return file_path
 
-    def download_all(self, skip_existing: bool = True) -> dict[str, Path]:
+    def download_all(
+        self,
+        skip_existing: bool = True,
+        release_schedule: pl.DataFrame | None = None,
+    ) -> dict[str, Path]:
         """Download and save COT data for all configured products.
 
         Args:
             skip_existing: Skip products that already have data
+            release_schedule: Authoritative report-date to release-timestamp mapping
 
         Returns:
             Dictionary mapping product code to saved file path
@@ -649,7 +677,7 @@ class COTFetcher:
                 continue
 
             try:
-                df = self.fetch_product(product)
+                df = self.fetch_product(product, release_schedule=release_schedule)
                 if not df.is_empty():
                     path = self.save_to_hive(df, product)
                     results[product] = path

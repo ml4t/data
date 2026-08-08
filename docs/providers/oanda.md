@@ -20,7 +20,6 @@ Oanda provides institutional-grade forex data with comprehensive currency pair c
 ```python
 import os
 os.environ["OANDA_API_KEY"] = "your_key_here"
-os.environ["OANDA_ACCOUNT_ID"] = "your_account_id"
 
 from ml4t.data.providers import OandaProvider
 
@@ -53,9 +52,8 @@ Use Oanda's instrument format with underscore:
 ## API Key Setup
 
 ```bash
-# .env file
-OANDA_API_KEY=your_api_key_here
-OANDA_ACCOUNT_ID=your_account_id
+# Environment variable
+export OANDA_API_KEY=your_api_key_here
 ```
 
 Get credentials by opening a practice account at [oanda.com](https://www.oanda.com).
@@ -74,4 +72,4 @@ Get credentials by opening a practice account at [oanda.com](https://www.oanda.c
 ## See Also
 
 - [Oanda API](https://developer.oanda.com)
-- [Provider README](README.md)
+- [Provider reference](index.md)

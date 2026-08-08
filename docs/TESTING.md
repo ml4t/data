@@ -33,15 +33,6 @@ pytest -m integration
 pytest tests/integration/test_coingecko.py -m ""
 ```
 
-### Run API Tests
-```bash
-# Install API dependencies first
-pip install -e ".[api]"
-
-# Run API tests
-pytest tests/test_api/ -m ""
-```
-
 ## Test Categories
 
 ### Unit Tests (Fast)
@@ -55,12 +46,6 @@ pytest tests/test_api/ -m ""
 - **Duration**: ~15 minutes
 - **Dependencies**: Real APIs, may require API keys
 - **Markers**: `@pytest.mark.integration`
-
-### API Tests (Optional)
-- **Location**: `tests/test_api/`, `tests/test_websocket*.py`
-- **Duration**: <1 minute
-- **Dependencies**: Requires `slowapi` (`pip install -e ".[api]"`)
-- **Markers**: Skipped if slowapi not installed
 
 ## API Keys for Integration Tests
 
@@ -121,11 +106,6 @@ GitHub Actions runs:
 - **Main branch**: Unit + integration tests (with API keys)
 
 ## Troubleshooting
-
-### "ModuleNotFoundError: No module named 'slowapi'"
-```bash
-pip install -e ".[api]"
-```
 
 ### "ModuleNotFoundError: No module named 'databento'"
 ```bash

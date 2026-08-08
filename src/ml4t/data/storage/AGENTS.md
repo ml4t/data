@@ -1,6 +1,6 @@
 # storage/ - 4.6k Lines
 
-Hive-partitioned Parquet storage (7x faster) and data profiling.
+Hive-partitioned and flat Parquet storage with data profiling.
 
 ## Modules
 

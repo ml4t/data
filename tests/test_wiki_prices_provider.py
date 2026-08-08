@@ -191,6 +191,7 @@ class TestFetchAndTransformData:
         assert "low" in df.columns
         assert "close" in df.columns
         assert "volume" in df.columns
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
 
     def test_fetch_invalid_frequency_raises(self, provider_with_data):
         """Test invalid frequency raises error."""
@@ -521,6 +522,64 @@ class TestDownload:
             with pytest.raises(RuntimeError, match="Rate limited"):
                 WikiPricesProvider.download(output_path=tmp_path, api_key="test_key")
 
+    def test_download_does_not_log_api_key_fragments(self, tmp_path, capsys):
+        """The public download path never writes credential fragments to logs."""
+        import httpx
+
+        api_key = "abcdefghSECRET-canary-value"
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+
+            with pytest.raises(ValueError, match="Invalid API key"):
+                WikiPricesProvider.download(output_path=tmp_path, api_key=api_key)
+
+        captured = capsys.readouterr()
+        combined_output = captured.out + captured.err
+        assert "Starting Wiki Prices download" in combined_output
+        assert api_key not in combined_output
+        assert api_key[:8] not in combined_output
+        assert api_key[-8:] not in combined_output
+
+    def test_download_poll_failure_does_not_expose_api_key(self, tmp_path, capsys):
+        """Polling errors omit the credential-bearing request URL and exception cause."""
+        import httpx
+
+        api_key = "polling-SECRET-canary-value"
+        generating = MagicMock()
+        generating.content = (
+            b"file.link,file.status\nhttps://download.example/export.zip,generating\n"
+        )
+        generating.raise_for_status.return_value = None
+        request = httpx.Request(
+            "GET",
+            f"{WikiPricesProvider.NASDAQ_EXPORT_URL}?api_key={api_key}&qopts.export=true",
+        )
+        failed_poll = httpx.Response(503, request=request)
+
+        with (
+            patch("httpx.Client") as mock_client,
+            patch("ml4t.data.providers.wiki_prices.time.sleep"),
+        ):
+            mock_client.return_value.__enter__.return_value.get.side_effect = [
+                generating,
+                failed_poll,
+            ]
+
+            with pytest.raises(RuntimeError, match="HTTP 503") as error:
+                WikiPricesProvider.download(output_path=tmp_path, api_key=api_key)
+
+        captured = capsys.readouterr()
+        combined_output = captured.out + captured.err
+        assert error.value.__cause__ is None
+        assert api_key not in str(error.value)
+        assert api_key not in combined_output
+
 
 class TestResolveApiKey:
     """Tests for _resolve_api_key class method."""
@@ -545,19 +604,20 @@ class TestResolveApiKey:
     def test_resolve_from_env_file(self, tmp_path):
         """Test resolving API key from .env file."""
         env_file = tmp_path / ".env"
-        env_file.write_text("QUANDL_API_KEY=file_key")
+        env_file.write_text("QUANDL_API_KEY=file_key", encoding="utf-8")
 
         with patch.dict("os.environ", {}, clear=True):
             key = WikiPricesProvider._resolve_api_key(None, env_file)
             assert key == "file_key"
 
-    def test_resolve_returns_none_when_not_found(self):
+    def test_resolve_returns_none_when_home_cannot_be_resolved(self, monkeypatch, tmp_path):
         """Test resolve returns None when no key found."""
+        monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {}, clear=True):
-            with patch.object(WikiPricesProvider, "DEFAULT_PATHS", []):
-                _key = WikiPricesProvider._resolve_api_key(None, None)  # noqa: F841
-                # Might return None depending on system .env files
-                # Just ensure it doesn't crash
+            with patch.object(Path, "expanduser", side_effect=RuntimeError):
+                key = WikiPricesProvider._resolve_api_key(None, None)
+
+        assert key is None
 
 
 class TestDatasetConstants:

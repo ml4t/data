@@ -10,15 +10,26 @@ This module handles core data fetching operations including:
 from __future__ import annotations
 
 from datetime import datetime
+from functools import cache
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import structlog
 
+from ml4t.data.core.exceptions import ProviderRoutingError
+from ml4t.data.utils.conversion import polars_to_pandas
+
 if TYPE_CHECKING:
     from ml4t.data.managers.provider_manager import ProviderManager, ProviderRouter
 
 logger = structlog.get_logger()
+
+
+@cache
+def _has_pyarrow() -> bool:
+    """Return whether the optional Arrow conversion dependency is installed."""
+    return find_spec("pyarrow") is not None
 
 
 class FetchManager:
@@ -34,7 +45,7 @@ class FetchManager:
 
     Example:
         >>> fetch_mgr = FetchManager(provider_manager, router, "polars")
-        >>> df = fetch_mgr.fetch("AAPL", "2024-01-01", "2024-12-31")
+        >>> df = fetch_mgr.fetch("AAPL", "2024-01-01", "2024-12-31", provider="yahoo")
     """
 
     def __init__(
@@ -92,6 +103,8 @@ class FetchManager:
         if self.output_format == "lazy":
             return df.lazy()
         if self.output_format == "pandas":
+            if not _has_pyarrow():
+                return polars_to_pandas(df)
             return df.to_pandas()
         return df
 
@@ -126,7 +139,7 @@ class FetchManager:
         # Determine provider
         provider_name = self.router.get_provider(symbol, override=provider)
         if not provider_name:
-            raise ValueError(
+            raise ProviderRoutingError(
                 f"No provider found for symbol: {symbol}. "
                 f"Configure routing patterns or specify provider explicitly."
             )
@@ -140,7 +153,9 @@ class FetchManager:
 
         try:
             # Get provider instance
-            provider_instance = self.provider_manager.get_provider(provider_name)
+            provider_instance = self.provider_manager.get_provider(
+                provider_name, required_capability="ohlcv"
+            )
 
             # Fetch data
             df = provider_instance.fetch_ohlcv(symbol, start, end, frequency, **kwargs)
@@ -176,8 +191,13 @@ class FetchManager:
 
         Returns:
             Dictionary mapping symbols to data (or None if fetch failed)
+
+        Raises:
+            ProviderRoutingError: If any symbol has no explicit or unambiguous route. The
+                entire batch is rejected before the first provider request.
         """
         results: dict[str, pl.DataFrame | pl.LazyFrame | Any | None] = {}
+        self.validate_routes(symbols, provider=kwargs.get("provider"))
 
         for symbol in symbols:
             try:
@@ -187,6 +207,22 @@ class FetchManager:
                 results[symbol] = None
 
         return results
+
+    def validate_routes(self, symbols: list[str], provider: str | None = None) -> None:
+        """Reject a batch whose symbols cannot all be routed before provider I/O."""
+        unroutable = [
+            symbol
+            for symbol in symbols
+            if self.router.get_provider(symbol, override=provider) is None
+        ]
+        if unroutable:
+            joined = ", ".join(unroutable)
+            raise ProviderRoutingError(
+                f"No provider found for symbols: {joined}. "
+                "Configure routing patterns or specify provider explicitly.",
+                parameter="provider",
+                details={"symbols": unroutable},
+            )
 
     def fetch_raw(
         self,
@@ -227,5 +263,17 @@ class FetchManager:
             )
 
         # Get provider instance and fetch
-        provider_instance = self.provider_manager.get_provider(provider_name)
+        provider_instance = self.provider_manager.get_provider(
+            provider_name, required_capability="ohlcv"
+        )
         return provider_instance.fetch_ohlcv(symbol, start, end, frequency, **kwargs)
+
+    def get_max_history_days(self, symbol: str, provider: str | None = None) -> int | None:
+        """Return a provider's declared history bound for managed initial loads."""
+        provider_name = self.router.get_provider(symbol, override=provider)
+        if provider_name is None:
+            return None
+        capabilities = self.provider_manager.get_provider(
+            provider_name, required_capability="ohlcv"
+        ).capabilities()
+        return capabilities.max_history_days

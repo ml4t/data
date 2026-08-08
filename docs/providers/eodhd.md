@@ -17,12 +17,7 @@ EODHD (End of Day Historical Data) provides affordable access to global equities
 | Tier | Price | Features |
 |------|-------|----------|
 | Free | $0/mo | 20 calls/day, 1 year history |
-| EOD All World | $19.99/mo | 100k calls/day, 30+ year history |
-| EOD+Intraday | $29.99/mo | + Intraday data |
-| Fundamentals | $59.99/mo | + Stock fundamentals |
-| ALL-IN-ONE | $99.99/mo | Everything included |
-
-**Note**: 50% student discount available.
+| Paid plans | See current pricing | Expanded history, markets, and endpoints |
 
 ---
 
@@ -70,7 +65,7 @@ See [EODHD Exchange List](https://eodhd.com/financial-apis/exchanges-api-list-of
 | `daily` | ✅ | Free |
 | `weekly` | ✅ | Free |
 | `monthly` | ✅ | Free |
-| `1m`, `5m`, `1h` | ✅ | EOD+Intraday ($29.99) |
+| `1m`, `5m`, `1h` | ✅ | A plan with intraday access |
 
 ---
 
@@ -86,8 +81,8 @@ See [EODHD Exchange List](https://eodhd.com/financial-apis/exchanges-api-list-of
 ## API Key Setup
 
 ```bash
-# .env file
-EODHD_API_KEY=your_api_key_here
+# Environment variable
+export EODHD_API_KEY=your_api_key_here
 ```
 
 Get your API key at [eodhd.com/register](https://eodhd.com/register).
@@ -107,9 +102,9 @@ Get your API key at [eodhd.com/register](https://eodhd.com/register).
 
 | Feature | Tier Required | Priority |
 |---------|---------------|----------|
-| Fundamentals | $59.99/mo | HIGH |
-| Intraday data | $29.99/mo | MEDIUM |
-| Options (Marketplace) | $29.99/mo | HIGH |
+| Fundamentals | Paid endpoint access | HIGH |
+| Intraday data | Paid endpoint access | MEDIUM |
+| Options (Marketplace) | Marketplace access | HIGH |
 | Earnings data | Included | MEDIUM |
 | Insider transactions | Included | LOW |
 
@@ -118,5 +113,4 @@ Get your API key at [eodhd.com/register](https://eodhd.com/register).
 ## See Also
 
 - [EODHD Pricing](https://eodhd.com/pricing)
-- [Provider README](README.md)
-- [Provider Audit](PROVIDER_AUDIT.md)
+- [Provider reference](index.md)

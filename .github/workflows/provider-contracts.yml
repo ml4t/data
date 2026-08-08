@@ -1,0 +1,281 @@
+name: Provider Contract Tests
+run-name: Provider Contract - ${{ inputs.provider }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Credentialed provider contract to run
+        required: true
+        type: choice
+        options:
+          - public
+          - alpaca
+          - fred
+          - tiingo
+          - massive
+          - finnhub
+          - cryptocompare
+          - databento
+          - oanda
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-contract-${{ github.ref }}-${{ inputs.provider }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.10.9"
+  UV_NO_MANAGED_PYTHON: "1"
+
+jobs:
+  public:
+    name: Public Provider Integration Suite
+    if: inputs.provider == 'public'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Run public live integrations
+        env:
+          RUN_PUBLIC_COINGECKO_TESTS: "1"
+          RUN_PUBLIC_KALSHI_TESTS: "1"
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_binance_public.py::TestBinancePublicProvider::test_fetch_daily_spot_btc
+          tests/integration/test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc
+          tests/integration/test_kalshi.py::TestKalshiProvider::test_list_markets
+          tests/integration/test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug
+          tests/integration/test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily
+          tests/integration/test_release_provider_contracts.py
+
+  alpaca:
+    name: Alpaca Contract
+    if: inputs.provider == 'alpaca'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credentials
+        env:
+          PROVIDER_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          PROVIDER_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+        run: >-
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
+          'ALPACA_API_KEY is not configured'; assert os.environ.get('PROVIDER_API_SECRET'),
+          'ALPACA_API_SECRET is not configured'"
+      - name: Run the live contract
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_alpaca.py::TestAlpacaProvider::test_fetch_stock_daily
+
+  fred:
+    name: FRED Contract
+    if: inputs.provider == 'fred'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'FRED_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_fred.py::TestFREDProvider::test_fetch_daily_series_vix
+
+  tiingo:
+    name: Tiingo Contract
+    if: inputs.provider == 'tiingo'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'TIINGO_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_tiingo.py::TestTiingoProvider::test_fetch_ohlcv_daily
+
+  massive:
+    name: Massive Contract
+    if: inputs.provider == 'massive'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+        run: >-
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
+          'MASSIVE_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_polygon.py::TestMassiveProvider::test_fetch_ohlcv_stock_daily
+
+  finnhub:
+    name: Finnhub Contract
+    if: inputs.provider == 'finnhub'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: >-
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
+          'FINNHUB_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_finnhub.py::TestFinnhubProvider::test_fetch_quote
+
+  cryptocompare:
+    name: CryptoCompare Contract
+    if: inputs.provider == 'cryptocompare'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'CRYPTOCOMPARE_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          CRYPTOCOMPARE_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_cryptocompare.py::TestCryptoCompareProvider::test_fetch_ohlcv_btc_daily
+
+  databento:
+    name: Databento Contract
+    if: inputs.provider == 'databento'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the provider credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+        run: >-
+          python -c "import os; assert os.environ.get('PROVIDER_API_KEY'),
+          'DATABENTO_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
+          ML4T_RUN_DATABENTO_LIVE: "1"
+        run: >-
+          uv run pytest -q -m integration
+          tests/test_databento_acceptance.py::test_databento_metadata_contract
+
+  oanda:
+    name: OANDA Contract
+    if: inputs.provider == 'oanda'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv sync --locked --dev
+      - name: Require the practice credential
+        env:
+          PROVIDER_API_KEY: ${{ secrets.OANDA_API_KEY }}
+        run: python -c "import os; assert os.environ.get('PROVIDER_API_KEY'), 'OANDA_API_KEY is not configured'"
+      - name: Run the live contract
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+        run: >-
+          uv run pytest -q -m integration
+          tests/integration/test_oanda.py::TestOandaProvider::test_fetch_ohlcv_eurusd_daily

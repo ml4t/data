@@ -370,6 +370,13 @@ class TestBackupManager:
 
         assert "my_backup" in str(backup_path)
 
+    @pytest.mark.parametrize(
+        "backup_name", ["../../escaped", "..\\..\\escaped", "/absolute", "C:\\absolute"]
+    )
+    def test_create_backup_rejects_path_escape(self, backup_manager, backup_name):
+        with pytest.raises(ValueError):
+            backup_manager.create_backup(backup_name=backup_name)
+
     def test_create_backup_auto_name(self, backup_manager, tmp_path):
         """Test backup auto-generates timestamp name."""
         # Create some data

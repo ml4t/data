@@ -1,16 +1,92 @@
-"""Core corporate actions adjustment functions.
-
-This module implements price adjustment algorithms for stock splits and
-dividends, following the industry-standard methodology used by Quandl, Yahoo
-Finance, and other major data providers.
-
-The adjustment works BACKWARD from the most recent date, using this formula:
-    Adj[i] = Adj[i+1] + Adj[i+1] × ((Price[i] × Split[i+1] - Price[i+1] - Div[i+1]) / Price[i+1])
-
-Where indices go from newest (0) to oldest (n).
-"""
+"""Corporate-action adjustment functions."""
 
 import polars as pl
+
+
+def _validate_adjustment_inputs(
+    df: pl.DataFrame,
+    *,
+    split_col: str,
+    dividend_col: str | None,
+    price_cols: list[str],
+    volume_col: str | None,
+) -> None:
+    required = {"date", split_col, *price_cols}
+    if dividend_col is not None:
+        required.update(("close", dividend_col))
+    missing = sorted(required.difference(df.columns))
+    if missing:
+        raise ValueError(f"Missing required adjustment columns: {', '.join(missing)}")
+    if df.get_column("date").null_count():
+        raise ValueError("Corporate-action dates cannot contain null values")
+    if df.get_column("date").n_unique() != df.height:
+        raise ValueError("Corporate-action input must contain exactly one row per date")
+
+    finite_columns = [split_col, *price_cols]
+    if dividend_col is not None:
+        finite_columns.extend(("close", dividend_col))
+    if volume_col is not None and volume_col in df.columns:
+        finite_columns.append(volume_col)
+    for column in dict.fromkeys(finite_columns):
+        invalid = df.filter(pl.col(column).is_null() | ~pl.col(column).is_finite())
+        if not invalid.is_empty():
+            raise ValueError(f"Adjustment column '{column}' must contain finite values")
+
+    if not df.filter(pl.col(split_col) <= 0).is_empty():
+        raise ValueError(f"Split ratios in '{split_col}' must be positive")
+    if dividend_col is not None and not df.filter(pl.col("close") <= 0).is_empty():
+        raise ValueError("Close prices must be positive")
+    if dividend_col is not None and not df.filter(pl.col(dividend_col) < 0).is_empty():
+        raise ValueError(f"Dividends in '{dividend_col}' cannot be negative")
+    if volume_col is not None and volume_col in df.columns:
+        if not df.filter(pl.col(volume_col) < 0).is_empty():
+            raise ValueError(f"Volume in '{volume_col}' cannot be negative")
+
+
+def _future_cumulative_product(column: str) -> pl.Expr:
+    return pl.col(column).shift(-1, fill_value=1.0).reverse().cum_prod().reverse()
+
+
+def _apply_canonical_adjustments(
+    prices: pl.DataFrame,
+    *,
+    split_col: str,
+    dividend_col: str | None,
+    price_cols: list[str],
+    volume_col: str | None,
+) -> pl.DataFrame:
+    _validate_adjustment_inputs(
+        prices,
+        split_col=split_col,
+        dividend_col=dividend_col,
+        price_cols=price_cols,
+        volume_col=volume_col,
+    )
+    df = prices.sort("date").clone()
+
+    price_event_factor = (
+        pl.col("close")
+        / (pl.col(split_col).cast(pl.Float64) * (pl.col("close") + pl.col(dividend_col)))
+        if dividend_col is not None
+        else 1.0 / pl.col(split_col).cast(pl.Float64)
+    )
+    df = df.with_columns(
+        price_event_factor.alias("_price_event_factor"),
+        pl.col(split_col).cast(pl.Float64).alias("_volume_event_factor"),
+    ).with_columns(
+        _future_cumulative_product("_price_event_factor").alias("price_adjustment_factor"),
+        _future_cumulative_product("_volume_event_factor").alias("volume_adjustment_factor"),
+    )
+
+    adjustments = [
+        (pl.col(column) * pl.col("price_adjustment_factor")).alias(f"adj_{column}")
+        for column in price_cols
+    ]
+    if volume_col is not None and volume_col in df.columns:
+        adjustments.append(
+            (pl.col(volume_col) * pl.col("volume_adjustment_factor")).alias(f"adj_{volume_col}")
+        )
+    return df.with_columns(adjustments).drop("_price_event_factor", "_volume_event_factor")
 
 
 def apply_corporate_actions(
@@ -20,12 +96,15 @@ def apply_corporate_actions(
     price_cols: list[str] | None = None,
     volume_col: str | None = "volume",
 ) -> pl.DataFrame:
-    """Apply both split and dividend adjustments to create fully adjusted prices.
+    """Adjust prices and volume to the share basis of the latest observation.
 
-    Uses the industry-standard backward-adjustment methodology where each day's
-    adjusted price is calculated from the next day's adjusted price and corporate
-    actions. This matches the approach used by Quandl, Yahoo Finance, and other
-    major data providers.
+    A split ratio on date ``t`` is new shares per old share and applies between
+    the preceding observation and ``t``. The row on ``t`` is already on the new
+    share basis. Earlier prices are divided by subsequent split ratios and
+    earlier volume is multiplied by them. A dividend is cash per post-event
+    share on its ex-date. Adjusted close-to-close returns include that cash.
+    The dividend factor uses the ex-date close. This differs from data vendors
+    that discount dividends using the prior close.
 
     Args:
         prices: DataFrame with date-sorted prices and corporate action data
@@ -35,105 +114,20 @@ def apply_corporate_actions(
         volume_col: Volume column to adjust (default: 'volume')
 
     Returns:
-        DataFrame with fully adjusted prices (splits + dividends)
-
-    Formula:
-        For each price column, working backwards from newest to oldest:
-        Adj[i] = Adj[i+1] + Adj[i+1] × ((Price[i] × Split[i+1] - Price[i+1] - Div[i+1]) / Price[i+1])
-
-        Simplified:
-        Adj[i] = Adj[i+1] × (Price[i] × Split[i+1] - Div[i+1]) / Price[i+1]
-
-    Example:
-        >>> # Validate against Quandl's pre-calculated adjusted prices
-        >>> result = apply_corporate_actions(quandl_df)
-        >>> assert np.allclose(result['adj_close'], quandl_df['adj_close'])
-
-    Note:
-        - Most recent date: adjusted price = unadjusted price
-        - Historical dates: adjusted using formula above
-        - Volume is adjusted by cumulative split ratio only
+        DataFrame retaining raw columns and adding adjusted columns plus explicit
+        price and volume adjustment factors
     """
     if price_cols is None:
-        price_cols = ["open", "high", "low", "close"]
-
-    # Ensure data is sorted by date (oldest first)
-    df = prices.sort("date").clone()
-
-    # Convert to numpy for efficient backward iteration
-    n = len(df)
-
-    # Extract columns we need
-    close_vals = df["close"].to_numpy()
-    split_vals = df[split_col].to_numpy()
-    div_vals = df[dividend_col].to_numpy()
-
-    # Initialize adjusted prices
-    adj_prices = {}
-    for col in price_cols:
-        if col in df.columns:
-            adj_prices[col] = df[col].to_numpy().copy()
-
-    # Detect which reverse splits have close prices adjusted for the split
-    # Some data providers adjust close prices for reverse splits, others don't
-    reverse_split_uses_ratio = {}
-    for i in range(1, n):
-        if split_vals[i] < 1.0:  # Reverse split
-            close_today = close_vals[i]
-            close_prev = close_vals[i - 1]
-            expected_ratio = 1.0 / split_vals[i]
-            actual_ratio = close_today / close_prev if close_prev > 0 else 0
-
-            # If actual close change is within 20% of expected, assume it was adjusted
-            if abs(actual_ratio - expected_ratio) / expected_ratio < 0.20:
-                reverse_split_uses_ratio[i] = True
-            else:
-                reverse_split_uses_ratio[i] = False
-
-    # Work BACKWARDS from newest (index n-1) to oldest (index 0)
-    # The most recent date's adjusted price equals its unadjusted price
-    # For each earlier date, apply the formula using the next day's values
-
-    for i in range(n - 2, -1, -1):  # From second-to-last to first
-        # Get next day's values (i+1)
-        split_next = split_vals[i + 1]
-        div_next = div_vals[i + 1]
-        close_next = close_vals[i + 1]
-
-        # Get today's close (used in formula for all columns)
-        close_today = close_vals[i]
-
-        # Calculate adjustment factor for all price columns
-        # Different data providers encode reverse splits differently:
-        # - Normal splits: always use split_ratio
-        # - Reverse splits: use split_ratio only if close was mechanically adjusted
-        if split_next >= 1.0:
-            # Normal split: use split_ratio in formula
-            adjustment_factor = (close_today / split_next - div_next) / close_next
-        elif reverse_split_uses_ratio.get(i + 1, False):
-            # Reverse split where close WAS adjusted: use split_ratio
-            adjustment_factor = (close_today / split_next - div_next) / close_next
-        else:
-            # Reverse split where close was NOT adjusted: ignore split_ratio
-            adjustment_factor = (close_today - div_next) / close_next
-
-        for col in price_cols:
-            if col in adj_prices:
-                adj_next = adj_prices[col][i + 1]
-
-                # Apply the adjustment formula
-                adj_prices[col][i] = adj_next * adjustment_factor
-
-    # Add adjusted price columns to dataframe
-    for col, values in adj_prices.items():
-        df = df.with_columns([pl.Series(name=f"adj_{col}", values=values)])
-
-    # Adjust volume: multiply by cumulative split ratio (forward calculation)
-    if volume_col and volume_col in df.columns:
-        cumulative_split = df[split_col].cum_prod()
-        df = df.with_columns([(pl.col(volume_col) * cumulative_split).alias(f"adj_{volume_col}")])
-
-    return df
+        price_cols = [
+            column for column in ("open", "high", "low", "close") if column in prices.columns
+        ]
+    return _apply_canonical_adjustments(
+        prices,
+        split_col=split_col,
+        dividend_col=dividend_col,
+        price_cols=price_cols,
+        volume_col=volume_col,
+    )
 
 
 def apply_splits(
@@ -142,57 +136,28 @@ def apply_splits(
     price_cols: list[str] | None = None,
     volume_col: str | None = "volume",
 ) -> pl.DataFrame:
-    """Apply stock split adjustments to historical prices.
-
-    DEPRECATED: For educational purposes. Use apply_corporate_actions() for
-    production code, as it properly handles both splits and dividends together
-    using the industry-standard methodology.
-
-    This function uses a simplified cumulative product approach that works for
-    splits in isolation but doesn't properly interact with dividend adjustments.
+    """Apply the canonical split-only adjustment convention.
 
     Args:
         prices: DataFrame with date-sorted prices and split_ratio column
         split_col: Name of column containing split ratios (default: 'split_ratio')
         price_cols: List of price columns to adjust (default: ['open', 'high', 'low', 'close'])
-        volume_col: Volume column name to adjust (multiplied by split ratio)
+        volume_col: Volume column name to adjust
 
     Returns:
-        DataFrame with split-adjusted prices
+        DataFrame retaining raw values and adding adjusted values and factors
     """
     if price_cols is None:
-        price_cols = ["open", "high", "low", "close"]
-
-    # Create a copy to avoid modifying original
-    df = prices.clone()
-
-    # Calculate cumulative split factor (backward from most recent to oldest)
-    # For each row, cumulative_factor = product of all split_ratios from that date forward
-    df = df.with_columns(
-        [pl.col(split_col).reverse().cum_prod().reverse().alias("_cumulative_split_factor")]
+        price_cols = [
+            column for column in ("open", "high", "low", "close") if column in prices.columns
+        ]
+    return _apply_canonical_adjustments(
+        prices,
+        split_col=split_col,
+        dividend_col=None,
+        price_cols=price_cols,
+        volume_col=volume_col,
     )
-
-    # Adjust prices: divide by cumulative split factor
-    # Adjust volume: multiply by cumulative split factor
-    adjustments = []
-
-    for col in price_cols:
-        if col in df.columns:
-            adjustments.append(
-                (pl.col(col) / pl.col("_cumulative_split_factor")).alias(f"adj_{col}")
-            )
-
-    if volume_col and volume_col in df.columns:
-        adjustments.append(
-            (pl.col(volume_col) * pl.col("_cumulative_split_factor")).alias(f"adj_{volume_col}")
-        )
-
-    df = df.with_columns(adjustments)
-
-    # Drop temporary column
-    df = df.drop("_cumulative_split_factor")
-
-    return df
 
 
 def apply_dividends(
@@ -201,15 +166,13 @@ def apply_dividends(
     price_cols: list[str] | None = None,
     close_col: str = "adj_close",
 ) -> pl.DataFrame:
-    """Apply dividend adjustments to historical prices (total return calculation).
+    """Apply dividend-only adjustments that preserve total close-to-close returns.
 
-    DEPRECATED: For educational purposes. Use apply_corporate_actions() for
-    production code, as it properly handles both splits and dividends together
-    using the industry-standard methodology.
-
-    This function uses a simplified cumulative product approach that doesn't
-    match the industry-standard iterative backward adjustment used by Quandl
-    and Yahoo Finance.
+    A dividend on date ``t`` is cash per share paid between the preceding
+    observation and ``t``. The event row remains unchanged. This adapter is for
+    data whose split adjustments have already been handled consistently. When
+    split factors are present, dividends are converted to the latest share basis
+    and the dividend factor is composed with the existing price factor.
 
     Args:
         prices: DataFrame with date-sorted prices and ex-dividend column
@@ -218,38 +181,72 @@ def apply_dividends(
         close_col: Column to use for dividend factor calculation (default: 'adj_close')
 
     Returns:
-        DataFrame with dividend-adjusted prices (total return series)
+        DataFrame with adjusted price columns and an explicit adjustment factor
     """
     if price_cols is None:
-        price_cols = ["adj_open", "adj_high", "adj_low", "adj_close"]
-
-    df = prices.clone()
-
-    # Calculate cumulative dividend adjustment factor
-    # Factor = (1 - dividend/price) for each ex-dividend date
-    # Cumulative product applied backward in time
-    df = df.with_columns(
-        [
-            pl.when(pl.col(dividend_col) > 0)
-            .then(1 - pl.col(dividend_col) / pl.col(close_col))
-            .otherwise(1.0)
-            .alias("_div_factor")
+        price_cols = [
+            column
+            for column in ("adj_open", "adj_high", "adj_low", "adj_close")
+            if column in prices.columns
         ]
+
+    required = {"date", dividend_col, close_col, *price_cols}
+    missing = sorted(required.difference(prices.columns))
+    if missing:
+        raise ValueError(f"Missing required dividend columns: {', '.join(missing)}")
+    df = prices.sort("date").clone()
+    if df.get_column("date").null_count():
+        raise ValueError("Dividend dates cannot contain null values")
+    if df.get_column("date").n_unique() != df.height:
+        raise ValueError("Dividend input must contain exactly one row per date")
+    for column in (dividend_col, close_col, *price_cols):
+        if not df.filter(pl.col(column).is_null() | ~pl.col(column).is_finite()).is_empty():
+            raise ValueError(f"Dividend adjustment column '{column}' must contain finite values")
+    if not df.filter(pl.col(dividend_col) < 0).is_empty():
+        raise ValueError(f"Dividends in '{dividend_col}' cannot be negative")
+    if not df.filter(pl.col(close_col) <= 0).is_empty():
+        raise ValueError(f"Close prices in '{close_col}' must be positive")
+
+    for factor_column in ("price_adjustment_factor", "volume_adjustment_factor"):
+        if (
+            factor_column in df.columns
+            and not df.filter(
+                pl.col(factor_column).is_null()
+                | ~pl.col(factor_column).is_finite()
+                | (pl.col(factor_column) <= 0)
+            ).is_empty()
+        ):
+            raise ValueError(f"Adjustment factor '{factor_column}' must be finite and positive")
+
+    rebased_dividend = pl.col(dividend_col)
+    if "volume_adjustment_factor" in df.columns:
+        rebased_dividend = rebased_dividend / pl.col("volume_adjustment_factor")
+    existing_factor = (
+        pl.col("price_adjustment_factor")
+        if "price_adjustment_factor" in df.columns
+        else pl.lit(1.0)
     )
 
-    df = df.with_columns(
-        [pl.col("_div_factor").reverse().cum_prod().reverse().alias("_cumulative_div_factor")]
+    return (
+        df.with_columns(rebased_dividend.alias("_rebased_dividend"))
+        .with_columns(
+            (pl.col(close_col) / (pl.col(close_col) + pl.col("_rebased_dividend"))).alias(
+                "_dividend_event_factor"
+            )
+        )
+        .with_columns(
+            _future_cumulative_product("_dividend_event_factor").alias(
+                "_dividend_adjustment_factor"
+            )
+        )
+        .with_columns(
+            *[
+                (pl.col(column) * pl.col("_dividend_adjustment_factor")).alias(column)
+                for column in price_cols
+            ],
+            (existing_factor * pl.col("_dividend_adjustment_factor")).alias(
+                "price_adjustment_factor"
+            ),
+        )
+        .drop("_rebased_dividend", "_dividend_event_factor", "_dividend_adjustment_factor")
     )
-
-    # Adjust prices by dividing by cumulative dividend factor
-    adjustments = []
-    for col in price_cols:
-        if col in df.columns:
-            adjustments.append((pl.col(col) / pl.col("_cumulative_div_factor")).alias(col))
-
-    df = df.with_columns(adjustments)
-
-    # Drop temporary columns
-    df = df.drop(["_div_factor", "_cumulative_div_factor"])
-
-    return df

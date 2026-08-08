@@ -2,7 +2,8 @@
 
 import shutil
 import tempfile
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -48,6 +49,39 @@ class TestStorageBackends:
             assert isinstance(storage, FlatStorage)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_init_rejects_symlinked_metadata_root(self, tmp_path, tmp_path_factory, strategy):
+        """Storage locks cannot be redirected outside the configured root."""
+        outside = tmp_path_factory.mktemp("metadata-outside")
+        try:
+            (tmp_path / ".metadata").symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            create_storage(tmp_path, strategy=strategy)
+
+        assert not any(outside.iterdir())
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_delete_rejects_symlinked_trash_root(
+        self, tmp_path, tmp_path_factory, sample_data, strategy
+    ):
+        """Deleting a key cannot move it to an external directory."""
+        storage = create_storage(tmp_path, strategy=strategy)
+        storage.write(sample_data, "test_key")
+        outside = tmp_path_factory.mktemp("trash-outside")
+        try:
+            (tmp_path / ".trash").symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.delete("test_key")
+
+        assert storage.exists("test_key")
+        assert not any(outside.iterdir())
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_write_read_cycle(self, temp_dir, sample_data, strategy):
         """Test basic write and read operations."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -62,6 +96,17 @@ class TestStorageBackends:
         assert set(df.columns) == set(sample_data.columns)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_relative_base_path_is_resolved(self, tmp_path, monkeypatch, sample_data, strategy):
+        """Relative storage roots support a complete write and read cycle."""
+        monkeypatch.chdir(tmp_path)
+        storage = create_storage("relative-data", strategy=strategy)
+
+        storage.write(sample_data.lazy(), "test_key")
+
+        assert storage.base_path == (tmp_path / "relative-data").resolve()
+        assert len(storage.read("test_key").collect()) == len(sample_data)
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_date_filtering(self, temp_dir, sample_data, strategy):
         """Test reading with date filters."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -74,8 +119,8 @@ class TestStorageBackends:
 
         # Should have June data only
         assert len(df) == 30
-        assert df["timestamp"].min() >= start
-        assert df["timestamp"].max() < end
+        assert df["timestamp"].min() >= start.replace(tzinfo=UTC)
+        assert df["timestamp"].max() < end.replace(tzinfo=UTC)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_column_selection(self, temp_dir, sample_data, strategy):
@@ -123,6 +168,42 @@ class TestStorageBackends:
         assert "key2" in keys
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_list_keys_ignores_malformed_encoded_entry(self, temp_dir, sample_data, strategy):
+        """One malformed physical entry does not hide valid logical keys."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        storage.write(sample_data.lazy(), "valid_key")
+        malformed = storage.base_path / "k1_invalid$"
+        malformed.mkdir()
+        (malformed / "CURRENT").write_text("not-a-commit\n", encoding="utf-8")
+
+        assert storage.list_keys() == ["valid_key"]
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    def test_logical_keys_do_not_alias(self, temp_dir, strategy):
+        """Separators and underscores retain distinct physical identities."""
+        storage = create_storage(temp_dir, strategy=strategy)
+        first = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "close": [1.0]})
+        second = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "close": [2.0]})
+
+        first_path = storage.write(first, "a/b_c")
+        second_path = storage.write(second, "a_b/c")
+
+        assert first_path != second_path
+        assert storage.read("a/b_c").collect()["close"].item() == 1.0
+        assert storage.read("a_b/c").collect()["close"].item() == 2.0
+        assert storage.list_keys() == ["a/b_c", "a_b/c"]
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
+    @pytest.mark.parametrize("key", ["../../../escaped", "a/../escaped", "a\\..\\escaped"])
+    def test_storage_keys_cannot_escape_base_path(self, temp_dir, sample_data, strategy, key):
+        storage = create_storage(temp_dir, strategy=strategy)
+
+        with pytest.raises(ValueError):
+            storage.write(sample_data, key)
+
+        assert not (temp_dir.parent / "escaped").exists()
+
+    @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_exists(self, temp_dir, sample_data, strategy):
         """Test key existence check."""
         storage = create_storage(temp_dir, strategy=strategy)
@@ -149,10 +230,9 @@ class TestStorageBackends:
     def test_hive_partitioning(self, temp_dir, sample_data):
         """Test Hive-specific partitioning structure."""
         storage = create_storage(temp_dir, strategy="hive")
-        storage.write(sample_data.lazy(), "test_key")
+        key_path = storage.write(sample_data.lazy(), "test_key")
 
         # Check partition structure
-        key_path = temp_dir / "test_key"
         assert key_path.exists()
 
         # Should have year directories
@@ -175,6 +255,154 @@ class TestStorageBackends:
         # No temp files should remain
         temp_files = list(temp_dir.glob("*.tmp"))
         assert len(temp_files) == 0
+
+    def test_hive_repeated_write_is_full_replacement(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="hive")
+        original = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15), datetime(2024, 2, 15)],
+                "close": [1.0, 2.0],
+            }
+        )
+        replacement = pl.DataFrame({"timestamp": [datetime(2024, 1, 20)], "close": [3.0]})
+        storage.write(original, "prices")
+
+        storage.write(replacement, "prices")
+
+        expected = replacement.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
+        metadata = storage.get_metadata("prices")
+        assert metadata is not None
+        assert metadata["row_count"] == 1
+        assert metadata["partitions"] == ["year=2024/month=1"]
+
+    def test_hive_partition_failure_preserves_previous_commit(self, temp_dir, monkeypatch):
+        storage = create_storage(temp_dir, strategy="hive")
+        original = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15), datetime(2024, 2, 15)],
+                "close": [1.0, 2.0],
+            }
+        )
+        replacement = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 3, 15), datetime(2024, 4, 15)],
+                "close": [3.0, 4.0],
+            }
+        )
+        storage.write(original, "prices")
+        previous_commit = storage._current_commit("prices")
+        original_atomic_write = storage._atomic_write
+        call_count = 0
+
+        def fail_second_partition(df, path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise OSError("injected partition failure")
+            original_atomic_write(df, path)
+
+        monkeypatch.setattr(storage, "_atomic_write", fail_second_partition)
+
+        with pytest.raises(OSError, match="injected partition failure"):
+            storage.write(replacement, "prices")
+
+        expected = original.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
+        assert storage._current_commit("prices").commit_id == previous_commit.commit_id
+        assert storage.get_metadata("prices") == previous_commit.metadata
+        assert not list(storage._key_path("prices").glob(".staging-*"))
+        restarted = create_storage(temp_dir, strategy="hive")
+        assert restarted.read("prices").collect().equals(expected)
+
+    def test_pointer_failure_preserves_previous_commit(self, temp_dir, monkeypatch):
+        storage = create_storage(temp_dir, strategy="flat")
+        original = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)], "value": [1]})
+        replacement = pl.DataFrame({"timestamp": [datetime(2024, 1, 2)], "value": [2]})
+        storage.write(original, "prices")
+        previous_commit = storage._current_commit("prices")
+
+        def fail_pointer(path, content):
+            raise OSError("injected pointer failure")
+
+        monkeypatch.setattr(storage, "_atomic_write_text", fail_pointer)
+
+        with pytest.raises(OSError, match="injected pointer failure"):
+            storage.write(replacement, "prices")
+
+        expected = original.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
+        assert storage._current_commit("prices").commit_id == previous_commit.commit_id
+        restarted = create_storage(temp_dir, strategy="flat")
+        assert restarted.read("prices").collect().equals(expected)
+
+    def test_next_write_removes_unpublished_staging_directory(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        storage.write(pl.DataFrame({"value": [1]}), "prices")
+        staging = storage._key_path("prices") / ".staging-interrupted"
+        staging.mkdir()
+        (staging / "partial.parquet").write_bytes(b"partial")
+
+        restarted = create_storage(temp_dir, strategy="flat")
+        assert staging.exists()
+        restarted.write(pl.DataFrame({"value": [2]}), "prices")
+
+        assert not staging.exists()
+
+    def test_constructor_does_not_delete_another_writer_staging(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        key_path = storage._key_path("prices")
+        key_path.mkdir()
+        staging = key_path / ".staging-active"
+        staging.mkdir()
+        (staging / "partial.parquet").write_bytes(b"partial")
+
+        create_storage(temp_dir, strategy="flat")
+
+        assert staging.is_dir()
+
+    def test_corrupt_current_commit_falls_back_to_prior_valid_generation(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        original = pl.DataFrame({"value": [1]})
+        replacement = pl.DataFrame({"value": [2]})
+        storage.write(original, "prices")
+        storage.write(replacement, "prices")
+        current = storage._current_commit("prices")
+        commit_path = storage._key_path("prices") / "commits" / f"{current.commit_id}.json"
+        commit_path.write_text("{invalid", encoding="utf-8")
+
+        assert storage.read("prices").collect().equals(original)
+
+    def test_generation_history_is_bounded(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+        for value in range(10):
+            storage.write(pl.DataFrame({"value": [value]}), "prices")
+
+        key_path = storage._key_path("prices")
+        assert len(list((key_path / "commits").glob("*.json"))) == storage.GENERATION_RETENTION
+        assert len(list((key_path / "generations").iterdir())) == storage.GENERATION_RETENTION
+        assert storage.read("prices").collect()["value"].item() == 9
+
+    def test_concurrent_flat_writes_publish_matching_data_and_metadata(self, temp_dir):
+        storage = create_storage(temp_dir, strategy="flat")
+
+        def write_generation(writer: int) -> None:
+            data = pl.DataFrame(
+                {
+                    "timestamp": [datetime(2024, 1, 1)] * writer,
+                    "writer": [writer] * writer,
+                }
+            )
+            storage.write(data, "prices", metadata={"writer": writer})
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write_generation, range(1, 25)))
+
+        data = storage.read("prices").collect()
+        metadata = storage.get_metadata("prices")
+        assert metadata is not None
+        assert data.height == metadata["row_count"]
+        assert data["writer"].unique().to_list() == [metadata["custom"]["writer"]]
 
     def test_lazy_evaluation(self, temp_dir, sample_data):
         """Test that lazy evaluation is preserved."""
@@ -200,8 +428,7 @@ class TestStorageConfig:
         config = StorageConfig(base_path=temp_dir)
         assert config.strategy == "hive"
         assert config.compression == "zstd"
-        assert config.atomic_writes
-        assert config.enable_locking
+        assert config.lock_timeout == 30
         assert config.metadata_tracking
         assert config.partition_cols == ["year", "month"]
 
@@ -213,9 +440,6 @@ class TestStorageConfig:
 
     def test_custom_config(self, temp_dir):
         """Test custom configuration."""
-        config = StorageConfig(
-            base_path=temp_dir, compression="lz4", atomic_writes=False, enable_locking=False
-        )
+        config = StorageConfig(base_path=temp_dir, compression="lz4", lock_timeout=12)
         assert config.compression == "lz4"
-        assert not config.atomic_writes
-        assert not config.enable_locking
+        assert config.lock_timeout == 12

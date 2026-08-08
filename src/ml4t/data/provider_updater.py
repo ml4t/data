@@ -6,7 +6,7 @@ This integrates provider fetching, transformation, and storage in one workflow.
 
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import polars as pl
@@ -43,7 +43,7 @@ class ProviderUpdater(ABC):
                 return data  # Already in correct format
 
             def _get_default_start_time(self, symbol):
-                return datetime.now() - timedelta(days=365)
+                return datetime.now(UTC) - timedelta(days=365)
     """
 
     def __init__(
@@ -81,7 +81,8 @@ class ProviderUpdater(ABC):
 
         Args:
             symbol: Symbol to update (e.g., "AAPL", "BTC-USD")
-            start_time: Start time (uses latest timestamp if None and incremental)
+            start_time: Start time. Uses the latest stored timestamp for incremental updates or
+                the provider default for a full refresh.
             end_time: End time (uses current time if None)
             incremental: If True, fetch only data after latest timestamp
             dry_run: If True, don't write files
@@ -114,6 +115,9 @@ class ProviderUpdater(ABC):
                 stats["success"] = True
                 stats["skip_reason"] = "already_up_to_date"
                 return stats
+
+            if start_time is None or end_time is None:
+                raise RuntimeError("time range resolution returned an incomplete range")
 
             stats["start_time"] = start_time
             stats["end_time"] = end_time
@@ -208,7 +212,7 @@ class ProviderUpdater(ABC):
             max_workers=max_workers,
         )
 
-        results = {}
+        results: dict[str, dict[str, Any]] = {}
 
         if max_workers == 1 or len(symbols) == 1:
             # Sequential processing
@@ -258,7 +262,7 @@ class ProviderUpdater(ABC):
 
         # Log summary
         successful = sum(1 for r in results.values() if r.get("success", False))
-        total_added = sum(r.get("records_added", 0) for r in results.values())
+        total_added = sum(int(r.get("records_added", 0)) for r in results.values())
 
         self.logger.info(
             "Concurrent updates completed",
@@ -289,11 +293,15 @@ class ProviderUpdater(ABC):
             Tuple of (start_time, end_time), or (None, None) if no update needed
         """
         # Determine start time
-        if incremental and start_time is None:
-            # Get latest existing timestamp
-            latest_ts = self.storage.get_latest_timestamp(symbol, self.provider_name)
+        used_default_start = False
+        if start_time is None:
+            latest_ts = (
+                self.storage.get_latest_timestamp(symbol, self.provider_name)
+                if incremental
+                else None
+            )
 
-            if latest_ts:
+            if latest_ts is not None:
                 # Start from after latest, with safety margin
                 start_time = latest_ts - self.safety_margin + timedelta(minutes=1)
 
@@ -304,17 +312,26 @@ class ProviderUpdater(ABC):
                     start=start_time,
                 )
             else:
-                # No existing data - use subclass default
+                # No existing data or a full refresh - use subclass default
                 start_time = self._get_default_start_time(symbol)
+                used_default_start = True
                 self.logger.info(
-                    "No existing data, starting from default",
+                    "Using default start time",
                     symbol=symbol,
                     start=start_time,
+                    incremental=incremental,
                 )
+
+        if used_default_start and start_time.tzinfo is None:
+            default_timezone = end_time.tzinfo if end_time is not None else UTC
+            start_time = start_time.replace(tzinfo=default_timezone)
 
         # Determine end time
         if end_time is None:
-            end_time = datetime.now().replace(microsecond=0)
+            end_time = datetime.now(tz=start_time.tzinfo).replace(microsecond=0)
+
+        if (start_time.tzinfo is None) != (end_time.tzinfo is None):
+            raise ValueError("start_time and end_time must both be timezone-aware or both naive")
 
         # Validate range
         if start_time >= end_time:

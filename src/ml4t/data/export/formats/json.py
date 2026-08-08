@@ -182,23 +182,24 @@ class JSONExporter(BaseExporter):
         Returns:
             JSON-serializable dictionary
         """
-        result = {
+        result: dict[str, Any] = {
             "symbol": symbol,
             "data": self._dataframe_to_dict(df),
         }
 
         if self.config.include_metadata:
-            result["metadata"] = {
+            metadata: dict[str, Any] = {
                 "exported_at": datetime.now().isoformat(),
                 "rows": len(df),
                 "columns": df.columns,
             }
 
             if "timestamp" in df.columns and len(df) > 0:
-                result["metadata"]["date_range"] = {
+                metadata["date_range"] = {
                     "start": self._serialize_datetime(df["timestamp"].min()),
                     "end": self._serialize_datetime(df["timestamp"].max()),
                 }
+            result["metadata"] = metadata
 
         return result
 

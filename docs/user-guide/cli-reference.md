@@ -16,23 +16,26 @@ Fetch financial data from any configured provider.
 
 ```bash
 # Single symbol
-ml4t-data fetch -s AAPL --start 2024-01-01 --end 2024-12-31
+ml4t-data fetch -s AAPL --provider yahoo --start 2024-01-01 --end 2024-12-31
 
 # Multiple symbols
-ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-06-30
+ml4t-data fetch -s BTC -s ETH --provider cryptocompare \
+    --start 2024-01-01 --end 2024-06-30
 
 # From a symbols file (one symbol per line)
-ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-12-31
+ml4t-data fetch -f symbols.txt --provider yahoo --start 2024-01-01 --end 2024-12-31
 
 # Specific provider and frequency
 ml4t-data fetch -s AAPL --provider yahoo --frequency daily \
     --start 2024-01-01 --end 2024-12-31
 
 # Save output to file
-ml4t-data fetch -s AAPL --start 2024-01-01 --end 2024-12-31 -o data.parquet
+ml4t-data fetch -s AAPL --provider yahoo \
+    --start 2024-01-01 --end 2024-12-31 -o data.parquet
 
 # Show progress bar for batch fetches
-ml4t-data fetch -f sp500.txt --start 2024-01-01 --end 2024-12-31 --progress
+ml4t-data fetch -f sp500.txt --provider yahoo \
+    --start 2024-01-01 --end 2024-12-31 --progress
 ```
 
 | Option | Short | Description |
@@ -52,25 +55,32 @@ ml4t-data fetch -f sp500.txt --start 2024-01-01 --end 2024-12-31 --progress
 Perform incremental data updates for symbols already in storage.
 
 ```bash
-# Incremental update (default - only fetches new data)
+# Incremental update of an existing dataset
 ml4t-data update -s AAPL --storage-path ./data
 
-# Full refresh
-ml4t-data update -s AAPL --strategy full_refresh --storage-path ./data
+# Use a longer overlap to revise recent observations
+ml4t-data update -s AAPL --lookback-days 30 --storage-path ./data
 
-# Backfill with specific date range
-ml4t-data update -s AAPL --strategy backfill \
+# Set the date range used when the dataset does not exist yet
+ml4t-data update -s AAPL --provider yahoo \
     --start 2020-01-01 --end 2020-12-31 --storage-path ./data
+
+# Use the storage and provider settings from a configuration file
+ml4t-data update -s AAPL --config ml4t-data.yaml
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--symbol`, `-s` | Symbol to update (required) |
-| `--start` | Start date (defaults to 30 days ago) |
-| `--end` | End date (defaults to today) |
-| `--strategy` | `incremental`, `append_only`, `full_refresh`, or `backfill` |
+| `--frequency` | `daily`, `hourly`, or `weekly` |
+| `--asset-class` | `equities`, `crypto`, `forex`, or `futures` |
+| `--lookback-days` | Existing-data overlap used for revisions |
+| `--fill-gaps`, `--no-fill-gaps` | Enable or disable gap filling |
 | `--provider`, `-p` | Provider to use for fetching |
-| `--storage-path` | Storage directory (default: `./data`) |
+| `--start`, `--end` | Date bounds used only for a first load |
+| `--initial-load-days` | First-load history when `--start` is omitted |
+| `--config` | Configuration file selecting storage and provider settings |
+| `--storage-path` | Hive storage directory (default: `./data`) |
 
 ### validate
 
@@ -88,7 +98,7 @@ ml4t-data validate --all --storage-path ./data
 ml4t-data validate -s AAPL --anomalies --storage-path ./data
 
 # Filter by severity and save report
-ml4t-data validate -s AAPL --anomalies --severity error --save-report
+ml4t-data validate -s AAPL --anomalies --severity error --save-report --config ml4t-data.yaml
 ```
 
 | Option | Description |
@@ -98,7 +108,9 @@ ml4t-data validate -s AAPL --anomalies --severity error --save-report
 | `--anomalies` | Run anomaly detection (return outliers, volume spikes, staleness) |
 | `--save-report` | Save anomaly report to `./anomaly_reports/` |
 | `--severity` | Minimum severity: `info`, `warning`, `error`, `critical` |
-| `--storage-path` | Storage directory (default: `./data`) |
+| `--frequency`, `--asset-class` | Select the canonical dataset key |
+| `--config` | Configuration file selecting Hive or flat storage |
+| `--storage-path` | Hive storage directory (default: `./data`) |
 
 ### status
 
@@ -106,21 +118,25 @@ Show system overview and health status of stored datasets.
 
 ```bash
 ml4t-data status --storage-path ./data
-ml4t-data status --detailed --storage-path ./data
+ml4t-data status --detailed --stale-days 7 --storage-path ./data
+ml4t-data status --config config.yaml --detailed
 ```
 
-The `--detailed` flag shows per-symbol panels with provider, frequency, row count,
-date range, last update, and health status.
+The `--detailed` flag shows each dataset's provider, row count, observation date,
+last update, and health status. Use `--config` to select a configured Hive or flat store.
 
 ### export
 
 Export stored data to CSV, JSON, or Parquet.
 
 ```bash
-ml4t-data export -s AAPL -o aapl.csv --format csv
-ml4t-data export -s AAPL -o aapl.json --format json
-ml4t-data export -s AAPL -o aapl.parquet --format parquet
+ml4t-data export -s AAPL -o aapl.csv --format csv --storage-path ./data
+ml4t-data export -s AAPL -o aapl.json --format json --config ml4t-data.yaml
+ml4t-data export -s BTC --asset-class crypto -o btc.parquet --format parquet
 ```
+
+Use `--frequency` and `--asset-class` to select the dataset key. Use either
+`--config` for configured Hive or flat storage, or `--storage-path` for Hive storage.
 
 ### list
 
@@ -139,6 +155,7 @@ Show detailed information about a specific stored symbol, including a data previ
 
 ```bash
 ml4t-data info -s AAPL --storage-path ./data
+ml4t-data info -s BTC --asset-class crypto --config ml4t-data.yaml
 ```
 
 ## Batch Operations
@@ -162,17 +179,17 @@ The configuration file defines datasets with inline symbols or file references:
 
 ```yaml
 storage:
-  path: ~/ml4t-data
+  base_path: ~/ml4t-data
   partition_granularity: year
 
 datasets:
-  equities:
+  - name: equities
     provider: yahoo
     symbols: [AAPL, MSFT, GOOGL]
     frequency: daily
-    asset_class: equities
+    asset_class: equity
     initial_load_days: 3650
-  sp500:
+  - name: sp500
     provider: yahoo
     symbols_file: sp500.txt
     start_date: "2010-01-01"
@@ -212,9 +229,8 @@ ml4t-data download-cot -c cot-config.yaml -o ~/ml4t-data/cot
 | `ml4t-data version` | Show version and Python information |
 | `ml4t-data providers` | List available data providers with API key requirements |
 | `ml4t-data config` | Show current configuration |
-| `ml4t-data health` | Check health status of all datasets |
-| `ml4t-data health --detailed --stale-days 7` | Show per-symbol staleness |
-| `ml4t-data server --port 8000` | Start the REST API server (requires `ml4t-data[api]`) |
+| `ml4t-data status --storage-path ./data` | Check stored dataset health |
+| `ml4t-data status --config config.yaml --detailed` | Show configured dataset status |
 | `ml4t-data show-completion bash` | Print shell completion script |
 
 ## Shell Completion

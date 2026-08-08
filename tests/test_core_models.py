@@ -42,6 +42,21 @@ class TestCoreModels:
         assert metadata.data_range["start"] == "2024-01-01"
         assert metadata.data_range["end"] == "2024-01-31"
 
+    def test_metadata_preserves_workflow_attributes(self):
+        """Workflow metadata is retained during validation and serialization."""
+        from ml4t.data.core.models import Metadata
+
+        attributes = {"last_update": "2024-01-31T00:00:00", "gaps_filled": True}
+        metadata = Metadata(
+            provider="yahoo",
+            symbol="AAPL",
+            asset_class="equities",
+            attributes=attributes,
+        )
+
+        assert metadata.attributes == attributes
+        assert metadata.model_dump()["attributes"] == attributes
+
     def test_metadata_dict_conversion(self):
         """Test Metadata model dict conversion."""
         from ml4t.data.core.models import Metadata

@@ -54,7 +54,7 @@ class PathValidator:
     VALID_KEY_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-]+/[a-zA-Z0-9_\-\.]+$")
 
     @classmethod
-    def validate_storage_key(cls, key: str) -> tuple[str, str, str]:
+    def parse_storage_key(cls, key: str) -> tuple[str, str, str]:
         """
         Validate a storage key and extract components.
 

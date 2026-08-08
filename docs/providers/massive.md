@@ -109,8 +109,8 @@ or pass `asset_class="futures"` when calling `fetch_ohlcv()`.
 ## API Key Setup
 
 ```bash
-# .env file
-MASSIVE_API_KEY=your_api_key_here
+# Environment variable
+export MASSIVE_API_KEY=your_api_key_here
 ```
 
 Get your API key at [massive.com](https://massive.com).
@@ -151,4 +151,3 @@ POLYGON_API_KEY=your_existing_polygon_key
 - [Massive Pricing](https://massive.com/pricing)
 - [Massive REST Docs](https://massive.com/docs)
 - [Polygon compatibility note](polygon.md)
-- [Provider Audit](PROVIDER_AUDIT.md)

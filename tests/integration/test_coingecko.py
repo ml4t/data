@@ -157,9 +157,9 @@ class TestCoinGeckoProvider:
         # Validate results
         assert not df.is_empty(), "Should fetch BTC data"
         assert len(df) >= 1, "Should have at least 1 row of data"
-        # CoinGecko returns intraday data (4-hourly for 3-30 days, not daily)
-        # For ~7 days with 4-hour intervals: ~42 rows (6 per day * 7 days)
-        assert len(df) <= TEST_DAYS * 10, "Should have reasonable amount of intraday data"
+        assert len(df) <= TEST_DAYS + 1, "Daily output must contain at most one row per date"
+        assert df["timestamp"].dt.hour().eq(0).all(), "Daily bars must align to 00:00 UTC"
+        assert (df["volume"] > 0).all(), "Daily volume must come from CoinGecko market data"
 
         # Validate schema
         self._validate_ohlcv_schema(df)
@@ -203,12 +203,14 @@ class TestCoinGeckoProvider:
     @pytest.mark.integration
     def test_fetch_ohlcv_empty_result(self, provider):
         """Test fetching data with no results."""
+        end = datetime.now().date() - timedelta(days=1)
+        start = end - timedelta(days=1)
         # Invalid coin should raise SymbolNotFoundError
         with pytest.raises(SymbolNotFoundError):
             provider.fetch_ohlcv(
                 symbol="INVALID_COIN_XYZ_12345",
-                start="2024-01-01",
-                end="2024-01-02",
+                start=start.isoformat(),
+                end=end.isoformat(),
                 frequency="daily",
             )
 

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import tempfile
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import polars as pl
-import pytest
 
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
@@ -73,8 +72,8 @@ class TestGapDetector:
         gaps = detector.detect_gaps(df, frequency="daily")
 
         assert len(gaps) == 1
-        assert gaps[0]["start"] == datetime(2024, 1, 5)
-        assert gaps[0]["end"] == datetime(2024, 1, 6)
+        assert gaps[0]["start"] == datetime(2024, 1, 5, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 6, tzinfo=UTC)
         assert gaps[0]["size_days"] == 2
 
     def test_detect_multiple_gaps(self):
@@ -112,11 +111,11 @@ class TestGapDetector:
 
         assert len(gaps) == 2
         # First gap: Jan 4-5
-        assert gaps[0]["start"] == datetime(2024, 1, 4)
-        assert gaps[0]["end"] == datetime(2024, 1, 5)
+        assert gaps[0]["start"] == datetime(2024, 1, 4, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 5, tzinfo=UTC)
         # Second gap: Jan 9-11
-        assert gaps[1]["start"] == datetime(2024, 1, 9)
-        assert gaps[1]["end"] == datetime(2024, 1, 11)
+        assert gaps[1]["start"] == datetime(2024, 1, 9, tzinfo=UTC)
+        assert gaps[1]["end"] == datetime(2024, 1, 11, tzinfo=UTC)
 
     def test_detect_gaps_with_weekends(self):
         """Test gap detection excludes weekends for daily data."""
@@ -142,8 +141,8 @@ class TestGapDetector:
         gaps = detector.detect_gaps(df, frequency="daily")
 
         assert len(gaps) == 1
-        assert gaps[0]["start"] == datetime(2024, 1, 3)
-        assert gaps[0]["end"] == datetime(2024, 1, 3)
+        assert gaps[0]["start"] == datetime(2024, 1, 3, tzinfo=UTC)
+        assert gaps[0]["end"] == datetime(2024, 1, 3, tzinfo=UTC)
         assert gaps[0]["size_days"] == 1
 
     def test_detect_gaps_in_hive_partitions(self):
@@ -178,8 +177,7 @@ class TestGapDetector:
                 }
             )
 
-            storage.write(df1, "test_symbol")
-            storage.write(df2, "test_symbol")
+            storage.write(pl.concat([df1, df2]), "test_symbol")
 
             detector = GapDetector()
             gaps = detector.detect_gaps_in_storage(
@@ -192,11 +190,11 @@ class TestGapDetector:
 
             assert len(gaps) == 2  # One between datasets, one at the end
             # First gap: between Jan 15 and Feb 10
-            assert gaps[0]["start"] == datetime(2024, 1, 16)
-            assert gaps[0]["end"] == datetime(2024, 2, 9)
+            assert gaps[0]["start"] == datetime(2024, 1, 16, tzinfo=UTC)
+            assert gaps[0]["end"] == datetime(2024, 2, 9, tzinfo=UTC)
             # Second gap: from Feb 21 to Feb 28
-            assert gaps[1]["start"] == datetime(2024, 2, 21)
-            assert gaps[1]["end"] == datetime(2024, 2, 28)
+            assert gaps[1]["start"] == datetime(2024, 2, 21, tzinfo=UTC)
+            assert gaps[1]["end"] == datetime(2024, 2, 28, tzinfo=UTC)
 
 
 class TestIncrementalUpdater:
@@ -217,8 +215,8 @@ class TestIncrementalUpdater:
             )
 
             assert update_type == "full"
-            assert start == datetime(2024, 1, 1)
-            assert end == datetime(2024, 1, 31)
+            assert start == datetime(2024, 1, 1, tzinfo=UTC)
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)
 
     def test_determine_update_range_incremental(self):
         """Test incremental update from last available timestamp."""
@@ -251,8 +249,8 @@ class TestIncrementalUpdater:
             )
 
             assert update_type == "incremental"
-            assert start == datetime(2024, 1, 16)  # Day after last data
-            assert end == datetime(2024, 1, 31)
+            assert start == datetime(2024, 1, 16, tzinfo=UTC)  # Day after last data
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)
 
     def test_incremental_update_with_overlap_handling(self):
         """Test that incremental updates handle overlapping data correctly."""
@@ -523,7 +521,6 @@ class TestUpdateStrategy:
 class TestBackfillManager:
     """Tests for backfill operations."""
 
-    @pytest.mark.skip(reason="Weekend exclusion logic makes gap detection complex for testing")
     def test_identify_backfill_candidates(self):
         """Test identification of datasets needing backfill."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -558,7 +555,7 @@ class TestBackfillManager:
             storage.write(df3, "no_gap")
 
             # Identify candidates
-            candidates = backfill_mgr.identify_candidates(min_gap_days=3)
+            candidates = backfill_mgr.identify_candidates(min_gap_days=3, max_age_days=5_000)
 
             assert len(candidates) == 1
             assert candidates[0]["symbol"] == "large_gap"
@@ -654,12 +651,10 @@ class TestBackfillManager:
             assert len(final_df) == 13  # Jan 1-5, 8-9 (backfilled), 10-15
 
 
-class TestPerformanceOptimization:
-    """Tests for performance optimization and validation."""
+class TestUpdateStrategyBehavior:
+    """Tests for incremental and full-refresh behavior."""
 
-    @pytest.mark.skip(reason="Timing-based performance tests are flaky - use benchmarks instead")
-    def test_incremental_update_performance(self):
-        """Test that incremental updates are faster than full refresh."""
+    def test_incremental_update_and_full_refresh_succeed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = HiveStorage(StorageConfig(base_path=Path(tmpdir)))
             tracker = MetadataTracker(Path(tmpdir))
@@ -694,10 +689,6 @@ class TestPerformanceOptimization:
                 }
             )
 
-            # Time incremental update
-            import time
-
-            start_time = time.time()
             result_incremental = updater.update_incremental(
                 storage,
                 tracker,
@@ -706,10 +697,6 @@ class TestPerformanceOptimization:
                 provider="test",
                 strategy=UpdateStrategy.INCREMENTAL,
             )
-            incremental_time = time.time() - start_time
-
-            # Time full refresh
-            start_time = time.time()
             result_full = updater.update_incremental(
                 storage,
                 tracker,
@@ -718,16 +705,11 @@ class TestPerformanceOptimization:
                 provider="test",
                 strategy=UpdateStrategy.FULL_REFRESH,
             )
-            full_refresh_time = time.time() - start_time
-
-            # Incremental should generally be faster (or at least not significantly slower)
-            # With small datasets, the timing can be variable due to system overhead
-            assert incremental_time <= full_refresh_time * 1.5  # Allow some variance for small data
             assert result_incremental.success is True
             assert result_full.success is True
 
-    def test_download_reduction_metric(self):
-        """Test that incremental updates reduce download size by 80%."""
+    def test_update_range_starts_after_stored_data(self):
+        """Incremental range excludes dates already present in storage."""
         with tempfile.TemporaryDirectory() as tmpdir:
             storage = HiveStorage(StorageConfig(base_path=Path(tmpdir)))
             updater = IncrementalUpdater()
@@ -758,9 +740,5 @@ class TestPerformanceOptimization:
 
             assert update_type == "incremental"
 
-            # Calculate download reduction
-            total_days_requested = (datetime(2024, 1, 31) - datetime(2023, 1, 1)).days
-            incremental_days = (end - start).days
-            reduction_percent = 1 - (incremental_days / total_days_requested)
-
-            assert reduction_percent >= 0.8  # At least 80% reduction
+            assert start == datetime(2024, 1, 1, tzinfo=UTC)
+            assert end == datetime(2024, 1, 31, tzinfo=UTC)

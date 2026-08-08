@@ -9,7 +9,7 @@
 | **Test Files** | 73 (50+ unit, 10 integration, 5+ acceptance) |
 | **Lines of Code** | ~18,900 in src/ |
 | **Python Version** | 3.9+ |
-| **Performance** | 7x faster queries (Hive storage) |
+| **Storage** | Hive-partitioned and flat Parquet layouts |
 | **Maturity** | 70-75% complete |
 
 ---
@@ -28,7 +28,7 @@
 - [x] Synthetic and mock providers for testing
 
 ### Storage (Complete)
-- [x] Hive-partitioned Parquet (7x faster)
+- [x] Hive-partitioned Parquet with date partition pruning
 - [x] Metadata tracking (last updates, row counts)
 - [x] Atomic writes with file locking
 - [x] Transaction support with rollback
@@ -94,7 +94,7 @@ src/ml4t/data/
 │   ├── hive.py        # Hive-partitioned (primary)
 │   ├── metadata_tracker.py  # Update tracking
 │   ├── migration.py    # Schema evolution
-│   └── transaction.py  # ACID-like operations
+│   └── backend.py      # Atomic generation publication
 ├── validation/         # Data quality
 │   ├── ohlcv.py       # OHLC invariant checks
 │   ├── anomaly.py     # 3 anomaly detectors
@@ -134,11 +134,11 @@ from ml4t.data.data_manager import DataManager
 storage = HiveStorage(config=StorageConfig(base_path="~/ml4t-data"))
 manager = DataManager(storage=storage)
 
-# Store data
-manager.store("AAPL", data)
+# Store data and retain the canonical key
+key = manager.import_data(data, "AAPL", provider="yahoo")
 
 # Retrieve later
-retrieved = manager.fetch("AAPL")
+retrieved = storage.read(key).collect()
 ```
 
 ### Validate Data
@@ -193,7 +193,7 @@ None identified
 ### Important Issues
 1. **Binance Integration Tests** - Missing (requires VPN in US)
 2. **Async Storage** - Implemented but under-tested
-3. **Type Hints** - Not strict (mypy strict mode disabled)
+3. **Type Checking** - Reduce the remaining suppressed ty rules
 
 ### Nice-to-Have
 1. WebSocket streaming (Phase 2)
@@ -224,7 +224,7 @@ for symbol in symbols:
 ### Benchmark Results
 - **Provider Init**: 30-35ms (httpx.Client setup)
 - **Per-call Overhead**: ~5ms (negligible)
-- **Storage Query**: 7x faster with Hive partitioning
+- **Storage Query**: Hive storage prunes partitions for date-filtered reads
 - **Metadata Lookup**: O(1) efficiency
 
 ---
@@ -287,7 +287,7 @@ datasets:
     frequency: daily
     update_strategy: incremental
 
-  # Free tier (500/day)
+  # Free tier (20 calls/day)
   nasdaq100_daily:
     provider: eodhd
     symbols_file: config/symbols/nasdaq100.txt
@@ -316,7 +316,7 @@ ruff format .
 ruff check .
 
 # Type check
-mypy src/
+uv run ty check
 
 # Pre-commit hooks
 pre-commit run --all-files
@@ -331,7 +331,8 @@ pip install -e .
 ### Data Operations
 ```bash
 # Fetch and save
-ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-12-31 -o crypto.parquet
+ml4t-data fetch -s BTC -s ETH --provider cryptocompare \
+    --start 2024-01-01 --end 2024-12-31 -o crypto.parquet
 
 # Update daily from config
 ml4t-data update-all -c ml4t-data.yaml --dry-run

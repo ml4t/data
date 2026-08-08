@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -31,7 +32,7 @@ from .utils import console
 @click.option(
     "--start-year",
     type=int,
-    default=2020,
+    default=None,
     help="Start year (default: 2020)",
 )
 @click.option(
@@ -139,13 +140,13 @@ def download_cot(
             from ml4t.data.cot import load_cot_config
 
             cot_config = load_cot_config(config)
-            # Override with CLI options if provided
-            if products:
-                cot_config.products = list(products)
-            if end_year:
-                cot_config.end_year = end_year
-            if output:
-                cot_config.storage_path = Path(output).expanduser()
+            cot_config = replace(
+                cot_config,
+                products=list(products) if products else cot_config.products,
+                start_year=start_year if start_year is not None else cot_config.start_year,
+                end_year=end_year if end_year is not None else cot_config.end_year,
+                storage_path=Path(output).expanduser() if output else cot_config.storage_path,
+            )
         else:
             # Build config from CLI options
             if not products:
@@ -157,7 +158,7 @@ def download_cot(
 
             cot_config = COTConfig(
                 products=list(products),
-                start_year=start_year,
+                start_year=start_year if start_year is not None else 2020,
                 end_year=end_year or datetime.now().year,
                 storage_path=resolve_storage_path(output, "cot"),
             )

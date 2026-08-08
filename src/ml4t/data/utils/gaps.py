@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -282,6 +282,8 @@ class GapDetector:
         # Create a complete time index
         min_ts = df[timestamp_col].min()
         max_ts = df[timestamp_col].max()
+        if not isinstance(min_ts, date) or not isinstance(max_ts, date):
+            raise TypeError(f"'{timestamp_col}' must contain non-null Date or Datetime values")
 
         if gaps:
             frequency = gaps[0].frequency

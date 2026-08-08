@@ -20,11 +20,14 @@ Tests the async methods added to additional providers:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import polars as pl
 import pytest
+
+HAS_DATABENTO = importlib.util.find_spec("databento") is not None
 
 # ===== Fixtures =====
 
@@ -310,6 +313,7 @@ class TestTwelveDataProviderAsync:
 # ===== DataBentoProvider Async Tests (Thread-wrapped) =====
 
 
+@pytest.mark.skipif(not HAS_DATABENTO, reason="databento not installed")
 class TestDataBentoProviderAsync:
     """Test async methods on DataBentoProvider (thread-wrapped)."""
 
@@ -563,10 +567,11 @@ class TestExtendedAsyncProtocolConformance:
     @pytest.mark.parametrize(
         "provider_module,provider_class,mock_path",
         [
-            (
+            pytest.param(
                 "ml4t.data.providers.databento",
                 "DataBentoProvider",
                 "ml4t.data.providers.databento.Historical",
+                marks=pytest.mark.skipif(not HAS_DATABENTO, reason="databento not installed"),
             ),
             (
                 "ml4t.data.providers.oanda",

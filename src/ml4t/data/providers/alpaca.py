@@ -153,6 +153,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
     # Maximum bars per page accepted by both bars endpoints; pagination follows
     # next_page_token beyond this.
     PAGE_LIMIT: ClassVar[int] = 10000
+    MAX_PAGES: ClassVar[int] = 10000
 
     # Asset classes a request can be routed to.
     ASSET_CLASSES: ClassVar[frozenset[str]] = frozenset({"stock", "crypto"})
@@ -263,6 +264,9 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
     async def init_async_session(
         self,
+        timeout: float | None = None,
+        max_connections: int | None = None,
+        max_keepalive: int | None = None,
         headers: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -272,11 +276,20 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         session, so the auth headers are applied unless a caller supplies its own.
 
         Args:
+            timeout: Request timeout in seconds.
+            max_connections: Maximum concurrent connections.
+            max_keepalive: Maximum keepalive connections.
             headers: Default headers for all requests; falls back to the auth
                 headers when not provided.
             **kwargs: Additional arguments forwarded to AsyncSessionMixin.
         """
-        await super().init_async_session(headers=headers or self._auth_headers, **kwargs)
+        await super().init_async_session(
+            timeout=timeout,
+            max_connections=max_connections,
+            max_keepalive=max_keepalive,
+            headers=headers or self._auth_headers,
+            **kwargs,
+        )
 
     def capabilities(self) -> ProviderCapabilities:
         """Return provider capabilities.
@@ -503,6 +516,32 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         merged_list.extend(page_bars or [])
         return merged_list
 
+    def _next_page_token(
+        self,
+        payload: dict[str, Any],
+        seen_tokens: set[str],
+        page_count: int,
+    ) -> str | None:
+        """Validate that an upstream pagination cursor is bounded and progressing."""
+        token = payload.get("next_page_token")
+        if token in (None, ""):
+            return None
+        if not isinstance(token, str):
+            raise DataValidationError(
+                provider="alpaca", message="received an invalid pagination token"
+            )
+        if token in seen_tokens:
+            raise DataValidationError(
+                provider="alpaca", message="received a repeated pagination token"
+            )
+        if page_count >= self.MAX_PAGES:
+            raise DataValidationError(
+                provider="alpaca",
+                message=f"reached pagination page limit of {self.MAX_PAGES}",
+            )
+        seen_tokens.add(token)
+        return token
+
     def _check_response_status(self, response: Any, symbol: str) -> None:
         """Map an HTTP error response to a typed provider exception.
 
@@ -688,14 +727,17 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
         accumulated: Any = None
         token: str | None = None
+        seen_tokens: set[str] = set()
+        page_count = 0
         while True:
             # A fresh dict per page keeps each request's params independent;
             # mutating one shared dict would otherwise rewrite the token on
             # earlier requests that already went out.
             page_params = {**params, "page_token": token} if token else params
             payload = self._get_page(endpoint, page_params, symbol)
+            page_count += 1
             accumulated = self._merge_bars(accumulated, payload.get("bars"))
-            token = payload.get("next_page_token")
+            token = self._next_page_token(payload, seen_tokens, page_count)
             if not token:
                 return {"bars": accumulated}
 
@@ -737,14 +779,17 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
 
         accumulated: Any = None
         token: str | None = None
+        seen_tokens: set[str] = set()
+        page_count = 0
         while True:
             # A fresh dict per page keeps each request's params independent;
             # mutating one shared dict would otherwise rewrite the token on
             # earlier requests that already went out.
             page_params = {**params, "page_token": token} if token else params
             payload = await self._get_page_async(endpoint, page_params, symbol)
+            page_count += 1
             accumulated = self._merge_bars(accumulated, payload.get("bars"))
-            token = payload.get("next_page_token")
+            token = self._next_page_token(payload, seen_tokens, page_count)
             if not token:
                 return {"bars": accumulated}
 
@@ -834,12 +879,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                     "v": "volume",
                 }
             )
-            # Alpaca timestamps are RFC-3339 with a UTC ("Z") offset; parse them
-            # tz-aware then drop the zone to match the canonical naive schema.
             df = df.with_columns(
                 pl.col("timestamp")
                 .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%.f%#z")
-                .dt.replace_time_zone(None)
+                .dt.convert_time_zone("UTC")
             )
             for col in ["open", "high", "low", "close", "volume"]:
                 df = df.with_columns(pl.col(col).cast(pl.Float64))
@@ -909,7 +952,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         def _fetch_and_process() -> pl.DataFrame:
             raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=resolved)
             df = self._transform_data(raw_data, symbol, asset_class=resolved)
-            return self._validate_ohlcv(df, self.name)
+            return self._validate_ohlcv(df, self.name, symbol)
 
         validated_data = self._with_circuit_breaker(_fetch_and_process)
 
@@ -935,8 +978,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         Mirrors :meth:`fetch_ohlcv` over the async transport with the same
         resilience semantics: the circuit breaker wraps the full
         fetch/transform/validate pipeline (an open breaker refuses before any
-        request goes out, and fetch failures count toward opening it), and
-        transient failures retry per page inside the fetch.
+        request goes out, and transient service failures count toward opening
+        it), and transient failures retry per page inside the fetch.
 
         Args:
             symbol: The symbol to fetch. A ``BASE/QUOTE`` symbol (e.g. "BTC/USD")
@@ -980,7 +1023,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 symbol, start, end, frequency, asset_class=resolved
             )
             df = self._transform_data(raw_data, symbol, asset_class=resolved)
-            return self._validate_ohlcv(df, self.name)
+            return self._validate_ohlcv(df, self.name, symbol)
 
         validated_data = await self._with_circuit_breaker_async(_fetch_and_process)
 

@@ -19,12 +19,28 @@ Schema Design:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, ClassVar
 
 import polars as pl
 
+PolarsDataType = pl.DataType | type[pl.DataType]
 
-def _build_fill_expression(name: str, value: Any, dtype: pl.DataType | None) -> pl.Expr:
+
+def timestamp_bounds(df: pl.DataFrame) -> tuple[datetime, datetime]:
+    """Return validated bounds for the canonical Datetime timestamp column."""
+    timestamp = df.get_column("timestamp")
+    if not isinstance(timestamp.dtype, pl.Datetime):
+        raise ValueError(f"'timestamp' must be a Datetime column, got {timestamp.dtype}")
+    start = timestamp.min()
+    end = timestamp.max()
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise ValueError("'timestamp' must contain non-null Datetime values")
+    return start, end
+
+
+def _build_fill_expression(name: str, value: Any, dtype: PolarsDataType | None) -> pl.Expr:
     if dtype is not None:
         return pl.lit(value, dtype=dtype).alias(name)
     return pl.lit(value).alias(name)
@@ -33,7 +49,7 @@ def _build_fill_expression(name: str, value: Any, dtype: pl.DataType | None) -> 
 def _align_frame_columns(
     df: pl.DataFrame,
     columns: list[str],
-    schema: dict[str, pl.DataType],
+    schema: Mapping[str, PolarsDataType],
     fill_values: dict[str, Any] | None = None,
 ) -> pl.DataFrame:
     fill_values = fill_values or {}
@@ -44,7 +60,26 @@ def _align_frame_columns(
             [_build_fill_expression(col, fill_values.get(col), schema.get(col)) for col in missing]
         )
 
-    return df.select(columns)
+    return df.select(pl.col(column).cast(schema[column]) for column in columns)
+
+
+def _concat_dtype(left: pl.DataType, right: pl.DataType) -> pl.DataType:
+    """Resolve a concat dtype without reducing timestamp precision."""
+    if left == right:
+        return left
+    if isinstance(left, pl.Datetime) and isinstance(right, pl.Datetime):
+        precision = {"ms": 0, "us": 1, "ns": 2}
+        time_unit = max((left.time_unit, right.time_unit), key=precision.__getitem__)
+        if left.time_zone == right.time_zone:
+            return pl.Datetime(time_unit, left.time_zone)
+        time_zone = left.time_zone or right.time_zone or "UTC"
+        if left.time_zone is not None and right.time_zone is not None:
+            time_zone = "UTC"
+        return pl.Datetime(time_unit, time_zone)
+
+    left_empty = pl.DataFrame({"value": pl.Series([], dtype=left)})
+    right_empty = pl.DataFrame({"value": pl.Series([], dtype=right)})
+    return pl.concat([left_empty, right_empty], how="vertical_relaxed").schema["value"]
 
 
 def align_frames_for_concat(
@@ -56,7 +91,16 @@ def align_frames_for_concat(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Align two DataFrames to a shared column set for safe vertical concatenation."""
     columns = [*left.columns, *[col for col in right.columns if col not in left.columns]]
-    schema = {**right.schema, **left.schema}
+    schema = {
+        column: (
+            _concat_dtype(left.schema[column], right.schema[column])
+            if column in left.schema and column in right.schema
+            else left.schema[column]
+            if column in left.schema
+            else right.schema[column]
+        )
+        for column in columns
+    }
 
     return (
         _align_frame_columns(left, columns, schema, left_fill_values),
@@ -107,7 +151,7 @@ class MultiAssetSchema:
     """
 
     # Required columns with their Polars data types
-    SCHEMA: ClassVar[dict[str, pl.DataType]] = {
+    SCHEMA: ClassVar[dict[str, PolarsDataType]] = {
         "timestamp": pl.Datetime("us", "UTC"),
         "symbol": pl.Utf8,
         "open": pl.Float64,
@@ -118,7 +162,7 @@ class MultiAssetSchema:
     }
 
     # Optional columns by asset class
-    OPTIONAL_COLUMNS: ClassVar[dict[str, dict[str, pl.DataType]]] = {
+    OPTIONAL_COLUMNS: ClassVar[dict[str, dict[str, PolarsDataType]]] = {
         "equities": {
             "dividends": pl.Float64,
             "splits": pl.Float64,

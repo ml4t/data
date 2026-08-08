@@ -6,14 +6,15 @@ utilities for the futures downloader.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from ml4t.data.core.config import resolve_storage_path
 
 
-class FuturesCategory(str, Enum):
+class FuturesCategory(StrEnum):
     """Futures product categories."""
 
     EQUITY_INDEX = "equity_index"
@@ -63,13 +64,15 @@ class FuturesDownloadConfig:
     start: str = "2016-01-01"
     end: str = "2025-12-13"
     storage_path: str | Path = field(default_factory=lambda: resolve_storage_path(None, "futures"))
+    resolved_storage_path: Path = field(init=False, repr=False)
     dataset: str = "GLBX.MDP3"
     schemas: list[str] = field(default_factory=lambda: ["ohlcv-1d", "definition", "statistics"])
     api_key: str | None = None
 
     def __post_init__(self) -> None:
         """Validate and normalize configuration."""
-        self.storage_path = resolve_storage_path(self.storage_path, "futures")
+        self.resolved_storage_path = resolve_storage_path(self.storage_path, "futures")
+        self.storage_path = self.resolved_storage_path
 
     def get_product_list(self) -> list[str]:
         """Get flat list of all products."""
@@ -92,6 +95,11 @@ class DownloadProgress:
     completed_products: set[str] = field(default_factory=set)
     failed_products: dict[str, str] = field(default_factory=dict)
     total_bytes: int = 0
+    on_complete: Callable[[str, int], None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def mark_complete(self, product: str, bytes_downloaded: int = 0) -> None:
         """Mark a product as successfully downloaded."""
@@ -99,6 +107,8 @@ class DownloadProgress:
         self.total_bytes += bytes_downloaded
         if product in self.failed_products:
             del self.failed_products[product]
+        if self.on_complete is not None:
+            self.on_complete(product, bytes_downloaded)
 
     def mark_failed(self, product: str, error: str) -> None:
         """Mark a product as failed."""

@@ -1,6 +1,7 @@
 """Tests for Twelve Data provider module."""
 
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -80,11 +81,33 @@ class TestFetchRawData:
             ],
         }
 
-        with patch.object(provider.session, "get", return_value=mock_response):
+        with patch.object(provider.session, "get", return_value=mock_response) as get:
             data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-02", "daily")
 
         assert "values" in data
         assert len(data["values"]) == 1
+        assert get.call_args.kwargs["params"]["timezone"] == "UTC"
+
+    @pytest.mark.asyncio
+    async def test_fetch_raw_data_async_requests_utc(self, provider):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "values": [
+                {
+                    "datetime": "2024-01-02",
+                    "open": "170.0",
+                    "high": "172.0",
+                    "low": "169.0",
+                    "close": "171.0",
+                    "volume": "1000000",
+                }
+            ]
+        }
+
+        with patch.object(provider, "_aget", new=AsyncMock(return_value=response)) as get:
+            await provider._fetch_raw_data_async("AAPL", "2024-01-01", "2024-01-02", "daily")
+
+        assert get.call_args.kwargs["params"]["timezone"] == "UTC"
 
     def test_fetch_raw_data_rate_limit(self, provider):
         """Test 429 raises RateLimitError."""
@@ -188,6 +211,30 @@ class TestTransformData:
         assert "close" in df.columns
         assert "symbol" in df.columns
         assert df["symbol"][0] == "AAPL"
+        assert df.schema["timestamp"].time_zone == "UTC"
+        assert df["timestamp"][0] == datetime(2024, 1, 2, tzinfo=UTC)
+
+    def test_transform_data_treats_intraday_values_as_utc(self, provider):
+        raw_data = {
+            "values": [
+                {
+                    "datetime": timestamp,
+                    "open": "170.0",
+                    "high": "172.0",
+                    "low": "169.0",
+                    "close": "171.0",
+                    "volume": "1000000",
+                }
+                for timestamp in ("2024-11-03 01:30:00", "2024-06-03 09:30:00")
+            ]
+        }
+
+        frame = provider._transform_data(raw_data, "AAPL")
+
+        assert frame.get_column("timestamp").to_list() == [
+            datetime(2024, 6, 3, 9, 30, tzinfo=UTC),
+            datetime(2024, 11, 3, 1, 30, tzinfo=UTC),
+        ]
 
     def test_transform_data_uppercase_symbol(self, provider):
         """Test symbol is uppercased."""

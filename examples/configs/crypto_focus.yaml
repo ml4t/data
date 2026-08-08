@@ -9,16 +9,12 @@ providers:
   # Multiple crypto exchanges
   - name: binance_spot
     type: binance
-    api_key: ${BINANCE_API_KEY}
-    api_secret: ${BINANCE_API_SECRET}
     rate_limit: 10
     extra:
       market: spot
 
   - name: binance_futures
     type: binance
-    api_key: ${BINANCE_API_KEY}
-    api_secret: ${BINANCE_API_SECRET}
     rate_limit: 10
     extra:
       market: futures
@@ -27,7 +23,6 @@ providers:
     type: cryptocompare
     api_key: ${CRYPTOCOMPARE_API_KEY}
     rate_limit: 2.0
-    timeout: 60
 
   - name: yahoo_crypto
     type: yahoo
@@ -70,7 +65,7 @@ datasets:
     frequency: 15minute
 
   - name: spot_alts_hourly
-    symbols: "@symbols/altcoins.txt"
+    symbols_file: ../symbols/altcoins.txt
     provider: binance_spot
     frequency: hourly
 
@@ -178,21 +173,13 @@ validation:
     volume_spike_threshold: 100  # 100x volume spikes happen
     price_gap_threshold: 0.5  # 50% gaps possible
     staleness_threshold: 10  # 10 periods before considering stale
-    check_negative_prices: true
+    negative_price_policy: forbid
     check_negative_volume: true
     check_duplicate_timestamps: true
 
 # Optimized storage for high-frequency crypto data
 storage:
-  backend: filesystem
+  strategy: hive
+  base_path: ./crypto_data/storage
   compression: zstd
-  partition_strategy: custom
-  partition_config:
-    minute: day      # Minute data partitioned by day
-    15minute: week   # 15-minute data by week
-    hourly: month    # Hourly data by month
-    daily: year      # Daily data by year
-  cache:
-    enabled: true
-    size_mb: 2000
-    ttl_seconds: 300  # 5 minute cache for real-time data
+  partition_granularity: month

@@ -25,7 +25,7 @@ A ML4T Data provider is a class that inherits from `BaseProvider` and implements
 - Familiarity with Python async/await
 - Understanding of the target API
 - API key from the data provider (if required)
-- Development environment set up (see [CONTRIBUTING.md](../CONTRIBUTING.md))
+- Development environment set up (see the [contribution guide](index.md))
 
 ## Step-by-Step Guide
 
@@ -656,9 +656,9 @@ if __name__ == "__main__":
 
 ### Step 9: Update README
 
-Add provider to README.md:
+Add the provider to the provider reference:
 
-```markdown
+````markdown
 ## Phase X Providers
 
 | Provider | Asset Classes | API Key | Rate Limit | Best For |
@@ -683,7 +683,7 @@ data = provider.fetch_ohlcv("AAPL.US", "2024-01-01", "2024-01-31")
 - 50+ exchanges worldwide
 - No registration required
 - Simple CSV format
-```
+````
 
 ## Checklist
 
@@ -698,7 +698,7 @@ Before submitting your provider, verify:
 - [ ] Has type hints on all public methods
 - [ ] Has Google-style docstrings
 - [ ] Passes `ruff` linting
-- [ ] Passes `mypy` type checking
+- [ ] Passes `uv run ty check`
 
 ### Testing
 - [ ] Integration tests created
@@ -767,7 +767,7 @@ if response.status_code == 429:
 
 - Check existing providers for patterns: `src/ml4t-data/providers/`
 - Use the template: `provider_template/`
-- Read [extending_ml4t-data.md](extending_ml4t-data.md) for architecture details
+- Read the [architecture guide](architecture.md) for implementation details
 - Ask in GitHub Discussions
 
 ---

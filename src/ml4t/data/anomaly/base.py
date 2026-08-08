@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import polars as pl
 from pydantic import BaseModel, Field
 
 
-class AnomalySeverity(str, Enum):
+class AnomalySeverity(StrEnum):
     """Anomaly severity levels."""
 
     INFO = "info"
@@ -20,7 +20,7 @@ class AnomalySeverity(str, Enum):
     CRITICAL = "critical"
 
 
-class AnomalyType(str, Enum):
+class AnomalyType(StrEnum):
     """Types of anomalies."""
 
     RETURN_OUTLIER = "return_outlier"

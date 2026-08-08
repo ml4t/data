@@ -6,6 +6,7 @@ actual Databento API calls. All tests can run offline.
 
 from __future__ import annotations
 
+import importlib.util
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -164,6 +165,7 @@ futures:
 # ============================================================================
 
 
+@pytest.mark.skipif(importlib.util.find_spec("databento") is None, reason="databento not installed")
 class TestFuturesDataManagerClient:
     """Test Databento client initialization."""
 
@@ -232,6 +234,7 @@ class TestPathHelpers:
 # ============================================================================
 
 
+@pytest.mark.skipif(importlib.util.find_spec("pyarrow") is None, reason="pyarrow not installed")
 class TestDownloadProductOHLCV:
     """Test download_product_ohlcv method."""
 
@@ -408,6 +411,7 @@ class TestDownloadProductOHLCV:
         # Should have 2 rows (deduplicated)
         df = pl.read_parquet(output_path)
         assert len(df) == 2
+        assert df.schema["ts_event"] == pl.Datetime("ns", "UTC")
 
 
 # ============================================================================
@@ -415,6 +419,7 @@ class TestDownloadProductOHLCV:
 # ============================================================================
 
 
+@pytest.mark.skipif(importlib.util.find_spec("pyarrow") is None, reason="pyarrow not installed")
 class TestDownloadProductDefinitions:
     """Test download_product_definitions method."""
 
@@ -528,6 +533,7 @@ class TestDownloadProductDefinitions:
 # ============================================================================
 
 
+@pytest.mark.skipif(importlib.util.find_spec("pyarrow") is None, reason="pyarrow not installed")
 class TestDownloadAll:
     """Test download_all method."""
 
@@ -585,6 +591,7 @@ class TestDownloadAll:
 # ============================================================================
 
 
+@pytest.mark.skipif(importlib.util.find_spec("pyarrow") is None, reason="pyarrow not installed")
 class TestUpdate:
     """Test update method."""
 

@@ -6,20 +6,24 @@ with measured 7x query performance improvement.
 
 from __future__ import annotations
 
-import json
-import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import polars as pl
+import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 
 from .backend import StorageBackend, StorageConfig
+from .keys import (
+    KEY_ENCODING_PREFIX,
+    contained_path,
+    decode_storage_key,
+    encode_storage_key,
+)
 
-if TYPE_CHECKING:
-    from ml4t.data.core.models import DataObject
+logger = structlog.get_logger()
 
 
 class HiveStorage(StorageBackend):
@@ -95,7 +99,7 @@ class HiveStorage(StorageBackend):
         return df
 
     def _build_partition_path(
-        self, base_path: Path, partition_cols: list[str], values: tuple
+        self, base_path: Path, partition_cols: list[str], values: tuple[Any, ...]
     ) -> Path:
         """Build partition directory path from column names and values.
 
@@ -139,7 +143,7 @@ class HiveStorage(StorageBackend):
 
         if not (start_date or end_date):
             # No filtering, return all partitions
-            return list(key_path.glob(glob_pattern))
+            return sorted(key_path.glob(glob_pattern))
 
         # With date filtering, we need to prune partitions
         partition_paths = []
@@ -247,39 +251,20 @@ class HiveStorage(StorageBackend):
 
     def write(
         self,
-        data: pl.LazyFrame | pl.DataFrame | DataObject,
-        key: str | None = None,
+        data: pl.LazyFrame | pl.DataFrame,
+        key: str,
         metadata: dict[str, Any] | None = None,
-    ) -> Path | str:
+    ) -> Path:
         """Write data using Hive partitioning.
 
         Args:
-            data: Data to write (DataFrame, LazyFrame, or DataObject)
-            key: Storage key (e.g., "BTC-USD" or "equities/daily/AAPL"). Optional if data is DataObject.
+            data: DataFrame or LazyFrame to write
+            key: Storage key (e.g., "BTC-USD" or "equities/daily/AAPL")
             metadata: Optional metadata dict
 
         Returns:
-            Path to base directory (old API) or storage key string (new DataObject API)
+            Path to the committed data generation
         """
-        # Handle DataObject input (new API)
-        from ml4t.data.core.models import DataObject
-
-        if isinstance(data, DataObject):
-            # Extract components from DataObject
-            df_data = data.data
-            data_metadata = data.metadata
-            # Construct storage key from metadata
-            storage_key = (
-                f"{data_metadata.asset_class}/{data_metadata.frequency}/{data_metadata.symbol}"
-            )
-            # Use the old API internally
-            self.write(df_data, storage_key, None)
-            return storage_key
-
-        # Old API: data is DataFrame/LazyFrame, key is required
-        if key is None:
-            raise ValueError("key is required when data is not a DataObject")
-
         # Ensure LazyFrame for efficiency
         lazy_data = self._ensure_lazy(data)
 
@@ -296,40 +281,38 @@ class HiveStorage(StorageBackend):
         # Add partition columns dynamically based on granularity
         df = self._add_partition_columns(df, partition_cols)
 
-        # Create key directory
-        key_path = self.base_path / key.replace("/", "_")
-        key_path.mkdir(exist_ok=True)
+        with self._key_lock(key):
+            staging_path, generation_id = self._prepare_generation(key)
+            try:
+                partitions_written = []
+                for partition_values, partition_df in df.group_by(
+                    partition_cols, maintain_order=True
+                ):
+                    partition_path = self._build_partition_path(
+                        staging_path, partition_cols, partition_values
+                    )
+                    partition_path.mkdir(parents=True, exist_ok=True)
+                    partition_df = partition_df.drop(partition_cols)
+                    self._atomic_write(partition_df, partition_path / "data.parquet")
+                    partitions_written.append(partition_path.relative_to(staging_path).as_posix())
 
-        # Group by partitions and write
-        partitions_written = []
+                commit_metadata = (
+                    {
+                        "last_updated": datetime.now().isoformat(),
+                        "partitions": partitions_written,
+                        "row_count": len(df),
+                        "schema": list(df.columns),
+                        "custom": metadata or {},
+                    }
+                    if self.config.metadata_tracking
+                    else {}
+                )
+                commit = self._publish_generation(key, staging_path, generation_id, commit_metadata)
+            except BaseException:
+                self._cleanup_staging(staging_path)
+                raise
 
-        for partition_values, partition_df in df.group_by(partition_cols, maintain_order=True):
-            # Create partition path dynamically
-            partition_path = self._build_partition_path(key_path, partition_cols, partition_values)
-            partition_path.mkdir(parents=True, exist_ok=True)
-
-            # Remove partition columns from data
-            partition_df = partition_df.drop(partition_cols)
-
-            # Write with atomic pattern
-            file_path = partition_path / "data.parquet"
-            self._atomic_write(partition_df, file_path)
-            partitions_written.append(str(partition_path.relative_to(self.base_path)))
-
-        # Update metadata
-        if self.config.metadata_tracking:
-            self._update_metadata(
-                key,
-                {
-                    "last_updated": datetime.now().isoformat(),
-                    "partitions": partitions_written,
-                    "row_count": len(df),
-                    "schema": list(df.columns),
-                    "custom": metadata or {},
-                },
-            )
-
-        return key_path
+        return commit.generation_path
 
     def read(
         self,
@@ -349,10 +332,7 @@ class HiveStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        key_path = self.base_path / key.replace("/", "_")
-
-        if not key_path.exists():
-            raise KeyError(f"Key '{key}' not found in storage")
+        key_path = self._current_commit(key).generation_path
 
         # Get partition columns based on granularity
         partition_cols = self._get_partition_columns()
@@ -365,18 +345,40 @@ class HiveStorage(StorageBackend):
 
         # Use Polars lazy reading with predicate pushdown
         lazy_frames = []
+        normalized_start = (
+            start_date.replace(tzinfo=UTC)
+            if start_date is not None and start_date.tzinfo is None
+            else start_date.astimezone(UTC)
+            if start_date is not None
+            else None
+        )
+        normalized_end = (
+            end_date.replace(tzinfo=UTC)
+            if end_date is not None and end_date.tzinfo is None
+            else end_date.astimezone(UTC)
+            if end_date is not None
+            else None
+        )
         for path in partition_paths:
             lf = pl.scan_parquet(path)
-
-            # Apply column selection
-            if columns:
-                lf = lf.select(columns)
+            timestamp_type = lf.collect_schema().get("timestamp")
+            if isinstance(timestamp_type, pl.Datetime):
+                timestamp = pl.col("timestamp")
+                if timestamp_type.time_zone is None:
+                    timestamp = timestamp.dt.replace_time_zone("UTC")
+                else:
+                    timestamp = timestamp.dt.convert_time_zone("UTC")
+                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
 
             # Apply date filters
-            if start_date:
-                lf = lf.filter(pl.col("timestamp") >= start_date)
-            if end_date:
-                lf = lf.filter(pl.col("timestamp") < end_date)
+            if normalized_start:
+                lf = lf.filter(pl.col("timestamp") >= normalized_start)
+            if normalized_end:
+                lf = lf.filter(pl.col("timestamp") < normalized_end)
+
+            # Apply column selection after timestamp filtering.
+            if columns:
+                lf = lf.select(columns)
 
             lazy_frames.append(lf)
 
@@ -392,10 +394,25 @@ class HiveStorage(StorageBackend):
             List of storage keys
         """
         keys = []
-        for path in self.base_path.iterdir():
-            if path.is_dir() and not path.name.startswith("."):
-                # Convert back from filesystem-safe name
-                keys.append(path.name.replace("_", "/"))
+        for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
+            if path.is_dir() and (path / "CURRENT").is_file():
+                try:
+                    keys.append(decode_storage_key(path.name))
+                except ValueError as error:
+                    logger.warning("Ignoring invalid storage entry", path=path, error=str(error))
+        legacy_entries = [
+            path
+            for path in self.base_path.iterdir()
+            if path.is_dir()
+            and not path.name.startswith((".", KEY_ENCODING_PREFIX))
+            and any(path.glob("year=*/**/data.parquet"))
+        ]
+        if legacy_entries:
+            logger.warning(
+                "Legacy Hive storage entries require explicit migration",
+                base_path=self.base_path,
+                entries=len(legacy_entries),
+            )
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -407,8 +424,11 @@ class HiveStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        key_path = self.base_path / key.replace("/", "_")
-        return key_path.exists()
+        try:
+            self._current_commit(key)
+        except KeyError:
+            return False
+        return True
 
     def delete(self, key: str) -> bool:
         """Delete all data for a key.
@@ -419,17 +439,7 @@ class HiveStorage(StorageBackend):
         Returns:
             True if successful
         """
-        key_path = self.base_path / key.replace("/", "_")
-        if key_path.exists():
-            shutil.rmtree(key_path)
-
-            # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-            if metadata_file.exists():
-                metadata_file.unlink()
-
-            return True
-        return False
+        return self._delete_key(key)
 
     # Incremental update methods for IncrementalStorageBackend protocol
 
@@ -448,13 +458,16 @@ class HiveStorage(StorageBackend):
         if not self.exists(key):
             return None
 
-        try:
-            df = self.read(key).select("timestamp").collect()
-            if df.is_empty():
-                return None
-            return df["timestamp"].max()
-        except Exception:
+        stored = self.read(key)
+        if "timestamp" not in stored.collect_schema().names():
             return None
+        df = stored.select("timestamp").collect()
+        if df.is_empty():
+            return None
+        latest = df["timestamp"].max()
+        if not isinstance(latest, datetime):
+            raise TypeError(f"Expected datetime timestamp for '{key}', got {type(latest).__name__}")
+        return latest
 
     def save_chunk(
         self,
@@ -477,7 +490,12 @@ class HiveStorage(StorageBackend):
             Path to the saved chunk file
         """
         # Create chunks directory
-        chunks_dir = self.base_path / ".chunks" / provider / symbol
+        chunks_dir = contained_path(
+            self.base_path,
+            ".chunks",
+            encode_storage_key(provider),
+            encode_storage_key(symbol),
+        )
         chunks_dir.mkdir(parents=True, exist_ok=True)
 
         # Create chunk filename with timestamp range
@@ -487,7 +505,7 @@ class HiveStorage(StorageBackend):
         chunk_path = chunks_dir / chunk_name
 
         # Save chunk
-        data.write_parquet(chunk_path, compression=self.config.compression or "zstd")
+        data.write_parquet(chunk_path, compression=self._parquet_compression())
 
         return chunk_path
 
@@ -538,7 +556,10 @@ class HiveStorage(StorageBackend):
             Path to combined data directory
         """
         key = f"{provider}/{symbol}"
-        return self.base_path / key.replace("/", "_")
+        try:
+            return self._current_commit(key).generation_path
+        except KeyError:
+            return self._key_path(key)
 
     def read_data(
         self,
@@ -581,21 +602,20 @@ class HiveStorage(StorageBackend):
             last_update: Timestamp of this update
             records_added: Number of records added
             chunk_file: Name of the chunk file saved
+
+        Raises:
+            KeyError: If no published dataset exists for the provider and symbol.
         """
         key = f"{provider}/{symbol}"
-        metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-
-        # Load existing metadata or create new
-        if metadata_file.exists():
-            with open(metadata_file) as f:
-                metadata = json.load(f)
-        else:
-            metadata = {
-                "symbol": symbol,
-                "provider": provider,
-                "first_update": last_update.isoformat(),
-                "update_history": [],
-            }
+        metadata = self.get_metadata(key) or {
+            "symbol": symbol,
+            "provider": provider,
+            "first_update": last_update.isoformat(),
+            "update_history": [],
+        }
+        metadata.setdefault("symbol", symbol)
+        metadata.setdefault("provider", provider)
+        metadata.setdefault("first_update", last_update.isoformat())
 
         # Update metadata
         metadata["last_update"] = last_update.isoformat()

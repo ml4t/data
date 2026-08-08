@@ -20,15 +20,18 @@ from ml4t.data.futures.book_downloader import (
     download_futures_data,
     update_futures_data,
 )
+from ml4t.data.futures.config import (
+    DEFAULT_PRODUCTS,
+    DefinitionsConfig,
+    DownloadProgress,
+    FuturesCategory,
+    FuturesDownloadConfig,
+    load_definitions_config,
+    load_yaml_config,
+)
 from ml4t.data.futures.continuous import (
     ContinuousContractBuilder,
     build_continuous_contract,
-)
-from ml4t.data.futures.continuous_downloader import (
-    ContinuousDownloadConfig,
-    ContinuousDownloader,
-    ContinuousDownloadProgress,
-    load_continuous_config,
 )
 from ml4t.data.futures.databento_parser import (
     STAT_TYPE_CLEARED_VOLUME,
@@ -47,23 +50,6 @@ from ml4t.data.futures.databento_parser import (
     parse_databento,
     parse_databento_raw,
 )
-from ml4t.data.futures.downloader import (
-    DEFAULT_PRODUCTS,
-    DefinitionsConfig,
-    DefinitionsDownloader,
-    DownloadProgress,
-    FuturesCategory,
-    FuturesDownloadConfig,
-    FuturesDownloader,
-    load_definitions_config,
-    load_yaml_config,
-)
-from ml4t.data.futures.individual_downloader import (
-    IndividualDownloadConfig,
-    IndividualDownloader,
-    IndividualProductConfig,
-    load_individual_config,
-)
 from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
 from ml4t.data.futures.roll import (
     # Databento-compatible selection-based roll strategies
@@ -73,6 +59,7 @@ from ml4t.data.futures.roll import (
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     OpenInterestBasedRoll,
+    RollEvent,
     RollStrategy,
     TimeBasedRoll,
     VolumeBasedRoll,
@@ -86,6 +73,59 @@ from ml4t.data.futures.schema import (
     SettlementType,
 )
 
+_DATABENTO_EXPORTS = [
+    "FuturesDownloader",
+    "ContinuousDownloader",
+    "ContinuousDownloadConfig",
+    "ContinuousDownloadProgress",
+    "load_continuous_config",
+    "IndividualDownloader",
+    "IndividualDownloadConfig",
+    "IndividualProductConfig",
+    "load_individual_config",
+    "DefinitionsDownloader",
+]
+_DATABENTO_IMPORT_ERROR: ModuleNotFoundError | None = None
+
+try:
+    from ml4t.data.futures import continuous_downloader as _continuous_downloader
+    from ml4t.data.futures import downloader as _downloader
+    from ml4t.data.futures import individual_downloader as _individual_downloader
+except ModuleNotFoundError as error:
+    missing_module = error.name or ""
+    if missing_module != "databento" and not missing_module.startswith("databento."):
+        raise
+    _DATABENTO_IMPORT_ERROR = error
+else:
+    ContinuousDownloadConfig = _continuous_downloader.ContinuousDownloadConfig
+    ContinuousDownloader = _continuous_downloader.ContinuousDownloader
+    ContinuousDownloadProgress = _continuous_downloader.ContinuousDownloadProgress
+    load_continuous_config = _continuous_downloader.load_continuous_config
+    DefinitionsDownloader = _downloader.DefinitionsDownloader
+    FuturesDownloader = _downloader.FuturesDownloader
+    IndividualDownloadConfig = _individual_downloader.IndividualDownloadConfig
+    IndividualDownloader = _individual_downloader.IndividualDownloader
+    IndividualProductConfig = _individual_downloader.IndividualProductConfig
+    load_individual_config = _individual_downloader.load_individual_config
+
+
+def __getattr__(name: str):
+    """Explain how to install public Databento-backed downloader symbols."""
+    if name in _DATABENTO_EXPORTS and _DATABENTO_IMPORT_ERROR is not None:
+        raise AttributeError(
+            f"{name} requires the Databento extra: uv add 'ml4t-data[databento]'"
+        ) from _DATABENTO_IMPORT_ERROR
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def require_databento(name: str = "FuturesDownloader") -> None:
+    """Raise an actionable error before using a Databento-backed export."""
+    if _DATABENTO_IMPORT_ERROR is not None:
+        raise ImportError(
+            f"{name} requires the Databento extra: uv add 'ml4t-data[databento]'"
+        ) from _DATABENTO_IMPORT_ERROR
+
+
 __all__ = [
     # Schema
     "AssetClass",  # Backward compat alias for FuturesAssetClass
@@ -94,6 +134,14 @@ __all__ = [
     "ExchangeInfo",
     "MAJOR_CONTRACTS",
     "SettlementType",
+    "FuturesDownloadConfig",
+    "FuturesCategory",
+    "DownloadProgress",
+    "DefinitionsConfig",
+    "DEFAULT_PRODUCTS",
+    "load_yaml_config",
+    "load_definitions_config",
+    "require_databento",
     # Parser (Quandl)
     "parse_quandl_chris",
     "parse_quandl_chris_raw",
@@ -115,6 +163,7 @@ __all__ = [
     "STAT_TYPE_CLEARED_VOLUME",
     # Roll strategies (original crossover-based)
     "RollStrategy",
+    "RollEvent",
     "VolumeBasedRoll",
     "OpenInterestBasedRoll",
     "TimeBasedRoll",
@@ -131,30 +180,9 @@ __all__ = [
     # Continuous contract builder
     "ContinuousContractBuilder",
     "build_continuous_contract",
-    # Downloader (individual contracts)
-    "FuturesDownloader",
-    "FuturesDownloadConfig",
-    "FuturesCategory",
-    "DownloadProgress",
-    "DEFAULT_PRODUCTS",
-    "load_yaml_config",
-    # Continuous contract downloader
-    "ContinuousDownloader",
-    "ContinuousDownloadConfig",
-    "ContinuousDownloadProgress",
-    "load_continuous_config",
-    # Individual contract downloader
-    "IndividualDownloader",
-    "IndividualDownloadConfig",
-    "IndividualProductConfig",
-    "load_individual_config",
-    # Definitions downloader
-    "DefinitionsDownloader",
-    "DefinitionsConfig",
-    "load_definitions_config",
     # Book downloader (simplified interface for ML4T readers)
     "FuturesDataManager",
     "FuturesConfig",
     "download_futures_data",
     "update_futures_data",
-]
+] + ([] if _DATABENTO_IMPORT_ERROR is not None else _DATABENTO_EXPORTS)

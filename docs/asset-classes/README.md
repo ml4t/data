@@ -152,7 +152,7 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 - ❌ **Futures**: Not available free
 
 **< $50/month**:
-- ✅ **Global Stocks**: EODHD (€19.99/month unlimited)
+- ✅ **Global Stocks**: EODHD with plan-dependent coverage and quotas
 - ✅ **Futures**: Databento ($30-50/month starter)
 - ✅ **Multi-asset**: Twelve Data ($49/month)
 
@@ -182,9 +182,9 @@ df = provider.fetch_ohlcv("ES.v.0", start="2024-01-01", end="2024-12-31")  # S&P
 | Provider | Crypto | Stocks | Forex | Futures | Free Tier | API Key | Best For |
 |----------|--------|--------|-------|---------|-----------|---------|----------|
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | 50/min | Optional | Crypto (beginners) |
-| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Optional | Crypto (advanced) |
+| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | 100K/month | Required | Crypto (advanced) |
 | **Tiingo** | ❌ | ✅ US | ❌ | ❌ | 1000/day | Required | US stocks |
-| **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 500/day | Required | Global stocks (best value) |
+| **EODHD** | ❌ | ✅ Global | ❌ | ❌ | 20 calls/day free | Required | Global stocks |
 | **Finnhub** | ⚠️ | ✅ Global | ⚠️ | ❌ | Real-time only | Required | Professional stocks |
 | **OANDA** | ❌ | ❌ | ✅ | ❌ | Demo account | Required | Professional forex |
 | **Twelve Data** | ✅ | ✅ | ✅ | ❌ | 800/day | Required | Multi-asset |
@@ -359,15 +359,16 @@ def fetch_data_robust(symbol: str, asset_class: str):
 - [Tutorial 05: Multi-Provider Strategies](../tutorials/05_multi_provider.md)
 
 **Provider Setup**:
-- [Provider Selection Guide](../provider-selection-guide.md)
-- [Creating a Custom Provider](../creating_a_provider.md)
-- [Extending ML4T Data](../extending_ml4t-data.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)
+- [Creating a Custom Provider](../contributing/creating-a-provider.md)
+- [Architecture](../contributing/architecture.md)
 
 **Getting Started**:
-- [Main README](../../README.md)
-- [Quick Start Guide](../../README.md#quick-start)
-- [CONTRIBUTING.md](../../CONTRIBUTING.md)
+- [Documentation home](../index.md)
+- [Quick Start Guide](../getting-started/quickstart.md)
+- [Contribution guide](../contributing/index.md)
 
 ---
 
-**Questions or issues?** Open a GitHub issue or see [CONTRIBUTING.md](../../CONTRIBUTING.md) for help.
+**Questions or issues?** Open a GitHub issue or see the
+[contribution guide](../contributing/index.md) for help.

@@ -9,8 +9,10 @@ Data Source: https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
+from time import monotonic
+from typing import Any, ClassVar, TypedDict
 from urllib.parse import urljoin
 
 import httpx
@@ -21,6 +23,24 @@ from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 
 logger = structlog.get_logger()
+
+
+class ParsedMessageTypeInfo(TypedDict):
+    """Summary of one locally parsed ITCH message type."""
+
+    code: str
+    description: str
+    files: int
+    path: str
+
+
+class AvailableFileInfo(TypedDict):
+    """Metadata for one downloadable ITCH sample."""
+
+    name: str
+    date: str
+    size_gb: float
+    url: str
 
 
 class ITCHSampleProvider:
@@ -43,7 +63,7 @@ class ITCHSampleProvider:
     - Requires parsing (binary format)
     - No guaranteed long-term availability
 
-    ## Available Files (as of 2024)
+    ## Available Files (verified August 2026)
 
     | File | Date | Compressed Size |
     |------|------|-----------------|
@@ -112,14 +132,19 @@ class ITCHSampleProvider:
 
     # Known sample files (filename: expected_size_bytes)
     KNOWN_FILES: ClassVar[dict[str, int]] = {
-        "01302019.NASDAQ_ITCH50.gz": 5_112_000_000,  # ~4.76 GB
-        "01302020.NASDAQ_ITCH50.gz": 6_012_000_000,  # ~5.60 GB
-        "03272019.NASDAQ_ITCH50.gz": 5_916_000_000,  # ~5.51 GB
-        "07302019.NASDAQ_ITCH50.gz": 3_929_000_000,  # ~3.66 GB
-        "08302019.NASDAQ_ITCH50.gz": 4_380_000_000,  # ~4.08 GB
-        "10302019.NASDAQ_ITCH50.gz": 4_155_000_000,  # ~3.87 GB
-        "12302019.NASDAQ_ITCH50.gz": 3_780_000_000,  # ~3.52 GB
+        "01302019.NASDAQ_ITCH50.gz": 4_764_426_091,
+        "01302020.NASDAQ_ITCH50.gz": 5_597_158_940,
+        "03272019.NASDAQ_ITCH50.gz": 5_510_131_732,
+        "07302019.NASDAQ_ITCH50.gz": 3_662_140_094,
+        "08302019.NASDAQ_ITCH50.gz": 4_075_649_457,
+        "10302019.NASDAQ_ITCH50.gz": 3_872_931_242,
+        "12302019.NASDAQ_ITCH50.gz": 3_524_013_057,
     }
+    CONNECT_TIMEOUT: ClassVar[float] = 30.0
+    READ_TIMEOUT: ClassVar[float] = 60.0
+    WRITE_TIMEOUT: ClassVar[float] = 60.0
+    POOL_TIMEOUT: ClassVar[float] = 30.0
+    MAX_DOWNLOAD_SECONDS: ClassVar[float] = 6 * 60 * 60
 
     @classmethod
     def default_download_path(cls) -> Path:
@@ -190,7 +215,7 @@ class ITCHSampleProvider:
         """Return the provider name."""
         return "nasdaq_itch"
 
-    def list_available_files(self) -> list[dict[str, str]]:
+    def list_available_files(self) -> list[AvailableFileInfo]:
         """
         List known ITCH sample files available for download.
 
@@ -203,7 +228,7 @@ class ITCHSampleProvider:
             >>> for f in files:
             ...     print(f"{f['name']}: {f['date']} ({f['size_gb']} GB)")
         """
-        files = []
+        files: list[AvailableFileInfo] = []
         for filename, size_bytes in self.KNOWN_FILES.items():
             # Parse date from filename (MMDDYYYY format)
             date_str = filename.split(".")[0]
@@ -227,7 +252,7 @@ class ITCHSampleProvider:
         date_or_filename: str,
         output_path: str | Path | None = None,
         verify_size: bool = True,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> Path:
         """
         Download an ITCH sample file from NASDAQ.
@@ -259,6 +284,7 @@ class ITCHSampleProvider:
         if filename not in self.KNOWN_FILES:
             available = ", ".join(self.KNOWN_FILES.keys())
             raise ValueError(f"Unknown ITCH file: {filename}\nAvailable files: {available}")
+        expected_size = self.KNOWN_FILES[filename]
 
         # Resolve output path
         if output_path:
@@ -266,12 +292,13 @@ class ITCHSampleProvider:
         else:
             self.download_path.mkdir(parents=True, exist_ok=True)
             out_path = self.download_path / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path = out_path.with_name(f"{out_path.name}.part")
 
         # Check if already downloaded
         if out_path.exists():
             existing_size = out_path.stat().st_size
-            expected_size = self.KNOWN_FILES[filename]
-            if abs(existing_size - expected_size) < 1e8:  # Within 100MB
+            if existing_size == expected_size:
                 self.logger.info(
                     "File already exists, skipping download",
                     path=str(out_path),
@@ -290,47 +317,106 @@ class ITCHSampleProvider:
         self.logger.info(
             "Starting ITCH download",
             url=url,
-            expected_size_gb=round(self.KNOWN_FILES[filename] / 1e9, 2),
+            expected_size_gb=round(expected_size / 1e9, 2),
         )
 
-        try:
-            with httpx.stream("GET", url, timeout=None, follow_redirects=True) as response:
-                response.raise_for_status()
+        resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
+        if verify_size and resume_offset == expected_size:
+            partial_path.replace(out_path)
+            self.logger.info(
+                "Completed ITCH download from resume checkpoint",
+                path=str(out_path),
+                size_gb=round(expected_size / 1e9, 2),
+            )
+            return out_path
+        if verify_size and resume_offset > expected_size:
+            self.logger.warning(
+                "Discarding invalid ITCH resume checkpoint",
+                partial_size=resume_offset,
+                expected_size=expected_size,
+            )
+            partial_path.unlink(missing_ok=True)
+            resume_offset = 0
+        timeout = httpx.Timeout(
+            connect=self.CONNECT_TIMEOUT,
+            read=self.READ_TIMEOUT,
+            write=self.WRITE_TIMEOUT,
+            pool=self.POOL_TIMEOUT,
+        )
+        started_at = monotonic()
 
-                total_size = int(response.headers.get("content-length", 0))
-                downloaded = 0
+        for attempt in range(2):
+            resume_offset = partial_path.stat().st_size if partial_path.exists() else 0
+            headers = {"Range": f"bytes={resume_offset}-"} if resume_offset else {}
+            try:
+                with httpx.stream(
+                    "GET",
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    follow_redirects=True,
+                ) as response:
+                    if response.status_code == 416 and resume_offset and attempt == 0:
+                        partial_path.unlink(missing_ok=True)
+                        continue
+                    response.raise_for_status()
 
-                with open(out_path, "wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=8192 * 1024):  # 8MB chunks
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_callback:
-                            progress_callback(downloaded, total_size)
+                    resumed = resume_offset > 0 and response.status_code == 206
+                    if resumed:
+                        content_range = response.headers.get("content-range", "")
+                        if not content_range.startswith(f"bytes {resume_offset}-"):
+                            partial_path.unlink(missing_ok=True)
+                            if attempt == 0:
+                                continue
+                            raise RuntimeError("server returned an invalid resume range")
+                    downloaded = resume_offset if resumed else 0
+                    content_length = int(response.headers.get("content-length", 0))
+                    total_size = downloaded + content_length if resumed else content_length
+                    mode = "ab" if resumed else "wb"
 
-                        # Log progress every ~500MB
-                        if downloaded % (500 * 1024 * 1024) < 8192 * 1024:
-                            self.logger.info(
-                                "Download progress",
-                                downloaded_gb=round(downloaded / 1e9, 2),
-                                total_gb=round(total_size / 1e9, 2) if total_size else "unknown",
-                            )
+                    with partial_path.open(mode) as f:
+                        for chunk in response.iter_bytes(chunk_size=8192 * 1024):  # 8MB chunks
+                            if monotonic() - started_at > self.MAX_DOWNLOAD_SECONDS:
+                                raise RuntimeError(
+                                    f"download exceeded {self.MAX_DOWNLOAD_SECONDS:.0f} seconds"
+                                )
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if progress_callback:
+                                progress_callback(downloaded, total_size)
 
-        except httpx.HTTPError as e:
-            # Clean up partial download
-            if out_path.exists():
-                out_path.unlink()
-            raise RuntimeError(f"Download failed: {e}") from e
+                            # Log progress every ~500MB
+                            if downloaded % (500 * 1024 * 1024) < 8192 * 1024:
+                                self.logger.info(
+                                    "Download progress",
+                                    downloaded_gb=round(downloaded / 1e9, 2),
+                                    total_gb=(
+                                        round(total_size / 1e9, 2) if total_size else "unknown"
+                                    ),
+                                )
+                break
+            except (httpx.HTTPError, OSError, ValueError) as e:
+                raise RuntimeError(f"Download failed: {e}") from e
 
-        # Verify size
+        actual_size = partial_path.stat().st_size
         if verify_size:
-            actual_size = out_path.stat().st_size
-            expected_size = self.KNOWN_FILES[filename]
-            if abs(actual_size - expected_size) > 1e8:  # More than 100MB difference
-                self.logger.warning(
-                    "Downloaded file size differs from expected",
-                    actual_gb=round(actual_size / 1e9, 2),
-                    expected_gb=round(expected_size / 1e9, 2),
+            if actual_size != expected_size:
+                made_progress = actual_size > resume_offset
+                resumable = actual_size < expected_size and made_progress
+                if not resumable:
+                    partial_path.unlink(missing_ok=True)
+                disposition = (
+                    f"partial retained at {partial_path} for a ranged retry"
+                    if resumable
+                    else "partial file discarded so the next attempt starts cleanly"
                 )
+                raise RuntimeError(
+                    "Downloaded file size differs from expected: "
+                    f"actual={actual_size}, expected={expected_size}; "
+                    f"{disposition}"
+                )
+
+        partial_path.replace(out_path)
 
         self.logger.info(
             "Download complete",
@@ -470,7 +556,7 @@ class ITCHSampleProvider:
 
     def list_parsed_message_types(
         self, parsed_dir: str | Path | None = None
-    ) -> list[dict[str, str]]:
+    ) -> list[ParsedMessageTypeInfo]:
         """
         List available parsed message types in the messages directory.
 
@@ -491,7 +577,7 @@ class ITCHSampleProvider:
         if not msg_root.exists():
             return []
 
-        result = []
+        result: list[ParsedMessageTypeInfo] = []
         for subdir in sorted(msg_root.iterdir()):
             if subdir.is_dir() and len(subdir.name) == 1:
                 code = subdir.name
@@ -508,7 +594,7 @@ class ITCHSampleProvider:
 
         return result
 
-    def get_dataset_info(self) -> dict[str, any]:
+    def get_dataset_info(self) -> dict[str, Any]:
         """
         Get information about local ITCH data.
 

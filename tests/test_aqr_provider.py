@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 from openpyxl import Workbook
@@ -55,7 +56,7 @@ class TestAQRFactorProviderInit:
             with pytest.raises(FileNotFoundError):
                 AQRFactorProvider()
 
-    def test_missing_data_message_names_a_command_a_reader_can_run(self, monkeypatch):
+    def test_missing_data_message_names_a_command_a_reader_can_run(self, monkeypatch, tmp_path):
         """The old message named `AQRFactorProvider.download()` and nothing else.
 
         That is a Python API call, so a reader who hits this has nothing to type,
@@ -63,13 +64,15 @@ class TestAQRFactorProviderInit:
         download it again. The message has to say where it looked, why there, and
         what to run.
         """
-        monkeypatch.setenv("ML4T_DATA_PATH", "/mnt/big/data")
+        data_root = tmp_path / "data-root"
+        missing_path = tmp_path / "nonexistent"
+        monkeypatch.setenv("ML4T_DATA_PATH", str(data_root))
         with pytest.raises(FileNotFoundError) as exc:
-            AQRFactorProvider(data_path="/nonexistent/path")
+            AQRFactorProvider(data_path=missing_path)
 
         message = str(exc.value)
-        assert "/nonexistent/path" in message
-        assert "ML4T_DATA_PATH=/mnt/big/data" in message
+        assert str(missing_path) in message
+        assert f"ML4T_DATA_PATH={data_root}" in message
         assert "uv run python data/factors/aqr_download.py" in message
 
     def test_missing_data_message_says_when_the_root_is_unset(self, monkeypatch):
@@ -351,9 +354,7 @@ class TestExcelParsing:
     def test_parse_dates_handles_mixed_strings_without_warning(self):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            parsed = AQRFactorProvider._parse_dates(
-                pl.Series(["2024-01-31", "02/29/2024"]).to_pandas()
-            )
+            parsed = AQRFactorProvider._parse_dates(pd.Series(["2024-01-31", "02/29/2024"]))
 
         assert parsed.dt.strftime("%Y-%m-%d").tolist() == ["2024-01-31", "2024-02-29"]
         assert not [

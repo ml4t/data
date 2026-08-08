@@ -1,28 +1,20 @@
 """Tests for LearnedSyntheticProvider.
 
 These tests verify the learned synthetic data provider can load pre-generated
-samples or model checkpoints and generate realistic OHLCV data.
+samples and generate realistic OHLCV data.
 """
 
 from __future__ import annotations
 
-# Check if torch is available for checkpoint tests
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import numpy as np
 import polars as pl
 import pytest
 
 from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
-
-HAS_TORCH = importlib.util.find_spec("torch") is not None
-
-requires_torch = pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
-
 
 # =============================================================================
 # Fixtures
@@ -100,10 +92,7 @@ def checkpoint_dir(tmp_path: Path, sample_3d_array: np.ndarray, mock_metadata: d
     with open(checkpoint_path / "metadata.json", "w") as f:
         json.dump(mock_metadata, f)
 
-    if HAS_TORCH:
-        import torch  # type: ignore[import-unresolved]
-
-        torch.save({"state_dict": {}, "generator": "timegan"}, checkpoint_path / "checkpoint.pt")
+    (checkpoint_path / "checkpoint.pt").write_bytes(b"untrusted checkpoint bytes")
 
     return checkpoint_path
 
@@ -132,6 +121,10 @@ class TestLearnedSyntheticInit:
         assert provider.n_samples == 100
         assert provider.seq_length == 24
         assert provider.n_features == 6
+
+    def test_invalid_calendar_mode_is_rejected(self, sample_3d_array: np.ndarray):
+        with pytest.raises(ValueError, match="calendar_mode"):
+            LearnedSyntheticProvider(samples=sample_3d_array, calendar_mode="weekdays")
 
     def test_init_invalid_shape_2d(self):
         """Test initialization fails with 2D array."""
@@ -173,16 +166,6 @@ class TestLearnedSyntheticInit:
         """Test initialization without seed."""
         provider = LearnedSyntheticProvider(samples=sample_3d_array)
         assert provider.seed is None
-
-    def test_init_with_model(self, sample_3d_array: np.ndarray):
-        """Test initialization with model object."""
-        mock_model = MagicMock()
-        provider = LearnedSyntheticProvider(
-            samples=sample_3d_array,
-            model=mock_model,
-        )
-        # Model is stored internally
-        assert provider._model is mock_model
 
 
 # =============================================================================
@@ -259,11 +242,55 @@ class TestLearnedSyntheticFromSamples:
         provider = LearnedSyntheticProvider.from_samples(samples_file, seed=42)
         assert provider.seed == 42
 
+    def test_from_samples_returns_writable_samples(self, samples_file: Path):
+        """Loaded arrays retain the writable in-memory public contract."""
+        provider = LearnedSyntheticProvider.from_samples(samples_file)
+
+        samples = provider.get_samples(shuffle=False)
+
+        assert samples.flags.writeable
+        assert not isinstance(samples, np.memmap)
+        samples[0, 0, 0] = 1.0
+
+    def test_from_samples_accepts_float16(self, tmp_path: Path):
+        """Compact floating-point training artifacts remain supported."""
+        samples_path = tmp_path / "float16-samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.float16))
+
+        provider = LearnedSyntheticProvider.from_samples(samples_path)
+
+        assert provider.get_samples(shuffle=False).dtype == np.float16
+
     def test_from_samples_no_metadata(self, samples_file: Path):
         """Test loading works without metadata file."""
         provider = LearnedSyntheticProvider.from_samples(samples_file)
         assert provider.generator_name == "unknown"
         assert provider.n_samples == 100
+
+    def test_from_samples_rejects_unsupported_dtype(self, tmp_path: Path):
+        """Only bounded floating-point sample tensors are accepted."""
+        samples_path = tmp_path / "integer-samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.int64))
+
+        with pytest.raises(ValueError, match="dtype"):
+            LearnedSyntheticProvider.from_samples(samples_path)
+
+    def test_from_samples_rejects_oversized_file(self, tmp_path: Path, monkeypatch):
+        """Artifact size is checked before NumPy opens the array."""
+        samples_path = tmp_path / "samples.npy"
+        np.save(samples_path, np.ones((2, 3, 1), dtype=np.float32))
+        monkeypatch.setattr(LearnedSyntheticProvider, "MAX_SAMPLE_FILE_BYTES", 16)
+
+        with pytest.raises(ValueError, match="Sample file exceeds"):
+            LearnedSyntheticProvider.from_samples(samples_path)
+
+    def test_from_samples_rejects_non_mapping_metadata(self, samples_file: Path, tmp_path: Path):
+        """Metadata must use the documented JSON object schema."""
+        metadata_path = tmp_path / "metadata.json"
+        metadata_path.write_text("[]")
+
+        with pytest.raises(ValueError, match="JSON object"):
+            LearnedSyntheticProvider.from_samples(samples_file, metadata_path=metadata_path)
 
 
 # =============================================================================
@@ -274,18 +301,12 @@ class TestLearnedSyntheticFromSamples:
 class TestLearnedSyntheticFromCheckpoint:
     """Test from_checkpoint class method."""
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_from_checkpoint_with_samples(self, checkpoint_dir: Path):
-        """Test loading from checkpoint with pre-generated samples."""
+        """Load safe samples without deserializing the adjacent checkpoint."""
         provider = LearnedSyntheticProvider.from_checkpoint(checkpoint_dir)
         assert provider.n_samples == 100
         assert provider.generator_name == "timegan"
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_from_checkpoint_string_path(self, checkpoint_dir: Path):
         """Test loading from string path."""
         provider = LearnedSyntheticProvider.from_checkpoint(str(checkpoint_dir))
@@ -305,13 +326,42 @@ class TestLearnedSyntheticFromCheckpoint:
         with pytest.raises(FileNotFoundError, match="Metadata file not found"):
             LearnedSyntheticProvider.from_checkpoint(checkpoint_path)
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
+    def test_from_checkpoint_requires_pre_generated_samples(
+        self, tmp_path: Path, mock_metadata: dict[str, Any]
+    ) -> None:
+        checkpoint_path = tmp_path / "checkpoint"
+        checkpoint_path.mkdir()
+        (checkpoint_path / "metadata.json").write_text(json.dumps(mock_metadata))
+        (checkpoint_path / "checkpoint.pt").write_bytes(b"untrusted checkpoint bytes")
+
+        with pytest.raises(
+            FileNotFoundError, match="Executable model checkpoints are not supported"
+        ):
+            LearnedSyntheticProvider.from_checkpoint(checkpoint_path)
+
     def test_from_checkpoint_with_seed(self, checkpoint_dir: Path):
         """Test from_checkpoint with seed parameter."""
         provider = LearnedSyntheticProvider.from_checkpoint(checkpoint_dir, seed=42)
         assert provider.seed == 42
+
+    def test_from_checkpoint_cannot_execute_object_array_pickle(
+        self, checkpoint_dir: Path, tmp_path: Path
+    ):
+        """A malicious NumPy object payload cannot execute through the public loader."""
+        marker = tmp_path / "payload-executed"
+
+        class MaliciousPayload:
+            def __reduce__(self):
+                return (Path.mkdir, (marker,))
+
+        payload = np.empty((1,), dtype=object)
+        payload[0] = MaliciousPayload()
+        np.save(checkpoint_dir / "samples.npy", payload, allow_pickle=True)
+
+        with pytest.raises(ValueError, match="safe NumPy"):
+            LearnedSyntheticProvider.from_checkpoint(checkpoint_dir)
+
+        assert not marker.exists()
 
 
 # =============================================================================
@@ -397,23 +447,6 @@ class TestLearnedSyntheticSamples:
         # Should return all available
         assert samples.shape[0] == 100
 
-    def test_generate_samples_no_model(self, provider: LearnedSyntheticProvider):
-        """Test generate_samples raises error when no model."""
-        with pytest.raises(RuntimeError, match="Cannot generate new samples"):
-            provider.generate_samples(n_samples=10)
-
-    def test_generate_samples_with_model(self, sample_3d_array: np.ndarray):
-        """Test generate_samples with model (placeholder behavior)."""
-        mock_model = MagicMock()
-        provider = LearnedSyntheticProvider(
-            samples=sample_3d_array,
-            model=mock_model,
-        )
-
-        # Should return random samples (placeholder implementation)
-        samples = provider.generate_samples(n_samples=10)
-        assert samples.shape[0] == 10
-
 
 # =============================================================================
 # TestLearnedSyntheticOHLCV - OHLCV Generation Tests
@@ -449,6 +482,12 @@ class TestLearnedSyntheticOHLCV:
         # Should have many bars per day
         assert len(df) >= 100
 
+    def test_invalid_frequency_is_rejected_before_generation(
+        self, provider: LearnedSyntheticProvider
+    ):
+        with pytest.raises(ValueError, match="Unsupported synthetic frequency"):
+            provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-02", "quarterly")
+
     def test_fetch_ohlcv_empty_range(self, provider: LearnedSyntheticProvider):
         """Test OHLCV generation for empty date range (weekend)."""
         # A weekend day might have no data
@@ -457,6 +496,20 @@ class TestLearnedSyntheticOHLCV:
         # Result should be valid DataFrame (might be empty for weekend)
         assert isinstance(df, pl.DataFrame)
         assert "timestamp" in df.columns
+
+    def test_continuous_calendar_includes_weekends(
+        self, sample_3d_array: np.ndarray, mock_metadata: dict
+    ):
+        provider = LearnedSyntheticProvider(
+            samples=sample_3d_array,
+            metadata=mock_metadata,
+            seed=42,
+            calendar_mode="continuous",
+        )
+
+        df = provider.fetch_ohlcv("SYNTH", "2024-01-06", "2024-01-07", "daily")
+
+        assert len(df) == 2
 
     def test_ohlcv_high_gte_low(self, provider: LearnedSyntheticProvider):
         """Test OHLC invariant: high >= low."""
@@ -689,9 +742,6 @@ class TestLearnedSyntheticIntegration:
         assert (df["high"] >= df["low"]).all()
         assert (df["close"] > 0).all()
 
-    @pytest.mark.integration
-    @pytest.mark.optional_dependency
-    @requires_torch
     def test_full_workflow_from_checkpoint(self, checkpoint_dir: Path):
         """Test complete workflow from checkpoint directory."""
         # 1. Load from checkpoint
@@ -705,7 +755,7 @@ class TestLearnedSyntheticIntegration:
         assert provider.generator_name == "timegan"
 
         # 3. Generate multiple datasets
-        df_daily = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-31", "daily")
+        df_daily = provider.fetch_ohlcv("SYNTH", "2024-01-02", "2024-01-03", "daily")
         df_hourly = provider.fetch_ohlcv("SYNTH", "2024-01-02", "2024-01-03", "hourly")
 
         assert len(df_daily) > 0

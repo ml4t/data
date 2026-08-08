@@ -52,7 +52,7 @@ pytest
 ## Code Style
 
 - **Formatter**: ruff (100 char line length)
-- **Type checking**: mypy strict mode
+- **Type checking**: ty
 - **Docstrings**: Google style
 - **Tests**: pytest with 80%+ coverage
 

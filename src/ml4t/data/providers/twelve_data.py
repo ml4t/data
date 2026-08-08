@@ -113,7 +113,7 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
             "interval": interval,
             "start_date": start,
             "end_date": end,
-            "timezone": "America/New_York",
+            "timezone": "UTC",
             "apikey": self.api_key,
             "outputsize": 5000,
             "format": "JSON",
@@ -160,8 +160,10 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
         # Rename columns
         df = df.rename({"datetime": "timestamp"})
 
-        # Convert timestamp to datetime
-        df = df.with_columns(pl.col("timestamp").str.to_datetime().alias("timestamp"))
+        # The API returns wall-clock values in the requested UTC timezone.
+        df = df.with_columns(
+            pl.col("timestamp").str.to_datetime(time_zone="UTC").alias("timestamp")
+        )
 
         # Convert OHLCV columns to float
         for col in ["open", "high", "low", "close", "volume"]:
@@ -191,7 +193,7 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
             "interval": interval,
             "start_date": start,
             "end_date": end,
-            "timezone": "America/New_York",
+            "timezone": "UTC",
             "apikey": self.api_key,
             "outputsize": 5000,
             "format": "JSON",

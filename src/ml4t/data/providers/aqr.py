@@ -45,7 +45,7 @@ from calendar import monthrange
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import httpx
 import pandas as pd
@@ -55,6 +55,7 @@ import structlog
 from ml4t.data.core.config import PREFERRED_DATA_ENV_VAR, resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.utils.conversion import pandas_to_polars
 
 logger = structlog.get_logger()
 _DEFAULT_DATA_SUBPATH = Path("factors/aqr")
@@ -285,7 +286,7 @@ class AQRFactorProvider(BaseProvider):
     }
 
     # Dataset metadata - comprehensive details for each dataset
-    DATASETS: ClassVar[dict[str, dict]] = {
+    DATASETS: ClassVar[dict[str, dict[str, Any]]] = {
         # ===== CORE EQUITY FACTORS =====
         "qmj_factors": {
             "name": "Quality Minus Junk: Factors, Monthly",
@@ -733,7 +734,7 @@ class AQRFactorProvider(BaseProvider):
         """List dataset categories."""
         return list(AQR_CATEGORIES.keys())
 
-    def get_dataset_info(self, dataset: AQRDataset) -> dict:
+    def get_dataset_info(self, dataset: AQRDataset) -> dict[str, Any]:
         """
         Get metadata for a specific dataset.
 
@@ -1010,7 +1011,7 @@ class AQRFactorProvider(BaseProvider):
         first_col = str(df_pd.columns[0]).lower()
         if "unnamed" in first_col or "please" in first_col or "disclosures" in first_col:
             # Column names are in a data row - find them
-            for idx, row in df_pd.iterrows():
+            for position, (_, row) in enumerate(df_pd.iterrows()):
                 first_val = str(row.iloc[0]).upper() if pd.notna(row.iloc[0]) else ""
                 # Check if this row has "DATE" or looks like a date
                 if first_val == "DATE":
@@ -1018,10 +1019,10 @@ class AQRFactorProvider(BaseProvider):
                     df_pd.columns = [
                         str(v) if pd.notna(v) else f"col_{i}" for i, v in enumerate(row)
                     ]
-                    df_pd = df_pd.iloc[idx + 1 :].reset_index(drop=True)
+                    df_pd = df_pd.iloc[position + 1 :].reset_index(drop=True)
                     break
                 # Check if row 0 contains column names (not dates)
-                elif idx == 0 and pd.isna(row.iloc[0]) and not pd.isna(row.iloc[1]):
+                elif position == 0 and pd.isna(row.iloc[0]) and not pd.isna(row.iloc[1]):
                     # Row 0 has column names starting from column 1
                     new_cols = ["date"] + [
                         str(v) if pd.notna(v) else f"col_{i}" for i, v in enumerate(row.iloc[1:], 1)
@@ -1083,7 +1084,7 @@ class AQRFactorProvider(BaseProvider):
             if converted.notna().sum() == df_pd[col].notna().sum():
                 df_pd[col] = converted.astype(float)
 
-        df = pl.from_pandas(df_pd).rename({"date": "timestamp"})
+        df = pandas_to_polars(df_pd).rename({"date": "timestamp"})
 
         if info.get("frequency") == "monthly":
             df = df.with_columns(pl.col("timestamp").dt.month_start().alias("timestamp"))

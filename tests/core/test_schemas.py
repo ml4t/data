@@ -681,6 +681,42 @@ class TestAlignFramesForConcat:
         assert aligned_right["dividends"].to_list() == [0.0]
         assert aligned_right["splits"].to_list() == [1.0]
 
+    def test_aligns_datetime_units_without_reducing_precision(self):
+        """Timestamp alignment retains the more precise input unit."""
+        left = pl.DataFrame(
+            {
+                "timestamp": pl.Series([1_700_000_000_000_000], dtype=pl.Int64).cast(
+                    pl.Datetime("us", "UTC")
+                )
+            }
+        )
+        right = pl.DataFrame(
+            {
+                "timestamp": pl.Series([1_700_000_000_000_000_001], dtype=pl.Int64).cast(
+                    pl.Datetime("ns", "UTC")
+                )
+            }
+        )
+
+        aligned_left, aligned_right = align_frames_for_concat(left, right)
+
+        expected = pl.Datetime("ns", "UTC")
+        assert aligned_left.schema["timestamp"] == expected
+        assert aligned_right.schema["timestamp"] == expected
+        assert len(pl.concat([aligned_left, aligned_right])) == 2
+
+    def test_aligns_legacy_naive_timestamps_with_canonical_utc(self):
+        """Existing naive UTC data can be appended to canonical provider output."""
+        left = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
+        right = pl.DataFrame({"timestamp": [datetime(2024, 1, 2, tzinfo=UTC)]})
+
+        aligned_left, aligned_right = align_frames_for_concat(left, right)
+
+        expected = pl.Datetime("us", "UTC")
+        assert aligned_left.schema["timestamp"] == expected
+        assert aligned_right.schema["timestamp"] == expected
+        assert len(pl.concat([aligned_left, aligned_right])) == 2
+
 
 class TestIntegration:
     """Integration tests combining multiple operations."""

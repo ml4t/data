@@ -260,7 +260,9 @@ class TestValidationReportIntegration:
 
         # Create validator
         validator = OHLCVValidator(
-            check_nulls=True, check_price_consistency=True, check_negative_prices=True
+            check_nulls=True,
+            check_price_consistency=True,
+            negative_price_policy="forbid",
         )
 
         # Create test data with issues

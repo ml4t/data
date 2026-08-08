@@ -13,6 +13,12 @@ from ml4t.data.validation.base import Severity, ValidationIssue, ValidationResul
 logger = structlog.get_logger()
 
 
+def _numeric_scalar(value: object, metric: str) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"'{metric}' must contain non-null numeric values")
+    return float(value)
+
+
 class CrossValidator(Validator):
     """Cross-validation checks across multiple data sources or timeframes."""
 
@@ -123,7 +129,7 @@ class CrossValidator(Validator):
                     message=f"Found {len(significant_gaps)} price gaps >{self.price_gap_threshold:.0%}",
                     details={
                         "threshold": self.price_gap_threshold,
-                        "max_gap": float(max_gap) if max_gap is not None else 0.0,
+                        "max_gap": _numeric_scalar(max_gap, "gap_pct"),
                         "gap_count": len(significant_gaps),
                     },
                     row_count=len(significant_gaps),
@@ -157,7 +163,7 @@ class CrossValidator(Validator):
                     message=f"Found {len(volume_spikes)} volume spikes >{self.volume_spike_threshold}x average",
                     details={
                         "threshold": self.volume_spike_threshold,
-                        "max_spike": float(max_spike) if max_spike is not None else 0.0,
+                        "max_spike": _numeric_scalar(max_spike, "volume_ratio"),
                         "spike_count": len(volume_spikes),
                     },
                     row_count=len(volume_spikes),
@@ -270,7 +276,7 @@ class CrossValidator(Validator):
                     check="cross_reference",
                     message=f"Found {len(significant_diffs)} timestamps with >1% price difference vs reference",
                     details={
-                        "max_difference": float(max_diff) if max_diff is not None else 0.0,
+                        "max_difference": _numeric_scalar(max_diff, "price_diff_pct"),
                         "diff_count": len(significant_diffs),
                         "common_timestamps": len(common_timestamps),
                     },

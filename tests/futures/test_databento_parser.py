@@ -1,6 +1,6 @@
 """Tests for Databento futures parser."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 import polars as pl
@@ -32,7 +32,7 @@ class TestParseContractSymbol:
 
     def test_parse_es_march_2025(self):
         """Parse standard ES contract symbol."""
-        info = parse_contract_symbol("ESH25")
+        info = parse_contract_symbol("ESH25", reference_year=2025)
 
         assert info.raw_symbol == "ESH25"
         assert info.product == "ES"
@@ -40,9 +40,30 @@ class TestParseContractSymbol:
         assert info.month == 3
         assert info.year == 2025
 
+    def test_ambiguous_year_requires_explicit_reference(self):
+        with pytest.raises(ValueError, match="reference_year"):
+            parse_contract_symbol("ESH25")
+
+    @pytest.mark.parametrize(
+        ("symbol", "reference_year", "expected_year"),
+        [("ESZ6", 2026, 2026), ("ESH30", 2026, 2030), ("ESH99", 1998, 1999)],
+    )
+    def test_ambiguous_year_resolves_nearest_reference(self, symbol, reference_year, expected_year):
+        assert parse_contract_symbol(symbol, reference_year=reference_year).year == expected_year
+
+    def test_four_digit_year_is_unambiguous(self):
+        assert parse_contract_symbol("ESH2030").year == 2030
+
+    def test_four_digit_year_with_digit_in_product(self):
+        info = parse_contract_symbol("6EH2025")
+
+        assert info.product == "6E"
+        assert info.month_code == "H"
+        assert info.year == 2025
+
     def test_parse_cl_december_2024(self):
         """Parse crude oil contract symbol."""
-        info = parse_contract_symbol("CLZ24")
+        info = parse_contract_symbol("CLZ24", reference_year=2024)
 
         assert info.raw_symbol == "CLZ24"
         assert info.product == "CL"
@@ -52,7 +73,7 @@ class TestParseContractSymbol:
 
     def test_parse_gc_february_2025(self):
         """Parse gold contract symbol."""
-        info = parse_contract_symbol("GCG25")
+        info = parse_contract_symbol("GCG25", reference_year=2025)
 
         assert info.raw_symbol == "GCG25"
         assert info.product == "GC"
@@ -62,7 +83,7 @@ class TestParseContractSymbol:
 
     def test_parse_euro_fx_symbol(self):
         """Parse longer product symbol (Euro FX)."""
-        info = parse_contract_symbol("6EH25")
+        info = parse_contract_symbol("6EH25", reference_year=2025)
 
         assert info.raw_symbol == "6EH25"
         assert info.product == "6E"
@@ -74,51 +95,51 @@ class TestParseContractSymbol:
         """Test all month codes are recognized."""
         for code, expected_month in MONTH_CODES.items():
             symbol = f"ES{code}25"
-            info = parse_contract_symbol(symbol)
+            info = parse_contract_symbol(symbol, reference_year=2025)
             assert info.month == expected_month
             assert info.month_code == code
 
     def test_parse_year_2000s(self):
         """Test year parsing for 2000-2029 range."""
-        info = parse_contract_symbol("ESH00")
+        info = parse_contract_symbol("ESH00", reference_year=2000)
         assert info.year == 2000
 
-        info = parse_contract_symbol("ESH15")
+        info = parse_contract_symbol("ESH15", reference_year=2015)
         assert info.year == 2015
 
-        info = parse_contract_symbol("ESH29")
+        info = parse_contract_symbol("ESH29", reference_year=2029)
         assert info.year == 2029
 
     def test_parse_year_1900s(self):
         """Test year parsing for 1930-1999 range (historical)."""
-        info = parse_contract_symbol("ESH30")
+        info = parse_contract_symbol("ESH30", reference_year=1930)
         assert info.year == 1930
 
-        info = parse_contract_symbol("ESH99")
+        info = parse_contract_symbol("ESH99", reference_year=1999)
         assert info.year == 1999
 
     def test_parse_single_digit_year_2020s(self):
         """Test single-digit year format for 2020s (0-5)."""
         # ZMK0 -> ZM + K + 0 -> 2020
-        info = parse_contract_symbol("ZMK0")
+        info = parse_contract_symbol("ZMK0", reference_year=2020)
         assert info.product == "ZM"
         assert info.month_code == "K"
         assert info.year == 2020
 
         # ZMF5 -> ZM + F + 5 -> 2025
-        info = parse_contract_symbol("ZMF5")
+        info = parse_contract_symbol("ZMF5", reference_year=2025)
         assert info.year == 2025
 
     def test_parse_single_digit_year_2010s(self):
         """Test single-digit year format for 2010s (6-9)."""
         # ZMK9 -> ZM + K + 9 -> 2019
-        info = parse_contract_symbol("ZMK9")
+        info = parse_contract_symbol("ZMK9", reference_year=2019)
         assert info.product == "ZM"
         assert info.month_code == "K"
         assert info.year == 2019
 
         # ZMV6 -> ZM + V + 6 -> 2016
-        info = parse_contract_symbol("ZMV6")
+        info = parse_contract_symbol("ZMV6", reference_year=2016)
         assert info.year == 2016
 
     def test_invalid_symbol_too_short(self):
@@ -159,17 +180,17 @@ class TestParseContractSymbol:
 
     def test_contract_info_month_property(self):
         """Test ContractInfo.contract_month property."""
-        info = parse_contract_symbol("ESH25")
+        info = parse_contract_symbol("ESH25", reference_year=2025)
         assert info.contract_month == "2025-03"
 
-        info = parse_contract_symbol("CLZ24")
+        info = parse_contract_symbol("CLZ24", reference_year=2024)
         assert info.contract_month == "2024-12"
 
     def test_contract_info_hashable(self):
         """Test ContractInfo can be used in sets/dicts."""
-        info1 = parse_contract_symbol("ESH25")
-        info2 = parse_contract_symbol("ESH25")
-        info3 = parse_contract_symbol("ESM25")
+        info1 = parse_contract_symbol("ESH25", reference_year=2025)
+        info2 = parse_contract_symbol("ESH25", reference_year=2025)
+        info3 = parse_contract_symbol("ESM25", reference_year=2025)
 
         # Same symbol should hash the same
         assert hash(info1) == hash(info2)
@@ -271,6 +292,50 @@ def databento_path():
     if not DATABENTO_DATA_PATH.exists():
         pytest.skip("Databento data not available")
     return DATABENTO_DATA_PATH
+
+
+def test_numeric_expiration_is_interpreted_in_utc(tmp_path):
+    expiration_ns = 1_742_515_200_000_000_000  # 2025-03-21 00:00:00 UTC
+    definitions = pl.DataFrame(
+        {"raw_symbol": ["ESH25"], "expiration": pl.Series([expiration_ns], dtype=pl.Int64)}
+    )
+    definition_dir = tmp_path / "definition" / "product=ES"
+    definition_dir.mkdir(parents=True)
+    definitions.write_parquet(definition_dir / "definition.parquet")
+
+    assert get_expiration_dates("ES", tmp_path) == {"ESH25": date(2025, 3, 21)}
+
+
+@pytest.mark.parametrize(
+    ("expiration", "expected"),
+    [
+        (datetime(2025, 3, 21, 23, 30), date(2025, 3, 21)),
+        (
+            datetime(2025, 3, 21, 23, 30, tzinfo=timezone(-timedelta(hours=4))),
+            date(2025, 3, 22),
+        ),
+        (datetime(2025, 3, 21, 0, 0, tzinfo=UTC), date(2025, 3, 21)),
+    ],
+)
+def test_datetime_expiration_is_interpreted_in_utc(tmp_path, expiration, expected):
+    definitions = pl.DataFrame({"raw_symbol": ["ESH25"], "expiration": [expiration]})
+    definition_dir = tmp_path / "definition" / "product=ES"
+    definition_dir.mkdir(parents=True)
+    definitions.write_parquet(definition_dir / "definition.parquet")
+
+    assert get_expiration_dates("ES", tmp_path) == {"ESH25": expected}
+
+
+def test_contract_chain_warns_when_truncated_year_is_ambiguous(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ml4t.data.futures.databento_parser.get_expiration_dates",
+        lambda *_args, **_kwargs: {"ESH5": date(2000, 3, 17)},
+    )
+
+    assert get_contract_chain("ES") == []
+    output = capsys.readouterr().out
+    assert "ESH5" in output
+    assert "equally close" in output
 
 
 @pytest.mark.integration
@@ -385,10 +450,10 @@ class TestGetExpirationDates:
         """Expiration dict symbols should be parseable."""
         expirations = get_expiration_dates("ZM", databento_path)
 
-        for symbol in list(expirations.keys())[:5]:
+        for symbol, expiration in list(expirations.items())[:5]:
             # Should be able to parse the symbol
             try:
-                info = parse_contract_symbol(symbol)
+                info = parse_contract_symbol(symbol, reference_year=expiration.year)
                 assert info.product == "ZM"
             except ValueError:
                 # Some symbols might be spreads or invalid

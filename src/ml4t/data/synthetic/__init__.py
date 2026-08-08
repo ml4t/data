@@ -21,21 +21,31 @@ Usage:
 """
 
 from ml4t.data.synthetic.ohlcv_utils import (
+    CalendarMode,
+    create_rng,
+    derive_symbol_seed,
     generate_ohlc_from_close,
     generate_timestamps,
     generate_volume,
     get_bars_per_day,
+    get_periods_per_year,
     returns_to_prices,
+    validate_synthetic_frequency,
 )
 from ml4t.data.synthetic.registry import SyntheticRegistry
 
 __all__ = [
     # OHLCV utilities
+    "CalendarMode",
+    "create_rng",
+    "derive_symbol_seed",
     "generate_ohlc_from_close",
     "generate_timestamps",
     "generate_volume",
     "get_bars_per_day",
+    "get_periods_per_year",
     "returns_to_prices",
+    "validate_synthetic_frequency",
     # Registry
     "SyntheticRegistry",
 ]

@@ -7,6 +7,8 @@ import pandas as pd
 import polars as pl
 import pytest
 
+pytest.importorskip("databento")
+
 # Import real databento exceptions (databento package is installed)
 from databento.common.error import BentoClientError, BentoServerError
 
@@ -149,6 +151,7 @@ class TestDataBentoProvider:
                 "low": [4695.0, 4700.0],
                 "close": [4705.0, 4710.0],
                 "volume": [1000.0, 1100.0],
+                "raw_symbol": ["ESH4", "ESH4"],
             }
         )
 
@@ -164,9 +167,10 @@ class TestDataBentoProvider:
         assert "symbol" in df.columns
 
         # Check data types
-        assert df["timestamp"].dtype == pl.Datetime("ns")
+        assert df["timestamp"].dtype == pl.Datetime("ns", "UTC")
         assert df["open"].dtype == pl.Float64
-        assert df["symbol"][0] == "ES.v.0"
+        assert df["symbol"][0] == "ES.V.0"
+        assert df["contract"][0] == "ESH4"
 
         # Check sorting
         timestamps = df["timestamp"].to_list()
@@ -515,32 +519,7 @@ class TestDataBentoProvider:
 
 @pytest.mark.integration
 class TestDataBentoProviderIntegration:
-    """Integration tests for Databento provider (requires API key)."""
-
-    @pytest.mark.skipif(not os.getenv("DATABENTO_API_KEY"), reason="DATABENTO_API_KEY not set")
-    def test_real_api_fetch(self):
-        """Test with real Databento API (if key available)."""
-        provider = DataBentoProvider()
-
-        # Fetch a small amount of data to minimize costs
-        # Note: ES.v.0 continuous futures don't work with GLBX.MDP3 dataset
-        # Using specific contract instead
-        df = provider.fetch_ohlcv(
-            "ESH4",  # E-mini S&P March 2024 contract
-            "2024-01-02",  # Single day
-            "2024-01-02",
-            "daily",
-        )
-
-        assert not df.is_empty()
-        assert "timestamp" in df.columns
-        assert "open" in df.columns
-        assert "close" in df.columns
-
-        # Verify data quality
-        assert df["high"].max() >= df["low"].min()
-        assert df["high"].max() >= df["open"].max()
-        assert df["high"].max() >= df["close"].max()
+    """Non-contract Databento integration scenarios."""
 
     @pytest.mark.skipif(not os.getenv("DATABENTO_API_KEY"), reason="DATABENTO_API_KEY not set")
     @pytest.mark.skip(reason="DataBento paid tier required")

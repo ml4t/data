@@ -8,7 +8,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.core.exceptions import DataNotAvailableError, NetworkError
 from ml4t.data.providers.fama_french import (
     FF_CATEGORIES,
     FamaFrenchProvider,
@@ -410,13 +410,23 @@ class TestDownload:
         """Create provider instance."""
         return FamaFrenchProvider(use_cache=False)
 
-    def test_download_handles_http_error(self, provider):
-        """Test that HTTP errors are wrapped in DataNotAvailableError."""
+    def test_download_classifies_transport_error(self, provider):
+        """Transport errors remain visible to provider health policies."""
         import httpx
 
         with patch.object(httpx.Client, "get") as mock_get:
-            mock_get.side_effect = httpx.HTTPError("Connection failed")
+            mock_get.side_effect = httpx.ConnectError("Connection failed")
 
+            with pytest.raises(NetworkError):
+                provider._download_dataset("ff3")
+
+    def test_download_classifies_missing_dataset(self, provider):
+        """A 404 is a permanent data-availability failure."""
+        import httpx
+
+        request = httpx.Request("GET", "https://example.test/missing.zip")
+        response = httpx.Response(404, request=request)
+        with patch.object(httpx.Client, "get", return_value=response):
             with pytest.raises(DataNotAvailableError):
                 provider._download_dataset("ff3")
 

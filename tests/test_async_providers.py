@@ -10,7 +10,7 @@ Tests the async methods added to providers:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,7 +18,12 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
-from ml4t.data.managers.async_batch import AsyncBatchManager, async_batch_load
+from ml4t.data.managers.async_batch import (
+    AsyncBatchManager,
+    async_batch_load,
+    async_batch_load_dict,
+)
+from ml4t.data.providers.async_base import AsyncBaseProvider
 from ml4t.data.providers.binance_public import BinancePublicProvider
 from ml4t.data.providers.cryptocompare import CryptoCompareProvider
 from ml4t.data.providers.yahoo import YahooFinanceProvider
@@ -36,9 +41,9 @@ def sample_ohlcv_data() -> pl.DataFrame:
     return pl.DataFrame(
         {
             "timestamp": [
-                datetime(2024, 1, 1),
-                datetime(2024, 1, 2),
-                datetime(2024, 1, 3),
+                datetime(2024, 1, 1, tzinfo=UTC),
+                datetime(2024, 1, 2, tzinfo=UTC),
+                datetime(2024, 1, 3, tzinfo=UTC),
             ],
             "open": [100.0, 101.0, 102.0],
             "high": [105.0, 106.0, 107.0],
@@ -162,6 +167,94 @@ class TestBinancePublicProviderAsync:
         await provider.close_async()
 
     @pytest.mark.asyncio
+    async def test_fetch_daily_data_async_does_not_swallow_base_exception(self, sample_ohlcv_data):
+        """Cancellation-class failures propagate after sibling downloads stop."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = BinancePublicProvider()
+        call_count = 0
+        concurrent_started = asyncio.Event()
+        never_complete = asyncio.Event()
+        active_calls: set[int] = set()
+        cancelled_calls: set[int] = set()
+
+        async def mock_download(url):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return sample_ohlcv_data
+            call_id = call_count - 1
+            active_calls.add(call_id)
+            if len(active_calls) == 5:
+                concurrent_started.set()
+            await concurrent_started.wait()
+            if call_id == 2:
+                raise WorkerStopped("stopped")
+            try:
+                await never_complete.wait()
+            except asyncio.CancelledError:
+                cancelled_calls.add(call_id)
+                raise
+
+        with patch.object(provider, "_download_and_parse_zip_async", side_effect=mock_download):
+            with pytest.raises(WorkerStopped, match="stopped"):
+                await provider._fetch_daily_data_async(
+                    "BTCUSDT", "1d", datetime(2024, 1, 1), datetime(2024, 1, 6)
+                )
+
+        assert active_calls == {1, 2, 3, 4, 5}
+        assert cancelled_calls == {1, 3, 4, 5}
+        await provider.close_async()
+
+    @pytest.mark.asyncio
+    async def test_fetch_premium_index_async_cancels_siblings_on_base_exception(self):
+        """Premium-index failures propagate after all monthly siblings stop."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = BinancePublicProvider(market="futures")
+        concurrent_started = asyncio.Event()
+        never_complete = asyncio.Event()
+        active_calls: set[int] = set()
+        cancelled_calls: set[int] = set()
+        call_count = 0
+
+        async def mock_download(url, symbol):
+            nonlocal call_count
+            call_count += 1
+            call_id = call_count
+            active_calls.add(call_id)
+            if len(active_calls) == 5:
+                concurrent_started.set()
+            await concurrent_started.wait()
+            if call_id == 2:
+                raise WorkerStopped("stopped")
+            try:
+                await never_complete.wait()
+            except asyncio.CancelledError:
+                cancelled_calls.add(call_id)
+                raise
+
+        with patch.object(
+            provider,
+            "_download_and_parse_premium_index_zip_async",
+            side_effect=mock_download,
+        ):
+            with pytest.raises(WorkerStopped, match="stopped"):
+                await provider.fetch_premium_index_async(
+                    "BTCUSDT",
+                    "2024-01-01",
+                    "2024-05-31",
+                )
+
+        assert active_calls == {1, 2, 3, 4, 5}
+        assert cancelled_calls == {1, 3, 4, 5}
+        await provider.close_async()
+
+    @pytest.mark.asyncio
     async def test_fetch_ohlcv_multi_async_combines_symbols(self, sample_ohlcv_data):
         """Test multi-symbol OHLCV fetch combines successful results."""
         provider = BinancePublicProvider()
@@ -254,26 +347,28 @@ class TestYahooFinanceProviderAsync:
 class TestCryptoCompareProviderAsync:
     """Test async methods on CryptoCompareProvider."""
 
-    def test_async_session_with_api_key(self):
+    @pytest.mark.asyncio
+    async def test_async_session_with_api_key(self):
         """Test async session includes API key in headers."""
         provider = CryptoCompareProvider(api_key="test_key_123")
         session = provider._async_session
 
         assert session is not None
-        assert "authorization" in session.headers
-        assert provider.api_key in session.headers["authorization"]
+        assert session.headers["authorization"] == "Apikey test_key_123"
+        await provider.close_async()
+        provider.close()
 
     @pytest.mark.asyncio
     async def test_async_context_manager(self):
         """Test async context manager protocol."""
-        async with CryptoCompareProvider() as provider:
+        async with CryptoCompareProvider(api_key="test_key") as provider:
             assert provider is not None
             assert provider.name == "cryptocompare"
 
     @pytest.mark.asyncio
     async def test_fetch_ohlcv_async_success(self, sample_ohlcv_data):
         """Test async fetch returns valid data."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         # Mock the transform to return valid data directly
         with (
@@ -293,7 +388,7 @@ class TestCryptoCompareProviderAsync:
     @pytest.mark.asyncio
     async def test_close_async(self):
         """Test async close cleans up resources."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
         # Create async client
         _ = provider._async_session
         assert provider._async_client is not None
@@ -455,6 +550,63 @@ class TestAsyncBatchLoad:
         # Should never exceed max_concurrent
         assert max_observed_concurrent <= 3
 
+    @pytest.mark.asyncio
+    async def test_dict_does_not_swallow_base_exception(self):
+        """Cancellation-class failures must propagate out of batch collection."""
+
+        class WorkerStopped(BaseException):
+            pass
+
+        mock_provider = MagicMock()
+        mock_provider.fetch_ohlcv_async = AsyncMock(side_effect=WorkerStopped("stopped"))
+
+        with pytest.raises(WorkerStopped, match="stopped"):
+            await async_batch_load_dict(
+                mock_provider,
+                ["AAPL"],
+                "2024-01-01",
+                "2024-01-31",
+                return_exceptions=True,
+            )
+
+
+class TestAsyncBaseProviderBatch:
+    """Test exception boundaries in the abstract async provider batch API."""
+
+    class Provider(AsyncBaseProvider):
+        @property
+        def name(self) -> str:
+            return "test_async"
+
+        async def _fetch_and_transform_data_async(
+            self, symbol: str, start: str, end: str, frequency: str
+        ) -> pl.DataFrame:
+            return pl.DataFrame()
+
+    @pytest.mark.asyncio
+    async def test_returns_normal_exceptions(self):
+        provider = self.Provider()
+        provider.fetch_ohlcv_async = AsyncMock(side_effect=RuntimeError("failed"))
+
+        result = await provider.batch_fetch_async(
+            ["AAPL"], "2024-01-01", "2024-01-31", return_exceptions=True
+        )
+
+        assert isinstance(result["AAPL"], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_does_not_swallow_base_exception(self):
+        class WorkerStopped(BaseException):
+            pass
+
+        provider = self.Provider()
+        provider.fetch_ohlcv_async = AsyncMock(side_effect=WorkerStopped("stopped"))
+
+        with pytest.raises(WorkerStopped, match="stopped"):
+            await provider.batch_fetch_async(
+                ["AAPL"], "2024-01-01", "2024-01-31", return_exceptions=True
+            )
+
 
 # ===== Protocol Conformance Tests =====
 
@@ -486,7 +638,7 @@ class TestAsyncProtocolConformance:
 
     def test_cryptocompare_has_async_methods(self):
         """Test CryptoCompareProvider has required async methods."""
-        provider = CryptoCompareProvider()
+        provider = CryptoCompareProvider(api_key="test_key")
 
         assert hasattr(provider, "fetch_ohlcv_async")
         assert asyncio.iscoroutinefunction(provider.fetch_ohlcv_async)

@@ -7,11 +7,12 @@ ProviderManager for provider instance management.
 
 from __future__ import annotations
 
-import os
 import re
 from typing import TYPE_CHECKING, Any
 
 import structlog
+
+from ml4t.data.providers.registry import PROVIDER_REGISTRY, ProviderSpec, get_provider_spec
 
 if TYPE_CHECKING:
     from ml4t.data.providers.base import BaseProvider
@@ -39,7 +40,7 @@ class ProviderRouter:
 
     def __init__(self) -> None:
         """Initialize provider router."""
-        self.patterns: list[tuple[re.Pattern, str]] = []
+        self.patterns: list[tuple[re.Pattern[str], str]] = []
         self._cache: dict[str, str] = {}
 
     def add_pattern(self, pattern: str, provider: str) -> None:
@@ -84,27 +85,21 @@ class ProviderRouter:
         self._cache.clear()
 
     def setup_default_patterns(self) -> None:
-        """Setup default routing patterns if none configured.
+        """Set up routing only for symbol formats with one clear asset class.
 
         Default patterns:
-        - Forex: EURUSD or EUR_USD format → oanda
-        - Crypto: BTC/ETH/SOL prefixes → cryptocompare
-        - Futures: Continuous (.v.) or contracts (ESZ4) → databento
+        - Forex: ``EUR_USD`` format routes to OANDA
+        - Futures: continuous ``ROOT.v.N`` symbols route to Databento
+
+        Bare tickers and compact pairs are intentionally not inferred because their
+        formats overlap across equities, crypto, forex, and futures. Delimited crypto
+        pairs are also not inferred because several providers accept the same syntax.
         """
         if self.patterns:
             return  # Don't override existing patterns
 
-        # Forex patterns
-        self.add_pattern(r"^[A-Z]{6}$", "oanda")  # EURUSD format
-        self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")  # EUR_USD format
-
-        # Crypto patterns
-        self.add_pattern(r"^(BTC|ETH|SOL|ADA|DOT|LINK|AVAX|MATIC)", "cryptocompare")
-        self.add_pattern(r"^[A-Z]{3,5}(-USD)?$", "cryptocompare")
-
-        # Futures patterns
-        self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")  # Continuous
-        self.add_pattern(r"^[A-Z]{2,3}[FGHJKMNQUVXZ][0-9]$", "databento")  # Contracts
+        self.add_pattern(r"^[A-Z]{3}_[A-Z]{3}$", "oanda")
+        self.add_pattern(r"^[A-Z]+\.(v|V)\.[0-9]+$", "databento")
 
 
 class ProviderManager:
@@ -135,30 +130,24 @@ class ProviderManager:
 
     # Providers that work without API keys
     FREE_PROVIDERS = frozenset(
-        {
-            "yahoo",
-            "binance",
-            "binance_public",
-            "mock",
-            "cryptocompare",
-            "synthetic",
-            "okx",
-        }
+        spec.name
+        for spec in PROVIDER_REGISTRY.values()
+        if spec.manager_compatible and not spec.credentials and not spec.required_configuration
     )
 
     # Providers that require API keys
     KEYED_PROVIDERS = frozenset(
-        {
-            "alpaca",
-            "databento",
-            "massive",
-            "oanda",
-            "polygon",
-        }
+        spec.name
+        for spec in PROVIDER_REGISTRY.values()
+        if spec.manager_compatible and spec.credentials
     )
 
     # Credential fields that must never leave get_provider_info's sanitized view
-    SECRET_FIELDS = frozenset({"api_key", "api_secret"})
+    SECRET_FIELDS = frozenset(
+        requirement.config_field
+        for spec in PROVIDER_REGISTRY.values()
+        for requirement in spec.credentials
+    ) | {"api_key", "api_secret"}
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize ProviderManager.
@@ -168,7 +157,9 @@ class ProviderManager:
         """
         self.config = config
         self.providers: dict[str, BaseProvider] = {}
-        self._provider_classes = self._get_provider_classes()
+        self._provider_classes = dict(self._get_provider_classes())
+        self._provider_specs = dict(PROVIDER_REGISTRY)
+        self._register_configured_aliases()
         self._available_providers: list[str] = []
         self._detect_available_providers()
 
@@ -187,109 +178,53 @@ class ProviderManager:
         if cls._PROVIDER_CLASSES is not None:
             return cls._PROVIDER_CLASSES
 
-        # Import core providers
-        from ml4t.data.providers.alpaca import AlpacaDataProvider
-        from ml4t.data.providers.binance import BinanceProvider
-        from ml4t.data.providers.binance_public import BinancePublicProvider
-        from ml4t.data.providers.cryptocompare import CryptoCompareProvider
-        from ml4t.data.providers.mock import MockProvider
-        from ml4t.data.providers.okx import OKXProvider
-        from ml4t.data.providers.synthetic import SyntheticProvider
-        from ml4t.data.providers.yahoo import YahooFinanceProvider
-
-        provider_classes: dict[str, type] = {
-            "alpaca": AlpacaDataProvider,
-            "binance": BinanceProvider,
-            "binance_public": BinancePublicProvider,
-            "cryptocompare": CryptoCompareProvider,
-            "mock": MockProvider,
-            "okx": OKXProvider,
-            "synthetic": SyntheticProvider,
-            "yahoo": YahooFinanceProvider,
-        }
-
-        # Optional providers with external dependencies
-        try:
-            from ml4t.data.providers.databento import DataBentoProvider
-
-            provider_classes["databento"] = DataBentoProvider
-        except ImportError:
-            pass
-
-        try:
-            from ml4t.data.providers.oanda import OandaProvider
-
-            provider_classes["oanda"] = OandaProvider
-        except ImportError:
-            pass
-
-        try:
-            from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
-
-            provider_classes["massive"] = MassiveProvider
-            provider_classes["polygon"] = PolygonProvider
-        except ImportError:
-            pass
+        provider_classes: dict[str, type] = {}
+        for spec in PROVIDER_REGISTRY.values():
+            if not spec.manager_compatible:
+                continue
+            try:
+                provider_classes[spec.name] = spec.load_class()
+            except ImportError:
+                logger.debug(
+                    "Provider dependency is not installed",
+                    provider=spec.name,
+                    extra=spec.extra,
+                )
 
         cls._PROVIDER_CLASSES = provider_classes
         return provider_classes
 
+    def _register_configured_aliases(self) -> None:
+        """Bind configured instance names to their registered provider types."""
+        for name, config in self.config.get("providers", {}).items():
+            provider_type = config.get("type", name)
+            if not isinstance(provider_type, str) or provider_type == name:
+                continue
+            spec = get_provider_spec(provider_type)
+            if not spec.manager_compatible:
+                raise ValueError(
+                    f"Provider '{name}' uses type '{provider_type}', which is direct-API only"
+                )
+            provider_class = self._provider_classes.get(provider_type)
+            if provider_class is None:
+                logger.warning(
+                    "Configured provider alias is unavailable",
+                    provider=name,
+                    provider_type=provider_type,
+                    extra=spec.extra,
+                )
+                continue
+            self._provider_classes[name] = provider_class
+            self._provider_specs[name] = spec
+
     def _detect_available_providers(self) -> None:
         """Detect which providers are available based on configuration."""
-        self._available_providers = []
         providers_config = self.config.get("providers", {})
-
-        # Check configured providers
-        for provider_name, provider_config in providers_config.items():
-            available = provider_name in self.FREE_PROVIDERS or (
-                provider_name in self.KEYED_PROVIDERS and provider_config.get("api_key")
-            )
-            # Alpaca is two-credential: a key without a secret is not
-            # constructable, so it must not be reported as available.
-            if provider_name == "alpaca" and available:
-                available = bool(provider_config.get("api_secret") or self._alpaca_env_secret())
-            if available:
-                self._available_providers.append(provider_name)
-
-        # Check environment for API keys not in config
-        env_to_provider = {
-            "CRYPTOCOMPARE_API_KEY": "cryptocompare",
-            "DATABENTO_API_KEY": "databento",
-            "MASSIVE_API_KEY": "massive",
-            "OANDA_API_KEY": "oanda",
-            "POLYGON_API_KEY": "massive",
-        }
-
-        for env_var, provider_name in env_to_provider.items():
-            if env_var in os.environ and provider_name not in self._available_providers:
-                self._available_providers.append(provider_name)
-
-        # Preserve old DataManager(provider="polygon") usage when users only have
-        # the legacy Polygon key in their environment.
-        if "POLYGON_API_KEY" in os.environ and "polygon" not in self._available_providers:
-            self._available_providers.append("polygon")
-
-        # Alpaca needs both credentials; either the project (ALPACA_*) or the
-        # Alpaca SDK (APCA_*) naming scheme satisfies each one.
-        if "alpaca" not in self._available_providers and (
-            self._alpaca_env_key() and self._alpaca_env_secret()
-        ):
-            self._available_providers.append("alpaca")
-
-        # Add free providers if not already detected
-        for free_provider in self.FREE_PROVIDERS:
-            if free_provider not in self._available_providers:
-                self._available_providers.append(free_provider)
-
-    @staticmethod
-    def _alpaca_env_key() -> str | None:
-        """Return the Alpaca API key from the environment, if set."""
-        return os.environ.get("ALPACA_API_KEY") or os.environ.get("APCA_API_KEY_ID")
-
-    @staticmethod
-    def _alpaca_env_secret() -> str | None:
-        """Return the Alpaca API secret from the environment, if set."""
-        return os.environ.get("ALPACA_API_SECRET") or os.environ.get("APCA_API_SECRET_KEY")
+        self._available_providers = [
+            name
+            for name, spec in self._provider_specs.items()
+            if name in self._provider_classes and spec.is_configured(providers_config.get(name, {}))
+        ]
 
     @property
     def available_providers(self) -> list[str]:
@@ -307,13 +242,19 @@ class ProviderManager:
         """
         return provider_name in self._available_providers
 
-    def get_provider(self, provider_name: str) -> BaseProvider:
+    def get_provider(
+        self,
+        provider_name: str,
+        *,
+        required_capability: str | None = None,
+    ) -> BaseProvider:
         """Get or create a provider instance.
 
         Provider instances are cached for connection reuse.
 
         Args:
             provider_name: Name of the provider
+            required_capability: Capability the caller will invoke
 
         Returns:
             Provider instance
@@ -321,6 +262,20 @@ class ProviderManager:
         Raises:
             ValueError: If provider is not available or initialization fails
         """
+        spec: ProviderSpec | None = self._provider_specs.get(provider_name)
+
+        if required_capability is not None and spec is not None:
+            if required_capability not in spec.capabilities:
+                supported = ", ".join(sorted(spec.capabilities))
+                raise ValueError(
+                    f"Provider '{provider_name}' does not support '{required_capability}'. "
+                    f"Supported capabilities: {supported}"
+                )
+            if not spec.manager_compatible:
+                raise ValueError(
+                    f"Provider '{provider_name}' is available only through its direct API"
+                )
+
         if provider_name not in self._available_providers:
             raise ValueError(
                 f"Provider '{provider_name}' not available. "
@@ -337,7 +292,13 @@ class ProviderManager:
             raise ValueError(f"Unknown provider: {provider_name}")
 
         # Get provider configuration
-        provider_config = self.config.get("providers", {}).get(provider_name, {})
+        provider_config = dict(self.config.get("providers", {}).get(provider_name, {}))
+        provider_config.pop("enabled", None)
+        provider_config.pop("name", None)
+        provider_config.pop("type", None)
+        extra = provider_config.pop("extra", None)
+        if isinstance(extra, dict):
+            provider_config = {**extra, **provider_config}
 
         # Create provider instance
         try:
@@ -360,17 +321,36 @@ class ProviderManager:
         Raises:
             ValueError: If provider is not available
         """
-        if provider_name not in self._available_providers:
-            raise ValueError(f"Provider '{provider_name}' not available")
-
+        spec = self._provider_specs.get(provider_name)
+        if spec is None:
+            raise ValueError(f"Provider '{provider_name}' not available: not registered")
         config = self.config.get("providers", {}).get(provider_name, {})
+        sanitized_config = {
+            key: (
+                {
+                    nested_key: nested_value
+                    for nested_key, nested_value in value.items()
+                    if nested_key not in self.SECRET_FIELDS
+                }
+                if key == "extra" and isinstance(value, dict)
+                else value
+            )
+            for key, value in config.items()
+            if key not in self.SECRET_FIELDS
+        }
 
         return {
             "name": provider_name,
+            "description": spec.description,
+            "available": provider_name in self._available_providers,
             "configured": provider_name in self.config.get("providers", {}),
-            "has_api_key": bool(config.get("api_key")),
-            "is_free": provider_name in self.FREE_PROVIDERS,
-            "config": {k: v for k, v in config.items() if k not in self.SECRET_FIELDS},
+            "has_api_key": spec.has_api_key(config),
+            "is_free": not spec.credentials and not spec.required_configuration,
+            "capabilities": sorted(spec.capabilities),
+            "credential_environment": list(spec.credential_environment),
+            "extra": spec.extra,
+            "deprecated": spec.deprecated,
+            "config": sanitized_config,
         }
 
     def close_all(self) -> None:

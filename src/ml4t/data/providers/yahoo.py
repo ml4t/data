@@ -4,25 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pandas as pd
 import polars as pl
 import structlog
 
-# yfinance is an optional dependency
-try:
+# yfinance is an optional dependency. Keep its static type in checked code while
+# retaining a runtime sentinel when the extra is not installed.
+if TYPE_CHECKING:
     import yfinance as yf
 
     _YFINANCE_AVAILABLE = True
-except ImportError:
-    yf = None  # type: ignore[assignment]
-    _YFINANCE_AVAILABLE = False
+else:
+    try:
+        import yfinance as yf
+
+        _YFINANCE_AVAILABLE = True
+    except ImportError:
+        yf = None
+        _YFINANCE_AVAILABLE = False
 
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
     DataValidationError,
+    NetworkError,
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
@@ -39,7 +47,7 @@ from ml4t.data.providers.fundamentals import (
 logger = structlog.get_logger()
 
 
-def _chunks(lst: list, n: int):
+def _chunks(lst: list[Any], n: int) -> Iterator[list[Any]]:
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
@@ -104,12 +112,17 @@ class YahooFinanceProvider(BaseProvider):
         "cashflow": "get_cash_flow",
     }
 
-    def __init__(self, enable_progress: bool = False) -> None:
+    def __init__(
+        self,
+        enable_progress: bool = False,
+        rate_limit: tuple[int, float] | None = None,
+    ) -> None:
         """
         Initialize Yahoo Finance provider.
 
         Args:
             enable_progress: Show progress bars for downloads (default False)
+            rate_limit: Optional custom rate limit as (calls, period_seconds)
 
         Raises:
             ImportError: If yfinance is not installed
@@ -119,8 +132,7 @@ class YahooFinanceProvider(BaseProvider):
                 "YahooFinanceProvider requires yfinance. "
                 "Install with: pip install 'ml4t-data[yahoo]'"
             )
-        # Don't use BaseProvider's rate limiting - yfinance handles this
-        super().__init__(rate_limit=None)
+        super().__init__(rate_limit=rate_limit)
         self.enable_progress = enable_progress
 
     @property
@@ -188,6 +200,10 @@ class YahooFinanceProvider(BaseProvider):
         except (DataNotAvailableError, SymbolNotFoundError):
             raise
 
+        except OSError as e:
+            logger.error("Yahoo transport failed", symbol=symbol, error=str(e))
+            raise NetworkError("yahoo", f"Failed to fetch {symbol}: {e}") from e
+
         except Exception as e:
             logger.error("Error fetching data", symbol=symbol, error=str(e))
             raise DataValidationError(
@@ -246,17 +262,21 @@ class YahooFinanceProvider(BaseProvider):
             }
         )
 
-        # Cast to proper types, add symbol, and select in standard order
+        timestamp_type = df.schema["timestamp"]
+        timestamp = pl.col("timestamp")
+        if isinstance(timestamp_type, pl.Datetime) and timestamp_type.time_zone is not None:
+            timestamp = timestamp.dt.convert_time_zone("UTC")
+        else:
+            timestamp = timestamp.cast(pl.Datetime).dt.replace_time_zone("UTC")
+
         return (
             df.with_columns(
-                [
-                    pl.col("timestamp").cast(pl.Datetime),
-                    pl.col("open").cast(pl.Float64),
-                    pl.col("high").cast(pl.Float64),
-                    pl.col("low").cast(pl.Float64),
-                    pl.col("close").cast(pl.Float64),
-                    pl.col("volume").cast(pl.Float64),
-                ]
+                timestamp,
+                pl.col("open").cast(pl.Float64),
+                pl.col("high").cast(pl.Float64),
+                pl.col("low").cast(pl.Float64),
+                pl.col("close").cast(pl.Float64),
+                pl.col("volume").cast(pl.Float64),
             )
             .with_columns(pl.lit(symbol.upper()).alias("symbol"))
             .select(["timestamp", "symbol", "open", "high", "low", "close", "volume"])

@@ -9,7 +9,7 @@ ML4T Data supports multiple cryptocurrency data providers for fetching historica
 - **Markets**: Spot prices from multiple exchanges
 - **Data**: OHLCV data with aggregated pricing
 - **Frequencies**: minute, hourly, daily
-- **API Key**: Optional (higher rate limits with key)
+- **API Key**: Required (free account available)
 
 ### Binance
 - **Type**: Free (no API key required for public data)
@@ -102,7 +102,7 @@ Cryptocurrency markets operate 24/7, unlike traditional equity markets. The ML4T
 ### CryptoCompare
 - Free tier: 100,000 calls/month
 - Automatic rate limiting with delays between requests
-- API key can be provided for higher limits
+- Reads the required key from `CRYPTOCOMPARE_API_KEY`
 
 ### Binance
 - Public endpoints: 1200 weight per minute

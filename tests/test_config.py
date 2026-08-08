@@ -1,5 +1,6 @@
 """Tests for configuration management."""
 
+import os
 from datetime import time as datetime_time
 from pathlib import Path
 
@@ -32,8 +33,7 @@ class TestStorageConfig:
         config = StorageConfig()
         assert config.strategy == StorageStrategy.HIVE
         assert config.compression == CompressionType.ZSTD
-        assert config.atomic_writes is True
-        assert config.enable_locking is True
+        assert config.lock_timeout == 30
         assert config.metadata_tracking is True
         assert config.partition_cols == ["year", "month"]
 
@@ -60,17 +60,12 @@ class TestRateLimitConfig:
         config = RateLimitConfig()
         assert config.requests_per_second == 10.0
         assert config.burst_size == 1
-        assert config.retry_max_attempts == 3
-        assert config.retry_backoff_factor == 2.0
-        assert config.circuit_breaker_threshold == 5
-        assert config.circuit_breaker_timeout == 60
 
     def test_custom_rate_limit(self):
         """Test custom rate limit values."""
-        config = RateLimitConfig(requests_per_second=5.0, burst_size=10, retry_max_attempts=5)
+        config = RateLimitConfig(requests_per_second=5.0, burst_size=10)
         assert config.requests_per_second == 5.0
         assert config.burst_size == 10
-        assert config.retry_max_attempts == 5
 
 
 class TestProviderConfig:
@@ -195,7 +190,7 @@ class TestDataConfig:
         """Test saving and loading from YAML."""
         config = DataConfig(
             storage=StorageConfig(strategy=StorageStrategy.HIVE, base_path=tmp_path / "data"),
-            providers=[ProviderConfig(name="yahoo", type=ProviderType.YAHOO, api_key="test_key")],
+            providers=[ProviderConfig(name="tiingo", type=ProviderType.TIINGO, api_key="test_key")],
             universes=[SymbolUniverse(name="sp500", symbols=["AAPL", "MSFT"])],
         )
 
@@ -208,9 +203,33 @@ class TestDataConfig:
         loaded = DataConfig.from_yaml(yaml_file)
         assert loaded.storage.strategy == StorageStrategy.HIVE
         assert len(loaded.providers) == 1
-        assert loaded.providers[0].name == "yahoo"
+        assert loaded.providers[0].name == "tiingo"
         assert len(loaded.universes) == 1
         assert loaded.universes[0].name == "sp500"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_yaml_serialization_excludes_credentials_and_restricts_permissions(self, tmp_path):
+        """Saving a runtime configuration cannot disclose resolved credentials."""
+        credential = "canary-runtime-credential"
+        config = DataConfig(
+            providers=[
+                ProviderConfig(
+                    name="private_provider",
+                    type=ProviderType.ALPACA,
+                    api_key=credential,
+                    api_secret=credential,
+                )
+            ]
+        )
+        yaml_file = tmp_path / "config.yaml"
+
+        config.to_yaml(yaml_file)
+
+        content = yaml_file.read_text()
+        assert credential not in content
+        assert "api_key" not in content
+        assert "api_secret" not in content
+        assert yaml_file.stat().st_mode & 0o777 == 0o600
 
 
 class TestConfigLoader:
@@ -250,7 +269,7 @@ class TestConfigLoader:
         monkeypatch.setenv("TEST_LOG_LEVEL", "WARNING")
 
         config_data = {
-            "providers": [{"name": "test", "type": "yahoo", "api_key": "${TEST_API_KEY}"}],
+            "providers": [{"name": "test", "type": "tiingo", "api_key": "${TEST_API_KEY}"}],
             "log_level": "${TEST_LOG_LEVEL}",
         }
 
@@ -268,7 +287,7 @@ class TestConfigLoader:
         """Test environment variables with default values."""
         config_data = {
             "providers": [
-                {"name": "test", "type": "yahoo", "api_key": "${MISSING_VAR:default_value}"}
+                {"name": "test", "type": "tiingo", "api_key": "${MISSING_VAR:default_value}"}
             ]
         }
 
@@ -330,6 +349,135 @@ class TestConfigLoader:
         assert data["log_level"] == "WARNING"
         assert len(data["providers"]) == 1
         assert data["providers"][0]["name"] == "test"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_save_config_excludes_credentials_and_restricts_permissions(self, tmp_path):
+        """ConfigLoader applies the same secure serialization contract."""
+        credential = "canary-runtime-credential"
+        config = DataConfig(
+            providers=[
+                ProviderConfig(
+                    name="private_provider",
+                    type=ProviderType.ALPACA,
+                    api_key=credential,
+                    api_secret=credential,
+                )
+            ]
+        )
+        save_path = tmp_path / "saved.yaml"
+
+        ConfigLoader().save(config, save_path)
+
+        assert credential not in save_path.read_text()
+        assert save_path.stat().st_mode & 0o777 == 0o600
+
+    def test_load_save_preserves_environment_credential_references(self, tmp_path, monkeypatch):
+        """A load-save cycle retains references while keeping resolved values out of YAML."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key-value")
+        monkeypatch.setenv("TEST_PROVIDER_SECRET", "resolved-secret-value")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: ${TEST_PROVIDER_KEY}\n"
+            "    api_secret: ${TEST_PROVIDER_SECRET}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        config = loader.load()
+        assert config.providers[0].api_key == "resolved-key-value"
+        assert config.providers[0].api_secret == "resolved-secret-value"
+        loader.save(config, target)
+
+        saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+        assert saved["providers"][0]["api_key"] == "${TEST_PROVIDER_KEY}"
+        assert saved["providers"][0]["api_secret"] == "${TEST_PROVIDER_SECRET}"
+        assert "resolved-key-value" not in target.read_text(encoding="utf-8")
+        assert "resolved-secret-value" not in target.read_text(encoding="utf-8")
+
+    def test_load_save_preserves_embedded_credential_references(self, tmp_path, monkeypatch):
+        """Credential templates survive interpolation without persisting their resolutions."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key")
+        monkeypatch.setenv("TEST_TENANT", "tenant")
+        monkeypatch.setenv("TEST_PROVIDER_SECRET", "resolved-secret")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: Bearer ${TEST_PROVIDER_KEY}\n"
+            "    api_secret: ${TEST_TENANT}-${TEST_PROVIDER_SECRET}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        config = loader.load()
+        loader.save(config, target)
+
+        saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+        assert saved["providers"][0]["api_key"] == "Bearer ${TEST_PROVIDER_KEY}"
+        assert saved["providers"][0]["api_secret"] == ("${TEST_TENANT}-${TEST_PROVIDER_SECRET}")
+        assert "resolved-key" not in target.read_text(encoding="utf-8")
+        assert "resolved-secret" not in target.read_text(encoding="utf-8")
+
+    def test_credential_assignment_invalidates_retained_reference(self, tmp_path, monkeypatch):
+        """A later literal assignment cannot serialize an obsolete environment reference."""
+        monkeypatch.setenv("TEST_PROVIDER_KEY", "resolved-key")
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: ${TEST_PROVIDER_KEY}\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+        config = loader.load()
+
+        config.providers[0].api_key = "replacement-literal"
+        loader.save(config, target)
+
+        saved_provider = yaml.safe_load(target.read_text(encoding="utf-8"))["providers"][0]
+        assert "api_key" not in saved_provider
+        assert "resolved-key" not in target.read_text(encoding="utf-8")
+        assert "replacement-literal" not in target.read_text(encoding="utf-8")
+
+    def test_plain_literal_credential_is_not_reserialized(self, tmp_path):
+        """A source literal is excluded from every saved configuration."""
+        source = tmp_path / "source.yaml"
+        source.write_text(
+            "providers:\n"
+            "  - name: private_provider\n"
+            "    type: alpaca\n"
+            "    api_key: source-literal-credential\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target.yaml"
+        loader = ConfigLoader(source)
+
+        loader.save(loader.load(), target)
+
+        assert "api_key" not in yaml.safe_load(target.read_text(encoding="utf-8"))["providers"][0]
+        assert "source-literal-credential" not in target.read_text(encoding="utf-8")
+
+    def test_write_yaml_failure_preserves_target_and_removes_temporary_file(self, tmp_path):
+        """A serialization failure neither clobbers the target nor leaves a temp file."""
+        from ml4t.data.config._serialization import write_yaml
+
+        target = tmp_path / "config.yaml"
+        target.write_text("original: true\n", encoding="utf-8")
+        original_entries = set(tmp_path.iterdir())
+
+        with pytest.raises(yaml.representer.RepresenterError):
+            write_yaml(target, {"unsupported": object()})
+
+        assert target.read_text(encoding="utf-8") == "original: true\n"
+        assert set(tmp_path.iterdir()) == original_entries
 
 
 class TestScheduleConfig:

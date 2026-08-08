@@ -148,8 +148,8 @@ def pivot_to_wide(
 
     # Check for duplicate (timestamp, symbol) pairs
     duplicate_check = df.group_by([timestamp_col, symbol_col]).agg(pl.len().alias("count"))
-    max_count = duplicate_check["count"].max()
-    if max_count and max_count > 1:
+    max_count = int(duplicate_check["count"].max() or 0)
+    if max_count > 1:
         duplicates = duplicate_check.filter(pl.col("count") > 1)
         n_duplicates = len(duplicates)
         raise ValueError(

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any, ClassVar
 
 
-class AssetClass(str, Enum):
+class AssetClass(StrEnum):
     """Supported asset classes.
 
     Canonical enum for all asset class references across ml4t-data.
@@ -20,6 +20,7 @@ class AssetClass(str, Enum):
     FOREX = "forex"
     COMMODITY = "commodity"
     FIXED_INCOME = "fixed_income"
+    ECONOMIC = "economic"
     INDEX = "index"
     ETF = "etf"
     OPTION = "option"
@@ -101,7 +102,7 @@ class AssetInfo:
 class MarketHours:
     """Market hours for different asset classes."""
 
-    SCHEDULES: ClassVar[dict] = {
+    SCHEDULES: ClassVar[dict[AssetClass, dict[str, dict[str, Any]]]] = {
         AssetClass.EQUITY: {
             "NYSE": {
                 "open": "09:30",
@@ -141,7 +142,9 @@ class MarketHours:
     }
 
     @classmethod
-    def get_schedule(cls, asset_class: AssetClass, exchange: str | None = None) -> dict[str, Any]:
+    def get_schedule(
+        cls, asset_class: AssetClass, exchange: str | None = None
+    ) -> dict[str, Any] | None:
         """
         Get market schedule for asset class and exchange.
 

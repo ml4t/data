@@ -9,10 +9,13 @@ This module handles metadata management and symbol discovery:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 import polars as pl
 import structlog
+
+from ml4t.data.storage.backend import normalize_storage_metadata
+from ml4t.data.storage.keys import storage_key_path
 
 logger = structlog.get_logger()
 
@@ -93,7 +96,7 @@ class MetadataManager:
         symbol: str,
         asset_class: str = "equities",
         frequency: str = "daily",
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Get metadata for a specific symbol.
 
         Args:
@@ -110,7 +113,7 @@ class MetadataManager:
         key = f"{asset_class}/{frequency}/{symbol}"
         return self.get_metadata_for_key(key)
 
-    def get_metadata_for_key(self, key: str) -> dict | None:
+    def get_metadata_for_key(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a storage key.
 
         Args:
@@ -119,21 +122,20 @@ class MetadataManager:
         Returns:
             Metadata dict or None if not found
         """
-        if not hasattr(self.storage, "metadata_dir"):
-            return None
-
         try:
-            metadata_file = self.storage.metadata_dir / f"{key.replace('/', '_')}.json"
-            if not metadata_file.exists():
-                return None
-
-            with open(metadata_file) as f:
-                return json.load(f)
+            get_metadata = getattr(self.storage, "get_metadata", None)
+            metadata = get_metadata(key) if callable(get_metadata) else None
+            if not metadata and hasattr(self.storage, "metadata_dir"):
+                metadata_file = storage_key_path(self.storage.metadata_dir, key, ".json")
+                if metadata_file.exists():
+                    with open(metadata_file, encoding="utf-8") as metadata_handle:
+                        metadata = json.load(metadata_handle)
+            return normalize_storage_metadata(metadata, key)
         except Exception as e:
             logger.warning(f"Failed to read metadata for {key}: {e}")
             return None
 
-    def get_all_metadata(self) -> dict[str, dict]:
+    def get_all_metadata(self) -> dict[str, dict[str, Any]]:
         """Get metadata for all stored symbols.
 
         Returns:
@@ -155,6 +157,7 @@ class MetadataManager:
         df: pl.DataFrame,
         exchange: str | None = None,
         calendar: str | None = None,
+        bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
     ) -> pl.DataFrame:
         """Assign session_date column to DataFrame based on exchange calendar.
 
@@ -162,6 +165,7 @@ class MetadataManager:
             df: DataFrame with timestamp column
             exchange: Exchange code (e.g., "CME", "NYSE")
             calendar: Calendar name override
+            bar_frequency: Daily period-label handling, intraday containment, or inference
 
         Returns:
             DataFrame with session_date column added
@@ -178,7 +182,7 @@ class MetadataManager:
         else:
             assigner = SessionAssigner(calendar)
 
-        return assigner.assign_sessions(df)
+        return assigner.assign_sessions(df, bar_frequency=bar_frequency)
 
     def complete_sessions(
         self,
@@ -200,7 +204,9 @@ class MetadataManager:
             zero_volume: If True, set volume=0 for filled rows
 
         Returns:
-            DataFrame with complete sessions
+            DataFrame with complete minute sessions and an is_imputed column. Input must
+            contain one symbol, unique minute-aligned timestamps, and no observations
+            outside the inferred completion range.
 
         Raises:
             ValueError: If neither exchange nor calendar provided

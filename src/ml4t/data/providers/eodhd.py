@@ -6,7 +6,7 @@ EODHD provides affordable global equities data with 60+ exchanges and
 API Documentation: https://eodhd.com/financial-apis/
 
 Free Tier Limits:
-- 500 API calls per day
+- 20 API calls per day
 - 1 year historical depth
 - Daily/weekly/monthly OHLCV data
 - Global coverage (60+ exchanges)
@@ -62,7 +62,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
     Supports global equities with daily/weekly/monthly OHLCV data.
 
     Rate Limits (Free Tier):
-    - 500 requests per day
+    - 20 API calls per day
     - 1 year historical depth
 
     Supports both sync and async operations:
@@ -75,8 +75,9 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
             df = await provider.fetch_ohlcv_async("AAPL", start, end)
     """
 
-    # Conservative: 500 requests/day = ~1 per 3 minutes
-    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1, 180.0)
+    # Stay below EODHD's documented 1,000 requests/minute server limit.
+    # Account-specific daily API-call budgets cannot be modeled as an inter-request delay.
+    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (10, 1.0)
 
     # Map frequency to EODHD period codes
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {
@@ -254,19 +255,30 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
             df = pl.DataFrame(raw_data)
 
             # Convert date to datetime
-            df = df.with_columns(pl.col("date").str.to_date().cast(pl.Datetime).alias("timestamp"))
+            df = df.with_columns(
+                pl.col("date").str.to_date().cast(pl.Datetime("us", "UTC")).alias("timestamp")
+            )
             df = df.drop("date")
 
-            # Use adjusted close, drop unadjusted
-            if "close" in df.columns:
-                df = df.drop("close")
-            if "adjusted_close" in df.columns:
-                df = df.rename({"adjusted_close": "close"})
-
             # Convert numeric columns to float
-            for col in ["open", "high", "low", "close", "volume"]:
+            for col in ["open", "high", "low", "close", "adjusted_close", "volume"]:
                 if col in df.columns:
                     df = df.with_columns(pl.col(col).cast(pl.Float64))
+
+            if "adjusted_close" in df.columns and "close" in df.columns:
+                adjustment = (
+                    pl.when(pl.col("close") != 0)
+                    .then(pl.col("adjusted_close") / pl.col("close"))
+                    .otherwise(1.0)
+                )
+                df = df.with_columns(
+                    [
+                        (pl.col(column) * adjustment).alias(column)
+                        for column in ("open", "high", "low", "close")
+                    ]
+                ).drop("adjusted_close")
+            elif "adjusted_close" in df.columns:
+                df = df.rename({"adjusted_close": "close"})
 
             # Sort and add symbol
             df = df.sort("timestamp")
@@ -322,6 +334,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
 
         raw_data = self._fetch_raw_data(symbol, start, end, frequency, exchange=exchange_code)
         df = self._transform_data(raw_data, symbol)
+        df = self._validate_ohlcv(df, self.name, symbol)
 
         self.logger.info(f"Fetched {len(df)} records", symbol=formatted_symbol)
 

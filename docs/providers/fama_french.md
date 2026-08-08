@@ -112,5 +112,4 @@ ff5_mom = provider.fetch_combined(["ff5", "mom"])
 
 - [Ken French Data Library](https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html)
 - [AQR Provider](aqr.md)
-- [Example Config](../../configs/examples/academic_factors.yaml)
-- [Provider README](README.md)
+- [Provider reference](index.md)

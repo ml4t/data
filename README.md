@@ -1,6 +1,6 @@
 # ml4t-data
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12-3.14](https://img.shields.io/badge/python-3.12--3.14-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/ml4t-data)](https://pypi.org/project/ml4t-data/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -18,7 +18,7 @@ Together they cover data infrastructure, feature engineering, modeling, signal e
 
 Quantitative research requires consistent, reproducible access to market data from multiple sources. ml4t-data provides:
 
-- `DataManager` as the unified interface: fetch, store, update, and query across all providers
+- `DataManager` as the unified OHLCV interface for registry providers with that capability
 - 20+ provider adapters covering equities, crypto, futures, forex, macro, prediction markets, and factors
 - Automated storage in Hive-partitioned Parquet format with metadata tracking
 - Incremental updates, gap detection, and backfill via CLI
@@ -32,6 +32,12 @@ The goal is to support an ongoing research workflow rather than one-off download
 ![ml4t-data Architecture](docs/images/ml4t_data_architecture_print.jpeg)
 
 ## Installation
+
+ML4T Data supports stable CPython 3.12 through 3.14 on Linux, macOS, and Windows.
+Python 3.15 prereleases are tested as informational compatibility checks but are not supported
+until the required dependencies publish compatible distributions. The Databento SDK currently
+has no CPython 3.15 distribution, so the 3.15 prerelease lane tests the core package without the
+Databento extra.
 
 ```bash
 pip install ml4t-data
@@ -65,9 +71,12 @@ metadata = dm.get_metadata("AAPL")
 
 ### Direct Provider Access
 
-All providers implement the same interface:
+Providers expose capability-specific methods. OHLCV providers use `fetch_ohlcv`, economic-series
+providers may also use `fetch_series`, and factor providers use `fetch`.
 
 ```python
+from datetime import UTC, datetime, timedelta
+
 from ml4t.data.providers import YahooFinanceProvider, CoinGeckoProvider, FREDProvider
 
 # Equities
@@ -75,9 +84,15 @@ provider = YahooFinanceProvider()
 data = provider.fetch_ohlcv("AAPL", "2020-01-01", "2024-12-31")
 
 # Crypto
-crypto = CoinGeckoProvider().fetch_ohlcv("bitcoin", "2024-01-01", "2024-12-31")
+last_complete_day = datetime.now(UTC).date() - timedelta(days=1)
+crypto = CoinGeckoProvider().fetch_ohlcv(
+    "bitcoin",
+    str(last_complete_day - timedelta(days=6)),
+    str(last_complete_day),
+)
 
 # Economic data
+# Reads FRED_API_KEY from the environment
 fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 ```
 
@@ -88,8 +103,7 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Provider | Coverage |
 |----------|----------|
 | Yahoo Finance | US/global equities, ETFs, crypto, forex |
-| CoinGecko | 10,000+ cryptocurrencies |
-| FRED | 850,000 economic series |
+| CoinGecko | 10,000+ cryptocurrencies; daily OHLCV for 29 completed UTC days |
 | FXMacroData | FX macro releases, calendars, COT, commodities, sentiment |
 | Fama-French | Academic factor data |
 | AQR | Research factors (QMJ, BAB, HML Devil, VME, more) |
@@ -97,12 +111,15 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Kalshi | Prediction market contracts |
 | Polymarket | Prediction market history/order book snapshots |
 | Binance Public | Bulk crypto data downloads |
+| Binance | Crypto exchange data |
+| OKX | Crypto perpetuals and funding rates |
 | NASDAQ ITCH Sample | Tick-level sample data |
 
 ### Authenticated or Metered APIs
 
 | Provider | Coverage |
 |----------|----------|
+| FRED | 850,000 economic series |
 | Alpaca | US equities + crypto (free IEX feed) |
 | EODHD | 60+ global exchanges |
 | Tiingo | US equities with quality focus |
@@ -110,10 +127,8 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Databento | CME/ICE futures; OPRA options |
 | Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
-| Binance | Crypto exchange data |
-| OKX | Crypto perpetuals and funding rates |
-| CryptoCompare | Crypto market data |
 | OANDA | Forex broker data |
+| CryptoCompare | Crypto market data; free account key required |
 
 ## Specialized Modules
 
@@ -149,17 +164,31 @@ profile = fm.generate_profile("ES")
 CFTC weekly positioning data for futures markets:
 
 ```python
-from ml4t.data.cot import COTFetcher, create_cot_features, combine_cot_ohlcv_pit
+import polars as pl
 
-fetcher = COTFetcher(config)
-cot_data = fetcher.fetch_product("ES", start_year=2015, end_year=2024)
+from ml4t.data.cot import COTFetcher, combine_cot_ohlcv, create_cot_features
 
-# Point-in-time combination with OHLCV (no look-ahead)
-combined = combine_cot_ohlcv_pit(cot_data, ohlcv_data)
+fetcher = COTFetcher()
+official_schedule = pl.read_parquet("cot-release-schedule.parquet")
+cot_data = fetcher.fetch_product(
+    "ES",
+    start_year=2015,
+    end_year=2024,
+    release_schedule=official_schedule,
+)
 
-# Generate features from COT data
-features = create_cot_features(cot_data)
+# Point-in-time combination with OHLCV
+combined = combine_cot_ohlcv(ohlcv_data, cot_data)
+
+# Generate weekly features without counting forward-filled daily rows as new reports
+features = create_cot_features(combined)
 ```
+
+The schedule must contain one `report_date` and timezone-aware `available_at` timestamp per
+report. CFTC publishes a tentative schedule for only the latest 13 months, so retain the exact
+release timestamps you use for historical research. Shutdown catch-up releases and other
+exceptions must use their actual publication timestamps. See the
+[official CFTC release schedule](https://www.cftc.gov/MarketReports/CommitmentsofTraders/ReleaseSchedule/index.htm).
 
 ### Book Data Managers
 
@@ -208,20 +237,20 @@ Configuration-driven batch updates:
 
 ```yaml
 storage:
-  path: ~/data/market
+  base_path: ~/data/market
 
 datasets:
-  sp500_daily:
+  - name: sp500_daily
     provider: yahoo
     symbols_file: symbols/sp500.txt
     frequency: daily
     start_date: 2015-01-01
 
-  crypto:
+  - name: crypto
     provider: coingecko
     symbols: [bitcoin, ethereum, solana]
     frequency: daily
-    start_date: 2020-01-01
+    initial_load_days: 29
 ```
 
 ## Storage Format
@@ -272,23 +301,24 @@ report = manager.detect(data)
 
 ## Documentation
 
-- [Getting Started](docs/user-guide/getting-started.md) — quick start guide
-- [Configuration](docs/user-guide/configuration.md) — YAML config reference
-- [Storage](docs/user-guide/storage.md) — Hive partitioning and backends
-- [Incremental Updates](docs/user-guide/incremental-updates.md) — update strategies and gap detection
-- [Data Quality](docs/user-guide/data-quality.md) — validation and anomaly detection
-- [CLI Reference](docs/user-guide/cli-reference.md) — command-line interface
-- [Provider Selection Guide](docs/provider-selection-guide.md) — choosing providers
-- [Creating a Provider](docs/creating_a_provider.md) — extending with new sources
+- [Getting Started](docs/user-guide/getting-started.md) - quick start guide
+- [Configuration](docs/user-guide/configuration.md) - YAML config reference
+- [Storage](docs/user-guide/storage.md) - Hive partitioning and backends
+- [Incremental Updates](docs/user-guide/incremental-updates.md) - update strategies and gap detection
+- [Data Quality](docs/user-guide/data-quality.md) - validation and anomaly detection
+- [CLI Reference](docs/user-guide/cli-reference.md) - command-line interface
+- [Provider Selection Guide](docs/getting-started/provider-selection.md) - choosing providers
+- [Creating a Provider](docs/contributing/creating-a-provider.md) - extending with new sources
 
 ## Technical Characteristics
 
 - **Polars-based**: Native Polars DataFrames throughout
-- **Consistent schema**: All providers return the same column structure
-- **Async support**: Async providers and batch operations for parallel downloads
+- **Capability-specific schemas**: OHLCV, economic-series, factor, and specialized providers
+  expose contracts suited to their data
+- **Async support**: OHLCV providers implementing the async protocol can use parallel batch operations
 - **Metadata tracking**: Last update timestamps, row counts, date ranges
 - **Resilience**: Rate limiting, retry with exponential backoff, gap detection
-- **Multiple backends**: File system, S3, and in-memory storage
+- **Storage layouts**: Partitioned Hive and single-file Parquet storage
 - **Type-safe**: Full type annotations throughout
 
 ## Related Libraries

@@ -37,9 +37,15 @@ from typing import Any, ClassVar
 
 import polars as pl
 import structlog
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryCallState,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-from ml4t.data.core.exceptions import NetworkError, RateLimitError
+from ml4t.data.core.exceptions import NetworkError
 from ml4t.data.providers.mixins.circuit_breaker import CircuitBreaker, CircuitBreakerMixin
 from ml4t.data.providers.mixins.rate_limit import RateLimitMixin
 from ml4t.data.providers.mixins.session import SessionMixin
@@ -47,6 +53,24 @@ from ml4t.data.providers.mixins.validation import ValidationMixin
 from ml4t.data.providers.protocols import OHLCVProvider, ProviderCapabilities
 
 logger = structlog.get_logger()
+_DEFAULT_RETRY_WAIT = wait_exponential(multiplier=1, min=4, max=10)
+_MAX_RETRY_AFTER = 60.0
+
+
+def _provider_retry_wait(retry_state: RetryCallState) -> float:
+    """Honor provider retry hints without shortening exponential backoff."""
+    delay = float(_DEFAULT_RETRY_WAIT(retry_state))
+    if retry_state.outcome is None:
+        return delay
+    error = retry_state.outcome.exception()
+    if isinstance(error, NetworkError) and error.retry_after is not None:
+        return min(max(delay, float(error.retry_after)), _MAX_RETRY_AFTER)
+    return delay
+
+
+def _provider_error_is_retryable(error: BaseException) -> bool:
+    """Retry transient provider failures that have not exhausted a local policy."""
+    return isinstance(error, NetworkError) and error.retryable
 
 
 # Re-export for backward compatibility
@@ -63,7 +87,7 @@ __all__ = [
 def circuit_breaker(
     failure_threshold: int = 5,
     reset_timeout: float = 300.0,
-    expected_exception: type[Exception] = Exception,
+    expected_exception: type[Exception] = NetworkError,
 ):
     """Decorator for circuit breaker pattern (backward compatibility).
 
@@ -174,8 +198,8 @@ class BaseProvider(
 
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((NetworkError, RateLimitError)),
+        wait=_provider_retry_wait,
+        retry=retry_if_exception(_provider_error_is_retryable),
         reraise=True,
     )
     def fetch_ohlcv(
@@ -233,7 +257,7 @@ class BaseProvider(
             data = self._fetch_and_transform_data(symbol, start, end, frequency)
 
             # Step 4: Validate and normalize (from ValidationMixin)
-            return self._validate_ohlcv(data, self.name)
+            return self._validate_ohlcv(data, self.name, symbol)
 
         # Execute with circuit breaker protection (from CircuitBreakerMixin)
         validated_data = self._with_circuit_breaker(_fetch_and_process)
@@ -250,11 +274,11 @@ class BaseProvider(
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with canonical OHLCV schema.
 
-        Override in subclasses that need a different schema (e.g. no symbol column).
+        Provider-specific optional columns may be added after the canonical columns.
         """
         return pl.DataFrame(
             schema={
-                "timestamp": pl.Datetime,
+                "timestamp": pl.Datetime("us", "UTC"),
                 "symbol": pl.Utf8,
                 "open": pl.Float64,
                 "high": pl.Float64,

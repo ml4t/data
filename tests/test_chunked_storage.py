@@ -1,17 +1,119 @@
 """Tests for chunked storage implementation."""
 
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
 
 from ml4t.data.core.models import DataObject, Metadata
 from ml4t.data.storage.chunked import ChunkedStorage, ChunkInfo
+from ml4t.data.storage.config import CompressionType
+from ml4t.data.storage.keys import storage_key_path
+
+
+def _parquet_compression(path: Path) -> str:
+    parquet = pytest.importorskip("pyarrow.parquet")
+    metadata = parquet.ParquetFile(path).metadata
+    return metadata.row_group(0).column(0).compression
 
 
 class TestChunkedStorage:
     """Test chunked storage functionality."""
+
+    def test_rejects_invalid_configuration(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="chunk_size_days must be positive"):
+            ChunkedStorage(tmp_path, chunk_size_days=0)
+
+        with pytest.raises(ValueError, match="Unsupported Parquet compression"):
+            ChunkedStorage(tmp_path, compression="invalid")
+
+        with pytest.raises(ValueError, match="Unsupported Parquet compression"):
+            ChunkedStorage(tmp_path, compression=5)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("directory", ["chunks", "metadata"])
+    def test_rejects_symlinked_internal_root(
+        self,
+        tmp_path: Path,
+        tmp_path_factory,
+        directory: str,
+    ) -> None:
+        outside = tmp_path_factory.mktemp(f"chunked-{directory}-outside")
+        try:
+            (tmp_path / directory).symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            ChunkedStorage(tmp_path)
+
+        assert not any(outside.iterdir())
+
+    def test_none_compression_writes_uncompressed_parquet(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path, compression=None)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert storage.compression == "uncompressed"
+        assert storage.read(key).data.equals(frame)
+        chunk = storage.get_chunk_info(key)[0]
+        assert _parquet_compression(chunk.file_path) == "UNCOMPRESSED"
+
+    @pytest.mark.parametrize("compression", list(CompressionType))
+    def test_canonical_compressions_round_trip(
+        self,
+        tmp_path: Path,
+        compression: CompressionType,
+    ) -> None:
+        storage = ChunkedStorage(tmp_path, compression=compression.value.upper())
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert storage.compression == compression.value
+        assert storage.read(key).data.equals(frame)
+        chunk = storage.get_chunk_info(key)[0]
+        assert _parquet_compression(chunk.file_path) == compression.name
+
+    @pytest.mark.parametrize("compression", [None, "none", "NONE", "null", "NULL"])
+    def test_no_compression_aliases(self, tmp_path: Path, compression: str | None) -> None:
+        storage = ChunkedStorage(tmp_path, compression=compression)
+
+        assert storage.compression == "uncompressed"
 
     def test_basic_write_and_read(self, tmp_path: Path) -> None:
         """Test basic chunked storage operations."""
@@ -56,6 +158,377 @@ class TestChunkedStorage:
         result = storage.read(key)
         assert len(result.data) == len(df)
         assert result.data["close"].to_list() == df["close"].to_list()
+
+    def test_metadata_round_trips_through_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_type="volume",
+            bar_params={"threshold": 1000},
+            exchange="XCME",
+            calendar="CME_Equity",
+            attributes={"dataset": "GLBX.MDP3"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read(key)
+
+        assert result.metadata.provider == "databento"
+        assert result.metadata.bar_type == "volume"
+        assert result.metadata.bar_params == {"threshold": 1000}
+        assert result.metadata.exchange == "XCME"
+        assert result.metadata.calendar == "CME_Equity"
+        assert result.metadata.attributes == {"dataset": "GLBX.MDP3"}
+
+    def test_incremental_metadata_preserves_omitted_fields(self, tmp_path: Path) -> None:
+        """An incremental write does not erase richer stored metadata by omission."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        rich = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_params={"frequency": "daily"},
+            exchange="XCME",
+            calendar="CME_Equity",
+            attributes={"dataset": "GLBX.MDP3"},
+        )
+        lean = Metadata(
+            provider="databento",
+            symbol="ES",
+            asset_class="futures",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=rich))
+        storage.write(DataObject(data=frame, metadata=lean))
+        result = storage.read(key)
+
+        assert result.metadata.exchange == "XCME"
+        assert result.metadata.calendar == "CME_Equity"
+        assert result.metadata.attributes == {"dataset": "GLBX.MDP3"}
+
+    def test_reads_version_one_chunk_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        index_path = next(storage.metadata_path.glob("k1_*_index.json"))
+        current_index = json.loads(index_path.read_text(encoding="utf-8"))
+        index_path.write_text(json.dumps(current_index["chunks"]), encoding="utf-8")
+
+        result = storage.read(key)
+
+        assert result.data.equals(frame)
+        assert result.metadata.symbol == "TEST"
+        assert result.metadata.frequency == "daily"
+
+    def test_weekly_version_one_index_requires_migration(self, tmp_path: Path) -> None:
+        """Legacy weekly IDs cannot be mixed with the corrected ISO-year scheme."""
+        storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=7)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        index_path = next(storage.metadata_path.glob("k1_*_index.json"))
+        current_index = json.loads(index_path.read_text(encoding="utf-8"))
+        index_path.write_text(json.dumps(current_index["chunks"]), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="requires migration"):
+            storage.read(key)
+
+    @pytest.mark.parametrize(
+        "index_data",
+        [
+            {"format_version": 2, "metadata": {}, "chunks": []},
+            {"format_version": 3, "metadata": {}, "chunks": {}},
+        ],
+    )
+    def test_rejects_invalid_index_envelopes(self, tmp_path: Path, index_data: dict) -> None:
+        """Malformed and unsupported index envelopes fail with an index diagnostic."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        key = "equities/daily/TEST"
+        index_path = storage_key_path(storage.metadata_path, key, "_index.json")
+        index_path.write_text(json.dumps(index_data), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="chunk index"):
+            storage.read(key)
+
+    def test_failed_index_flush_preserves_committed_index(self, tmp_path: Path) -> None:
+        """A failed index flush leaves the last committed index readable."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        chunks, stored_metadata = storage._load_index(key)
+        assert stored_metadata is not None
+        index_path = storage_key_path(storage.metadata_path, key, "_index.json")
+        committed = index_path.read_text(encoding="utf-8")
+
+        with patch("ml4t.data.storage.chunked.os.fsync", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                storage._save_chunk_index(key, chunks, stored_metadata)
+
+        assert index_path.read_text(encoding="utf-8") == committed
+        assert not list(index_path.parent.glob(f".{index_path.name}.*.tmp"))
+
+    def test_failed_chunk_write_preserves_committed_parquet(self, tmp_path: Path) -> None:
+        """A failed incremental Parquet write leaves the prior chunk readable."""
+        storage = ChunkedStorage(base_path=tmp_path)
+        initial = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        update = initial.with_columns(pl.lit(105.0).alias("close"))
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=initial, metadata=metadata))
+        chunk_path = storage.get_chunk_info(key)[0].file_path
+
+        with patch.object(pl.DataFrame, "write_parquet", side_effect=OSError("disk full")):
+            with pytest.raises(OSError, match="disk full"):
+                storage.write(DataObject(data=update, metadata=metadata))
+
+        assert storage.read(key).data.equals(initial)
+        assert not list(chunk_path.parent.glob(f".{chunk_path.name}.*.tmp"))
+
+    def test_empty_range_uses_next_readable_chunk_schema(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2), datetime(2024, 2, 2)],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        first_chunk = storage.get_chunk_info(key)[0]
+        storage._chunk_path(key, first_chunk.chunk_id).unlink()
+
+        result = storage.read(key, start_date=datetime(2025, 1, 1))
+
+        assert result.data.is_empty()
+        assert result.data.schema == frame.schema
+
+    @pytest.mark.parametrize(
+        ("chunk_size_days", "boundary"),
+        [
+            (7, datetime(2024, 1, 8)),
+            (30, datetime(2024, 2, 1)),
+            (90, datetime(2024, 4, 1)),
+            (365, datetime(2025, 1, 1)),
+        ],
+    )
+    def test_subsecond_records_round_trip_across_chunk_boundaries(
+        self,
+        tmp_path: Path,
+        chunk_size_days: int,
+        boundary: datetime,
+    ) -> None:
+        storage = ChunkedStorage(tmp_path, chunk_size_days=chunk_size_days)
+        timestamps = [boundary - timedelta(microseconds=1), boundary]
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+
+        result = storage.read("equities/tick/TEST")
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
+        assert result.data["timestamp"].to_list() == timestamps
+
+    def test_read_range_uses_exclusive_end_and_returns_typed_empty_result(
+        self, tmp_path: Path
+    ) -> None:
+        storage = ChunkedStorage(tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        first_day = storage.read(key, end_date=datetime(2024, 1, 2))
+        empty = storage.read(
+            key,
+            start_date=datetime(2025, 1, 1),
+            end_date=datetime(2025, 2, 1),
+        )
+
+        assert first_day.data["timestamp"].to_list() == [datetime(2024, 1, 1)]
+        assert empty.data.is_empty()
+        assert empty.data.schema == frame.schema
+        assert empty.metadata.symbol == "TEST"
+        assert empty.metadata.frequency == "daily"
+        assert empty.metadata.data_range is None
+        assert empty.metadata.start_date is None
+        assert empty.metadata.end_date is None
+
+    def test_nanosecond_timestamps_round_trip_at_month_boundary(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path)
+        timestamps = (
+            pl.Series(
+                "timestamp",
+                ["2024-01-31T23:59:59.999999999", "2024-02-01T00:00:00.000000000"],
+            )
+            .str.to_datetime(time_unit="ns")
+            .alias("timestamp")
+        )
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read("equities/tick/TEST")
+
+        assert result.data["timestamp"].equals(timestamps)
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
+
+    def test_timezone_aware_timestamps_round_trip_across_dst_week(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(tmp_path, chunk_size_days=7)
+        timezone = ZoneInfo("America/New_York")
+        boundary = datetime(2024, 3, 11, tzinfo=timezone)
+        timestamps = [boundary - timedelta(microseconds=1), boundary]
+        frame = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "tick"},
+        )
+
+        storage.write(DataObject(data=frame, metadata=metadata))
+        result = storage.read("equities/tick/TEST")
+
+        assert result.data["timestamp"].to_list() == timestamps
+        assert len(storage.get_chunk_info("equities/tick/TEST")) == 2
 
     def test_date_range_filtering(self, tmp_path: Path) -> None:
         """Test reading specific date ranges from chunks."""
@@ -262,6 +735,34 @@ class TestChunkedStorage:
         # Verify chunk IDs contain week numbers
         assert any("_W" in chunk.chunk_id for chunk in chunks)
 
+    def test_weekly_chunks_use_iso_year_at_calendar_boundary(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=7)
+        dates = [datetime(2024, 1, 1), datetime(2024, 12, 30)]
+        frame = pl.DataFrame(
+            {
+                "timestamp": dates,
+                "open": [100.0, 101.0],
+                "high": [102.0, 103.0],
+                "low": [99.0, 100.0],
+                "close": [101.0, 102.0],
+                "volume": [1000.0, 1100.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+
+        assert [chunk.chunk_id for chunk in storage.get_chunk_info(key)] == [
+            "TEST_daily_2024_W01",
+            "TEST_daily_2025_W01",
+        ]
+        assert storage.read(key).data["timestamp"].to_list() == dates
+
     def test_quarterly_chunks(self, tmp_path: Path) -> None:
         """Test quarterly chunk size."""
         storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=90)
@@ -374,6 +875,33 @@ class TestChunkedStorage:
         # Should not create any chunks
         assert not storage.exists(key)
 
+    def test_read_rejects_all_null_chunk_timestamps(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        frame = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 2)],
+                "open": [100.0],
+                "high": [102.0],
+                "low": [99.0],
+                "close": [101.0],
+                "volume": [1000.0],
+            }
+        )
+        metadata = Metadata(
+            provider="test",
+            symbol="TEST",
+            asset_class="equities",
+            bar_params={"frequency": "daily"},
+        )
+        key = storage.write(DataObject(data=frame, metadata=metadata))
+        chunk = storage.get_chunk_info(key)[0]
+        frame.with_columns(pl.lit(None, dtype=pl.Datetime("us")).alias("timestamp")).write_parquet(
+            chunk.file_path
+        )
+
+        with pytest.raises(ValueError, match="non-null Datetime"):
+            storage.read(key)
+
     def test_delete_chunks(self, tmp_path: Path) -> None:
         """Test deleting all chunks for a key."""
         storage = ChunkedStorage(base_path=tmp_path, chunk_size_days=30)
@@ -472,6 +1000,37 @@ class TestChunkedStorage:
         equity_keys = storage.list_keys(prefix="equities/")
         assert len(equity_keys) == 2
         assert all(k.startswith("equities/") for k in equity_keys)
+
+    def test_list_keys_preserves_underscores(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        metadata = Metadata(
+            provider="test",
+            symbol="BRK_B",
+            asset_class="equities",
+            bar_type="time",
+            bar_params={"frequency": "daily"},
+        )
+        data = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1)],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1_000],
+            }
+        )
+
+        storage.write(DataObject(data=data, metadata=metadata))
+
+        assert storage.list_keys() == ["equities/daily/BRK_B"]
+        assert storage.read("equities/daily/BRK_B").data["close"].item() == 100.5
+
+    def test_list_keys_ignores_malformed_encoded_index(self, tmp_path: Path) -> None:
+        storage = ChunkedStorage(base_path=tmp_path)
+        (storage.metadata_path / "k1_invalid$_index.json").write_text("{}", encoding="utf-8")
+
+        assert storage.list_keys() == []
 
     def test_chunk_info_properties(self) -> None:
         """Test ChunkInfo class properties."""

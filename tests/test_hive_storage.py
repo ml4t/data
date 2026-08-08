@@ -1,13 +1,14 @@
 """Tests for Hive partitioned storage module."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import polars as pl
 import pytest
 
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage.keys import decode_storage_key, encode_storage_key, storage_key_path
 
 
 class TestHiveStorageInit:
@@ -68,6 +69,32 @@ class TestHiveStorageWrite:
 
         assert result.exists()
 
+    def test_read_normalizes_mixed_legacy_partition_timezones(self, storage):
+        """Read generations containing both naive and UTC timestamp partitions."""
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2023, 1, 15), datetime(2024, 1, 15)],
+                    dtype=pl.Datetime("us", "UTC"),
+                ),
+                "close": [100.0, 101.0],
+            }
+        )
+        generation = storage.write(df, "test_key")
+        legacy_path = generation / "year=2023" / "month=1" / "data.parquet"
+        legacy = pl.read_parquet(legacy_path).with_columns(
+            pl.col("timestamp").dt.replace_time_zone(None)
+        )
+        legacy.write_parquet(legacy_path)
+
+        result = storage.read("test_key").collect().sort("timestamp")
+
+        assert result.schema["timestamp"] == pl.Datetime("us", "UTC")
+        assert result["timestamp"].to_list() == [
+            datetime(2023, 1, 15, tzinfo=UTC),
+            datetime(2024, 1, 15, tzinfo=UTC),
+        ]
+
     def test_write_without_timestamp_raises(self, storage):
         """Test writing without timestamp column raises error."""
         df = pl.DataFrame(
@@ -88,7 +115,7 @@ class TestHiveStorageWrite:
             }
         )
 
-        with pytest.raises(ValueError, match="key is required"):
+        with pytest.raises(ValueError, match="non-empty string"):
             storage.write(df, None)
 
     def test_write_creates_metadata(self, storage):
@@ -102,11 +129,8 @@ class TestHiveStorageWrite:
 
         storage.write(df, "test_key")
 
-        metadata_file = storage.metadata_dir / "test_key.json"
-        assert metadata_file.exists()
-
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        metadata = storage.get_metadata("test_key")
+        assert metadata is not None
         assert "last_updated" in metadata
         assert "row_count" in metadata
         assert metadata["row_count"] == 1
@@ -313,6 +337,19 @@ class TestHiveStorageIncrementalMethods:
         result = storage.get_latest_timestamp("AAPL", "yahoo")
         assert result is None
 
+    def test_get_latest_timestamp_empty_generation(self, storage):
+        """Return no timestamp for a committed generation with no partitions."""
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series([], dtype=pl.Datetime("us", "UTC")),
+                "close": pl.Series([], dtype=pl.Float64),
+            }
+        )
+        storage.write(df, "yahoo/AAPL")
+
+        assert storage.exists("yahoo/AAPL")
+        assert storage.get_latest_timestamp("AAPL", "yahoo") is None
+
     def test_get_latest_timestamp_with_data(self, storage):
         """Test getting latest timestamp with existing data."""
         df = pl.DataFrame(
@@ -327,7 +364,7 @@ class TestHiveStorageIncrementalMethods:
         storage.write(df, "yahoo/AAPL")
 
         result = storage.get_latest_timestamp("AAPL", "yahoo")
-        assert result == datetime(2024, 2, 15)
+        assert result == datetime(2024, 2, 15, tzinfo=UTC)
 
     def test_save_chunk(self, storage):
         """Test saving incremental chunk."""
@@ -344,6 +381,88 @@ class TestHiveStorageIncrementalMethods:
 
         assert chunk_path.exists()
         assert ".chunks" in str(chunk_path)
+
+    def test_save_chunk_round_trips_exchange_symbol_without_collision(self, storage):
+        """Valid exchange symbols remain reversible and physically distinct."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 15)],
+                "close": [100.0],
+            }
+        )
+
+        slash_path = storage.save_chunk(
+            df, "BTC/USD", "exchange", datetime(2024, 1, 1), datetime(2024, 1, 31)
+        )
+        underscore_path = storage.save_chunk(
+            df, "BTC_USD", "exchange", datetime(2024, 1, 1), datetime(2024, 1, 31)
+        )
+
+        assert slash_path != underscore_path
+        assert decode_storage_key(slash_path.parent.name) == "BTC/USD"
+        assert decode_storage_key(underscore_path.parent.name) == "BTC_USD"
+        assert slash_path.resolve().is_relative_to(storage.base_path.resolve())
+        assert underscore_path.resolve().is_relative_to(storage.base_path.resolve())
+
+    @pytest.mark.parametrize(
+        ("symbol", "provider"),
+        [
+            ("../../escaped", "exchange"),
+            ("..\\..\\escaped", "exchange"),
+            ("/absolute", "exchange"),
+            ("BTC/USD", "../escaped"),
+        ],
+    )
+    def test_save_chunk_rejects_path_escape(self, storage, symbol, provider):
+        """Incremental writes reject traversal syntax before creating a path."""
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError):
+            storage.save_chunk(df, symbol, provider, datetime(2024, 1, 1), datetime(2024, 1, 31))
+
+    def test_save_chunk_rejects_existing_symlink_escape(self, storage, tmp_path_factory):
+        """An existing encoded directory symlink cannot redirect a chunk write."""
+        outside = tmp_path_factory.mktemp("outside")
+        chunks = storage.base_path / ".chunks"
+        chunks.mkdir()
+        provider_path = chunks / encode_storage_key("exchange")
+        try:
+            provider_path.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.save_chunk(
+                df,
+                "BTC/USD",
+                "exchange",
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 31),
+            )
+
+        assert not any(outside.iterdir())
+
+    def test_save_chunk_rejects_symlinked_chunks_root(self, storage, tmp_path_factory):
+        """The chunk root itself cannot redirect writes outside storage."""
+        outside = tmp_path_factory.mktemp("outside-root")
+        chunks = storage.base_path / ".chunks"
+        try:
+            chunks.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            storage.save_chunk(
+                df,
+                "BTC/USD",
+                "exchange",
+                datetime(2024, 1, 1),
+                datetime(2024, 1, 31),
+            )
+
+        assert not any(outside.iterdir())
 
     def test_update_combined_file_new(self, storage):
         """Test updating combined file with new data."""
@@ -384,7 +503,7 @@ class TestHiveStorageIncrementalMethods:
     def test_get_combined_file_path(self, storage):
         """Test getting combined file path."""
         path = storage.get_combined_file_path("AAPL", "yahoo")
-        assert "yahoo_AAPL" in str(path)
+        assert path == storage_key_path(storage.base_path, "yahoo/AAPL")
 
     def test_read_data_no_data(self, storage):
         """Test reading data when no data exists."""
@@ -410,6 +529,10 @@ class TestHiveStorageIncrementalMethods:
 
     def test_update_metadata_new(self, storage):
         """Test updating metadata for new symbol."""
+        storage.write(
+            pl.DataFrame({"timestamp": [datetime(2024, 1, 15)], "close": [100.0]}),
+            "yahoo/AAPL",
+        )
         storage.update_metadata(
             "AAPL", "yahoo", datetime(2024, 1, 15), 100, "chunk_20240101.parquet"
         )
@@ -509,7 +632,7 @@ class TestHiveStorageSlashInKey:
     """Tests for keys with slashes (hierarchy)."""
 
     def test_write_with_slash_key(self, tmp_path):
-        """Test writing with slash in key converts to underscore."""
+        """Test writing with a hierarchical logical key."""
         config = StorageConfig(base_path=tmp_path)
         storage = HiveStorage(config)
 
@@ -519,10 +642,11 @@ class TestHiveStorageSlashInKey:
                 "close": [100.0],
             }
         )
-        storage.write(df, "provider/symbol")
+        path = storage.write(df, "provider/symbol")
 
-        # Directory name should use underscore
-        assert (tmp_path / "provider_symbol").exists()
+        assert path.exists()
+        assert path.is_relative_to(storage_key_path(tmp_path, "provider/symbol"))
+        assert path.parent.name == "generations"
 
     def test_exists_with_slash_key(self, tmp_path):
         """Test exists handles slash in key."""

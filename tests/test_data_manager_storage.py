@@ -1,7 +1,8 @@
 """Tests for DataManager storage operations (load/update)."""
 
+import json
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,8 +10,11 @@ import polars as pl
 import pytest
 
 from ml4t.data.data_manager import DataManager
+from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.storage.backend import StorageConfig
+from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
+from ml4t.data.storage.keys import storage_key_path
 
 
 class TestDataManagerLoad:
@@ -33,7 +37,6 @@ class TestDataManagerLoad:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 
@@ -124,7 +127,6 @@ class TestDataManagerLoad:
 
         manager = DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
             progress_callback=progress_callback,
         )
@@ -184,7 +186,6 @@ class TestDataManagerUpdate:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 
@@ -259,6 +260,104 @@ class TestDataManagerUpdate:
             provider="mock",
         )
 
+    def test_update_limits_default_initial_load_to_provider_history(self, manager):
+        """Generated initial dates respect a provider's declared history bound."""
+        with patch.object(
+            manager._storage_manager,
+            "load",
+            return_value="crypto/daily/BTC",
+        ) as mock_load:
+            key = manager.update(
+                "BTC",
+                asset_class="crypto",
+                provider="coingecko",
+                initial_load_days=365,
+            )
+
+        assert key == "crypto/daily/BTC"
+        call = mock_load.call_args.kwargs
+        start = datetime.strptime(call["start"], "%Y-%m-%d").date()
+        end = datetime.strptime(call["end"], "%Y-%m-%d").date()
+        assert (end - start).days == 29
+        assert call["provider"] == "coingecko"
+
+    def test_update_resumes_within_provider_history_without_filling_unavailable_gap(
+        self,
+        manager,
+        storage,
+    ):
+        """A stale dataset resumes accurately without synthesizing unavailable history."""
+        old_date = datetime.now(UTC) - timedelta(days=60)
+        recent_date = datetime.now(UTC) - timedelta(days=1)
+        columns = {
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [1_000.0],
+        }
+        manager.import_data(
+            pl.DataFrame({"timestamp": [old_date], **columns}),
+            symbol="BTC",
+            provider="coingecko",
+            asset_class="crypto",
+        )
+        recent = pl.DataFrame({"timestamp": [recent_date], **columns})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=recent) as fetch,
+            patch("ml4t.data.utils.gaps.GapDetector.fill_gaps") as fill_gaps,
+        ):
+            key = manager.update("BTC", asset_class="crypto", provider="coingecko")
+
+        call = fetch.call_args.kwargs
+        effective_start = datetime.strptime(call["start"], "%Y-%m-%d").date()
+        assert (datetime.now(UTC).date() - effective_start).days == 29
+        fill_gaps.assert_not_called()
+        assert len(storage.read(key).collect()) == 2
+        metadata = storage.get_metadata(key)
+        assert metadata is not None
+        assert metadata["custom"]["attributes"]["provider_history_limited"] is True
+
+    def test_update_keeps_gap_checks_when_history_clamp_leaves_no_hole(
+        self,
+        manager,
+        storage,
+    ):
+        """A bounded lookback does not disable gap checks for a current dataset."""
+        recent_date = datetime.now(UTC) - timedelta(days=1)
+        columns = {
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [1_000.0],
+        }
+        manager.import_data(
+            pl.DataFrame({"timestamp": [recent_date], **columns}),
+            symbol="BTC",
+            provider="coingecko",
+            asset_class="crypto",
+        )
+        next_date = recent_date + timedelta(days=1)
+        new_data = pl.DataFrame({"timestamp": [next_date], **columns})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data),
+            patch("ml4t.data.utils.gaps.GapDetector.detect_gaps", return_value=[]) as detect,
+        ):
+            key = manager.update(
+                "BTC",
+                asset_class="crypto",
+                provider="coingecko",
+                lookback_days=30,
+            )
+
+        detect.assert_called_once()
+        metadata = storage.get_metadata(key)
+        assert metadata is not None
+        assert metadata["custom"]["attributes"]["provider_history_limited"] is False
+
     def test_update_incremental(self, manager, storage):
         """Test incremental update with new data."""
         # First load initial data
@@ -285,6 +384,42 @@ class TestDataManagerUpdate:
         stored_df = storage.read(key).collect()
         # Should not have duplicates
         assert stored_df["timestamp"].is_unique().all()
+
+    def test_update_rejects_all_null_merged_timestamps(self, manager, initial_data, new_data):
+        """Reject invalid merged data before writing empty timestamp metadata."""
+        key = manager.import_data(initial_data, symbol="AAPL", provider="mock")
+        metadata_before = manager._storage_manager.storage.get_metadata(key)
+        invalid_merged = initial_data.head(1).with_columns(
+            pl.lit(None, dtype=pl.Datetime("us", "UTC")).alias("timestamp")
+        )
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data),
+            patch.object(manager._storage_manager, "_merge_data", return_value=invalid_merged),
+            pytest.raises(ValueError, match="non-null Datetime"),
+        ):
+            manager.update("AAPL", provider="mock", fill_gaps=False)
+
+        assert manager._storage_manager.storage.get_metadata(key) == metadata_before
+
+    def test_update_rejects_date_timestamps_before_fetch(
+        self,
+        manager,
+        storage,
+        initial_data,
+        new_data,
+    ):
+        key = "equities/daily/AAPL"
+        date_frame = initial_data.with_columns(pl.col("timestamp").cast(pl.Date))
+        storage.write(date_frame, key, {"provider": "mock"})
+
+        with (
+            patch.object(manager._fetch_manager, "fetch_raw", return_value=new_data) as fetch,
+            pytest.raises(ValueError, match="Datetime"),
+        ):
+            manager.update("AAPL", provider="mock", fill_gaps=False)
+
+        fetch.assert_not_called()
 
     def test_merge_fills_optional_equity_columns_on_both_sides(self, manager):
         """Optional equity columns should get defaults regardless of which frame lacks them."""
@@ -351,7 +486,6 @@ class TestDataManagerUpdate:
 
         manager = DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
             progress_callback=progress_callback,
         )
@@ -400,31 +534,27 @@ class TestDataManagerTransactions:
             }
         )
 
-    def test_transactions_enabled(self, storage):
-        """Test that transactions can be enabled."""
-        manager = DataManager(storage=storage, use_transactions=True)
+    def test_removed_transaction_option_is_rejected(self, storage):
+        """The beta transaction wrapper cannot imply unsupported guarantees."""
+        with pytest.raises(TypeError, match="use_transactions was removed"):
+            DataManager(storage=storage, use_transactions=True)
 
-        # TransactionalStorage should be wrapped
-        assert hasattr(manager.storage, "transaction")
+    def test_storage_uses_atomic_backend_directly(self, storage):
+        manager = DataManager(storage=storage)
 
-    def test_transactions_disabled(self, storage):
-        """Test that transactions can be disabled."""
-        manager = DataManager(storage=storage, use_transactions=False)
+        assert manager.storage is storage
 
-        # Should be raw storage (HiveStorage doesn't have transaction)
-        assert not hasattr(manager.storage, "transaction")
-
-    @patch.object(DataManager, "fetch")
-    def test_load_uses_transactions(self, mock_fetch, storage, sample_data):
-        """Test that load() uses transactions when enabled."""
-        manager = DataManager(storage=storage, use_transactions=True)
-        mock_fetch.return_value = sample_data
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
+    def test_load_publishes_atomic_storage_generation(self, mock_fetch_raw, storage, sample_data):
+        manager = DataManager(storage=storage)
+        mock_fetch_raw.return_value = sample_data
 
         # Load should use transaction
         key = manager.load("AAPL", "2024-01-01", "2024-01-10", provider="mock")
 
         # Data should be stored
         assert storage.exists(key)
+        mock_fetch_raw.assert_called_once_with("AAPL", "2024-01-01", "2024-01-10", "daily", "mock")
 
 
 class TestDataManagerBatchLoadFromStorage:
@@ -447,7 +577,6 @@ class TestDataManagerBatchLoadFromStorage:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=False,  # Disable - TransactionalStorage.read() doesn't accept date kwargs
             enable_validation=False,  # Disable for faster tests
         )
 
@@ -543,13 +672,13 @@ class TestDataManagerBatchLoadFromStorage:
         assert len(result) >= 14  # Combined data from both symbols
         assert set(result["symbol"].unique().to_list()) == {"AAPL", "MSFT"}
 
-    @patch.object(DataManager, "fetch")
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
     def test_batch_load_from_storage_strict_mode(
-        self, mock_fetch, manager, storage, sample_data_aapl
+        self, mock_fetch_raw, manager, storage, sample_data_aapl
     ):
         """Test strict mode (fetch_missing=False) raises on missing."""
         # Pre-populate storage with only AAPL
-        mock_fetch.return_value = sample_data_aapl
+        mock_fetch_raw.return_value = sample_data_aapl
         manager.load("AAPL", "2024-01-01", "2024-01-10", provider="mock")
 
         # Should raise because MSFT is not in storage
@@ -560,6 +689,7 @@ class TestDataManagerBatchLoadFromStorage:
                 end="2024-01-10",
                 fetch_missing=False,
             )
+        mock_fetch_raw.assert_called_once()
 
     def test_batch_load_from_storage_no_data_raises(self, manager):
         """Test that no data at all raises error."""
@@ -610,7 +740,6 @@ class TestDataManagerImportData:
         """Create DataManager with storage."""
         return DataManager(
             storage=storage,
-            use_transactions=True,
             enable_validation=True,
         )
 
@@ -705,6 +834,21 @@ class TestDataManagerImportData:
                 symbol="AAPL",
                 provider="databento",
             )
+
+    def test_import_data_rejects_all_null_timestamps(self, manager):
+        data = pl.DataFrame(
+            {
+                "timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC")),
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.5],
+                "volume": [1000.0],
+            }
+        )
+
+        with pytest.raises(ValueError, match="non-null Datetime"):
+            manager.import_data(data=data, symbol="AAPL", provider="test")
 
     def test_import_data_different_asset_classes(self, manager, storage, sample_data):
         """Test importing different asset classes."""
@@ -820,39 +964,28 @@ class TestDataManagerListSymbols:
         assert isinstance(symbols, list)
         assert len(symbols) == 0
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_all(self, mock_fetch, manager, sample_data):
+    def test_list_symbols_all(self, manager, sample_data):
         """Test listing all symbols."""
-        mock_fetch.return_value = sample_data
-
-        # Load multiple symbols
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("MSFT", "2024-01-01", "2024-01-05", provider="yahoo")
-        manager.load("GOOGL", "2024-01-01", "2024-01-05", provider="yahoo")
+        for symbol in ("AAPL", "MSFT", "GOOGL"):
+            manager.import_data(sample_data, symbol=symbol, provider="yahoo")
 
         symbols = manager.list_symbols()
 
-        assert isinstance(symbols, list)
-        # Note: list_symbols depends on metadata files, which may not be created
-        # by all storage backends in the same way
+        assert symbols == ["AAPL", "GOOGL", "MSFT"]
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_filter_by_provider(self, mock_fetch, manager, sample_data):
+    def test_list_symbols_filter_by_provider(self, manager, sample_data):
         """Test filtering symbols by provider."""
-        mock_fetch.return_value = sample_data
-
-        # Load from different providers
-        manager.load("AAPL", "2024-01-01", "2024-01-05", provider="yahoo")
+        manager.import_data(sample_data, symbol="AAPL", provider="yahoo")
 
         # Filter by provider
         symbols = manager.list_symbols(provider="yahoo")
 
-        assert isinstance(symbols, list)
+        assert symbols == ["AAPL"]
 
-    @patch.object(DataManager, "fetch")
-    def test_list_symbols_filter_by_asset_class(self, mock_fetch, manager, sample_data):
+    @patch("ml4t.data.managers.fetch_manager.FetchManager.fetch_raw")
+    def test_list_symbols_filter_by_asset_class(self, mock_fetch_raw, manager, sample_data):
         """Test filtering symbols by asset class."""
-        mock_fetch.return_value = sample_data
+        mock_fetch_raw.return_value = sample_data
 
         # Load different asset classes
         manager.load("AAPL", "2024-01-01", "2024-01-05", provider="mock", asset_class="equities")
@@ -867,7 +1000,89 @@ class TestDataManagerListSymbols:
 
         # Filter by asset class
         crypto_symbols = manager.list_symbols(asset_class="crypto")
-        assert isinstance(crypto_symbols, list)
+        assert crypto_symbols == ["BTC"]
+        mock_fetch_raw.assert_called_once()
+
+    @pytest.mark.parametrize("storage_type", [HiveStorage, FlatStorage])
+    def test_loaded_symbol_is_discoverable_after_restart(self, temp_dir, storage_type):
+        """A stored dataset remains discoverable through a new manager instance."""
+        storage = storage_type(StorageConfig(base_path=temp_dir))
+        manager = DataManager(storage=storage, enable_validation=False)
+        manager.load("AAPL", "2024-01-01", "2024-01-03", provider="mock")
+
+        restarted_storage = storage_type(StorageConfig(base_path=temp_dir))
+        restarted = DataManager(storage=restarted_storage, enable_validation=False)
+
+        assert restarted.list_symbols(provider="mock") == ["AAPL"]
+        metadata = restarted.get_metadata("AAPL")
+        assert metadata is not None
+        assert metadata["provider"] == "mock"
+        assert metadata["symbol"] == "AAPL"
+        assert metadata["frequency"] == "daily"
+
+        with patch.object(
+            restarted._storage_manager,
+            "update",
+            return_value="equities/daily/AAPL",
+        ) as update:
+            assert restarted.update_all(provider="mock") == {"AAPL": "equities/daily/AAPL"}
+        update.assert_called_once_with(
+            symbol="AAPL",
+            frequency="daily",
+            asset_class="equities",
+            provider="mock",
+        )
+
+    @pytest.mark.parametrize("storage_type", [HiveStorage, FlatStorage])
+    def test_non_time_bar_frequency_is_restored_from_key(
+        self,
+        temp_dir,
+        storage_type,
+        sample_data,
+    ):
+        """Bulk discovery preserves the storage frequency for non-time bars."""
+        storage = storage_type(StorageConfig(base_path=temp_dir))
+        manager = DataManager(storage=storage, enable_validation=False)
+        manager.import_data(
+            sample_data,
+            symbol="AAPL",
+            provider="mock",
+            frequency="hourly",
+            bar_type="volume",
+            bar_threshold=1_000,
+        )
+
+        restarted = DataManager(
+            storage=storage_type(StorageConfig(base_path=temp_dir)),
+            enable_validation=False,
+        )
+
+        metadata = restarted.get_metadata("AAPL", frequency="hourly")
+        assert metadata is not None
+        assert metadata["frequency"] == "hourly"
+        assert metadata["bar_type"] == "volume"
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            {"custom": {"provider": "yahoo", "symbol": "AAPL"}},
+            {"provider": "yahoo", "symbol": "AAPL"},
+        ],
+    )
+    def test_legacy_metadata_shapes_remain_discoverable(self, temp_dir, record):
+        """Pre-generation metadata files retain their public domain fields."""
+        storage = HiveStorage(StorageConfig(base_path=temp_dir))
+        key = "equities/daily/AAPL"
+        metadata_file = storage_key_path(storage.metadata_dir, key, ".json")
+        metadata_file.write_text(json.dumps(record), encoding="utf-8")
+
+        metadata = MetadataManager(storage).get_metadata_for_key(key)
+
+        assert metadata is not None
+        assert metadata["provider"] == "yahoo"
+        assert metadata["symbol"] == "AAPL"
+        assert metadata["asset_class"] == "equities"
+        assert metadata["frequency"] == "daily"
 
 
 class TestDataManagerBatchLoad:

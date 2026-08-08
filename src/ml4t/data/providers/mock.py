@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import polars as pl
@@ -12,7 +12,7 @@ import polars as pl
 from ml4t.data.providers.base import BaseProvider
 
 
-class DataPattern(str, Enum):
+class DataPattern(StrEnum):
     """Data generation patterns for mock provider."""
 
     RANDOM = "random"  # Random walk

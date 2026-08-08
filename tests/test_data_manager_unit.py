@@ -5,12 +5,15 @@ These tests focus on methods that don't require full integration setup.
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
 
+from ml4t.data import ProviderRoutingError
 from ml4t.data.data_manager import DataManager, ProviderRouter
 from ml4t.data.managers.config_manager import ConfigManager
+from ml4t.data.managers.fetch_manager import FetchManager
 from ml4t.data.managers.provider_manager import ProviderManager
 
 
@@ -125,6 +128,29 @@ class TestDataManagerMergeConfigs:
 
         assert result["key"] == "value"
 
+    def test_provider_override_preserves_configured_alias_type(self, tmp_path):
+        """Runtime overrides target configured instance names without changing their type."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("providers:\n  yahoo_main:\n    type: yahoo\n    rate_limit: 1\n")
+
+        config = ConfigManager(
+            config_path=str(config_path),
+            providers={"yahoo_main": {"rate_limit": 5}},
+        )
+
+        assert config.config["providers"]["yahoo_main"]["type"] == "yahoo"
+        assert config.config["providers"]["yahoo_main"]["rate_limit"] == (1, 0.2)
+
+
+def test_unavailable_optional_provider_alias_is_not_fatal():
+    """Missing optional extras leave configured aliases unavailable without aborting startup."""
+    with patch.object(ProviderManager, "_PROVIDER_CLASSES", {}):
+        manager = ProviderManager(
+            {"providers": {"databento_main": {"type": "databento", "api_key": "reference"}}}
+        )
+
+    assert not manager.is_available("databento_main")
+
 
 class TestMassiveProviderConfig:
     """Tests for Massive provider config and availability wiring."""
@@ -219,13 +245,67 @@ class TestDataManagerConvertOutput:
     def test_convert_to_pandas(self):
         """Test pandas output format."""
         dm = DataManager(output_format="pandas")
-        df = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
+                "a": [1, None],
+            }
+        )
 
         result = dm._convert_output(df)
 
-        # Check it's pandas
         assert hasattr(result, "iloc")
-        assert list(result["a"]) == [1, 2, 3]
+        assert result["timestamp"].tolist() == [datetime(2024, 1, 1), datetime(2024, 1, 2)]
+        assert result["a"].iloc[0] == 1
+        assert result["a"].isna().iloc[1]
+
+    def test_convert_to_pandas_preserves_categorical_dtype(self):
+        """Use the Arrow-backed conversion when its optional dependency is installed."""
+        pytest.importorskip("pyarrow")
+        dm = DataManager(output_format="pandas")
+        df = pl.DataFrame({"state": pl.Series(["open", "closed"], dtype=pl.Categorical)})
+
+        result = dm._convert_output(df)
+
+        assert str(result["state"].dtype) == "category"
+
+    @patch("ml4t.data.managers.fetch_manager._has_pyarrow", return_value=False)
+    def test_convert_to_pandas_without_pyarrow(self, mock_has_pyarrow):
+        """The Arrow-free fallback preserves empty public-result schemas."""
+        dm = DataManager(output_format="pandas")
+        df = pl.DataFrame(
+            schema={
+                "timestamp": pl.Datetime("us", "UTC"),
+                "count": pl.Int32,
+                "value": pl.Float32,
+                "state": pl.Categorical,
+            }
+        )
+
+        result = dm._convert_output(df)
+
+        assert str(result["timestamp"].dtype) == "datetime64[us, UTC]"
+        assert str(result["count"].dtype) == "int32"
+        assert str(result["value"].dtype) == "float32"
+        assert str(result["state"].dtype) == "category"
+        mock_has_pyarrow.assert_called_once_with()
+
+    @patch("ml4t.data.managers.fetch_manager._has_pyarrow", return_value=False)
+    def test_convert_to_pandas_without_pyarrow_preserves_timezone_instants(self, _):
+        """Named timezones retain their displayed time and absolute instant."""
+        dm = DataManager(output_format="pandas")
+        source = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2024, 1, 1, tzinfo=ZoneInfo("America/New_York"))],
+                    dtype=pl.Datetime("us", "America/New_York"),
+                )
+            }
+        )
+
+        result = dm._convert_output(source)
+
+        assert result["timestamp"].iloc[0].isoformat() == "2024-01-01T00:00:00-05:00"
 
     def test_convert_to_lazy(self):
         """Test lazy output format."""
@@ -432,15 +512,12 @@ class TestDataManagerInitOptions:
 
         assert dm.storage is mock_storage
 
-    def test_init_with_transactions(self):
-        """Test initialization with transactional storage."""
+    def test_init_rejects_removed_transactions_option(self):
+        """Test the removed beta transaction option has an actionable error."""
         mock_storage = MagicMock()
 
-        with patch("ml4t.data.storage.transaction.TransactionalStorage") as mock_trans:
-            mock_trans.return_value = MagicMock()
-            _dm = DataManager(storage=mock_storage, use_transactions=True)  # noqa: F841
-
-            mock_trans.assert_called_once_with(mock_storage)
+        with pytest.raises(TypeError, match="use_transactions was removed"):
+            DataManager(storage=mock_storage, use_transactions=True)
 
     def test_init_validation_disabled(self):
         """Test initialization with validation disabled."""
@@ -502,6 +579,26 @@ class TestDataManagerFetchBatch:
         assert isinstance(result, dict)
         assert "SYM1" in result
         assert "SYM2" in result
+
+    def test_fetch_batch_rejects_ambiguous_symbols(self):
+        """A batch routing error fails the operation instead of returning all None."""
+        dm = DataManager()
+
+        with pytest.raises(ProviderRoutingError, match="specify provider explicitly"):
+            dm.fetch_batch(["AAPL", "MSFT"], "2024-01-01", "2024-01-31")
+
+    def test_fetch_batch_validates_every_route_before_fetching(self):
+        """One missing route rejects the batch before any provider request."""
+        dm = DataManager()
+
+        with (
+            patch.object(FetchManager, "fetch") as fetch,
+            pytest.raises(ProviderRoutingError, match="AAPL") as error,
+        ):
+            dm.fetch_batch(["EUR_USD", "AAPL"], "2024-01-01", "2024-01-31")
+
+        fetch.assert_not_called()
+        assert error.value.details["symbols"] == ["AAPL"]
 
 
 class TestDataManagerDetectProviders:

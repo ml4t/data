@@ -22,7 +22,7 @@ df = manager.fetch("AAPL", "2024-01-01", "2024-12-31", provider="yahoo")
 from ml4t.data.storage import HiveStorage, StorageConfig
 
 storage = HiveStorage(StorageConfig(base_path="./data"))
-manager = DataManager(storage=storage, use_transactions=True)
+manager = DataManager(storage=storage)
 key = manager.load("AAPL", "2024-01-01", "2024-12-31")
 key = manager.update("AAPL")
 ```

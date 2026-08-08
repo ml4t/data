@@ -143,7 +143,7 @@ class AsyncBaseProvider(
             data = await self._fetch_and_transform_data_async(symbol, start, end, frequency)
 
             # Validate
-            validated = self._validate_ohlcv(data, self.name)
+            validated = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",
@@ -183,11 +183,19 @@ class AsyncBaseProvider(
             provider=self.name,
         )
 
+        async def fetch_one(symbol: str) -> pl.DataFrame | Exception:
+            try:
+                return await self.fetch_ohlcv_async(symbol, start, end, frequency)
+            except Exception as exc:
+                if return_exceptions:
+                    return exc
+                raise
+
         # Create tasks for all symbols
-        tasks = [self.fetch_ohlcv_async(symbol, start, end, frequency) for symbol in symbols]
+        tasks = [fetch_one(symbol) for symbol in symbols]
 
         # Execute concurrently
-        results = await asyncio.gather(*tasks, return_exceptions=return_exceptions)
+        results = await asyncio.gather(*tasks)
 
         # Build result dictionary
         result_dict: dict[str, pl.DataFrame | Exception] = {}

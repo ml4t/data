@@ -16,9 +16,8 @@ Finnhub provides multi-asset market data with strong fundamentals and company me
 **Pricing**:
 | Tier | Price | Features |
 |------|-------|----------|
-| Free | $0/mo | 60 req/min, basic data |
-| All-in-one | $49/mo | Premium features |
-| Professional | Custom | Full access |
+| Free | $0/month | 60 requests/minute, US quotes and selected company data |
+| All-in-One | See current pricing | Historical OHLC and additional datasets |
 
 ---
 
@@ -30,47 +29,50 @@ os.environ["FINNHUB_API_KEY"] = "your_key_here"
 
 from ml4t.data.providers import FinnhubProvider
 
-provider = FinnhubProvider()
-df = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-12-01", frequency="daily")
-provider.close()
+with FinnhubProvider() as provider:
+    quote = provider.fetch_quote("AAPL")
 ```
 
----
+`fetch_quote()` uses Finnhub's free US quote endpoint. Historical candles use a premium endpoint:
 
-## Supported Frequencies
+```python
+with FinnhubProvider() as provider:
+    history = provider.fetch_ohlcv(
+        "AAPL",
+        "2024-01-01",
+        "2024-12-01",
+        frequency="daily",
+    )
+```
 
-| Frequency | Available |
-|-----------|-----------|
-| `daily` | ✅ |
-| `1h` | ✅ |
-| `1m` | ✅ |
+Do not assume that a free key can call `fetch_ohlcv()`. Finnhub's current pricing table lists US
+OHLC history under its paid plan.
 
 ---
 
 ## API Key Setup
 
 ```bash
-# .env file
-FINNHUB_API_KEY=your_api_key_here
+# Environment variable
+export FINNHUB_API_KEY=your_api_key_here
 ```
 
 Get your API key at [finnhub.io/register](https://finnhub.io/register).
 
 ---
 
-## Not Yet Implemented
+## Implemented Capabilities
 
-| Feature | Priority |
-|---------|----------|
-| Company metrics | HIGH |
-| Analyst estimates | MEDIUM |
-| Earnings calendar | MEDIUM |
-| ESG scores | LOW |
-| News sentiment | LOW |
+| Method | Account requirement |
+|--------|---------------------|
+| `fetch_quote()` | Free key |
+| `fetch_company_metrics()` | Depends on requested metric and account coverage |
+| `fetch_financials()` | Depends on requested company and account coverage |
+| `fetch_ohlcv()` | Paid OHLC access |
 
 ---
 
 ## See Also
 
 - [Finnhub Pricing](https://finnhub.io/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)

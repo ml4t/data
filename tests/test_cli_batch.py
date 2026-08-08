@@ -18,8 +18,7 @@ storage:
   path: ./marketdata
   compression: zstd
   partition_granularity: year
-  atomic_writes: true
-  enable_locking: false
+  lock_timeout: 45
   metadata_tracking: true
 datasets:
   taa:
@@ -56,8 +55,7 @@ datasets:
         "strategy": "hive",
         "compression": "zstd",
         "partition_granularity": "year",
-        "atomic_writes": True,
-        "enable_locking": False,
+        "lock_timeout": 45.0,
         "metadata_tracking": True,
     }
     manager.update.assert_called_once_with(
@@ -105,7 +103,7 @@ datasets:
     manager.update.assert_called_once_with(
         "AAPL",
         frequency="daily",
-        asset_class="equities",
+        asset_class="equity",
         provider="mock",
         lookback_days=7,
         fill_gaps=True,

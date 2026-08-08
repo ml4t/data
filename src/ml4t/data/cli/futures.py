@@ -62,23 +62,25 @@ def download_futures(ctx, config, dry_run, force, product, parallel):
         # Re-download existing data
         ml4t-data download-futures -c configs/futures_download.yaml --force
     """
-    from dotenv import load_dotenv
+    from ml4t.data.futures import load_yaml_config
 
-    from ml4t.data.futures import FuturesDownloader, load_yaml_config
-
-    load_dotenv()
     quiet = ctx.obj.get("quiet", False)
 
     try:
         # Load configuration
         download_config = load_yaml_config(config)
 
+        import ml4t.data.futures as futures
+
+        futures.require_databento("FuturesDownloader")
+        downloader_class = vars(futures)["FuturesDownloader"]
+
         # Override products if specific ones requested
         if product:
             download_config.products = list(product)
 
         # Initialize downloader
-        downloader = FuturesDownloader(download_config)
+        downloader = downloader_class(download_config)
 
         # Show cost estimate
         cost = downloader.estimate_cost()
@@ -127,13 +129,10 @@ def download_futures(ctx, config, dry_run, force, product, parallel):
             task = progress.add_task("Downloading", total=len(download_config.get_product_list()))
 
             # Custom progress callback
-            original_mark_complete = downloader.progress.mark_complete
-
-            def progress_callback(product_name, bytes_downloaded=0):
-                original_mark_complete(product_name, bytes_downloaded)
+            def progress_callback(_product_name: str, _bytes_downloaded: int = 0) -> None:
                 progress.advance(task)
 
-            downloader.progress.mark_complete = progress_callback
+            downloader.progress.on_complete = progress_callback
 
             # Run download (parallel or sequential)
             if parallel > 1:
@@ -228,11 +227,8 @@ def update_futures(ctx, config, end_date, dry_run, yes):
     """
     from datetime import datetime, timedelta
 
-    from dotenv import load_dotenv
+    from ml4t.data.futures import load_yaml_config
 
-    from ml4t.data.futures import FuturesDownloader, load_yaml_config
-
-    load_dotenv()
     quiet = ctx.obj.get("quiet", False)
     verbose = ctx.obj.get("verbose", False)
 
@@ -240,8 +236,13 @@ def update_futures(ctx, config, end_date, dry_run, yes):
         # Load configuration
         download_config = load_yaml_config(config)
 
+        import ml4t.data.futures as futures
+
+        futures.require_databento("FuturesDownloader")
+        downloader_class = vars(futures)["FuturesDownloader"]
+
         # Initialize downloader
-        downloader = FuturesDownloader(download_config)
+        downloader = downloader_class(download_config)
 
         # Find latest existing date
         latest_date = downloader.get_latest_date()
@@ -310,13 +311,10 @@ def update_futures(ctx, config, end_date, dry_run, yes):
             task = progress.add_task("Updating", total=len(download_config.get_product_list()))
 
             # Custom progress callback
-            original_mark_complete = downloader.progress.mark_complete
-
-            def progress_callback(product_name, bytes_downloaded=0):
-                original_mark_complete(product_name, bytes_downloaded)
+            def progress_callback(_product_name: str, _bytes_downloaded: int = 0) -> None:
                 progress.advance(task)
 
-            downloader.progress.mark_complete = progress_callback
+            downloader.progress.on_complete = progress_callback
 
             result = downloader.update(end_date=end)
 

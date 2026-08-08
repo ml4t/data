@@ -53,8 +53,8 @@ provider.close()
 ## API Key Setup
 
 ```bash
-# .env file
-TWELVE_DATA_API_KEY=your_api_key_here
+# Environment variable
+export TWELVE_DATA_API_KEY=your_api_key_here
 ```
 
 Get your API key at [twelvedata.com/account](https://twelvedata.com/account).
@@ -71,4 +71,4 @@ Get your API key at [twelvedata.com/account](https://twelvedata.com/account).
 ## See Also
 
 - [TwelveData Pricing](https://twelvedata.com/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)

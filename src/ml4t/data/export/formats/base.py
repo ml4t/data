@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -17,7 +18,6 @@ class ExportConfig(BaseModel):
     format: str
     include_metadata: bool = True
     compression: str | None = None  # gzip, zip, etc.
-    batch_size: int = 100000  # For chunked processing
 
     # Transformation options
     resample: str | None = None  # Target frequency
@@ -93,15 +93,39 @@ class BaseExporter(ABC):
         # Apply date filter
         if self.config.date_filter:
             start, end = self.config.date_filter
-            df = df.filter((pl.col("timestamp") >= start) & (pl.col("timestamp") <= end))
+            timestamp_type = df.schema.get("timestamp")
+            if isinstance(timestamp_type, pl.Datetime):
+                start_bound = datetime.fromisoformat(start)
+                end_bound = datetime.fromisoformat(end)
+                if timestamp_type.time_zone is not None:
+                    start_bound = (
+                        start_bound.replace(tzinfo=UTC)
+                        if start_bound.tzinfo is None
+                        else start_bound.astimezone(UTC)
+                    )
+                    end_bound = (
+                        end_bound.replace(tzinfo=UTC)
+                        if end_bound.tzinfo is None
+                        else end_bound.astimezone(UTC)
+                    )
+                if len(end) == 10:
+                    df = df.filter(
+                        (pl.col("timestamp") >= start_bound)
+                        & (pl.col("timestamp") < end_bound + timedelta(days=1))
+                    )
+                else:
+                    df = df.filter(
+                        (pl.col("timestamp") >= start_bound) & (pl.col("timestamp") <= end_bound)
+                    )
+            else:
+                df = df.filter((pl.col("timestamp") >= start) & (pl.col("timestamp") <= end))
 
         # Select specific columns
         if self.config.columns:
-            available = set(df.columns)
-            requested = set(self.config.columns)
-            to_select = list(requested & available)
-            if to_select:
-                df = df.select(to_select)
+            missing = [column for column in self.config.columns if column not in df.columns]
+            if missing:
+                raise ValueError(f"Requested export columns are missing: {missing}")
+            df = df.select(self.config.columns)
 
         # Add calculated fields
         if self.config.add_returns and "close" in df.columns:

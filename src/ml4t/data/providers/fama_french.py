@@ -43,14 +43,14 @@ import io
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import httpx
 import polars as pl
 import structlog
 
 from ml4t.data.core.config import resolve_storage_path
-from ml4t.data.core.exceptions import DataNotAvailableError
+from ml4t.data.core.exceptions import DataNotAvailableError, NetworkError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -286,7 +286,7 @@ class FamaFrenchProvider(BaseProvider):
     BASE_URL: ClassVar[str] = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp"
 
     # Complete file mapping
-    FILES: ClassVar[dict[str, dict]] = {
+    FILES: ClassVar[dict[str, dict[str, Any]]] = {
         # === CORE FACTORS ===
         "ff3": {
             "file": "F-F_Research_Data_Factors",
@@ -424,7 +424,7 @@ class FamaFrenchProvider(BaseProvider):
     }
 
     # Dataset metadata with educational descriptions
-    DATASETS: ClassVar[dict[str, dict]] = {
+    DATASETS: ClassVar[dict[str, dict[str, Any]]] = {
         # === CORE FACTORS ===
         "ff3": {
             "name": "Fama-French 3 Factors",
@@ -619,7 +619,7 @@ class FamaFrenchProvider(BaseProvider):
             return FF_CATEGORIES[category]
         return list(self.FILES.keys())
 
-    def get_dataset_info(self, dataset: str) -> dict:
+    def get_dataset_info(self, dataset: str) -> dict[str, Any]:
         """
         Get metadata for a specific dataset.
 
@@ -830,7 +830,11 @@ class FamaFrenchProvider(BaseProvider):
             with httpx.Client(timeout=60.0) as client:
                 response = client.get(url)
                 response.raise_for_status()
-        except httpx.HTTPError as e:
+        except httpx.RequestError as e:
+            raise NetworkError("fama_french", str(e)) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                raise NetworkError("fama_french", f"HTTP {e.response.status_code}") from e
             raise DataNotAvailableError(
                 provider="fama_french",
                 symbol=dataset,

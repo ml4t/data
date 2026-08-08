@@ -499,7 +499,7 @@ class DataQualityMonitor:
 
 **Next Steps**:
 - [Tutorial 05: Multi-Provider Strategies](05_multi_provider.md)
-- [Data Validation API Reference](../../src/ml4t-data/validation/)
+- [Data Validation Source](https://github.com/ml4t/data/tree/main/src/ml4t/data/validation)
 
 ---
 

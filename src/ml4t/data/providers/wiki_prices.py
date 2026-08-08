@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import time
 import zipfile
+from datetime import date
 from io import BytesIO
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import httpx
 import polars as pl
@@ -386,7 +387,7 @@ class WikiPricesProvider(BaseProvider):
         try:
             standardized = filtered.select(
                 [
-                    pl.col("date").alias("timestamp"),
+                    pl.col("date").cast(pl.Datetime("us", "UTC")).alias("timestamp"),
                     pl.col("adj_open").alias("open"),
                     pl.col("adj_high").alias("high"),
                     pl.col("adj_low").alias("low"),
@@ -480,12 +481,12 @@ class WikiPricesProvider(BaseProvider):
                 },
             )
 
-        start = symbol_data["date"].min().strftime("%Y-%m-%d")
-        end = symbol_data["date"].max().strftime("%Y-%m-%d")
+        start = self._format_date(symbol_data["date"].min())
+        end = self._format_date(symbol_data["date"].max())
 
         return start, end
 
-    def get_dataset_stats(self) -> dict[str, any]:
+    def get_dataset_stats(self) -> dict[str, Any]:
         """
         Get statistics about Wiki Prices dataset.
 
@@ -508,8 +509,8 @@ class WikiPricesProvider(BaseProvider):
         if self.cache_in_memory and self._data is not None:
             total_rows = len(self._data)
             total_symbols = self._data["ticker"].n_unique()
-            start = self._data["date"].min().strftime("%Y-%m-%d")
-            end = self._data["date"].max().strftime("%Y-%m-%d")
+            start = self._format_date(self._data["date"].min())
+            end = self._format_date(self._data["date"].max())
             memory_size_mb = self._data.estimated_size("mb")
         else:
             # Lazy scan for stats
@@ -522,8 +523,8 @@ class WikiPricesProvider(BaseProvider):
                     pl.col("date").max().alias("max_date"),
                 ]
             ).collect()
-            start = date_stats["min_date"][0].strftime("%Y-%m-%d")
-            end = date_stats["max_date"][0].strftime("%Y-%m-%d")
+            start = self._format_date(date_stats["min_date"][0])
+            end = self._format_date(date_stats["max_date"][0])
             memory_size_mb = None
 
         return {
@@ -609,7 +610,6 @@ class WikiPricesProvider(BaseProvider):
         log.info(
             "Starting Wiki Prices download",
             output_path=str(output_file),
-            api_key_prefix=resolved_key[:8] + "...",
         )
 
         # Request export from NASDAQ Data Link API
@@ -622,18 +622,12 @@ class WikiPricesProvider(BaseProvider):
                 "qopts.export": "true",
             }
 
-            try:
-                response = client.get(cls.NASDAQ_EXPORT_URL, params=params)
-                response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    raise ValueError("Invalid API key. Check your NASDAQ Data Link API key.") from e
-                elif e.response.status_code == 429:
-                    raise RuntimeError("Rate limited by NASDAQ Data Link. Try again later.") from e
-                else:
-                    raise RuntimeError(
-                        f"Export request failed: {e.response.status_code} - {e.response.text}"
-                    ) from e
+            response = cls._checked_download_request(
+                client,
+                cls.NASDAQ_EXPORT_URL,
+                params=params,
+                nasdaq_api=True,
+            )
 
             # Step 2: Parse export metadata CSV to get download link
             meta_df = pl.read_csv(BytesIO(response.content))
@@ -656,8 +650,12 @@ class WikiPricesProvider(BaseProvider):
                 time.sleep(wait_interval)
                 total_wait += wait_interval
 
-                response = client.get(cls.NASDAQ_EXPORT_URL, params=params)
-                response.raise_for_status()
+                response = cls._checked_download_request(
+                    client,
+                    cls.NASDAQ_EXPORT_URL,
+                    params=params,
+                    nasdaq_api=True,
+                )
                 meta_df = pl.read_csv(BytesIO(response.content))
                 download_url = meta_df["file.link"][0]
                 file_status = (
@@ -669,8 +667,11 @@ class WikiPricesProvider(BaseProvider):
 
             # Step 4: Download the ZIP file from S3
             log.info("Downloading ZIP file from S3 (this may take a few minutes)...")
-            zip_response = client.get(download_url, timeout=600.0)
-            zip_response.raise_for_status()
+            zip_response = cls._checked_download_request(
+                client,
+                download_url,
+                timeout=600.0,
+            )
 
             log.info(f"Downloaded {len(zip_response.content) / 1024 / 1024:.1f} MB")
 
@@ -729,15 +730,17 @@ class WikiPricesProvider(BaseProvider):
                 return key
 
         # 3. Load from .env file
-        env_paths = []
+        env_paths: list[Path] = []
         if env_file:
-            env_paths.append(Path(env_file).expanduser())
-        env_paths.extend(
-            [
-                Path("~/.env").expanduser(),
-                Path(".env"),
-            ]
-        )
+            try:
+                env_paths.append(Path(env_file).expanduser())
+            except RuntimeError:
+                pass
+        try:
+            env_paths.append(Path("~/.env").expanduser())
+        except RuntimeError:
+            pass
+        env_paths.append(Path(".env"))
 
         for env_path in env_paths:
             if env_path.exists():
@@ -750,7 +753,7 @@ class WikiPricesProvider(BaseProvider):
                             return values[env_var]
                 except ImportError:
                     # python-dotenv not installed, try manual parsing
-                    with open(env_path) as f:
+                    with env_path.open(encoding="utf-8") as f:
                         for line in f:
                             line = line.strip()
                             if line.startswith("#") or "=" not in line:
@@ -762,3 +765,43 @@ class WikiPricesProvider(BaseProvider):
                                 return value
 
         return None
+
+    @staticmethod
+    def _format_date(value: object) -> str:
+        if not isinstance(value, date):
+            raise DataValidationError(
+                provider="wiki_prices",
+                message="Dataset date range contains no valid dates",
+                field="date",
+                value=value,
+            )
+        return value.strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _checked_download_request(
+        client: httpx.Client,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        timeout: float | None = None,
+        nasdaq_api: bool = False,
+    ) -> httpx.Response:
+        """Issue a download request without exposing credential-bearing URLs in errors."""
+        request_kwargs: dict[str, Any] = {}
+        if params is not None:
+            request_kwargs["params"] = params
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
+        try:
+            response = client.get(url, **request_kwargs)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            status_code = error.response.status_code
+            if nasdaq_api and status_code == 401:
+                raise ValueError("Invalid API key. Check your NASDAQ Data Link API key.") from None
+            if nasdaq_api and status_code == 429:
+                raise RuntimeError("Rate limited by NASDAQ Data Link. Try again later.") from None
+            raise RuntimeError(f"Download request failed with HTTP {status_code}") from None
+        except httpx.RequestError:
+            raise RuntimeError("Download request failed due to a network error") from None
+        return response

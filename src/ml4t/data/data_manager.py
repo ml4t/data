@@ -17,7 +17,7 @@ Architecture:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar, Literal
 
 import polars as pl
 import structlog
@@ -49,7 +49,7 @@ class DataManager:
     **Storage Operations (when storage configured):**
     - Initial data loading with validation
     - Incremental updates with gap detection and filling
-    - Transaction support for ACID guarantees
+    - Atomic generation-based replacement
     - Progress callbacks for UI integration
     - Data validation (OHLCV, cross-validation)
 
@@ -63,10 +63,12 @@ class DataManager:
         >>> from ml4t.data.storage.hive import HiveStorage
         >>> from ml4t.data.storage.backend import StorageConfig
         >>> storage = HiveStorage(StorageConfig(base_path="./data"))
-        >>> manager = DataManager(storage=storage, use_transactions=True)
+        >>> manager = DataManager(storage=storage)
         >>> key = manager.load("AAPL", "2024-01-01", "2024-12-31")
         >>> key = manager.update("AAPL")  # Incremental update
     """
+
+    PROVIDER_CLASSES: ClassVar[dict[str, type]]
 
     def __init__(
         self,
@@ -74,10 +76,9 @@ class DataManager:
         output_format: str = "polars",
         providers: dict[str, dict[str, Any]] | None = None,
         storage: Any | None = None,
-        use_transactions: bool = False,
         enable_validation: bool = True,
         progress_callback: Callable[[str, float], None] | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Initialize DataManager.
 
@@ -86,11 +87,15 @@ class DataManager:
             output_format: Output format ('polars', 'pandas', 'lazy')
             providers: Provider-specific configuration overrides
             storage: Optional storage backend for load/update operations
-            use_transactions: Enable transactional storage for ACID guarantees
             enable_validation: Enable data validation during load/update
             progress_callback: Optional callback for progress updates (message, progress)
             **kwargs: Additional configuration parameters
         """
+        if "use_transactions" in kwargs:
+            raise TypeError(
+                "use_transactions was removed before 0.1.0; supported storage writes are atomic"
+            )
+
         # Initialize configuration manager
         self._config_manager = ConfigManager(
             config_path=config_path,
@@ -118,13 +123,8 @@ class DataManager:
             output_format=self._config_manager.output_format,
         )
 
-        # Setup storage with optional transactions
+        # Supported storage backends publish complete immutable generations.
         self._storage = storage
-        if storage and use_transactions:
-            from ml4t.data.storage.transaction import TransactionalStorage
-
-            self._storage = TransactionalStorage(storage)
-            logger.info("TransactionalStorage enabled for ACID guarantees")
 
         # Initialize storage manager (if storage configured)
         self._storage_manager: StorageManager | None = None
@@ -212,7 +212,7 @@ class DataManager:
         end: str,
         frequency: str = "daily",
         provider: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> pl.DataFrame | pl.LazyFrame | Any:
         """Fetch data for a symbol.
 
@@ -238,7 +238,7 @@ class DataManager:
         start: str,
         end: str,
         frequency: str = "daily",
-        **kwargs,
+        **kwargs: Any,
     ) -> dict[str, pl.DataFrame | pl.LazyFrame | Any | None]:
         """Fetch data for multiple symbols.
 
@@ -251,8 +251,16 @@ class DataManager:
 
         Returns:
             Dictionary mapping symbols to data (or None if fetch failed)
+
+        Raises:
+            ProviderRoutingError: If any symbol has no explicit or unambiguous route. The
+                entire batch is rejected before the first provider request.
         """
         return self._fetch_manager.fetch_batch(symbols, start, end, frequency, **kwargs)
+
+    def validate_routes(self, symbols: list[str], provider: str | None = None) -> None:
+        """Reject a batch whose symbols cannot all be routed before provider I/O."""
+        self._fetch_manager.validate_routes(symbols, provider)
 
     # ========================================================================
     # Batch operations (delegate to BatchManager)
@@ -429,13 +437,13 @@ class DataManager:
         symbol: str,
         asset_class: str = "equities",
         frequency: str = "daily",
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """Get metadata for a specific symbol."""
         if not self._metadata_manager:
             raise ValueError("Storage not configured")
         return self._metadata_manager.get_metadata(symbol, asset_class, frequency)
 
-    def get_metadata_for_key(self, key: str) -> dict | None:
+    def get_metadata_for_key(self, key: str) -> dict[str, Any] | None:
         """Get metadata for a storage key."""
         if not self._metadata_manager:
             return None
@@ -446,8 +454,9 @@ class DataManager:
         df: pl.DataFrame,
         exchange: str | None = None,
         calendar: str | None = None,
+        bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
     ) -> pl.DataFrame:
-        """Assign session_date column to DataFrame based on exchange calendar."""
+        """Assign sessions to daily period labels or intraday timestamps."""
         if not self._metadata_manager:
             # Fall back to direct implementation
             from ml4t.data.sessions import SessionAssigner
@@ -458,9 +467,9 @@ class DataManager:
                 assigner = SessionAssigner.from_exchange(exchange)
             else:
                 assigner = SessionAssigner(calendar)
-            return assigner.assign_sessions(df)
+            return assigner.assign_sessions(df, bar_frequency=bar_frequency)
 
-        return self._metadata_manager.assign_sessions(df, exchange, calendar)
+        return self._metadata_manager.assign_sessions(df, exchange, calendar, bar_frequency)
 
     def complete_sessions(
         self,

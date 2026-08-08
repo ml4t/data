@@ -67,6 +67,36 @@ class TestMacroConfig:
         assert len(derived) == 1
         assert derived[0]["name"] == "SLOPE"
 
+    @pytest.mark.parametrize(
+        "derived",
+        ["DGS10 - DGS2", [{"name": "SLOPE", "window": 10}]],
+    )
+    def test_get_derived_series_rejects_invalid_shape(self, derived):
+        """Malformed derived-series configuration fails before download work starts."""
+        with pytest.raises(ValueError, match="macro.series.derived"):
+            MacroConfig(series={"derived": derived})
+
+    def test_get_derived_series_ignores_extension_fields(self):
+        """Consumer-specific extension fields do not invalidate required definitions."""
+        config = MacroConfig(
+            series={
+                "derived": [
+                    {"name": "SLOPE", "formula": "DGS10 - DGS2", "window": 10},
+                ]
+            }
+        )
+
+        assert config.get_derived_series() == [{"name": "SLOPE", "formula": "DGS10 - DGS2"}]
+
+    @pytest.mark.parametrize(
+        "treasury",
+        ["DGS10", {"symbols": "DGS10"}, {"symbols": ["DGS10", 2]}],
+    )
+    def test_treasury_symbols_reject_invalid_shape(self, treasury):
+        """Treasury symbol configuration fails at construction."""
+        with pytest.raises(ValueError, match="macro.series.treasury_yields"):
+            MacroConfig(series={"treasury_yields": treasury})
+
 
 class TestMacroDataManager:
     """Tests for MacroDataManager class."""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -54,6 +54,13 @@ def sample_cot_financial() -> pl.DataFrame:
     return pl.DataFrame(
         {
             "report_date": dates,
+            "available_at": [
+                datetime(2024, 1, 5, 20, 30, tzinfo=UTC),
+                datetime(2024, 1, 12, 20, 30, tzinfo=UTC),
+                datetime(2024, 1, 19, 20, 30, tzinfo=UTC),
+                datetime(2024, 1, 26, 20, 30, tzinfo=UTC),
+                datetime(2024, 2, 2, 20, 30, tzinfo=UTC),
+            ],
             "open_interest": [500000, 510000, 520000, 515000, 525000],
             "dealer_long": [100000, 102000, 98000, 105000, 103000],
             "dealer_short": [120000, 118000, 122000, 115000, 117000],
@@ -306,7 +313,7 @@ class TestCombineCOTOHLCV:
         assert len(combined) == len(sample_ohlcv)
 
         # Should have COT columns
-        assert "open_interest" in combined.columns
+        assert "cot_open_interest" in combined.columns
         assert "dealer_long" in combined.columns
         assert "lev_money_long" in combined.columns
 
@@ -314,60 +321,39 @@ class TestCombineCOTOHLCV:
 class TestCombineCOTOHLCVPIT:
     """Tests for combine_cot_ohlcv_pit (point-in-time safe) function."""
 
-    def test_pit_delays_data_availability(self, sample_ohlcv, sample_cot_financial):
-        """Test that PIT version delays COT data by publication lag."""
-        # Standard combine (no lag)
-        combined_naive = combine_cot_ohlcv(sample_ohlcv, sample_cot_financial)
-
-        # PIT combine (6-day lag)
+    def test_alias_matches_safe_primary_api(self, sample_ohlcv, sample_cot_financial):
+        """Both public join names use the official release timestamp."""
+        combined = combine_cot_ohlcv(sample_ohlcv, sample_cot_financial)
         combined_pit = combine_cot_ohlcv_pit(sample_ohlcv, sample_cot_financial)
 
-        # On Jan 2 (Tuesday, report date), naive has data, PIT should not
-        jan_2_naive = combined_naive.filter(pl.col("timestamp") == date(2024, 1, 2))
-        _jan_2_pit = combined_pit.filter(pl.col("timestamp") == date(2024, 1, 2))  # noqa: F841
-
-        # Naive has Jan 2 COT data available on Jan 2
-        assert jan_2_naive["open_interest"][0] is not None
-
-        # PIT should NOT have Jan 2 COT on Jan 2 (need to wait 6 days)
-        # It should have older data or null
-        # (Since Jan 2 is first report, there's no older data)
+        assert combined.equals(combined_pit)
+        jan_2 = combined.filter(pl.col("timestamp") == date(2024, 1, 2))
+        assert jan_2["cot_open_interest"][0] is None
 
     def test_pit_data_available_after_lag(self, sample_ohlcv, sample_cot_financial):
-        """Test that COT data becomes available after publication lag."""
-        # PIT combine with 6-day lag
-        combined_pit = combine_cot_ohlcv_pit(
-            sample_ohlcv, sample_cot_financial, publication_lag_days=6
+        """A daily observation sees a report only after its exact release."""
+        combined_pit = combine_cot_ohlcv_pit(sample_ohlcv, sample_cot_financial)
+
+        jan_5 = combined_pit.filter(pl.col("timestamp") == date(2024, 1, 5))
+        jan_6 = combined_pit.filter(pl.col("timestamp") == date(2024, 1, 6))
+        assert jan_5["cot_open_interest"][0] is None
+        assert jan_6["cot_open_interest"][0] == 500000
+
+    def test_pit_honors_delayed_schedule(self, sample_ohlcv, sample_cot_financial):
+        """A delayed release remains hidden until the supplied timestamp."""
+        delayed = sample_cot_financial.with_columns(
+            pl.when(pl.col("report_date") == date(2024, 1, 2))
+            .then(pl.lit(datetime(2024, 1, 8, tzinfo=UTC)))
+            .otherwise(pl.col("available_at"))
+            .alias("available_at")
         )
 
-        # Jan 2 report should be available on Jan 8 (Jan 2 + 6 days)
-        jan_8_pit = combined_pit.filter(pl.col("timestamp") == date(2024, 1, 8))
+        combined = combine_cot_ohlcv_pit(sample_ohlcv, delayed)
 
-        # Should have COT data (from Jan 2 report)
-        assert jan_8_pit["open_interest"][0] is not None
-        assert jan_8_pit["open_interest"][0] == 500000  # From Jan 2 report
-
-    def test_pit_configurable_lag(self, sample_ohlcv, sample_cot_financial):
-        """Test that publication lag is configurable."""
-        # 3-day lag (Friday publication)
-        combined_3day = combine_cot_ohlcv_pit(
-            sample_ohlcv, sample_cot_financial, publication_lag_days=3
-        )
-
-        # 6-day lag (Monday conservative)
-        combined_6day = combine_cot_ohlcv_pit(
-            sample_ohlcv, sample_cot_financial, publication_lag_days=6
-        )
-
-        # Jan 5 (Friday, 3 days after Jan 2 report)
-        jan_5_3day = combined_3day.filter(pl.col("timestamp") == date(2024, 1, 5))
-        _jan_5_6day = combined_6day.filter(pl.col("timestamp") == date(2024, 1, 5))  # noqa: F841
-
-        # With 3-day lag, Jan 2 report should be available on Jan 5
-        assert jan_5_3day["open_interest"][0] == 500000
-
-        # With 6-day lag, Jan 2 report should NOT be available yet on Jan 5
-        # (Will be null or from earlier data)
+        jan_7 = combined.filter(pl.col("timestamp") == date(2024, 1, 7))
+        jan_8 = combined.filter(pl.col("timestamp") == date(2024, 1, 8))
+        assert jan_7["cot_open_interest"][0] is None
+        assert jan_8["cot_open_interest"][0] == 500000
 
 
 class TestCombineCOTOHLCVMore:
@@ -378,11 +364,11 @@ class TestCombineCOTOHLCVMore:
         combined = combine_cot_ohlcv(sample_ohlcv, sample_cot_financial)
 
         # COT data should be forward-filled
-        # Jan 3 (Wednesday) should have Jan 2 COT data
-        row_jan_3 = combined.filter(pl.col("timestamp") == date(2024, 1, 3))
-        row_jan_2 = combined.filter(pl.col("timestamp") == date(2024, 1, 2))
+        # Jan 6 and Jan 8 should both have the January 2 report.
+        row_jan_6 = combined.filter(pl.col("timestamp") == date(2024, 1, 6))
+        row_jan_8 = combined.filter(pl.col("timestamp") == date(2024, 1, 8))
 
-        assert row_jan_3["open_interest"][0] == row_jan_2["open_interest"][0]
+        assert row_jan_6["cot_open_interest"][0] == row_jan_8["cot_open_interest"][0]
 
     def test_combine_preserves_ohlcv_columns(self, sample_ohlcv, sample_cot_financial):
         """Test that all OHLCV columns are preserved."""
@@ -495,7 +481,7 @@ class TestCOTIntegration:
         assert all(col in features.columns for col in ["open", "high", "low", "close", "volume"])
 
         # Has COT columns
-        assert "open_interest" in features.columns
+        assert "cot_open_interest" in features.columns
 
         # Has feature columns
         assert any(col.startswith("cot_") for col in features.columns)

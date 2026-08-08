@@ -6,13 +6,17 @@ Suitable for smaller datasets or when partitioning is not beneficial.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+import structlog
 
 from .backend import StorageBackend, StorageConfig
+from .keys import KEY_ENCODING_PREFIX, decode_storage_key
+
+logger = structlog.get_logger()
 
 
 class FlatStorage(StorageBackend):
@@ -50,28 +54,30 @@ class FlatStorage(StorageBackend):
         # Ensure LazyFrame for efficiency
         lazy_data = self._ensure_lazy(data)
 
-        # Create file path
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-
-        # Collect and write atomically
         df = lazy_data.collect()
-        self._atomic_write(df, file_path)
+        with self._key_lock(key):
+            staging_path, generation_id = self._prepare_generation(key)
+            try:
+                staged_file = staging_path / "data.parquet"
+                self._atomic_write(df, staged_file)
+                commit_metadata = (
+                    {
+                        "last_updated": datetime.now().isoformat(),
+                        "file_path": "data.parquet",
+                        "row_count": len(df),
+                        "schema": list(df.columns),
+                        "file_size_mb": staged_file.stat().st_size / (1024 * 1024),
+                        "custom": metadata or {},
+                    }
+                    if self.config.metadata_tracking
+                    else {}
+                )
+                commit = self._publish_generation(key, staging_path, generation_id, commit_metadata)
+            except BaseException:
+                self._cleanup_staging(staging_path)
+                raise
 
-        # Update metadata
-        if self.config.metadata_tracking:
-            self._update_metadata(
-                key,
-                {
-                    "last_updated": datetime.now().isoformat(),
-                    "file_path": str(file_path.relative_to(self.base_path)),
-                    "row_count": len(df),
-                    "schema": list(df.columns),
-                    "file_size_mb": file_path.stat().st_size / (1024 * 1024),
-                    "custom": metadata or {},
-                },
-            )
-
-        return file_path
+        return commit.generation_path / "data.parquet"
 
     def read(
         self,
@@ -91,25 +97,47 @@ class FlatStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-
-        if not file_path.exists():
-            raise KeyError(f"Key '{key}' not found in storage")
+        file_path = self._current_commit(key).generation_path / "data.parquet"
+        if not file_path.is_file():
+            raise RuntimeError(f"Published data file is missing for key '{key}'")
 
         # Use lazy reading
         lf = pl.scan_parquet(file_path)
 
-        # Apply column selection
+        # Apply date filters if timestamp column exists
+        schema = lf.collect_schema()
+        if "timestamp" in schema:
+            timestamp_type = schema["timestamp"]
+            if isinstance(timestamp_type, pl.Datetime):
+                timestamp = pl.col("timestamp")
+                if timestamp_type.time_zone is None:
+                    timestamp = timestamp.dt.replace_time_zone("UTC")
+                else:
+                    timestamp = timestamp.dt.convert_time_zone("UTC")
+                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
+
+            normalized_start = (
+                start_date.replace(tzinfo=UTC)
+                if start_date is not None and start_date.tzinfo is None
+                else start_date.astimezone(UTC)
+                if start_date is not None
+                else None
+            )
+            normalized_end = (
+                end_date.replace(tzinfo=UTC)
+                if end_date is not None and end_date.tzinfo is None
+                else end_date.astimezone(UTC)
+                if end_date is not None
+                else None
+            )
+            if normalized_start:
+                lf = lf.filter(pl.col("timestamp") >= normalized_start)
+            if normalized_end:
+                lf = lf.filter(pl.col("timestamp") < normalized_end)
+
+        # Select after timestamp filtering so callers can omit the filter column.
         if columns:
             lf = lf.select(columns)
-
-        # Apply date filters if timestamp column exists
-        schema = lf.schema
-        if "timestamp" in schema:
-            if start_date:
-                lf = lf.filter(pl.col("timestamp") >= start_date)
-            if end_date:
-                lf = lf.filter(pl.col("timestamp") < end_date)
 
         return lf
 
@@ -120,10 +148,17 @@ class FlatStorage(StorageBackend):
             List of storage keys
         """
         keys = []
-        for path in self.base_path.glob("*.parquet"):
-            # Convert from filesystem-safe name
-            key = path.stem.replace("_", "/")
-            keys.append(key)
+        for path in self.base_path.glob(f"{KEY_ENCODING_PREFIX}*"):
+            if path.is_dir() and (path / "CURRENT").is_file():
+                try:
+                    keys.append(decode_storage_key(path.name))
+                except ValueError as error:
+                    logger.warning("Ignoring invalid storage entry", path=path, error=str(error))
+        if any(self.base_path.glob("*.parquet")):
+            logger.warning(
+                "Legacy flat storage entries require explicit migration",
+                base_path=self.base_path,
+            )
         return sorted(keys)
 
     def exists(self, key: str) -> bool:
@@ -135,8 +170,11 @@ class FlatStorage(StorageBackend):
         Returns:
             True if key exists
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-        return file_path.exists()
+        try:
+            self._current_commit(key)
+        except KeyError:
+            return False
+        return True
 
     def delete(self, key: str) -> bool:
         """Delete data for a key.
@@ -147,14 +185,4 @@ class FlatStorage(StorageBackend):
         Returns:
             True if successful
         """
-        file_path = self.base_path / f"{key.replace('/', '_')}.parquet"
-        if file_path.exists():
-            file_path.unlink()
-
-            # Remove metadata
-            metadata_file = self.metadata_dir / f"{key.replace('/', '_')}.json"
-            if metadata_file.exists():
-                metadata_file.unlink()
-
-            return True
-        return False
+        return self._delete_key(key)

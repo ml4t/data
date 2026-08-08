@@ -19,11 +19,9 @@ direct access to the native `databento.Historical` client for advanced workflows
 **Pricing**:
 | Tier | Price | Features |
 |------|-------|----------|
-| Free Trial | $125 credit | Historical data only |
-| Usage-based | Pay as you go | Historical data, $/GB |
-| Standard | $179/mo | Live data, 15+ years core |
-| Plus | $1,500/mo + fees | External distribution |
-| Unlimited | $4,000/mo + fees | All schemas |
+| Metadata and symbology | Free | Discovery, cost estimates, symbol resolution |
+| Usage-based | Pay as you go | Historical time-series data billed by volume |
+| Subscription | See current pricing | Bundled historical and live access |
 
 ---
 
@@ -37,7 +35,11 @@ from ml4t.data.providers import DataBentoProvider
 
 provider = DataBentoProvider()
 
-# Futures (CME)
+# These authenticated discovery calls are not metered.
+datasets = provider.get_available_datasets()
+schemas = provider.get_available_schemas("GLBX.MDP3")
+
+# Historical time-series calls are metered.
 df = provider.fetch_ohlcv("ES", "2024-01-01", "2024-06-01", frequency="daily")
 
 # Multiple schemas for one symbol
@@ -147,24 +149,20 @@ df = provider.fetch_continuous_futures(
 ## API Key Setup
 
 ```bash
-# .env file
-DATABENTO_API_KEY=your_api_key_here
+# Environment variable
+export DATABENTO_API_KEY=your_api_key_here
 ```
 
 Get your API key at [databento.com](https://databento.com).
 
 ---
 
-## Cost Estimation
+## Cost Control
 
-| Data Type | Approximate Cost |
-|-----------|------------------|
-| Daily OHLCV | $0.01-0.05 per symbol-month |
-| Minute OHLCV | $0.10-0.50 per symbol-month |
-| Trades | $1-5 per symbol-month |
-| L2 Depth | $5-20 per symbol-month |
-
-Use the $125 free credit to explore before committing.
+Databento documents metadata, symbology, account management, and cost estimation as free. Historical
+time-series responses are metered by bytes delivered. Estimate a request before downloading data,
+and use account budgets to enforce a maximum spend. The ML4T release workflow calls only authenticated
+metadata methods and cannot incur time-series usage charges.
 
 ---
 
@@ -185,4 +183,4 @@ streaming, use `provider.client` directly.
 
 - [Databento Pricing](https://databento.com/pricing)
 - [Databento Reference](databento_reference.md) - Detailed schema guide
-- [Provider README](README.md)
+- [Provider reference](index.md)

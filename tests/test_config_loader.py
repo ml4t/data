@@ -41,9 +41,10 @@ class TestConfigLoader:
     def test_load_basic_yaml(self, tmp_path):
         """Test loading basic YAML configuration."""
         config_file = tmp_path / "config.yaml"
+        data_dir = tmp_path / "data"
         config_data = {
             "version": "1.0",
-            "base_dir": "/data",
+            "base_dir": str(data_dir),
             "log_level": "DEBUG",
         }
 
@@ -54,12 +55,13 @@ class TestConfigLoader:
         config = loader.load()
 
         assert config.version == "1.0"
-        assert config.base_dir == Path("/data")
+        assert config.base_dir == data_dir
         assert config.log_level == "DEBUG"
 
     def test_environment_variable_interpolation(self, tmp_path):
         """Test environment variable interpolation."""
         config_file = tmp_path / "config.yaml"
+        data_dir = tmp_path / "test-data"
         config_data = {
             "version": "1.0",
             "base_dir": "${TEST_DATA_DIR}",
@@ -67,7 +69,7 @@ class TestConfigLoader:
             "providers": [
                 {
                     "name": "test",
-                    "type": "yahoo",
+                    "type": "tiingo",
                     "api_key": "${TEST_API_KEY}",
                 }
             ],
@@ -77,7 +79,7 @@ class TestConfigLoader:
             yaml.dump(config_data, f)
 
         # Set environment variables
-        os.environ["TEST_DATA_DIR"] = "/test/data"
+        os.environ["TEST_DATA_DIR"] = str(data_dir)
         os.environ["TEST_API_KEY"] = "secret_key_123"
         # TEST_LOG_LEVEL not set, should use default
 
@@ -85,7 +87,7 @@ class TestConfigLoader:
             loader = ConfigLoader(config_file)
             config = loader.load()
 
-            assert config.base_dir == Path("/test/data")
+            assert config.base_dir == data_dir
             assert config.log_level == "INFO"  # Default value
             assert config.providers[0].api_key == "secret_key_123"
         finally:
@@ -130,9 +132,10 @@ class TestConfigLoader:
         """Test configuration includes."""
         # Create base config
         base_file = tmp_path / "base.yaml"
+        data_dir = tmp_path / "base-data"
         base_data = {
             "version": "1.0",
-            "base_dir": "/base/data",
+            "base_dir": str(data_dir),
             "log_level": "INFO",
             "providers": [{"name": "yahoo", "type": "yahoo"}],
         }
@@ -162,7 +165,7 @@ class TestConfigLoader:
 
         # Check that base is included
         assert config.version == "1.0"
-        assert config.base_dir == Path("/base/data")
+        assert config.base_dir == data_dir
         # Check that override works
         assert config.log_level == "DEBUG"
         # Check that both base and main content are present
@@ -282,21 +285,40 @@ class TestConfigLoader:
             loader = ConfigLoader(config_file)
             config = loader.load()
 
-            # Check that env vars were set
-            assert os.environ["TEST_ENV_VAR"] == "test_value"
-            assert os.environ["TEST_NUMBER"] == "42"
-            # Check that interpolation worked
-            assert config.base_dir == Path("test_value")
+            # File-local values participate in interpolation without mutating the process.
+            assert "TEST_ENV_VAR" not in os.environ
+            assert "TEST_NUMBER" not in os.environ
+            assert config.base_dir == (tmp_path / "test_value").resolve()
         finally:
             # Clean up
             os.environ.pop("TEST_ENV_VAR", None)
             os.environ.pop("TEST_NUMBER", None)
 
+    def test_process_environment_takes_precedence_over_config_env(self, tmp_path, monkeypatch):
+        """Deployment environment overrides file-local interpolation defaults."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("env:\n  TEST_ENV_VAR: configured\nbase_dir: ${TEST_ENV_VAR}\n")
+        monkeypatch.setenv("TEST_ENV_VAR", "deployed")
+
+        config = ConfigLoader(config_file).load()
+
+        assert config.base_dir == (tmp_path / "deployed").resolve()
+
+    @pytest.mark.parametrize("root", ["[]\n", "value\n", "0\n"])
+    def test_non_mapping_root_is_rejected_without_wrapping(self, tmp_path, root):
+        """A non-mapping root reports one direct configuration error."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(root)
+
+        with pytest.raises(ValueError, match=r"^Configuration root .* must be a mapping$"):
+            ConfigLoader(config_file).load()
+
     def test_save_config(self, tmp_path):
         """Test saving configuration to file."""
+        data_dir = tmp_path / "data"
         config = DataConfig(
             version="1.0",
-            base_dir=Path("/data"),
+            base_dir=data_dir,
             log_level="DEBUG",
             providers=[
                 {
@@ -327,7 +349,7 @@ class TestConfigLoader:
             saved_data = yaml.safe_load(f)
 
         assert saved_data["version"] == "1.0"
-        assert saved_data["base_dir"] == "/data"
+        assert saved_data["base_dir"] == str(data_dir)
         assert saved_data["log_level"] == "DEBUG"
         assert len(saved_data["providers"]) == 1
         assert len(saved_data["datasets"]) == 1

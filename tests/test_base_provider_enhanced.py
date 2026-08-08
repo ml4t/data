@@ -1,15 +1,20 @@
 """Test enhanced BaseProvider architecture with Template Method pattern."""
 
 from datetime import UTC, datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import polars as pl
 import pytest
+from tenacity import wait_none
 
 from ml4t.data.core.exceptions import (
+    AuthenticationError,
     CircuitBreakerOpenError,
+    DataNotAvailableError,
     DataValidationError,
     NetworkError,
+    RateLimitError,
+    SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider, CircuitBreaker
 
@@ -81,7 +86,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_failure_counting(self):
         """Test circuit breaker counts failures."""
-        breaker = CircuitBreaker(failure_threshold=3)
+        breaker = CircuitBreaker(failure_threshold=3, expected_exception=Exception)
 
         def failing_func():
             raise Exception("Mock failure")
@@ -106,7 +111,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_open_state(self):
         """Test circuit breaker prevents calls when open."""
-        breaker = CircuitBreaker(failure_threshold=2)
+        breaker = CircuitBreaker(failure_threshold=2, expected_exception=Exception)
 
         def failing_func():
             raise Exception("Mock failure")
@@ -125,7 +130,13 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_half_open_success(self):
         """Test circuit breaker recovery on success."""
-        breaker = CircuitBreaker(failure_threshold=2, reset_timeout=0.1)
+        now = [100.0]
+        breaker = CircuitBreaker(
+            failure_threshold=2,
+            reset_timeout=10.0,
+            expected_exception=Exception,
+            clock=lambda: now[0],
+        )
 
         def failing_func():
             raise Exception("Mock failure")
@@ -140,10 +151,7 @@ class TestCircuitBreaker:
             breaker.call(failing_func)
         assert breaker.state == "OPEN"
 
-        # Wait for reset timeout
-        import time
-
-        time.sleep(0.2)
+        now[0] += 10.0
 
         # Successful call should reset circuit
         result = breaker.call(success_func)
@@ -154,7 +162,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_call_async_success_and_failure_accounting(self):
         """call_async mirrors call: successes pass through, failures count."""
-        breaker = CircuitBreaker(failure_threshold=2)
+        breaker = CircuitBreaker(failure_threshold=2, expected_exception=Exception)
 
         async def success_func():
             return "success"
@@ -180,9 +188,13 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_call_async_half_open_recovery(self):
         """After the reset timeout, call_async probes HALF_OPEN and recovers."""
-        import time
-
-        breaker = CircuitBreaker(failure_threshold=1, reset_timeout=0.05)
+        now = [100.0]
+        breaker = CircuitBreaker(
+            failure_threshold=1,
+            reset_timeout=10.0,
+            expected_exception=Exception,
+            clock=lambda: now[0],
+        )
 
         async def failing_func():
             raise Exception("Mock failure")
@@ -194,9 +206,70 @@ class TestCircuitBreaker:
             await breaker.call_async(failing_func)
         assert breaker.state == "OPEN"
 
-        time.sleep(0.1)
+        now[0] += 10.0
 
         assert await breaker.call_async(success_func) == "success"
+        assert breaker.state == "CLOSED"
+        assert breaker.failure_count == 0
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            SymbolNotFoundError("mock", "BAD"),
+            AuthenticationError("mock"),
+            DataNotAvailableError("mock", "BAD"),
+            DataValidationError("mock", "invalid response"),
+            RateLimitError("mock", retry_after=1.0),
+            ValueError("invalid request"),
+        ],
+    )
+    def test_default_circuit_ignores_permanent_and_client_errors(self, error):
+        """Only transient service failures affect the default circuit."""
+        breaker = CircuitBreaker(failure_threshold=1)
+
+        def fail():
+            raise error
+
+        with pytest.raises(type(error)):
+            breaker.call(fail)
+
+        assert breaker.state == "CLOSED"
+        assert breaker.failure_count == 0
+        assert breaker.ignored_failure_count == 1
+
+    def test_default_circuit_counts_transient_network_errors(self):
+        """A classified transport failure opens the default circuit."""
+        breaker = CircuitBreaker(failure_threshold=1)
+
+        def fail():
+            raise NetworkError("mock", "connection reset")
+
+        with pytest.raises(NetworkError):
+            breaker.call(fail)
+
+        assert breaker.state == "OPEN"
+        assert breaker.failure_count == 1
+
+    def test_half_open_ignored_error_does_not_restart_open_timeout(self):
+        """A client error during a probe provides no service-health evidence."""
+        now = [100.0]
+        breaker = CircuitBreaker(failure_threshold=1, reset_timeout=10.0, clock=lambda: now[0])
+
+        def transient_failure():
+            raise NetworkError("mock")
+
+        def invalid_response():
+            raise DataValidationError("mock", "bad")
+
+        with pytest.raises(NetworkError):
+            breaker.call(transient_failure)
+        now[0] += 10.0
+
+        with pytest.raises(DataValidationError):
+            breaker.call(invalid_response)
+
+        assert breaker.state == "HALF_OPEN"
+        assert breaker.call(lambda: "healthy") == "healthy"
         assert breaker.state == "CLOSED"
         assert breaker.failure_count == 0
 
@@ -231,7 +304,17 @@ class TestBaseProvider:
 
         assert isinstance(df, pl.DataFrame)
         assert len(df) == 2
-        assert df.columns == ["timestamp", "open", "high", "low", "close", "volume"]
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+        assert df.schema == {
+            "timestamp": pl.Datetime("us", "UTC"),
+            "symbol": pl.String,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        }
+        assert df["symbol"].to_list() == ["AAPL", "AAPL"]
 
         # Check data is sorted by timestamp
         timestamps = df["timestamp"].to_list()
@@ -254,13 +337,21 @@ class TestBaseProvider:
             provider.fetch_ohlcv("AAPL", "2022-01-03", "2022-01-01")
 
     def test_data_validation_empty_dataframe(self):
-        """Test that empty DataFrame is valid when no data is available."""
+        """A provider's untyped empty sentinel becomes a typed canonical response."""
         provider = MockProvider()
         provider._raw_data = {"data": []}
 
-        # Empty DataFrame is now valid - provider logs info and returns empty
         result = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
         assert result.is_empty()
+        assert result.schema == {
+            "timestamp": pl.Datetime("us", "UTC"),
+            "symbol": pl.String,
+            "open": pl.Float64,
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "volume": pl.Float64,
+        }
 
     def test_data_validation_missing_columns(self):
         """Test validation with missing required columns."""
@@ -277,42 +368,17 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match="Missing required column"):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    def test_data_validation_ohlc_invariants_drop_mode(self):
-        """Test default OHLC invariant handling drops invalid rows."""
+    def test_data_validation_ohlc_invariants_strict_by_default(self):
+        """Invalid OHLC data fails instead of becoming a successful empty response."""
         provider = MockProvider()
 
         def bad_transform(raw_data, symbol):
             return pl.DataFrame(
                 [
                     {
-                        "timestamp": datetime.now(),
+                        "timestamp": datetime.now(UTC),
                         "open": 100.0,
                         "high": 90.0,  # High < open (invalid)
-                        "low": 85.0,
-                        "close": 95.0,
-                        "volume": 1000,
-                    }
-                ]
-            )
-
-        provider._transform_data = bad_transform
-
-        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
-
-        assert df.is_empty()
-
-    def test_data_validation_ohlc_invariants_strict_mode(self):
-        """Test strict OHLC invariant handling raises validation errors."""
-        provider = MockProvider()
-        provider.ohlc_mode = "strict"
-
-        def bad_transform(raw_data, symbol):
-            return pl.DataFrame(
-                [
-                    {
-                        "timestamp": datetime.now(),
-                        "open": 100.0,
-                        "high": 90.0,
                         "low": 85.0,
                         "close": 95.0,
                         "volume": 1000,
@@ -325,23 +391,116 @@ class TestBaseProvider:
         with pytest.raises(DataValidationError, match="invalid OHLC relationships"):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-    @pytest.mark.skip(reason="Circuit breaker state pollution in parallel execution")
-    def test_circuit_breaker_integration(self):
-        """Test circuit breaker integration with provider."""
-        provider = MockProvider(circuit_breaker_config={"failure_threshold": 2})
+    def test_data_validation_ohlc_invariants_drop_mode_is_explicit(self):
+        """Callers can explicitly opt into dropping invalid OHLC rows."""
+        provider = MockProvider()
+        provider.ohlc_mode = "drop"
+
+        def bad_transform(raw_data, symbol):
+            return pl.DataFrame(
+                [
+                    {
+                        "timestamp": datetime.now(UTC),
+                        "open": 100.0,
+                        "high": 90.0,
+                        "low": 85.0,
+                        "close": 95.0,
+                        "volume": 1000,
+                    }
+                ]
+            )
+
+        provider._transform_data = bad_transform
+
+        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert df.is_empty()
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+
+    def test_data_validation_canonicalizes_safe_types_and_column_order(self):
+        """Successful responses have one schema even when an adapter uses safe source types."""
+        provider = MockProvider()
+
+        def reordered_transform(raw_data, symbol):
+            return pl.DataFrame(
+                {
+                    "source_id": [7],
+                    "volume": [1000],
+                    "close": [103],
+                    "low": [98],
+                    "high": [105],
+                    "open": [100],
+                    "timestamp": [datetime(2022, 1, 1, tzinfo=UTC)],
+                }
+            )
+
+        provider._transform_data = reordered_transform
+        df = provider.fetch_ohlcv("aapl", "2022-01-01", "2022-01-03")
+
+        assert df.columns == [
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source_id",
+        ]
+        assert df["symbol"].to_list() == ["AAPL"]
+        assert df["timestamp"].dtype == pl.Datetime("us", "UTC")
+        for column in ["open", "high", "low", "close", "volume"]:
+            assert df[column].dtype == pl.Float64
+
+    @pytest.mark.parametrize(
+        ("mutator", "message"),
+        [
+            (
+                lambda frame: frame.with_columns(pl.col("timestamp").dt.replace_time_zone(None)),
+                "timezone-aware",
+            ),
+            (lambda frame: frame.with_columns(pl.col("open").cast(pl.String)), "numeric"),
+            (lambda frame: frame.with_columns(pl.lit(float("nan")).alias("close")), "finite"),
+            (lambda frame: frame.with_columns(pl.lit(None).alias("volume")), "null"),
+            (lambda frame: frame.with_columns(pl.lit(-1.0).alias("volume")), "negative"),
+            (lambda frame: frame.with_columns(pl.lit("MSFT").alias("symbol")), "requested symbol"),
+        ],
+    )
+    def test_data_validation_rejects_malformed_successes(self, mutator, message):
+        """Malformed source data cannot be logged and returned as a successful fetch."""
+        provider = MockProvider()
+        valid = pl.DataFrame(
+            {
+                "timestamp": [datetime(2022, 1, 1, tzinfo=UTC)],
+                "symbol": ["AAPL"],
+                "open": [100.0],
+                "high": [105.0],
+                "low": [98.0],
+                "close": [103.0],
+                "volume": [1000.0],
+            }
+        )
+        invalid = mutator(valid)
+        provider._transform_data = lambda raw_data, symbol: invalid
+
+        with pytest.raises(DataValidationError, match=message):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+    def test_circuit_breaker_integration(self, monkeypatch):
+        """Repeated transient failures open the provider's service circuit."""
+        provider = MockProvider(circuit_breaker_config={"failure_threshold": 3})
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "wait", wait_none())
         provider._should_fail = True
 
-        # First failure
         with pytest.raises(NetworkError):
             provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        # Second failure should open circuit
-        with pytest.raises(NetworkError):
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert provider.circuit_breaker.state == "OPEN"
+        assert provider.circuit_breaker.metrics["counted_failures"] == 3
+        assert provider.circuit_breaker.metrics["opened"] == 1
 
-        # Third call should be prevented by circuit breaker
+        provider._should_fail = False
         with pytest.raises(CircuitBreakerOpenError):
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+            provider.fetch_ohlcv("GOOD", "2022-01-01", "2022-01-03")
 
     def test_retry_mechanism(self):
         """Test retry mechanism for transient failures."""
@@ -364,23 +523,116 @@ class TestBaseProvider:
         assert isinstance(df, pl.DataFrame)
         assert call_count == 3
 
-    @pytest.mark.skip(
-        reason="Limiter class doesn't exist - test needs rewrite for global_rate_limit_manager"
-    )
-    @patch("ml4t.data.providers.base.Limiter")
-    def test_rate_limiting(self, mock_limiter_class):
-        """Test rate limiting integration."""
-        mock_limiter = Mock()
-        mock_limiter_class.return_value = mock_limiter
-
+    def test_retry_honors_provider_retry_after(self, monkeypatch):
+        """A longer provider retry hint replaces the first exponential delay."""
         provider = MockProvider()
+        original_fetch = provider._fetch_raw_data
+        delays = []
+        call_count = 0
+
+        def rate_limited_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RateLimitError("mock", retry_after=12.0)
+            return original_fetch(*args, **kwargs)
+
+        provider._fetch_raw_data = rate_limited_once
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "sleep", delays.append)
+
+        result = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        assert isinstance(result, pl.DataFrame)
+        assert call_count == 2
+        assert delays == [12.0]
+
+    def test_exhausted_provider_retry_policy_is_not_retried(self, monkeypatch):
+        """A provider-local retry budget prevents a second outer retry loop."""
+        provider = MockProvider()
+        call_count = 0
+
+        def exhausted_fetch(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RateLimitError("mock", retry_after=6.0, retryable=False)
+
+        provider._fetch_raw_data = exhausted_fetch
+        delays = []
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "sleep", delays.append)
+
+        with pytest.raises(RateLimitError):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        assert call_count == 1
+        assert delays == []
+
+    @pytest.mark.parametrize(
+        ("retry_after", "expected_delay"),
+        [(1.0, 4.0), (3_600.0, 60.0)],
+    )
+    def test_retry_after_respects_backoff_and_operation_bounds(
+        self, monkeypatch, retry_after, expected_delay
+    ):
+        """Provider hints neither shorten backoff nor create an unbounded wait."""
+        provider = MockProvider()
+        original_fetch = provider._fetch_raw_data
+        delays = []
+        call_count = 0
+
+        def rate_limited_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RateLimitError("mock", retry_after=retry_after)
+            return original_fetch(*args, **kwargs)
+
+        provider._fetch_raw_data = rate_limited_once
+        monkeypatch.setattr(provider.fetch_ohlcv.retry, "sleep", delays.append)
+
         provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-        # Verify rate limiter was called
-        mock_limiter.try_acquire.assert_called_with("api_call")
+        assert delays == [expected_delay]
 
-    def test_duplicate_timestamp_removal(self):
-        """Test that duplicate timestamps are removed."""
+    @pytest.mark.parametrize(
+        "error",
+        [
+            SymbolNotFoundError("mock", "BAD"),
+            AuthenticationError("mock"),
+            DataNotAvailableError("mock", "BAD"),
+            DataValidationError("mock", "invalid response"),
+        ],
+    )
+    def test_permanent_error_never_blocks_later_valid_symbol(self, error):
+        """One invalid request cannot make a healthy provider unavailable."""
+        provider = MockProvider(circuit_breaker_config={"failure_threshold": 2})
+        original_fetch = provider._fetch_raw_data
+
+        def fail_bad_symbol(symbol, start, end, frequency):
+            raise error
+
+        provider._fetch_raw_data = fail_bad_symbol
+        for _ in range(2):
+            with pytest.raises(type(error)):
+                provider.fetch_ohlcv("BAD", "2022-01-01", "2022-01-03")
+
+        assert provider.circuit_breaker.state == "CLOSED"
+        assert provider.circuit_breaker.failure_count == 0
+
+        provider._fetch_raw_data = original_fetch
+        result = provider.fetch_ohlcv("GOOD", "2022-01-01", "2022-01-03")
+        assert result.height == 2
+        assert result["symbol"].unique().to_list() == ["GOOD"]
+
+    def test_rate_limiting(self):
+        """Test rate limiting integration."""
+        provider = MockProvider()
+        provider.rate_limiter = Mock()
+        provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+
+        provider.rate_limiter.acquire.assert_called_once_with(blocking=True)
+
+    def test_duplicate_timestamp_rejected(self):
+        """Conflicting duplicate bars are rejected instead of silently discarded."""
         provider = MockProvider()
         provider._raw_data = {
             "data": [
@@ -397,12 +649,8 @@ class TestBaseProvider:
             ]
         }
 
-        df = provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
-
-        # Should have only unique timestamps
-        assert len(df) == 2
-        timestamps = df["timestamp"].to_list()
-        assert len(set(timestamps)) == len(timestamps)
+        with pytest.raises(DataValidationError, match="duplicate"):
+            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
     def test_backward_compatibility(self):
         """Test backward compatibility with Provider alias."""
@@ -416,25 +664,19 @@ class TestBaseProvider:
 class TestProviderLogging:
     """Test provider logging functionality."""
 
-    @pytest.mark.skip(reason="Structlog logger initialized at import time - mock timing issue")
     def test_structured_logging(self):
         """Test that providers use structured logging."""
         provider = MockProvider()
+        provider.logger = Mock()
 
-        with patch("structlog.get_logger") as mock_get_logger:
-            mock_logger = Mock()
-            mock_get_logger.return_value = mock_logger
+        provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
 
-            provider.fetch_ohlcv("AAPL", "2022-01-01", "2022-01-03")
+        assert provider.logger.info.call_count >= 2
 
-            # Verify info logs were called
-            assert mock_logger.info.call_count >= 2
-
-            # Check log structure
-            start_call = mock_logger.info.call_args_list[0]
-            assert "Fetching OHLCV data" in start_call[0]
-            assert "symbol" in start_call[1]
-            assert "provider" in start_call[1]
+        start_call = provider.logger.info.call_args_list[0]
+        assert "Fetching OHLCV data" in start_call.args
+        assert start_call.kwargs["symbol"] == "AAPL"
+        assert start_call.kwargs["provider"] == "mock"
 
 
 if __name__ == "__main__":

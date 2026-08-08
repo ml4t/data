@@ -10,14 +10,15 @@ This module handles data storage operations including:
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import structlog
 from tenacity import RetryError
 
-from ml4t.data.core.schemas import align_frames_for_concat
+from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
+from ml4t.data.utils.conversion import pandas_to_polars
 
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
@@ -90,31 +91,21 @@ class StorageManager:
         Returns:
             ValidationReport with results
         """
+        from ml4t.data.assets.asset_class import AssetClass
         from ml4t.data.validation import OHLCVValidator, ValidationReport
         from ml4t.data.validation.cross_validation import CrossValidator
         from ml4t.data.validation.rules import ValidationRulePresets
 
         report = ValidationReport(symbol=symbol, provider="unknown")
 
-        # Select validation rules based on asset class
-        if asset_class.lower() == "crypto":
-            rules = ValidationRulePresets.crypto_rules()
-            is_crypto = True
-        elif asset_class.lower() == "forex":
-            rules = ValidationRulePresets.forex_rules()
-            is_crypto = False
-        elif asset_class.lower() == "commodity":
-            rules = ValidationRulePresets.commodity_rules()
-            is_crypto = False
-        else:
-            rules = ValidationRulePresets.equity_rules()
-            is_crypto = False
+        rules = ValidationRulePresets.for_asset_class(asset_class)
+        is_crypto = rules.asset_class == AssetClass.CRYPTO
 
         # Run OHLCV validation
         ohlcv_validator = OHLCVValidator(
             check_nulls=rules.check_nulls,
             check_price_consistency=rules.check_price_consistency,
-            check_negative_prices=rules.check_negative_prices,
+            negative_price_policy=rules.negative_price_policy,
             check_negative_volume=rules.check_negative_volume,
             check_duplicate_timestamps=rules.check_duplicate_timestamps,
             check_chronological_order=rules.check_chronological_order,
@@ -184,8 +175,8 @@ class StorageManager:
             return df
         if hasattr(df, "collect"):  # LazyFrame
             return df.collect()
-        if hasattr(df, "to_polars"):  # pandas
-            return pl.from_pandas(df)
+        if hasattr(df, "columns"):
+            return pandas_to_polars(df)
         return df
 
     def load(
@@ -262,8 +253,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = df["timestamp"].min()
-            max_ts = df["timestamp"].max()
+            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -282,10 +272,9 @@ class StorageManager:
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
-                frequency=frequency,
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
             )
 
@@ -300,12 +289,8 @@ class StorageManager:
             # Store data
             self._report_progress(f"Storing data for {symbol}", 0.8)
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    txn.write(data_obj)
-            else:
-                metadata_dict = data_obj.metadata.model_dump() if data_obj.metadata else None
-                self.storage.write(data_obj.data, key, metadata_dict)
+            metadata_dict = data_obj.metadata.model_dump() if data_obj.metadata else None
+            self.storage.write(data_obj.data, key, metadata_dict)
 
             logger.info("Data load completed", key=key, rows=len(df))
             self._report_progress(f"Completed loading {symbol}", 1.0)
@@ -386,8 +371,7 @@ class StorageManager:
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = df["timestamp"].min()
-            max_ts = df["timestamp"].max()
+            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -406,10 +390,9 @@ class StorageManager:
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
-                frequency=frequency,
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
             )
 
@@ -417,12 +400,8 @@ class StorageManager:
             data_obj = DataObject(data=df, metadata=metadata)
             key = f"{asset_class}/{frequency}/{symbol}"
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    txn.write(data_obj)
-            else:
-                metadata_dict = data_obj.metadata.model_dump()
-                self.storage.write(data_obj.data, key, metadata_dict)
+            metadata_dict = data_obj.metadata.model_dump()
+            self.storage.write(data_obj.data, key, metadata_dict)
 
             logger.info("Data import completed", key=key, rows=len(df))
             return key
@@ -479,9 +458,21 @@ class StorageManager:
 
             if not self.storage.exists(key):
                 logger.warning("No existing data found, performing initial load", symbol=symbol)
-                end_date = initial_end or datetime.now().strftime("%Y-%m-%d")
+                today = datetime.now(UTC)
+                end_date = initial_end or today.strftime("%Y-%m-%d")
+                effective_load_days = initial_load_days
+                if initial_start is None:
+                    max_history_days = self.fetch_manager.get_max_history_days(symbol, provider)
+                    if max_history_days is not None and effective_load_days > max_history_days:
+                        logger.warning(
+                            "Initial load limited by provider history",
+                            provider=provider,
+                            requested_days=effective_load_days,
+                            max_history_days=max_history_days,
+                        )
+                        effective_load_days = max_history_days
                 start_date = initial_start or (
-                    datetime.now() - timedelta(days=initial_load_days)
+                    today - timedelta(days=effective_load_days)
                 ).strftime("%Y-%m-%d")
                 return self.load(
                     symbol=symbol,
@@ -503,20 +494,29 @@ class StorageManager:
             logger.info("Found existing data", rows=len(existing_df))
 
             # Get the date range from existing data
-            last_timestamp = existing_df["timestamp"].max()
-            if isinstance(last_timestamp, datetime):
-                if last_timestamp.tzinfo is None:
-                    last_timestamp = last_timestamp.replace(tzinfo=UTC)
-                else:
-                    last_timestamp = last_timestamp.astimezone(UTC)
-            elif isinstance(last_timestamp, date):
-                last_timestamp = datetime.combine(last_timestamp, datetime.min.time(), tzinfo=UTC)
+            _, last_timestamp = timestamp_bounds(existing_df)
+            if last_timestamp.tzinfo is None:
+                last_timestamp = last_timestamp.replace(tzinfo=UTC)
             else:
-                raise ValueError(f"Invalid timestamp value for {symbol}: {last_timestamp!r}")
+                last_timestamp = last_timestamp.astimezone(UTC)
 
             # Calculate fetch range
             fetch_start = last_timestamp - timedelta(days=lookback_days)
             fetch_end = datetime.now(UTC)
+            provider_history_limited = False
+            max_history_days = self.fetch_manager.get_max_history_days(symbol, provider)
+            if max_history_days is not None:
+                earliest_fetch_start = fetch_end - timedelta(days=max_history_days)
+                if fetch_start < earliest_fetch_start:
+                    logger.warning(
+                        "Incremental update limited by provider history",
+                        provider=provider,
+                        requested_start=fetch_start,
+                        effective_start=earliest_fetch_start,
+                        max_history_days=max_history_days,
+                    )
+                    fetch_start = earliest_fetch_start
+                    provider_history_limited = fetch_start.date() > last_timestamp.date()
 
             # Skip update if data is already current
             if frequency == "daily" and (fetch_end - last_timestamp).days < 1:
@@ -555,7 +555,7 @@ class StorageManager:
 
             # Detect and optionally fill gaps
             gaps = []
-            if fill_gaps:
+            if fill_gaps and not provider_history_limited:
                 self._report_progress(f"Checking for gaps in {symbol}", 0.6)
 
                 from ml4t.data.utils.gaps import GapDetector
@@ -574,14 +574,20 @@ class StorageManager:
 
                     merged_df = gap_detector.fill_gaps(merged_df, gaps, method="forward")
                     logger.info("Filled gaps using forward fill", final_rows=len(merged_df))
+            elif fill_gaps and provider_history_limited:
+                logger.warning(
+                    "Gap filling skipped because provider history cannot cover the missing range",
+                    provider=provider,
+                    last_timestamp=last_timestamp,
+                    resumed_at=fetch_start,
+                )
 
             self._report_progress(f"Storing updated data for {symbol}", 0.8)
 
             # Update metadata with new range
             from ml4t.data.core.models import DataObject, Metadata
 
-            min_ts = merged_df["timestamp"].min()
-            max_ts = merged_df["timestamp"].max()
+            min_ts, max_ts = timestamp_bounds(merged_df)
 
             updated_metadata = Metadata(
                 provider=provider or "auto",
@@ -590,27 +596,21 @@ class StorageManager:
                 bar_type="time",
                 bar_params={"frequency": frequency},
                 data_range={
-                    "start": str(min_ts) if min_ts is not None else "",
-                    "end": str(max_ts) if max_ts is not None else "",
+                    "start": str(min_ts),
+                    "end": str(max_ts),
                 },
                 attributes={
                     "last_update": datetime.now().isoformat(),
                     "update_type": "incremental",
                     "gaps_filled": fill_gaps and len(gaps) > 0,
+                    "provider_history_limited": provider_history_limited,
                 },
             )
 
             updated_obj = DataObject(data=merged_df, metadata=updated_metadata)
 
-            if hasattr(self.storage, "transaction"):
-                with self.storage.transaction() as txn:
-                    if hasattr(txn, "update"):
-                        txn.update(key, updated_obj)
-                    else:
-                        txn.write(updated_obj)
-            else:
-                metadata_dict = updated_obj.metadata.model_dump() if updated_obj.metadata else None
-                self.storage.write(updated_obj.data, key, metadata_dict)
+            metadata_dict = updated_obj.metadata.model_dump() if updated_obj.metadata else None
+            self.storage.write(updated_obj.data, key, metadata_dict)
 
             logger.info(
                 "Incremental update completed",

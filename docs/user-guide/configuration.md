@@ -34,11 +34,10 @@ parallel_downloads: 4
 # Storage backend
 storage:
   strategy: hive            # "hive" (partitioned) or "flat" (single file)
-  path: ~/ml4t-data         # base_path is also accepted
+  base_path: ~/ml4t-data
   compression: zstd         # zstd, lz4, snappy, or none
   partition_granularity: month  # year, month, day, or hour
-  atomic_writes: true
-  enable_locking: true
+  lock_timeout: 30
   metadata_tracking: true
 
 # Data providers
@@ -48,16 +47,12 @@ providers:
     enabled: true
     rate_limit:
       requests_per_second: 5.0
-      retry_max_attempts: 3
-    timeout: 30
 
   - name: databento
     type: databento
     api_key: ${DATABENTO_API_KEY}
     rate_limit:
       requests_per_second: 10.0
-      circuit_breaker_threshold: 5
-      circuit_breaker_timeout: 60
 
 # Symbol universes
 universes:
@@ -107,11 +102,12 @@ API keys and secrets support `${VAR}` interpolation with optional defaults:
 ```yaml
 providers:
   - name: massive
+    type: massive
     api_key: ${MASSIVE_API_KEY}           # required
-    api_secret: ${MASSIVE_SECRET:default}  # with fallback
 ```
 
-The `env` section defines variables that are set if not already present:
+The `env` section defines file-local interpolation values. Loading a configuration does
+not mutate the process environment:
 
 ```yaml
 env:
@@ -119,7 +115,8 @@ env:
   DEFAULT_PROVIDER: yahoo
 ```
 
-ml4t-data also reads `.env` files automatically via Pydantic Settings.
+Provider-specific environment variables such as `MASSIVE_API_KEY` are read by
+`DataManager`; `.env` files are not loaded implicitly.
 
 ## Key Configuration Sections
 
@@ -128,12 +125,14 @@ ml4t-data also reads `.env` files automatically via Pydantic Settings.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `strategy` | `hive` | `hive` for partitioned Parquet, `flat` for single files |
-| `path` / `base_path` | `./data` | Base directory (supports `~` expansion) |
+| `base_path` | platform data directory | Base directory (supports `~` expansion) |
 | `compression` | `zstd` | Parquet compression: `zstd`, `lz4`, `snappy`, `none` |
 | `partition_granularity` | `month` | Hive partition level: `year`, `month`, `day`, `hour` |
-| `atomic_writes` | `true` | Write to temp file then rename |
-| `enable_locking` | `true` | File locking for concurrent access |
+| `lock_timeout` | `30` | Seconds to wait for another writer on the same key |
 | `metadata_tracking` | `true` | JSON manifest files alongside data |
+
+Writes are always staged and published atomically. Profiling is an explicit operation, not a
+storage write option.
 
 ### Providers
 
@@ -142,13 +141,11 @@ Each provider entry configures connection parameters:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `name` | required | Provider identifier |
-| `type` | required | `yahoo`, `binance`, `cryptocompare`, `databento`, `oanda`, `polygon`, `mock` |
+| `type` | required | A name listed by `ml4t-data providers` |
 | `enabled` | `true` | Toggle provider on/off |
 | `api_key` | `null` | API key (use `${ENV_VAR}` format) |
-| `rate_limit` | see below | Rate limiting and circuit breaker config |
-| `timeout` | `30` | Request timeout in seconds |
-| `cache_enabled` | `true` | Response caching |
-| `cache_ttl` | `3600` | Cache time-to-live in seconds |
+| `rate_limit` | see below | Provider request-rate configuration |
+| `extra` | `{}` | Constructor settings specific to the selected provider |
 
 Rate limiting sub-config:
 
@@ -156,10 +153,6 @@ Rate limiting sub-config:
 |-------|---------|-------------|
 | `requests_per_second` | `10.0` | Maximum request rate |
 | `burst_size` | `1` | Burst allowance |
-| `retry_max_attempts` | `3` | Retry count |
-| `retry_backoff_factor` | `2.0` | Exponential backoff multiplier |
-| `circuit_breaker_threshold` | `5` | Failures before circuit opens |
-| `circuit_breaker_timeout` | `60` | Seconds before circuit half-opens |
 
 ### Datasets
 
@@ -171,7 +164,7 @@ provider, frequency, asset class, and bootstrap range.
 | `symbols` / `symbols_file` | required | Inline symbols or a file path relative to the config file |
 | `provider` | required | Provider used to fetch the dataset |
 | `frequency` | `daily` | Bar frequency passed to `DataManager.update()` |
-| `asset_class` | `equities` | Storage key prefix and validation context |
+| `asset_class` | `equity` | Storage key prefix and validation context |
 | `lookback_days` | `7` | Overlap fetched for incremental updates |
 | `fill_gaps` | `true` | Enable gap detection and filling after merge |
 | `start` / `start_date` | unset | Explicit first-load start date when storage is empty |

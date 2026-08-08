@@ -36,7 +36,7 @@ Most free tiers allow 500-1000 calls/day. You'd burn through your quota in secon
 
 ```python
 # ✅ SMART APPROACH - Incremental updates
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from ml4t.data.provider_updater import ProviderUpdater
 from ml4t.data.providers import TiingoProvider
@@ -56,7 +56,7 @@ class TiingoDailyUpdater(ProviderUpdater):
         return data
 
     def _get_default_start_time(self, symbol):
-        return datetime.now() - timedelta(days=365)
+        return datetime.now(UTC) - timedelta(days=365)
 
 # Setup storage and updater
 storage = HiveStorage(StorageConfig(base_path="./data"))

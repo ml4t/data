@@ -1,696 +1,415 @@
-"""
-Roll strategies for futures continuous contracts.
+"""Point-in-time futures contract selection and roll events."""
 
-Roll strategies determine when to switch from the current front month
-to the next contract month when building continuous contracts.
-"""
+from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 
 import polars as pl
 
 from ml4t.data.futures.schema import ContractSpec
 
 
+@dataclass(frozen=True)
+class RollEvent:
+    """One contract switch with paired closes observed on the switch date."""
+
+    date: date
+    old_symbol: str
+    new_symbol: str
+    old_close: float
+    new_close: float
+
+
 class RollStrategy(ABC):
-    """Abstract base class for roll strategies."""
+    """Select one identified contract after the configured point-in-time warm-up."""
 
     @abstractmethod
+    def select_contracts(
+        self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
+    ) -> pl.DataFrame:
+        """Return unique ``date`` and ``symbol`` selections in chronological order."""
+
     def identify_rolls(
         self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
     ) -> list[date]:
-        """
-        Identify roll dates in multi-contract data.
+        """Return switch dates as a compatibility view of the symbol selections."""
+        return [
+            event_date
+            for event_date, _, _ in _selection_changes(self.select_contracts(data, contract_spec))
+        ]
 
-        Args:
-            data: Multi-contract DataFrame with potential duplicate dates
-                  Must have columns: date, volume, open_interest
-            contract_spec: Optional contract specifications
-
-        Returns:
-            List of dates when rolls occur, sorted chronologically
-        """
+    def identify_roll_events(
+        self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
+    ) -> list[RollEvent]:
+        """Return switches with old and new contract closes from the same date."""
+        selections = self.select_contracts(data, contract_spec)
+        return build_roll_events(data, selections)
 
 
 class VolumeBasedRoll(RollStrategy):
-    """
-    Roll when next month volume exceeds front month volume.
-
-    This is the most common roll method - switches to the next contract
-    when it becomes more liquid (higher trading volume) than the current front month.
-    """
+    """Select by confirmed previous-observation volume rank."""
 
     def __init__(self, lookback_days: int = 1, min_days_between_rolls: int = 20):
-        """
-        Initialize volume-based roll strategy.
-
-        Args:
-            lookback_days: Number of days to confirm volume crossover
-                          (helps avoid false signals from single-day spikes)
-            min_days_between_rolls: Minimum days between rolls to filter noise
-                                   (default 20 for monthly contracts)
-        """
+        if lookback_days < 1:
+            raise ValueError("lookback_days must be at least 1")
+        if min_days_between_rolls < 0:
+            raise ValueError("min_days_between_rolls cannot be negative")
         self.lookback_days = lookback_days
         self.min_days_between_rolls = min_days_between_rolls
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on volume crossover.
-
-        Logic:
-        1. For each date with multiple contracts, identify front (highest volume) and back (2nd highest)
-        2. Detect sustained volume crossover (back month volume consistently exceeds front)
-        3. Filter rolls too close together (< min_days_between_rolls)
-        4. Return cleaned list of roll dates
-
-        Args:
-            data: Multi-contract DataFrame
-
-        Returns:
-            List of roll dates
-        """
-        # Filter to dates with multiple contracts (duplicates)
-        date_counts = data.group_by("date").len().filter(pl.col("len") > 1)
-
-        if len(date_counts) == 0:
-            # No duplicate dates = already continuous, no rolls detected
-            return []
-
-        duplicate_dates = sorted(date_counts.select("date").to_series().to_list())
-
-        # Build volume series for front and back months
-        front_volumes = []
-        back_volumes = []
-        dates_with_data = []
-
-        for dt in duplicate_dates:
-            day_data = data.filter(pl.col("date") == dt).sort("volume", descending=True)
-
-            if len(day_data) >= 2:
-                front_volumes.append(day_data["volume"][0])
-                back_volumes.append(day_data["volume"][1])
-                dates_with_data.append(dt)
-
-        if len(dates_with_data) < 2:
-            return []
-
-        # Detect crossovers: where the highest volume contract changes significantly
-        # Simple heuristic: if today's front volume is much closer to yesterday's back volume
-        # than yesterday's front volume, a roll likely occurred
-        crossovers = []
-        for i in range(1, len(dates_with_data)):
-            prev_front = front_volumes[i - 1]
-            prev_back = back_volumes[i - 1]
-            curr_front = front_volumes[i]
-
-            # Calculate distances to determine if volumes "switched"
-            # If current front is closer to previous back, we likely rolled
-            dist_to_prev_back = abs(curr_front - prev_back)
-            dist_to_prev_front = abs(curr_front - prev_front)
-
-            # Crossover if:
-            # 1. Current front volume is much closer to previous back (>20% closer)
-            # 2. Volume actually changed significantly (not just noise)
-            if dist_to_prev_front > 0:  # Avoid division by zero
-                closeness_ratio = dist_to_prev_back / dist_to_prev_front
-
-                # If current front is closer to prev back, ratio will be < 1
-                if closeness_ratio < 0.8:  # 20% threshold
-                    # Also check that volume actually changed (not same contract)
-                    if abs(curr_front - prev_front) / prev_front > 0.1:  # 10% change
-                        crossovers.append(dates_with_data[i])
-
-        # Filter out rolls too close together (noise reduction)
-        if not crossovers:
-            return []
-
-        filtered_rolls = [crossovers[0]]  # Always keep first roll
-
-        for roll_date in crossovers[1:]:
-            days_since_last = (roll_date - filtered_rolls[-1]).days
-
-            if days_since_last >= self.min_days_between_rolls:
-                filtered_rolls.append(roll_date)
-
-        return filtered_rolls
+    ) -> pl.DataFrame:
+        return _lagged_rank_selections(
+            data,
+            metric="volume",
+            rank=0,
+            minimum=0,
+            confirmation=self.lookback_days,
+            min_days_between_rolls=self.min_days_between_rolls,
+        )
 
 
 class OpenInterestBasedRoll(RollStrategy):
-    """
-    Roll when next month open interest exceeds front month.
-
-    Similar to volume-based, but uses open interest (outstanding contracts)
-    instead of daily volume. Often more stable than volume.
-    """
+    """Select by confirmed previous-observation closing open-interest rank."""
 
     def __init__(self, lookback_days: int = 1):
-        """
-        Initialize open interest-based roll strategy.
-
-        Args:
-            lookback_days: Number of days to confirm OI crossover
-        """
+        if lookback_days < 1:
+            raise ValueError("lookback_days must be at least 1")
         self.lookback_days = lookback_days
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on open interest crossover.
-
-        Logic: Similar to volume-based, but uses open_interest column.
-
-        Args:
-            data: Multi-contract DataFrame with open_interest column
-
-        Returns:
-            List of roll dates
-        """
-        # Check if open_interest column exists and has data
-        if "open_interest" not in data.columns:
-            raise ValueError("Data must have 'open_interest' column for OI-based rolling")
-
-        # Filter out rows where OI is null
-        oi_data = data.filter(pl.col("open_interest").is_not_null())
-
-        if len(oi_data) == 0:
-            raise ValueError("No open interest data available")
-
-        # Filter to dates with multiple contracts
-        date_counts = oi_data.group_by("date").len().filter(pl.col("len") > 1)
-
-        if len(date_counts) == 0:
-            return []  # No duplicate dates
-
-        duplicate_dates = date_counts.select("date").to_series().to_list()
-
-        rolls: list[date] = []
-        previous_front_oi = None
-        previous_back_oi = None
-
-        for dt in sorted(duplicate_dates):
-            day_data = oi_data.filter(pl.col("date") == dt).sort("open_interest", descending=True)
-
-            if len(day_data) < 2:
-                continue
-
-            front_oi = day_data["open_interest"][0]
-            back_oi = day_data["open_interest"][1]
-
-            # Detect roll similar to volume-based
-            if previous_front_oi is not None and previous_back_oi is not None:
-                if abs(front_oi - previous_back_oi) < abs(front_oi - previous_front_oi):
-                    rolls.append(dt)
-
-            previous_front_oi = front_oi
-            previous_back_oi = back_oi
-
-        return rolls
+    ) -> pl.DataFrame:
+        return _lagged_rank_selections(
+            data,
+            metric="open_interest",
+            rank=0,
+            minimum=0,
+            confirmation=self.lookback_days,
+            min_days_between_rolls=0,
+        )
 
 
 class TimeBasedRoll(RollStrategy):
-    """
-    Roll N business days before front month expiration.
-
-    Uses expiration dates from the data (e.g., from Databento definition schema).
-    Most predictable roll method - avoids liquidity-driven roll timing.
-
-    Requires data to have an 'expiration' column with contract expiration dates.
-    """
+    """Select the nearest contract until its configured pre-expiry roll date."""
 
     def __init__(
         self,
         days_before_expiration: int = 5,
         use_business_days: bool = True,
     ):
-        """
-        Initialize time-based roll strategy.
-
-        Args:
-            days_before_expiration: Number of days before expiration to roll.
-                                   If use_business_days=True, this is business days.
-            use_business_days: If True, count only weekdays (Mon-Fri).
-                              If False, use calendar days.
-        """
+        if days_before_expiration < 0:
+            raise ValueError("days_before_expiration cannot be negative")
         self.days_before_expiration = days_before_expiration
         self.use_business_days = use_business_days
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on expiration calendar.
+    ) -> pl.DataFrame:
+        _require_columns(data, "date", "symbol", "expiration")
+        dates = _dates(data)
+        if not dates:
+            return _empty_selections()
+        contracts = dict(_contract_expirations(data))
+        roll_dates = {
+            symbol: self._calculate_roll_date(expiration, dates)
+            for symbol, expiration in contracts.items()
+        }
+        available_by_date = _available_symbols_by_date(data)
+        records: list[dict[str, object]] = []
+        for observation_date in dates:
+            eligible = [
+                (symbol, contracts[symbol])
+                for symbol in available_by_date[observation_date]
+                if symbol in contracts and observation_date < roll_dates[symbol]
+            ]
+            if eligible:
+                records.append(
+                    {"date": observation_date, "symbol": min(eligible, key=lambda item: item[1])[0]}
+                )
+        return _selection_frame(records)
 
-        Requires data to have:
-        - 'date': Trading dates
-        - 'expiration': Contract expiration dates
-        - 'symbol': Contract identifier (to track which contract we're in)
-
-        Args:
-            data: Multi-contract DataFrame with expiration column
-            contract_spec: Optional contract specifications (unused, for API compat)
-
-        Returns:
-            List of roll dates sorted chronologically
-
-        Raises:
-            ValueError: If data doesn't have required 'expiration' column
-        """
-        if "expiration" not in data.columns:
-            raise ValueError(
-                "TimeBasedRoll requires data with 'expiration' column. "
-                "Use Databento definition schema or add expiration dates manually."
-            )
-
-        # Get unique contracts with their expirations
-        if "symbol" not in data.columns:
-            raise ValueError("TimeBasedRoll requires data with 'symbol' column")
-
-        # Get trading dates available in data
-        trading_dates = sorted(data.select("date").unique().to_series().to_list())
-
-        if not trading_dates:
-            return []
-
-        # Get contract expirations (unique symbol -> expiration mapping)
-        contract_exps = (
-            data.select(["symbol", "expiration"])
-            .unique(subset=["symbol"])
-            .filter(pl.col("expiration").is_not_null())
-            .sort("expiration")
-        )
-
-        if contract_exps.height == 0:
-            return []
-
-        # Calculate roll dates
-        roll_dates: list[date] = []
-
-        for row in contract_exps.iter_rows(named=True):
-            exp_date = row["expiration"]
-            if isinstance(exp_date, date):
-                roll_date = self._calculate_roll_date(exp_date, trading_dates)
-                if roll_date and roll_date in trading_dates:
-                    roll_dates.append(roll_date)
-
-        # Remove duplicates and sort
-        roll_dates = sorted(set(roll_dates))
-
-        return roll_dates
-
-    def _calculate_roll_date(
-        self,
-        expiration: date,
-        trading_dates: list[date],
-    ) -> date | None:
-        """
-        Calculate roll date as N days before expiration.
-
-        Args:
-            expiration: Contract expiration date
-            trading_dates: List of available trading dates
-
-        Returns:
-            Roll date, or None if can't calculate
-        """
-        from datetime import timedelta
-
+    def _calculate_roll_date(self, expiration: date, trading_dates: list[date]) -> date:
+        """Calculate the last configured roll date on the observed calendar."""
+        target = expiration
         if self.use_business_days:
-            # Count back N business days
-            roll_date = expiration
             days_counted = 0
-
             while days_counted < self.days_before_expiration:
-                roll_date = roll_date - timedelta(days=1)
-                # Check if it's a weekday (Monday=0, Friday=4)
-                if roll_date.weekday() < 5:
+                target -= timedelta(days=1)
+                if target.weekday() < 5:
                     days_counted += 1
-
-                # Safety limit to prevent infinite loop
-                if (expiration - roll_date).days > 30:
-                    return None
         else:
-            # Simple calendar days
-            roll_date = expiration - timedelta(days=self.days_before_expiration)
-
-        # Find the nearest trading date on or before roll_date
-        valid_dates = [d for d in trading_dates if d <= roll_date]
-        if valid_dates:
-            return max(valid_dates)
-
-        return None
+            target -= timedelta(days=self.days_before_expiration)
+        if target >= trading_dates[-1] or target < trading_dates[0]:
+            return target
+        observed = [trading_date for trading_date in trading_dates if trading_date <= target]
+        return max(observed) if observed else target
 
 
 class FirstNoticeDateRoll(RollStrategy):
-    """
-    Roll before first notice date for physical delivery contracts.
-
-    Critical for commodities (CL, GC, SI, etc.) where holding past first
-    notice date could result in delivery obligation.
-
-    First notice date is typically:
-    - One business day before the first day of the delivery month
-    - Varies by exchange and contract
-
-    Uses ContractSpec.first_notice_days to calculate the date.
-    """
+    """Select physical contracts before the configured first-notice interval."""
 
     def __init__(self, days_before_first_notice: int = 1):
-        """
-        Initialize first notice date roll strategy.
-
-        Args:
-            days_before_first_notice: Number of business days before first
-                                     notice date to roll (default: 1)
-        """
+        if days_before_first_notice < 0:
+            raise ValueError("days_before_first_notice cannot be negative")
         self.days_before_first_notice = days_before_first_notice
 
-    def identify_rolls(
+    def select_contracts(
         self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
-    ) -> list[date]:
-        """
-        Identify roll dates based on first notice dates.
-
-        For physical delivery contracts, rolls before first notice to avoid
-        delivery obligations.
-
-        Args:
-            data: Multi-contract DataFrame
-            contract_spec: Contract specifications with first_notice_days
-
-        Returns:
-            List of roll dates sorted chronologically
-        """
-        # If no contract spec or cash-settled, fall back to time-based
+    ) -> pl.DataFrame:
         if contract_spec is None or contract_spec.is_cash_settled:
-            # Cash-settled contracts don't have first notice
-            # Use TimeBasedRoll with 5 days before expiration as fallback
-            time_roll = TimeBasedRoll(days_before_expiration=5)
-            return time_roll.identify_rolls(data, contract_spec)
-
-        # Get first notice days from spec, or use default
-        first_notice_days = contract_spec.first_notice_days or 25
-
-        # First notice is typically first_notice_days before delivery month
-        # We roll days_before_first_notice before that
-        total_days = first_notice_days + self.days_before_first_notice
-
-        # Use TimeBasedRoll with adjusted days
-        time_roll = TimeBasedRoll(
-            days_before_expiration=total_days,
-            use_business_days=True,
-        )
-
-        return time_roll.identify_rolls(data, contract_spec)
-
-
-# =============================================================================
-# Databento-Compatible Roll Strategies (Selection-Based)
-# =============================================================================
-# These strategies match Databento's continuous contract symbology:
-# - Calendar (c): Nearest contract by expiration
-# - Volume (v): Highest volume contract
-# - Open Interest (n): Highest open interest contract
-#
-# Unlike the crossover-based strategies above, these are selection-based:
-# they determine which contract to use on each day, with roll dates
-# occurring when the selected contract changes.
-# =============================================================================
+            return TimeBasedRoll(days_before_expiration=5).select_contracts(data, contract_spec)
+        days = (contract_spec.first_notice_days or 25) + self.days_before_first_notice
+        return TimeBasedRoll(days_before_expiration=days).select_contracts(data, contract_spec)
 
 
 class CalendarRoll(RollStrategy):
-    """
-    Select the nearest contract by expiration date (Databento's "c" rule).
-
-    This is the simplest roll method - always use the contract with the
-    nearest expiration date. Roll occurs when that contract expires and
-    the next one becomes nearest.
-
-    Requires data to have 'expiration' column.
-
-    Example:
-        On 2024-01-15:
-        - ESH24 expires 2024-03-15 (selected - nearest)
-        - ESM24 expires 2024-06-21
-        - ESU24 expires 2024-09-20
-
-        On 2024-03-16 (after ESH24 expires):
-        - ESM24 expires 2024-06-21 (now selected)
-        - ESU24 expires 2024-09-20
-    """
+    """Select the requested unexpired contract rank by expiration."""
 
     def __init__(self, rank: int = 0):
-        """
-        Initialize calendar roll strategy.
-
-        Args:
-            rank: Which contract to select (0 = nearest, 1 = second nearest, etc.)
-                  Databento notation: c.0, c.1, c.2
-        """
+        if rank < 0:
+            raise ValueError("rank cannot be negative")
         self.rank = rank
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on expiration calendar.
-
-        Roll occurs when a different contract becomes the nearest-to-expiry.
-
-        Args:
-            data: Multi-contract DataFrame with 'expiration' column
-
-        Returns:
-            List of roll dates
-        """
-        if "expiration" not in data.columns:
-            raise ValueError(
-                "CalendarRoll requires data with 'expiration' column. "
-                "Use Databento definition schema to add expiration dates."
+    ) -> pl.DataFrame:
+        _require_columns(data, "date", "symbol", "expiration")
+        records = []
+        for observation_date in _dates(data):
+            ranked = (
+                data.filter(
+                    (pl.col("date") == observation_date)
+                    & pl.col("expiration").is_not_null()
+                    & (pl.col("expiration") > observation_date)
+                )
+                .sort(["expiration", "symbol"])
+                .select("symbol")
             )
-
-        if "symbol" not in data.columns:
-            raise ValueError("CalendarRoll requires data with 'symbol' column")
-
-        # Get unique dates
-        dates = sorted(data.select("date").unique().to_series().to_list())
-        if not dates:
-            return []
-
-        roll_dates: list[date] = []
-        prev_selected: str | None = None
-
-        for dt in dates:
-            day_data = data.filter(pl.col("date") == dt)
-
-            # Filter to unexpired contracts (expiration > current date)
-            unexpired = day_data.filter(pl.col("expiration") > dt)
-
-            if unexpired.height == 0:
-                continue
-
-            # Sort by expiration (nearest first)
-            sorted_data = unexpired.sort("expiration")
-
-            # Select contract at specified rank
-            if sorted_data.height > self.rank:
-                selected = sorted_data["symbol"][self.rank]
-
-                # Detect roll (change in selected contract)
-                if prev_selected is not None and selected != prev_selected:
-                    roll_dates.append(dt)
-
-                prev_selected = selected
-
-        return roll_dates
+            if ranked.height > self.rank:
+                records.append({"date": observation_date, "symbol": ranked["symbol"][self.rank]})
+        return _selection_frame(records)
 
 
 class HighestVolumeRoll(RollStrategy):
-    """
-    Select the contract with highest volume (Databento's "v" rule).
-
-    Uses previous day's volume to rank contracts. Roll occurs when
-    a different contract becomes the most liquid.
-
-    This is a market-driven roll - follows where trading activity is highest.
-
-    Example:
-        On 2024-03-01:
-        - ESH24: 1,500,000 volume (selected)
-        - ESM24: 500,000 volume
-
-        On 2024-03-08 (roll week):
-        - ESH24: 800,000 volume
-        - ESM24: 1,200,000 volume (now selected - roll!)
-    """
+    """Select by previous-observation volume, matching Databento's volume rule."""
 
     def __init__(self, rank: int = 0, min_volume: float = 0):
-        """
-        Initialize highest volume roll strategy.
-
-        Args:
-            rank: Which contract to select (0 = highest, 1 = second highest)
-                  Databento notation: v.0, v.1, v.2
-            min_volume: Minimum volume threshold to consider a contract
-        """
+        if rank < 0:
+            raise ValueError("rank cannot be negative")
+        if min_volume < 0:
+            raise ValueError("min_volume cannot be negative")
         self.rank = rank
         self.min_volume = min_volume
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on volume ranking.
-
-        Roll occurs when a different contract becomes highest volume.
-
-        Args:
-            data: Multi-contract DataFrame with 'volume' column
-
-        Returns:
-            List of roll dates
-        """
-        if "volume" not in data.columns:
-            raise ValueError("HighestVolumeRoll requires data with 'volume' column")
-
-        if "symbol" not in data.columns:
-            raise ValueError("HighestVolumeRoll requires data with 'symbol' column")
-
-        # Get unique dates
-        dates = sorted(data.select("date").unique().to_series().to_list())
-        if not dates:
-            return []
-
-        roll_dates: list[date] = []
-        prev_selected: str | None = None
-
-        for dt in dates:
-            day_data = data.filter(pl.col("date") == dt)
-
-            # Filter by minimum volume
-            if self.min_volume > 0:
-                day_data = day_data.filter(pl.col("volume") >= self.min_volume)
-
-            if day_data.height == 0:
-                continue
-
-            # Sort by volume (highest first)
-            sorted_data = day_data.sort("volume", descending=True)
-
-            # Select contract at specified rank
-            if sorted_data.height > self.rank:
-                selected = sorted_data["symbol"][self.rank]
-
-                # Detect roll (change in selected contract)
-                if prev_selected is not None and selected != prev_selected:
-                    roll_dates.append(dt)
-
-                prev_selected = selected
-
-        return roll_dates
+    ) -> pl.DataFrame:
+        return _lagged_rank_selections(
+            data,
+            metric="volume",
+            rank=self.rank,
+            minimum=self.min_volume,
+            confirmation=1,
+            min_days_between_rolls=0,
+        )
 
 
 class HighestOpenInterestRoll(RollStrategy):
-    """
-    Select the contract with highest open interest (Databento's "n" rule).
-
-    Uses previous day's close OI to rank contracts. Roll occurs when
-    a different contract becomes the most held.
-
-    OI is generally more stable than volume, providing smoother roll timing.
-
-    Example:
-        On 2024-03-01:
-        - ESH24: 2,000,000 OI (selected)
-        - ESM24: 500,000 OI
-
-        On 2024-03-10 (roll period):
-        - ESH24: 1,200,000 OI
-        - ESM24: 1,800,000 OI (now selected - roll!)
-    """
+    """Select by previous-observation closing open interest."""
 
     def __init__(self, rank: int = 0, min_oi: float = 0):
-        """
-        Initialize highest open interest roll strategy.
-
-        Args:
-            rank: Which contract to select (0 = highest, 1 = second highest)
-                  Databento notation: n.0, n.1, n.2
-            min_oi: Minimum OI threshold to consider a contract
-        """
+        if rank < 0:
+            raise ValueError("rank cannot be negative")
+        if min_oi < 0:
+            raise ValueError("min_oi cannot be negative")
         self.rank = rank
         self.min_oi = min_oi
 
-    def identify_rolls(
+    def select_contracts(
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
-    ) -> list[date]:
-        """
-        Identify roll dates based on open interest ranking.
+    ) -> pl.DataFrame:
+        return _lagged_rank_selections(
+            data,
+            metric="open_interest",
+            rank=self.rank,
+            minimum=self.min_oi,
+            confirmation=1,
+            min_days_between_rolls=0,
+        )
 
-        Roll occurs when a different contract becomes highest OI.
 
-        Args:
-            data: Multi-contract DataFrame with 'open_interest' column
+def _lagged_rank_selections(
+    data: pl.DataFrame,
+    *,
+    metric: str,
+    rank: int,
+    minimum: float,
+    confirmation: int,
+    min_days_between_rolls: int,
+) -> pl.DataFrame:
+    _require_columns(data, "date", "symbol", metric)
+    non_null = data.filter(pl.col(metric).is_not_null())
+    if non_null.is_empty() and metric == "open_interest":
+        raise ValueError("No open interest data available")
+    valid = non_null.filter(pl.col(metric) >= minimum)
+    if valid.is_empty():
+        return _empty_selections()
 
-        Returns:
-            List of roll dates
-        """
-        if "open_interest" not in data.columns:
-            raise ValueError("HighestOpenInterestRoll requires data with 'open_interest' column")
+    observation_dates = _dates(data)
+    ranked = (
+        valid.sort(["date", metric, "symbol"], descending=[False, True, False])
+        .group_by("date", maintain_order=True)
+        .agg(pl.col("symbol"))
+    )
+    rankings = {row["date"]: row["symbol"] for row in ranked.iter_rows(named=True)}
+    leaders = [
+        rankings[ranking_date][rank] if len(rankings.get(ranking_date, [])) > rank else None
+        for ranking_date in observation_dates
+    ]
+    available_by_date = _available_symbols_by_date(data)
 
-        if "symbol" not in data.columns:
-            raise ValueError("HighestOpenInterestRoll requires data with 'symbol' column")
+    records = []
+    selected: str | None = None
+    last_roll: date | None = None
+    for index in range(confirmation, len(observation_dates)):
+        history = leaders[index - confirmation : index]
+        candidate = history[0] if history[0] is not None and len(set(history)) == 1 else None
+        if candidate is not None:
+            effective_date = observation_dates[index]
+            available = available_by_date[effective_date]
+            if selected is None:
+                prior_ranking = rankings.get(observation_dates[index - 1], [])
+                selected = next(
+                    (symbol for symbol in prior_ranking[rank:] if symbol in available),
+                    None,
+                )
+            elif (
+                candidate != selected
+                and (
+                    last_roll is None or (effective_date - last_roll).days >= min_days_between_rolls
+                )
+                and candidate in available
+            ):
+                selected = candidate
+                last_roll = effective_date
+        if selected is not None:
+            effective_date = observation_dates[index]
+            if selected not in available_by_date[effective_date]:
+                raise ValueError(
+                    f"Selection on {effective_date} cannot use contract '{selected}': "
+                    "it was not observed on that date"
+                )
+            records.append({"date": effective_date, "symbol": selected})
+    return _selection_frame(records)
 
-        # Filter out null OI values
-        valid_data = data.filter(pl.col("open_interest").is_not_null())
 
-        if valid_data.height == 0:
-            raise ValueError("No open interest data available")
+def _selection_changes(selections: pl.DataFrame) -> list[tuple[date, str, str]]:
+    if selections.is_empty():
+        return []
+    ordered = selections.sort("date")
+    changes = []
+    previous_symbol = ordered["symbol"][0]
+    for row in ordered.iter_rows(named=True):
+        symbol = row["symbol"]
+        if symbol != previous_symbol:
+            changes.append((row["date"], previous_symbol, symbol))
+        previous_symbol = symbol
+    return changes
 
-        # Get unique dates
-        dates = sorted(valid_data.select("date").unique().to_series().to_list())
-        if not dates:
-            return []
 
-        roll_dates: list[date] = []
-        prev_selected: str | None = None
+def build_roll_events(data: pl.DataFrame, selections: pl.DataFrame) -> list[RollEvent]:
+    _require_columns(data, "date", "symbol", "close")
+    events = []
+    for roll_date, old_symbol, new_symbol in _selection_changes(selections):
+        old_close = _paired_close(data, roll_date, old_symbol)
+        new_close = _paired_close(data, roll_date, new_symbol)
+        events.append(
+            RollEvent(
+                date=roll_date,
+                old_symbol=old_symbol,
+                new_symbol=new_symbol,
+                old_close=old_close,
+                new_close=new_close,
+            )
+        )
+    return events
 
-        for dt in dates:
-            day_data = valid_data.filter(pl.col("date") == dt)
 
-            # Filter by minimum OI
-            if self.min_oi > 0:
-                day_data = day_data.filter(pl.col("open_interest") >= self.min_oi)
+def _paired_close(data: pl.DataFrame, roll_date: date, symbol: str) -> float:
+    rows = data.filter((pl.col("date") == roll_date) & (pl.col("symbol") == symbol))
+    if rows.height != 1:
+        raise ValueError(
+            f"Roll on {roll_date} requires exactly one close for contract '{symbol}', "
+            f"found {rows.height}"
+        )
+    value = rows["close"].item()
+    if value is None or not math.isfinite(float(value)):
+        raise ValueError(f"Roll on {roll_date} has an invalid close for contract '{symbol}'")
+    return float(value)
 
-            if day_data.height == 0:
-                continue
 
-            # Sort by OI (highest first)
-            sorted_data = day_data.sort("open_interest", descending=True)
+def _contract_expirations(data: pl.DataFrame) -> list[tuple[str, date]]:
+    contracts = (
+        data.select("symbol", "expiration")
+        .filter(pl.col("expiration").is_not_null())
+        .group_by("symbol")
+        .agg(
+            pl.col("expiration").n_unique().alias("expiration_count"),
+            pl.col("expiration").first().alias("expiration"),
+        )
+        .sort(["expiration", "symbol"])
+    )
+    conflicts = contracts.filter(pl.col("expiration_count") != 1)["symbol"].to_list()
+    if conflicts:
+        raise ValueError(f"Contracts have conflicting expiration dates: {conflicts}")
+    return [(row["symbol"], row["expiration"]) for row in contracts.iter_rows(named=True)]
 
-            # Select contract at specified rank
-            if sorted_data.height > self.rank:
-                selected = sorted_data["symbol"][self.rank]
 
-                # Detect roll (change in selected contract)
-                if prev_selected is not None and selected != prev_selected:
-                    roll_dates.append(dt)
+def _dates(data: pl.DataFrame) -> list[date]:
+    if "date" not in data.columns:
+        raise ValueError("Data must have 'date' column")
+    return sorted(data.select("date").unique().to_series().to_list())
 
-                prev_selected = selected
 
-        return roll_dates
+def _available_symbols_by_date(data: pl.DataFrame) -> dict[date, set[str]]:
+    _require_columns(data, "date", "symbol")
+    available = {observation_date: set() for observation_date in _dates(data)}
+    for observation_date, symbol in data.select("date", "symbol").unique().iter_rows():
+        available[observation_date].add(symbol)
+    return available
+
+
+def _require_columns(data: pl.DataFrame, *columns: str) -> None:
+    missing = [column for column in columns if column not in data.columns]
+    if missing:
+        raise ValueError(f"Data must have columns: {', '.join(missing)}")
+
+
+def _selection_frame(records: list[dict[str, object]]) -> pl.DataFrame:
+    if not records:
+        return _empty_selections()
+    frame = pl.DataFrame(records, schema={"date": pl.Date, "symbol": pl.String})
+    if frame.select("date").n_unique() != frame.height:
+        raise ValueError("Roll strategy selected more than one contract for a date")
+    return frame.sort("date")
+
+
+def _empty_selections() -> pl.DataFrame:
+    return pl.DataFrame(schema={"date": pl.Date, "symbol": pl.String})

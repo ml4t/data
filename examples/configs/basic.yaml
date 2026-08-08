@@ -6,7 +6,6 @@ storage:
   strategy: hive  # 'hive' for partitioned or 'flat' for single file
   base_path: ~/qdata/storage
   compression: zstd  # Best compression/speed balance
-  enable_locking: true  # Safe concurrent access
   metadata_tracking: true  # Track update timestamps
 
 # Data providers configuration
@@ -17,11 +16,6 @@ providers:
     rate_limit:
       requests_per_second: 2.0  # Conservative rate limit
       burst_size: 1
-      retry_max_attempts: 3
-      retry_backoff_factor: 2.0
-    timeout: 30
-    cache_enabled: true
-    cache_ttl: 3600  # 1 hour cache
 
 # Symbol universes - define groups of symbols to track
 universes:

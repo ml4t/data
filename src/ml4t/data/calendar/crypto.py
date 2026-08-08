@@ -10,6 +10,14 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _optional_numeric_scalar(value: object, metric: str) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"'{metric}' must contain numeric values")
+    return float(value)
+
+
 class CryptoCalendar:
     """
     24/7 market calendar for cryptocurrency markets.
@@ -346,10 +354,9 @@ class CryptoSessionValidator:
 
         # Check for extreme volume spikes
         if len(df) > 10:
-            df["volume"].to_numpy()
-            median_volume = df["volume"].median()
+            median_volume = _optional_numeric_scalar(df["volume"].median(), "volume")
 
-            if median_volume and median_volume > 0:
+            if median_volume is not None and median_volume > 0:
                 extreme_spikes = df.filter(pl.col("volume") > median_volume * 100)
                 if len(extreme_spikes) > 0:
                     issues.append(

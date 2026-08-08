@@ -93,7 +93,7 @@ class FileLock:
             # filelock doesn't support shared locks directly,
             # but we can use it for exclusive locking
             if blocking:
-                lock.acquire(timeout=self.timeout)
+                lock.acquire(timeout=self.timeout, poll_interval=self.retry_delay)
             else:
                 lock.acquire(timeout=0)
 

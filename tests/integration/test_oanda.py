@@ -26,10 +26,13 @@ from ml4t.data.providers.oanda import OandaProvider
 OANDA_API_KEY = os.getenv("OANDA_API_KEY")
 
 # Skip all tests if no API key
-pytestmark = pytest.mark.skipif(
-    not OANDA_API_KEY,
-    reason="OANDA_API_KEY not set - get key at https://www.oanda.com/",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not OANDA_API_KEY,
+        reason="OANDA_API_KEY not set - get key at https://www.oanda.com/",
+    ),
+]
 
 
 @pytest.fixture

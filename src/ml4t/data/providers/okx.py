@@ -22,7 +22,7 @@ import httpx
 import polars as pl
 import structlog
 
-from ml4t.data.core.exceptions import RateLimitError, SymbolNotFoundError
+from ml4t.data.core.exceptions import DataValidationError, RateLimitError, SymbolNotFoundError
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.mixins import AsyncSessionMixin
 
@@ -44,8 +44,8 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
     BASE_URL = "https://www.okx.com/api/v5"
 
-    # Map internal frequencies to OKX bar sizes
-    # OKX uses: 1m, 3m, 5m, 15m, 30m, 1H, 2H, 4H, 6H, 12H, 1D, 1W, 1M
+    # Map internal frequencies to OKX bar sizes. Calendar bars use the UTC variants
+    # so their timestamps align with the canonical daily-provider convention.
     INTERVAL_MAP: ClassVar[dict[str, str]] = {
         "minute": "1m",
         "1minute": "1m",
@@ -59,15 +59,17 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         "4hour": "4H",
         "6hour": "6H",
         "12hour": "12H",
-        "daily": "1D",
-        "1day": "1D",
-        "weekly": "1W",
-        "1week": "1W",
-        "monthly": "1M",
-        "1month": "1M",
+        "daily": "1Dutc",
+        "1day": "1Dutc",
+        "weekly": "1Wutc",
+        "1week": "1Wutc",
+        "monthly": "1Mutc",
+        "1month": "1Mutc",
     }
 
     MAX_CANDLES = 100  # OKX returns max 100 candles per request
+    MAX_BARS: ClassVar[int] = 10_000_000
+    MAX_PAGES: ClassVar[int] = MAX_BARS // MAX_CANDLES
 
     # Rate limit: 20 requests per 2 seconds for market data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (20, 2.0)
@@ -183,13 +185,30 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         # Default: add -USDT-SWAP
         return f"{symbol}-USDT-SWAP"
 
+    def _expected_ohlcv_symbol(self, symbol: str) -> str:
+        """Return the exchange symbol emitted by OHLCV transformations."""
+        return self._normalize_symbol(symbol)
+
+    def _next_after(self, current_after: int, oldest_ts: int, page_count: int) -> int:
+        """Validate that backward timestamp pagination is bounded and progressing."""
+        if oldest_ts >= current_after:
+            raise DataValidationError(
+                provider=self.name, message="pagination cursor did not move backward"
+            )
+        if page_count >= self.MAX_PAGES:
+            raise DataValidationError(
+                provider=self.name,
+                message=f"reached pagination page limit of {self.MAX_PAGES}",
+            )
+        return oldest_ts
+
     def _fetch_and_transform_data(
         self, symbol: str, start: str, end: str, frequency: str
     ) -> pl.DataFrame:
         """Fetch and transform OHLCV data from OKX.
 
-        Note: OKX returns newest data first and uses "before" parameter
-        for pagination (timestamp before which to fetch).
+        Note: OKX returns newest data first. Its ``after`` parameter requests
+        records earlier than the supplied timestamp.
 
         Args:
             symbol: Cryptocurrency symbol
@@ -231,14 +250,15 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
         # Fetch data in chunks (OKX returns newest first, paginate backwards)
         all_candles: list[list[Any]] = []
-        current_before = end_ms + 1  # Start from end, go backwards
+        current_after = end_ms + 1  # Start from end, go backwards
+        page_count = 0
 
         while True:
-            url = f"{self.BASE_URL}/market/candles"
+            url = f"{self.BASE_URL}/market/history-candles"
             params = {
                 "instId": inst_id,
                 "bar": bar,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": str(self.MAX_CANDLES),
             }
 
@@ -257,6 +277,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not candles:
                     break
+                page_count += 1
 
                 # Filter candles within our date range
                 for candle in candles:
@@ -270,7 +291,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                     break
 
                 # Update pagination cursor
-                current_before = oldest_ts
+                current_after = self._next_after(current_after, oldest_ts, page_count)
 
                 # Rate limit for pagination
                 self._acquire_rate_limit()
@@ -352,7 +373,8 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         end_ms = int(end_dt.timestamp() * 1000)
 
         all_rates: list[dict[str, Any]] = []
-        current_before = end_ms + 1
+        current_after = end_ms + 1
+        page_count = 0
 
         while True:
             self._acquire_rate_limit()
@@ -360,7 +382,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
             url = f"{self.BASE_URL}/public/funding-rate-history"
             params = {
                 "instId": inst_id,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": "100",
             }
 
@@ -379,6 +401,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not rates:
                     break
+                page_count += 1
 
                 # Filter rates within our date range
                 for rate in rates:
@@ -391,7 +414,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = oldest_ts
+                current_after = self._next_after(current_after, oldest_ts, page_count)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
@@ -506,14 +529,15 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
         end_ms = int(end_dt.timestamp() * 1000)
 
         all_candles: list[list[Any]] = []
-        current_before = end_ms + 1
+        current_after = end_ms + 1
+        page_count = 0
 
         while True:
-            url = f"{self.BASE_URL}/market/candles"
+            url = f"{self.BASE_URL}/market/history-candles"
             params = {
                 "instId": inst_id,
                 "bar": bar,
-                "before": str(current_before),
+                "after": str(current_after),
                 "limit": str(self.MAX_CANDLES),
             }
 
@@ -532,6 +556,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
                 if not candles:
                     break
+                page_count += 1
 
                 for candle in candles:
                     ts = int(candle[0])
@@ -542,7 +567,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
                 if oldest_ts <= start_ms:
                     break
 
-                current_before = oldest_ts
+                current_after = self._next_after(current_after, oldest_ts, page_count)
                 self._acquire_rate_limit()
 
             except httpx.HTTPStatusError as e:

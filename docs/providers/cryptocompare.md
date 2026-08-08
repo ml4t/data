@@ -18,11 +18,9 @@ CryptoCompare provides comprehensive cryptocurrency historical data with good co
 ## Quick Start
 
 ```python
-import os
-os.environ["CRYPTOCOMPARE_API_KEY"] = "your_key_here"
-
 from ml4t.data.providers import CryptoCompareProvider
 
+# Reads CRYPTOCOMPARE_API_KEY from the environment
 provider = CryptoCompareProvider()
 df = provider.fetch_ohlcv("BTC", "2024-01-01", "2024-12-01", frequency="daily")
 provider.close()
@@ -52,8 +50,8 @@ Quote currency defaults to USD.
 ## API Key Setup
 
 ```bash
-# .env file
-CRYPTOCOMPARE_API_KEY=your_api_key_here
+# Environment variable
+export CRYPTOCOMPARE_API_KEY=your_api_key_here
 ```
 
 Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptocompare.com/cryptopian/api-keys).
@@ -70,4 +68,4 @@ Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptoco
 ## See Also
 
 - [CryptoCompare Pricing](https://min-api.cryptocompare.com/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)

@@ -19,6 +19,8 @@ namespaces = true
 include = [
     "/src",
     "/tests",
+    "/scripts/verify_distribution.py",
+    "/scripts/verify_provider_contract_runs.py",
     "/README.md",
     "/LICENSE",
     "/CHANGELOG.md",
@@ -51,21 +53,23 @@ keywords = [
     "parquet",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 # Core dependencies
 dependencies = [
@@ -73,7 +77,6 @@ dependencies = [
     "polars>=0.20.0",
     "pandas>=2.0.0",
     "numpy>=1.24.0",
-    "pyarrow>=14.0.0",
     # HTTP and networking
     "httpx>=0.25.0",
     "tenacity>=8.0.0",
@@ -83,6 +86,8 @@ dependencies = [
     "click>=8.0.0",
     "python-dotenv>=1.0.0",
     "pydantic-settings>=2.0.0",
+    "pydantic>=2.12,<3",
+    "pydantic>=2.14.0b1; python_version >= '3.15'",
     # Utilities
     "structlog>=23.0.0",
     "platformdirs>=4.0.0",
@@ -91,8 +96,6 @@ dependencies = [
     "aiofiles>=23.0.0", # Async file I/O for async storage backends
     # Exchange calendars for session-aware operations
     "pandas-market-calendars>=4.3.0",
-    "lxml>=6.0.2",
-    "html5lib>=1.1",
     "openpyxl>=3.1.5",
 ]
 
@@ -103,9 +106,12 @@ yahoo = [
 ]
 databento = [
     "databento>=0.38.0",
+    "pyarrow>=14.0.0",
 ]
 oanda = [
     "oandapyV20>=0.7.0",
+    # oandapyV20 imports requests but does not declare it.
+    "requests>=2.32.0",
 ]
 cot = [
     "cot-reports>=0.1.0",  # CFTC Commitment of Traders data
@@ -124,7 +130,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "hypothesis>=6.80.0",
     "ruff>=0.1.0",
-    "mypy>=1.5.0",
+    "ty",
     "ipython>=8.14.0",
     "ipdb>=0.13.0",
     "pre-commit>=3.3.0",
@@ -134,7 +140,7 @@ dev = [
 
 # Documentation dependencies (MkDocs Material with Picasso theme)
 docs = [
-    "mkdocs>=1.6.0",
+    "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5.0",
     "mkdocstrings[python]>=0.24.0",
     "mkdocs-git-revision-date-localized-plugin>=1.2.0",
@@ -156,21 +162,32 @@ Issues = "https://github.com/ml4t/data/issues"
 Changelog = "https://github.com/ml4t/data/blob/main/CHANGELOG.md"
 
 [dependency-groups]
-dev = [
+test = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.3.0",
     "pytest-timeout>=2.1.0",
     "pytest-asyncio>=0.21.0",
     "hypothesis>=6.80.0",
-    "ruff>=0.8.0",
     "ty",
+    "xlsxwriter>=3.1.0",
+]
+prerelease = [
+    { include-group = "test" },
+    "yfinance>=0.2.0",
+    "oandapyV20>=0.7.0",
+    "requests>=2.32.0",
+    "cot-reports>=0.1.0",
+]
+dev = [
+    { include-group = "test" },
+    "ruff>=0.8.0",
     "pre-commit>=3.3.0",
     "twine>=6.0.0",
+    "pip-audit>=2.10.1",
     "databento>=0.38.0",
     "yfinance>=0.2.0",
     "oandapyV20>=0.7.0",
-    "xlsxwriter>=3.1.0",
 ]
 
 [tool.pytest.ini_options]
@@ -186,7 +203,7 @@ python_functions = ["test_*"]
 addopts = [
     "-ra",
     "--strict-markers",
-    "-m", "not slow and not paid_tier and not integration and not requires_api_key and not optional_dependency",
+    "-m", "not slow and not paid_tier and not integration and not requires_api_key",
     "--tb=short",
 ]
 
@@ -196,8 +213,8 @@ markers = [
     "integration: marks tests as integration tests requiring external APIs",
     "real_api: marks tests that use real API calls (deprecated, use integration)",
     "requires_api_key: marks tests requiring specific API keys",
-    "optional_dependency: marks tests requiring optional heavy dependencies",
     "expensive: marks tests with high API costs",
+    "network_guard_probe: exercises the offline network guard itself",
 ]
 
 filterwarnings = [
@@ -207,12 +224,13 @@ filterwarnings = [
 
 # Timeout for tests (prevent hanging)
 timeout = 300
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 fix = true
-exclude = ["_version.py"]
+exclude = ["_version.py", "**/AGENTS.md"]
 
 [tool.ruff.lint]
 select = [
@@ -254,132 +272,8 @@ known-first-party = ["ml4t"]
 "provider_template/*" = ["ARG002", "F821"]  # Template placeholders
 "examples/notebooks/*" = ["E402"]  # Jupyter notebooks
 
-[tool.mypy]
-python_version = "3.11"
-# Set mypy_path to src for proper module resolution
-mypy_path = "src"
-namespace_packages = true
-explicit_package_bases = true
-# Exclude data storage directory at project root (conflicts with ml4t.data package)
-exclude = ["^data/", "^benchmarks/", "^scripts/", "^examples/", "^provider_template/"]
-# Start with moderate strictness - can be increased incrementally
-strict = false
-warn_return_any = false  # Too many false positives with Any
-warn_unused_ignores = true
-disallow_untyped_defs = false  # Relax for initial commit
-disallow_any_unimported = false
-no_implicit_optional = true
-check_untyped_defs = true
-show_error_codes = true
-warn_redundant_casts = true
-ignore_missing_imports = true
-# Still catch real issues
-warn_unreachable = true
-warn_unused_configs = true
-disallow_untyped_calls = false
-
-# Exclude test files, examples, and benchmarks from strict checking
-[[tool.mypy.overrides]]
-module = ["tests.*", "examples.*", "benchmarks.*", "scripts.*"]
-disallow_untyped_defs = false
-check_untyped_defs = false
-warn_return_any = false
-
-# CLI files use Click which has complex decorators and config model issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.cli", "ml4t.data.cli_interface"]
-ignore_errors = true
-
-# Storage modules with async/complex patterns
-[[tool.mypy.overrides]]
-module = ["ml4t.data.storage.async_migration"]
-ignore_errors = true
-
-# Provider init with dynamic loading and specific provider issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.providers.__init__", "ml4t.data.providers.twelve_data", "ml4t.data.provider_updater"]
-ignore_errors = true
-
-# Pipeline and storage async modules need refactoring
-[[tool.mypy.overrides]]
-module = ["ml4t.data.pipeline", "ml4t.data.storage.async_filesystem"]
-ignore_errors = true
-
-# Anomaly detection module
-[[tool.mypy.overrides]]
-module = ["ml4t.data.anomaly.*"]
-ignore_errors = true
-
-# Config modules with model issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.config.*"]
-ignore_errors = true
-
-# Storage and provider modules needing refactoring
-[[tool.mypy.overrides]]
-module = ["ml4t.data.storage.hive", "ml4t.data.storage.migration", "ml4t.data.storage.partitioning", "ml4t.data.storage.__init__", "ml4t.data.storage.transaction"]
-ignore_errors = true
-
-# Data manager with complex type interactions
-[[tool.mypy.overrides]]
-module = ["ml4t.data.data_manager"]
-ignore_errors = true
-
-# Provider modules with various issues
-[[tool.mypy.overrides]]
-module = ["ml4t.data.providers.base", "ml4t.data.providers.oanda", "ml4t.data.providers.mock", "ml4t.data.providers.binance", "ml4t.data.providers.yahoo", "ml4t.data.providers.polygon", "ml4t.data.providers.eodhd", "ml4t.data.providers.finnhub", "ml4t.data.providers.tiingo", "ml4t.data.providers.alpha_vantage"]
-ignore_errors = true
-
-# Export and core modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.export.formats.*", "ml4t.data.core.config"]
-ignore_errors = true
-
-# Utility modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.utils.global_rate_limit"]
-ignore_errors = true
-
-# Asset modules
-[[tool.mypy.overrides]]
-module = ["ml4t.data.assets.asset_class", "ml4t.data.assets.validation"]
-ignore_errors = true
-
-# Modules with Polars type inference issues (to be fixed incrementally)
-[[tool.mypy.overrides]]
-module = [
-    "ml4t.data.utils.gaps",
-    "ml4t.data.update_manager",
-    "ml4t.data.storage.chunked",
-    "ml4t.data.providers.wiki_prices",
-    "ml4t.data.core.schemas",
-    "ml4t.data.etfs.downloader",
-    "ml4t.data.futures.roll",
-    "ml4t.data.futures.downloader",
-    "ml4t.data.futures.book_downloader",
-    "ml4t.data.providers.nasdaq_itch",
-    "ml4t.data.providers.kalshi",
-    "ml4t.data.calendar.crypto",
-    "ml4t.data.futures.continuous",
-    "ml4t.data.cot.fetcher",
-    "ml4t.data.cot.workflow",
-    "ml4t.data.utils.format",
-    "ml4t.data.sessions.*",
-    "ml4t.data.providers.polymarket",
-    "ml4t.data.providers.fred",
-    "ml4t.data.macro.downloader",
-    "ml4t.data.crypto.downloader",
-    "ml4t.data.providers.fama_french",
-    "ml4t.data.providers.aqr",
-    "ml4t.data.providers.databento",
-    "ml4t.data.validation.*",
-    "ml4t.data.futures.parser",
-    "ml4t.data.storage.flat",
-]
-ignore_errors = true
-
 [tool.ty.environment]
-python-version = "3.11"
+python-version = "3.12"
 root = ["src"]
 
 [tool.ty.src]

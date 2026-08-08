@@ -10,6 +10,7 @@ Tests cover:
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
+import pytest
 
 from ml4t.data.validation.base import Severity
 from ml4t.data.validation.ohlcv import OHLCVValidator
@@ -46,7 +47,7 @@ class TestOHLCVValidatorInitialization:
         validator = OHLCVValidator()
         assert validator.check_nulls is True
         assert validator.check_price_consistency is True
-        assert validator.check_negative_prices is True
+        assert validator.negative_price_policy == "forbid"
         assert validator.check_negative_volume is True
         assert validator.check_duplicate_timestamps is True
         assert validator.check_chronological_order is True
@@ -70,7 +71,7 @@ class TestOHLCVValidatorInitialization:
         )
         assert validator.check_nulls is False
         assert validator.check_price_consistency is False
-        assert validator.check_negative_prices is True  # Still enabled
+        assert validator.negative_price_policy == "forbid"
 
     def test_name_property(self):
         """Validator name is correct."""
@@ -221,6 +222,90 @@ class TestNullValueCheck:
         null_issues = [i for i in result.issues if i.check == "null_values"]
         assert len(null_issues) == 1
         assert len(null_issues[0].sample_rows) == 10  # Limited to 10
+
+
+class TestFiniteValueCheck:
+    """Non-finite numeric values are structural validation errors."""
+
+    def test_nan_and_infinities_are_rejected_in_every_numeric_column(self):
+        values = [float("nan"), float("inf"), float("-inf")]
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 2, tzinfo=UTC),
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                ],
+                "open": values,
+                "high": values,
+                "low": values,
+                "close": values,
+                "volume": values,
+            }
+        )
+
+        result = OHLCVValidator().validate(df)
+
+        issues = [issue for issue in result.issues if issue.check == "non_finite_values"]
+        assert result.passed is False
+        assert len(issues) == 5
+        assert {issue.details["column"] for issue in issues} == {
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        }
+        assert all(issue.severity == Severity.ERROR for issue in issues)
+        assert all(issue.row_count == 3 for issue in issues)
+
+    def test_all_null_numeric_columns_are_reported_as_nulls(self):
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
+                "open": [None],
+                "high": [None],
+                "low": [None],
+                "close": [None],
+                "volume": [None],
+            }
+        )
+
+        result = OHLCVValidator().validate(df)
+
+        null_issues = [issue for issue in result.issues if issue.check == "null_values"]
+        assert result.passed is False
+        assert len(null_issues) == 5
+        assert not [issue for issue in result.issues if issue.check == "numeric_columns"]
+
+    def test_non_numeric_column_is_a_structural_error(self):
+        df = create_valid_ohlcv_df().with_columns(pl.lit("unknown").alias("volume"))
+
+        result = OHLCVValidator().validate(df)
+
+        issues = [issue for issue in result.issues if issue.check == "numeric_columns"]
+        assert result.passed is False
+        assert len(issues) == 1
+        assert issues[0].severity == Severity.CRITICAL
+        assert issues[0].details["columns"] == ["volume"]
+
+    def test_mixed_non_finite_rows_preserve_input_positions_and_columns(self):
+        df = create_valid_ohlcv_df(3).with_columns(
+            pl.Series("close", [100.0, float("nan"), 102.0]),
+            pl.Series("volume", [1000.0, 1100.0, float("inf")]),
+            pl.Series("_validation_row", ["caller-0", "caller-1", "caller-2"]),
+        )
+
+        result = OHLCVValidator().validate(df)
+
+        issues = {
+            issue.details["column"]: issue
+            for issue in result.issues
+            if issue.check == "non_finite_values"
+        }
+        assert issues["close"].sample_rows == [1]
+        assert issues["volume"].sample_rows == [2]
+        assert df["_validation_row"].to_list() == ["caller-0", "caller-1", "caller-2"]
 
 
 class TestPriceConsistencyCheck:
@@ -380,7 +465,7 @@ class TestNegativePriceCheck:
 
         neg_issues = [i for i in result.issues if i.check == "negative_prices"]
         assert len(neg_issues) >= 1
-        assert neg_issues[0].severity == Severity.CRITICAL
+        assert neg_issues[0].severity == Severity.ERROR
         assert neg_issues[0].details["column"] == "open"
 
     def test_negative_prices_in_multiple_columns(self):
@@ -423,7 +508,7 @@ class TestNegativePriceCheck:
 
     def test_negative_prices_check_disabled(self):
         """Negative price check can be disabled."""
-        validator = OHLCVValidator(check_negative_prices=False)
+        validator = OHLCVValidator(negative_price_policy="allow")
         df = pl.DataFrame(
             {
                 "timestamp": [datetime(2024, 1, 1, tzinfo=UTC)],
@@ -438,6 +523,46 @@ class TestNegativePriceCheck:
 
         neg_issues = [i for i in result.issues if i.check == "negative_prices"]
         assert len(neg_issues) == 0
+
+    def test_negative_futures_price_allowed_by_instrument_policy(self):
+        """An eligible contract can accept an internally consistent negative bar."""
+        validator = OHLCVValidator(negative_price_policy="allow")
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2020, 4, 20, tzinfo=UTC)],
+                "open": [-37.63],
+                "high": [-37.63],
+                "low": [-37.63],
+                "close": [-37.63],
+                "volume": [1000.0],
+            }
+        )
+
+        result = validator.validate(df)
+
+        assert result.passed is True
+        assert not [issue for issue in result.issues if issue.check == "negative_prices"]
+
+    def test_negative_price_can_be_classified_as_anomaly(self):
+        """A policy can flag a plausible negative price without rejecting the data."""
+        validator = OHLCVValidator(negative_price_policy="warn")
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2020, 4, 20, tzinfo=UTC)],
+                "open": [-37.63],
+                "high": [-37.63],
+                "low": [-37.63],
+                "close": [-37.63],
+                "volume": [1000.0],
+            }
+        )
+
+        result = validator.validate(df)
+
+        issues = [issue for issue in result.issues if issue.check == "negative_prices"]
+        assert result.passed is True
+        assert len(issues) == 4
+        assert all(issue.severity == Severity.WARNING for issue in issues)
 
 
 class TestNegativeVolumeCheck:
@@ -931,15 +1056,15 @@ class TestValidationResult:
         assert len(result.issues) == 0
 
 
-class TestAllChecksDisabled:
-    """Test behavior with all checks disabled."""
+class TestConfigurableChecksDisabled:
+    """Configurable checks can be disabled while structural checks remain active."""
 
     def test_all_checks_disabled_passes_invalid_data(self):
-        """With all checks disabled, invalid data passes."""
+        """Disabling configurable checks permits finite numeric data."""
         validator = OHLCVValidator(
             check_nulls=False,
             check_price_consistency=False,
-            check_negative_prices=False,
+            negative_price_policy="allow",
             check_negative_volume=False,
             check_duplicate_timestamps=False,
             check_chronological_order=False,
@@ -965,6 +1090,18 @@ class TestAllChecksDisabled:
         # Only required columns check runs (and passes)
         assert result.passed is True
         assert len(result.issues) == 0
+
+
+def test_invalid_negative_price_policy_is_rejected():
+    with pytest.raises(ValueError, match="negative_price_policy"):
+        OHLCVValidator(negative_price_policy="sometimes")
+
+
+def test_legacy_negative_price_flag_is_mapped_with_deprecation():
+    with pytest.warns(DeprecationWarning, match="check_negative_prices"):
+        validator = OHLCVValidator(check_negative_prices=False)
+
+    assert validator.negative_price_policy == "allow"
 
 
 class TestEdgeCases:

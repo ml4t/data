@@ -12,6 +12,7 @@ import polars as pl
 
 StatementType = Literal["income", "balance", "cashflow"]
 PeriodType = Literal["annual", "quarterly", "ttm"]
+PolarsDataType = pl.DataType | type[pl.DataType]
 
 FINANCIAL_STATEMENT_COLUMNS = [
     "symbol",
@@ -318,7 +319,7 @@ def sequence_or_mapping_values(data: Any) -> list[Mapping[str, Any]]:
 
 def _rows_to_frame(
     rows: Iterable[Mapping[str, Any]],
-    schema: Mapping[str, pl.DataType],
+    schema: Mapping[str, PolarsDataType],
     columns: list[str],
 ) -> pl.DataFrame:
     row_list = [dict(row) for row in rows]

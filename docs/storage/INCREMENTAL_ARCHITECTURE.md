@@ -359,5 +359,3 @@ tar -czf metadata_backup.tar.gz ~/ml4t-data/**/.metadata.json
 ## See Also
 
 - [Partitioning Guide](PARTITIONING_GUIDE.md) - Storage structure
-- [Workflow Notebooks](../../notebooks/workflows/02_incremental_updates.py) - Examples
-- [Provider Audit](../providers/PROVIDER_AUDIT.md) - Rate limits by provider

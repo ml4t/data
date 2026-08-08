@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import os
 import time
 from datetime import UTC, datetime
 from typing import Any, ClassVar
@@ -11,6 +13,7 @@ import httpx
 import polars as pl
 import structlog
 
+from ml4t.data.core.exceptions import AuthenticationError, RateLimitError
 from ml4t.data.providers.base import BaseProvider
 
 logger = structlog.get_logger()
@@ -53,6 +56,9 @@ class CryptoCompareProvider(BaseProvider):
         10,
         60.0,
     )  # 10 requests per minute for free tier
+    MAX_RATE_LIMIT_ATTEMPTS: ClassVar[int] = 3
+    DEFAULT_RETRY_AFTER: ClassVar[float] = 6.0
+    MAX_RETRY_AFTER: ClassVar[float] = 60.0
 
     def __init__(
         self,
@@ -65,21 +71,26 @@ class CryptoCompareProvider(BaseProvider):
         Initialize CryptoCompare provider.
 
         Args:
-            api_key: Optional API key for higher rate limits
+            api_key: CryptoCompare API key (or set CRYPTOCOMPARE_API_KEY)
             exchange: Exchange to fetch from (default: aggregate)
             timeout: Request timeout in seconds
             **kwargs: Additional arguments passed to BaseProvider
         """
+        self.api_key = api_key or os.getenv("CRYPTOCOMPARE_API_KEY")
+        if not self.api_key:
+            raise AuthenticationError(
+                provider="cryptocompare",
+                message="CryptoCompare API key required. Set CRYPTOCOMPARE_API_KEY "
+                "or pass api_key. Get a key at: https://www.cryptocompare.com/cryptopian/api-keys",
+            )
+
         # Initialize base provider with rate limiting
         super().__init__(**kwargs)
 
-        self.api_key = api_key
         self.exchange = exchange
         self.timeout = timeout
 
-        # Configure session headers if API key provided
-        if self.api_key:
-            self.session.headers.update({"authorization": f"Apikey {self.api_key}"})
+        self.session.headers.update({"authorization": f"Apikey {self.api_key}"})
 
     @property
     def name(self) -> str:
@@ -125,6 +136,19 @@ class CryptoCompareProvider(BaseProvider):
                 parts = [symbol, "USD"]
 
         return parts[0], parts[1] if len(parts) > 1 else "USD"
+
+    def _retry_after_seconds(self, response: httpx.Response) -> float:
+        """Return a non-negative server delay capped by the provider policy."""
+        value = response.headers.get("Retry-After")
+        if not isinstance(value, str | int | float):
+            return self.DEFAULT_RETRY_AFTER
+        try:
+            delay = float(value)
+        except ValueError:
+            return self.DEFAULT_RETRY_AFTER
+        if not math.isfinite(delay):
+            return self.DEFAULT_RETRY_AFTER
+        return min(max(delay, 0.0), self.MAX_RETRY_AFTER)
 
     def _fetch_raw_data(self, symbol: str, start: str, end: str, frequency: str) -> Any:
         """
@@ -195,6 +219,7 @@ class CryptoCompareProvider(BaseProvider):
 
         # Fetch data in chunks if needed
         all_data = []
+        rate_limit_attempts = 0
 
         while current_time >= start_dt.timestamp():
             # Prepare request parameters
@@ -215,6 +240,7 @@ class CryptoCompareProvider(BaseProvider):
             try:
                 response = self.client.get(url, params=params)
                 response.raise_for_status()
+                rate_limit_attempts = 0
                 data = response.json()
 
                 if data.get("Response") != "Success":
@@ -237,15 +263,25 @@ class CryptoCompareProvider(BaseProvider):
                 current_time = oldest_time - 1
 
                 # Rate limiting (be conservative)
-                if not self.api_key:
-                    time.sleep(0.5)  # Slower for free tier
-                else:
-                    time.sleep(0.1)  # Faster with API key
+                time.sleep(0.1)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    logger.warning("Rate limit hit, waiting 60 seconds")
-                    time.sleep(60)
+                    rate_limit_attempts += 1
+                    retry_after = self._retry_after_seconds(e.response)
+                    if rate_limit_attempts >= self.MAX_RATE_LIMIT_ATTEMPTS:
+                        raise RateLimitError(
+                            provider=self.name,
+                            retry_after=retry_after,
+                            retryable=False,
+                        ) from e
+                    logger.warning(
+                        "Rate limit hit",
+                        attempt=rate_limit_attempts,
+                        max_attempts=self.MAX_RATE_LIMIT_ATTEMPTS,
+                        retry_after=retry_after,
+                    )
+                    time.sleep(retry_after)
                     continue
                 raise
 
@@ -335,23 +371,15 @@ class CryptoCompareProvider(BaseProvider):
 
         return df
 
-    def __del__(self) -> None:
-        """Clean up HTTP client."""
-        if hasattr(self, "_client") and self._client:
-            self._client.close()
-
     # ===== Async Support =====
 
     @property
     def _async_session(self) -> httpx.AsyncClient:
         """Lazily create async HTTP client."""
         if not hasattr(self, "_async_client") or self._async_client is None:
-            headers = {}
-            if self.api_key:
-                headers["authorization"] = f"Apikey {self.api_key}"
             self._async_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
-                headers=headers,
+                headers={"authorization": f"Apikey {self.api_key}"},
             )
         return self._async_client
 
@@ -415,6 +443,7 @@ class CryptoCompareProvider(BaseProvider):
             limit = min(max(1, int(total_seconds / 86400)), self.FREQUENCY_LIMITS[endpoint])
 
         all_data = []
+        rate_limit_attempts = 0
 
         while current_time >= start_dt.timestamp():
             params: dict[str, str | int] = {
@@ -433,6 +462,7 @@ class CryptoCompareProvider(BaseProvider):
             try:
                 response = await self._async_session.get(url, params=params)
                 response.raise_for_status()
+                rate_limit_attempts = 0
                 data = response.json()
 
                 if data.get("Response") != "Success":
@@ -453,13 +483,25 @@ class CryptoCompareProvider(BaseProvider):
                 current_time = oldest_time - 1
 
                 # Rate limiting
-                delay = 0.5 if not self.api_key else 0.1
-                await asyncio.sleep(delay)
+                await asyncio.sleep(0.1)
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
-                    logger.warning("Rate limit hit, waiting 60 seconds")
-                    await asyncio.sleep(60)
+                    rate_limit_attempts += 1
+                    retry_after = self._retry_after_seconds(e.response)
+                    if rate_limit_attempts >= self.MAX_RATE_LIMIT_ATTEMPTS:
+                        raise RateLimitError(
+                            provider=self.name,
+                            retry_after=retry_after,
+                            retryable=False,
+                        ) from e
+                    logger.warning(
+                        "Rate limit hit",
+                        attempt=rate_limit_attempts,
+                        max_attempts=self.MAX_RATE_LIMIT_ATTEMPTS,
+                        retry_after=retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
                     continue
                 raise
 
@@ -508,8 +550,7 @@ class CryptoCompareProvider(BaseProvider):
         raw_data = await self._fetch_raw_data_async(symbol, start, end, frequency)
         data = self._transform_data(raw_data, symbol)
 
-        if not data.is_empty():
-            data = self._validate_ohlcv(data, self.name)
+        data = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",

@@ -6,7 +6,7 @@ Welcome to ML4T Data (Quantitative Ledger Data Manager)! This guide will help yo
 
 ### System Requirements
 
-- Python 3.10 or higher
+- Stable CPython 3.12 through 3.14
 - 4GB RAM minimum (8GB recommended)
 - 10GB free disk space for data storage
 - Internet connection for data fetching
@@ -25,9 +25,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install the package
 pip install -e .
 
-# For additional features
-pip install -e ".[api]"    # API server support
-pip install -e ".[dev]"    # Development tools
+# For development tools
+pip install -e ".[dev]"
 ```
 
 ### Verify Installation
@@ -214,56 +213,6 @@ else:
         print(f"  - {issue.severity}: {issue.message}")
 ```
 
-## API Server
-
-### Starting the Server
-
-```bash
-# Start with default settings
-ml4t-data serve
-
-# Specify port and host
-ml4t-data serve --host 0.0.0.0 --port 8000
-
-# With authentication enabled
-ml4t-data serve --auth
-```
-
-### Using the API
-
-Once the server is running, you can access:
-- Interactive docs: http://localhost:8000/docs
-- API endpoints: http://localhost:8000/api/v1/
-
-#### Example API Calls
-
-```python
-import requests
-
-# Get data for a symbol
-response = requests.get(
-    "http://localhost:8000/api/v1/data/AAPL",
-    params={"start": "2024-01-01", "end": "2024-06-30"}
-)
-data = response.json()
-
-# Update symbol data
-response = requests.post(
-    "http://localhost:8000/api/v1/update/AAPL",
-    headers={"X-API-Key": "your-api-key"}  # If auth enabled
-)
-
-# Export data
-response = requests.post(
-    "http://localhost:8000/api/v1/export",
-    json={
-        "symbol": "AAPL",
-        "format": "csv",
-        "start": "2024-01-01"
-    }
-)
-```
-
 ## Common Workflows
 
 ### Daily Market Data Update
@@ -404,8 +353,10 @@ def get_data(symbol):
 
 - Read the [Configuration Guide](configuration.md) for advanced settings
 - Check the [CLI Reference](cli-reference.md) for all commands
-- Explore [Example Notebooks](../examples/notebooks/) for analysis workflows
-- Learn about [Provider Development](../developer-guide/providers.md) to add custom data sources
+- Explore the [example notebooks](https://github.com/ml4t/data/tree/main/examples/notebooks)
+  for analysis workflows
+- Learn about [provider development](../contributing/creating-a-provider.md) to add custom
+  data sources
 
 ## Getting Help
 

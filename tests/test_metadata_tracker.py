@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from ml4t.data.storage.metadata_tracker import (
     DatasetMetadata,
     MetadataTracker,
@@ -113,6 +115,18 @@ class TestDatasetMetadata:
 
 class TestMetadataTracker:
     """Test MetadataTracker functionality."""
+
+    def test_rejects_symlinked_metadata_root(self, tmp_path: Path, tmp_path_factory) -> None:
+        outside = tmp_path_factory.mktemp("tracker-metadata-outside")
+        try:
+            (tmp_path / ".metadata").symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"symlink creation unavailable: {error}")
+
+        with pytest.raises(ValueError, match="escapes configured root"):
+            MetadataTracker(base_path=tmp_path)
+
+        assert not any(outside.iterdir())
 
     def test_basic_metadata_operations(self, tmp_path: Path) -> None:
         """Test basic metadata tracking operations."""

@@ -96,8 +96,7 @@ class TestDefaultRateLimit:
 
     def test_default_rate_limit_value(self):
         """Test DEFAULT_RATE_LIMIT has expected value."""
-        # Conservative: 1 per 180 seconds (500/day)
-        assert EODHDProvider.DEFAULT_RATE_LIMIT == (1, 180.0)
+        assert EODHDProvider.DEFAULT_RATE_LIMIT == (10, 1.0)
 
 
 class TestFetchRawData:
@@ -318,8 +317,12 @@ class TestTransformData:
         assert "close" in df.columns
         assert "volume" in df.columns
         assert df["symbol"][0] == "AAPL"
-        # adjusted_close should be renamed to close
-        assert df["close"][0] == 171.0
+        assert str(df.schema["timestamp"]) == "Datetime(time_unit='us', time_zone='UTC')"
+        adjustment = 171.0 / 170.5
+        assert df["open"][0] == pytest.approx(170.0 * adjustment)
+        assert df["high"][0] == pytest.approx(172.0 * adjustment)
+        assert df["low"][0] == pytest.approx(169.0 * adjustment)
+        assert df["close"][0] == pytest.approx(171.0)
 
     def test_transform_data_empty(self, provider):
         """Test empty data returns empty DataFrame."""
@@ -328,7 +331,7 @@ class TestTransformData:
         assert "timestamp" in result.columns
 
     def test_transform_data_uses_adjusted_close(self, provider):
-        """Test adjusted_close is used for close column."""
+        """Test the adjusted-close factor is applied to every price column."""
         raw_data = [
             {
                 "date": "2024-01-01",
@@ -343,8 +346,11 @@ class TestTransformData:
 
         df = provider._transform_data(raw_data, "AAPL")
 
-        # close should be the adjusted_close value (171.0), not the unadjusted (170.5)
-        assert df["close"][0] == 171.0
+        adjustment = 171.0 / 170.5
+        assert df["open"][0] == pytest.approx(170.0 * adjustment)
+        assert df["high"][0] == pytest.approx(172.0 * adjustment)
+        assert df["low"][0] == pytest.approx(169.0 * adjustment)
+        assert df["close"][0] == pytest.approx(171.0)
 
     def test_transform_data_sorts_by_timestamp(self, provider):
         """Test data is sorted by timestamp."""

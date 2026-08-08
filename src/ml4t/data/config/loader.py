@@ -11,6 +11,7 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
+from ml4t.data.config._serialization import write_yaml
 from ml4t.data.config.models import DataConfig
 
 logger = structlog.get_logger()
@@ -47,7 +48,7 @@ class ConfigLoader:
 
         return None
 
-    def _interpolate_env_vars(self, data: Any) -> Any:
+    def _interpolate_env_vars(self, data: Any, environment: dict[str, str] | None = None) -> Any:
         """
         Recursively interpolate environment variables in configuration.
 
@@ -57,19 +58,22 @@ class ConfigLoader:
         Returns:
             Data with environment variables interpolated
         """
+        environment = environment or dict(os.environ)
         if isinstance(data, dict):
-            return {key: self._interpolate_env_vars(value) for key, value in data.items()}
+            return {
+                key: self._interpolate_env_vars(value, environment) for key, value in data.items()
+            }
         if isinstance(data, list):
-            return [self._interpolate_env_vars(item) for item in data]
+            return [self._interpolate_env_vars(item, environment) for item in data]
         if isinstance(data, str):
             # Replace ${VAR} with environment variable value
-            def replace_env(match):
+            def replace_env(match: re.Match[str]) -> str:
                 var_name = match.group(1)
                 # Support default values: ${VAR:default}
                 if ":" in var_name:
                     var_name, default = var_name.split(":", 1)
-                    return os.environ.get(var_name, default)
-                value = os.environ.get(var_name)
+                    return environment.get(var_name, default)
+                value = environment.get(var_name)
                 if value is None:
                     logger.warning(f"Environment variable not found: {var_name}")
                     return match.group(0)  # Keep original if not found
@@ -78,7 +82,7 @@ class ConfigLoader:
             return self.env_pattern.sub(replace_env, data)
         return data
 
-    def _merge_configs(self, base: dict, override: dict) -> dict:
+    def _merge_configs(self, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         """
         Recursively merge configuration dictionaries.
 
@@ -105,7 +109,27 @@ class ConfigLoader:
 
         return result
 
-    def _load_yaml(self, path: Path) -> dict:
+    def _retain_credential_references(self, config: DataConfig, raw_data: dict[str, Any]) -> None:
+        """Attach raw environment references without retaining resolved values."""
+        raw_providers = raw_data.get("providers", [])
+        if isinstance(raw_providers, dict):
+            provider_entries = [
+                {"name": name, **(entry if isinstance(entry, dict) else {})}
+                for name, entry in raw_providers.items()
+            ]
+        elif isinstance(raw_providers, list):
+            provider_entries = raw_providers
+        else:
+            return
+        for provider, raw_provider in zip(config.providers, provider_entries, strict=False):
+            if not isinstance(raw_provider, dict):
+                continue
+            for field in ("api_key", "api_secret"):
+                value = raw_provider.get(field)
+                if isinstance(value, str) and self.env_pattern.search(value):
+                    provider._set_credential_reference(field, value)
+
+    def _load_yaml(self, path: Path) -> dict[str, Any]:
         """
         Load YAML file.
 
@@ -118,13 +142,17 @@ class ConfigLoader:
         try:
             with open(path) as f:
                 data = yaml.safe_load(f)
-                return data or {}
         except yaml.YAMLError as e:
             raise ValueError(f"Invalid YAML in {path}: {e}") from e
-        except Exception as e:
+        except OSError as e:
             raise ValueError(f"Error loading {path}: {e}") from e
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError(f"Configuration root in {path} must be a mapping")
+        return data
 
-    def _process_includes(self, data: dict, base_dir: Path) -> dict:
+    def _process_includes(self, data: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         """
         Process include directives in configuration.
 
@@ -140,7 +168,7 @@ class ConfigLoader:
             if isinstance(includes, str):
                 includes = [includes]
 
-            base_config = {}
+            base_config: dict[str, Any] = {}
             for include_path in includes:
                 # Resolve relative paths
                 if not Path(include_path).is_absolute():
@@ -164,6 +192,33 @@ class ConfigLoader:
             data = self._merge_configs(base_config, data)
 
         return data
+
+    @staticmethod
+    def _resolve_path(value: str | Path, base_dir: Path) -> str:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        return str(path.resolve())
+
+    def _resolve_config_paths(self, data: dict[str, Any], base_dir: Path) -> None:
+        """Resolve supported relative paths against the declaring config file."""
+        if "base_dir" in data:
+            data["base_dir"] = self._resolve_path(data["base_dir"], base_dir)
+        storage = data.get("storage")
+        if isinstance(storage, dict):
+            for field in ("base_path", "path"):
+                if field in storage:
+                    storage[field] = self._resolve_path(storage[field], base_dir)
+        for field in ("universes", "datasets"):
+            entries = data.get(field, [])
+            if isinstance(entries, dict):
+                entries = entries.values()
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                path_field = "file" if field == "universes" else "symbols_file"
+                if path_field in entry:
+                    entry[path_field] = self._resolve_path(entry[path_field], base_dir)
 
     def load(self, override_path: Path | None = None) -> DataConfig:
         """
@@ -198,20 +253,25 @@ class ConfigLoader:
         # Process includes
         data = self._process_includes(data, config_path.parent)
 
-        # Set environment variables defined in config
-        if "env" in data:
-            for key, value in data["env"].items():
-                if key not in os.environ:
-                    os.environ[key] = str(value)
-                    logger.debug(f"Set environment variable: {key}")
+        raw_data = data
 
         # Interpolate environment variables
-        data = self._interpolate_env_vars(data)
+        local_environment = dict(os.environ)
+        configured_environment = data.get("env", {})
+        if isinstance(configured_environment, dict):
+            for key, value in configured_environment.items():
+                local_environment.setdefault(key, str(value))
+        data = self._interpolate_env_vars(data, local_environment)
+        self._resolve_config_paths(data, config_path.parent)
 
         # Apply defaults to datasets
-        if "defaults" in data and "datasets" in data:
+        if isinstance(data.get("defaults"), dict) and isinstance(data.get("datasets"), list | dict):
             defaults = data["defaults"]
-            for dataset in data["datasets"]:
+            datasets = data["datasets"]
+            dataset_entries = datasets.values() if isinstance(datasets, dict) else datasets
+            for dataset in dataset_entries:
+                if not isinstance(dataset, dict):
+                    continue
                 # Apply defaults that aren't already set
                 for key, value in defaults.items():
                     if key not in dataset:
@@ -220,6 +280,7 @@ class ConfigLoader:
         # Validate and create configuration object
         try:
             config = DataConfig(**data)
+            self._retain_credential_references(config, raw_data)
             logger.info(
                 "Configuration loaded successfully",
                 providers=len(config.providers),
@@ -228,8 +289,13 @@ class ConfigLoader:
             )
             return config
         except ValidationError as e:
-            logger.error("Configuration validation failed", errors=e.errors())
-            raise ValueError(f"Invalid configuration: {e}") from e
+            errors = e.errors(include_input=False, include_context=False)
+            logger.error("Configuration validation failed", errors=errors)
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc']) or 'configuration'}: {error['msg']}"
+                for error in errors
+            )
+            raise ValueError(f"Invalid configuration: {details}") from e
 
     def save(self, config: DataConfig, path: Path | None = None) -> None:
         """
@@ -246,10 +312,7 @@ class ConfigLoader:
         # Convert to dictionary with JSON-compatible types
         data = config.model_dump(exclude_none=True, exclude_defaults=False, mode="json")
 
-        # Save to YAML
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        write_yaml(save_path, data)
 
         logger.info(f"Configuration saved to: {save_path}")
 

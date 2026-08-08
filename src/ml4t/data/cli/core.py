@@ -5,31 +5,85 @@ Commands: fetch, update, validate, status, export, info, list
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import click
+import pandas as pd
 import polars as pl
 from rich import box
-from rich.panel import Panel
 from rich.table import Table
 
+from ml4t.data.config import load_config
 from ml4t.data.data_manager import DataManager
-from ml4t.data.storage.backend import StorageConfig
+from ml4t.data.managers.metadata_manager import MetadataManager
+from ml4t.data.storage.backend import StorageBackend, StorageConfig
 from ml4t.data.storage.hive import HiveStorage
-from ml4t.data.storage.metadata_tracker import MetadataTracker
-from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 
+from .batch import _as_date_string, _build_storage_from_config
 from .utils import (
     console,
     create_progress_bar,
+    load_symbols_from_file,
     print_error,
     print_success,
     save_batch_results,
     save_dataframe,
     validate_date,
 )
+
+
+def _resolve_storage(
+    config_path: str | None,
+    storage_path: str | None,
+) -> tuple[StorageBackend, Path]:
+    """Build configured storage for a CLI command."""
+    if config_path and storage_path:
+        raise click.UsageError("Use either --config or --storage-path, not both.")
+    if config_path:
+        resolved_config = Path(config_path).resolve()
+        cfg = load_config(resolved_config)
+        return _build_storage_from_config(cfg, resolved_config)
+    resolved_storage_path = Path(storage_path or "./data").expanduser()
+    return HiveStorage(StorageConfig(base_path=resolved_storage_path)), resolved_storage_path
+
+
+def _collect_dataframe(data: Any) -> pl.DataFrame:
+    """Materialize a DataManager result for CLI rendering and file output."""
+    if isinstance(data, pl.LazyFrame):
+        return data.collect()
+    if isinstance(data, pl.DataFrame):
+        return data
+    if isinstance(data, pd.DataFrame):
+        return pl.from_pandas(data)
+    raise TypeError(f"Expected a Polars DataFrame, received {type(data).__name__}")
+
+
+def _parse_row_count(value: object) -> int | None:
+    """Return a non-negative integral storage row count when one is encoded."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    if not parsed.is_integer() or parsed < 0:
+        return None
+    return int(parsed)
+
+
+def _format_row_count(value: object) -> str:
+    """Format a validated storage row count."""
+    parsed = _parse_row_count(value)
+    if parsed is None:
+        return "-"
+    return f"{parsed:,}"
+
+
+def _storage_row_count(storage: StorageBackend, key: str) -> int:
+    """Count stored rows without materializing the full dataset."""
+    return int(storage.read(key).select(pl.len()).collect().item())
 
 
 @click.command()
@@ -40,26 +94,39 @@ from .utils import (
     type=click.Path(exists=True),
     help="File containing symbols (one per line)",
 )
-@click.option("--start", callback=validate_date, required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", callback=validate_date, required=True, help="End date (YYYY-MM-DD)")
+@click.option("--start", callback=validate_date, help="Start date (YYYY-MM-DD)")
+@click.option("--end", callback=validate_date, help="End date (YYYY-MM-DD)")
 @click.option(
     "--frequency",
-    default="daily",
+    default=None,
     type=click.Choice(["daily", "hourly", "weekly"]),
-    help="Data frequency",
+    help="Data frequency (default: configured value or daily)",
 )
 @click.option("--provider", "-p", help="Specific provider to use")
 @click.option("--output", "-o", type=click.Path(), help="Output file path (.parquet or .csv)")
-@click.option("--config", "-c", type=click.Path(exists=True), help="Configuration file (JSON)")
+@click.option("--config", "-c", type=click.Path(exists=True), help="Configuration file")
+@click.option("--dataset", help="Dataset from the configuration file")
 @click.option("--progress", is_flag=True, help="Show progress bar")
 @click.pass_context
-def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, config, progress):
+def fetch(
+    ctx,
+    symbol,
+    symbols_file,
+    start,
+    end,
+    frequency,
+    provider,
+    output,
+    config,
+    dataset,
+    progress,
+):
     """Fetch financial data from providers.
 
     Examples:
-        ml4t-data fetch -s BTC --start 2024-01-01 --end 2024-01-31
-        ml4t-data fetch -s BTC -s ETH --start 2024-01-01 --end 2024-01-31
-        ml4t-data fetch -f symbols.txt --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -s BTC --provider cryptocompare --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -s BTC -s ETH -p cryptocompare --start 2024-01-01 --end 2024-01-31
+        ml4t-data fetch -f symbols.txt --provider yahoo --start 2024-01-01 --end 2024-01-31
     """
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
@@ -68,13 +135,41 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
     if config:
         if not quiet:
             console.print(f"Loading configuration from {config}")
-        with open(config) as f:
-            config_data = json.load(f)
-            symbol = config_data.get("symbols", list(symbol))
-            start = config_data.get("start", start)
-            end = config_data.get("end", end)
-            frequency = config_data.get("frequency", frequency)
-            provider = config_data.get("provider", provider)
+        configured = load_config(Path(config))
+        if dataset:
+            configured_dataset = configured.get_dataset(dataset)
+            if configured_dataset is None:
+                raise click.UsageError(f"Dataset '{dataset}' not found in {config}.")
+        elif len(configured.datasets) == 1:
+            configured_dataset = configured.datasets[0]
+        else:
+            raise click.UsageError("Use --dataset when the configuration has multiple datasets.")
+
+        if not symbol and not symbols_file:
+            symbol = list(configured_dataset.symbols)
+            if configured_dataset.symbols_file:
+                symbol.extend(load_symbols_from_file(configured_dataset.symbols_file))
+            if configured_dataset.universe:
+                universe = configured.get_universe(configured_dataset.universe)
+                if universe is None:
+                    raise click.UsageError(
+                        f"Dataset '{configured_dataset.name}' references unknown universe "
+                        f"'{configured_dataset.universe}'."
+                    )
+                symbol.extend(universe.symbols)
+        start = start or _as_date_string(configured_dataset.start_date)
+        end = end or _as_date_string(configured_dataset.end_date)
+        frequency = frequency or configured_dataset.frequency.value
+        provider = provider or configured_dataset.provider
+
+    frequency = frequency or "daily"
+
+    missing_options = [name for name, value in (("--start", start), ("--end", end)) if not value]
+    if missing_options:
+        options = " and ".join(f"'{name}'" for name in missing_options)
+        raise click.UsageError(f"Missing option {options} unless supplied by --config.")
+    assert isinstance(start, str)
+    assert isinstance(end, str)
 
     # Collect symbols
     symbols = list(symbol)
@@ -90,14 +185,16 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
         ctx.exit(1)
 
     try:
-        dm = DataManager()
+        dm = DataManager(config_path=config)
 
         if len(symbols) == 1:
             sym = symbols[0]
             if not quiet:
                 console.print(f"Fetching {sym} from {start} to {end}")
 
-            df = dm.fetch(sym, start, end, frequency=frequency, provider=provider)
+            df = _collect_dataframe(
+                dm.fetch(sym, start, end, frequency=frequency, provider=provider)
+            )
 
             if not quiet:
                 print_success(f"Fetched {len(df)} rows")
@@ -110,17 +207,27 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
             if not quiet:
                 console.print(f"Fetching {len(symbols)} symbols")
 
+            failures: dict[str, str] = {}
+            dm.validate_routes(list(symbols), provider)
+
             if progress and not quiet:
                 with create_progress_bar() as progress_bar:
                     task = progress_bar.add_task("Fetching...", total=len(symbols))
-                    results = {}
+                    results: dict[str, pl.DataFrame | None] = {}
                     for sym in symbols:
                         try:
-                            results[sym] = dm.fetch(
-                                sym, start, end, frequency=frequency, provider=provider
+                            results[sym] = _collect_dataframe(
+                                dm.fetch(
+                                    sym,
+                                    start,
+                                    end,
+                                    frequency=frequency,
+                                    provider=provider,
+                                )
                             )
                             progress_bar.update(task, advance=1, description=f"Fetched {sym}")
                         except Exception as e:
+                            failures[sym] = str(e)
                             if verbose:
                                 console.print(
                                     f"[yellow]Warning: Failed to fetch {sym}: {e}[/yellow]"
@@ -128,14 +235,35 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
                             results[sym] = None
                             progress_bar.update(task, advance=1)
             else:
-                results = dm.fetch_batch(symbols, start, end, frequency=frequency)
+                results = {}
+                for sym in symbols:
+                    try:
+                        results[sym] = _collect_dataframe(
+                            dm.fetch(
+                                sym,
+                                start,
+                                end,
+                                frequency=frequency,
+                                provider=provider,
+                            )
+                        )
+                    except Exception as e:
+                        failures[sym] = str(e)
+                        results[sym] = None
+                        if verbose:
+                            console.print(f"[yellow]Warning: Failed to fetch {sym}: {e}[/yellow]")
 
-            successful = sum(1 for v in results.values() if v is not None)
+            successful_results = {
+                symbol: data for symbol, data in results.items() if data is not None
+            }
+            if not successful_results:
+                detail = next(iter(failures.values()), "all provider requests failed")
+                raise ValueError(f"No symbols were fetched: {detail}")
             if not quiet:
-                print_success(f"Successfully fetched {successful} symbols")
+                print_success(f"Successfully fetched {len(successful_results)} symbols")
 
             if output:
-                save_batch_results(results, output)
+                save_batch_results(successful_results, output)
                 if not quiet:
                     console.print(f"[green]Saved to {output}[/green]")
 
@@ -146,90 +274,85 @@ def fetch(ctx, symbol, symbols_file, start, end, frequency, provider, output, co
 
 @click.command()
 @click.option("--symbol", "-s", required=True, help="Symbol to update")
-@click.option("--start", callback=validate_date, help="Start date (YYYY-MM-DD)")
-@click.option("--end", callback=validate_date, help="End date (YYYY-MM-DD)")
 @click.option(
-    "--strategy",
-    type=click.Choice(["incremental", "append_only", "full_refresh", "backfill"]),
-    default="incremental",
-    help="Update strategy",
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
 )
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+)
+@click.option("--lookback-days", type=click.IntRange(min=0), default=7, show_default=True)
+@click.option("--fill-gaps/--no-fill-gaps", default=True, show_default=True)
 @click.option("--provider", "-p", help="Provider to use for fetching")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option(
+    "--initial-start",
+    "--start",
+    "initial_start",
+    callback=validate_date,
+    help="Start date used only when the dataset does not exist",
+)
+@click.option(
+    "--initial-end",
+    "--end",
+    "initial_end",
+    callback=validate_date,
+    help="End date used only when the dataset does not exist",
+)
+@click.option("--initial-load-days", type=click.IntRange(min=1), default=365, show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def update(ctx, symbol, start, end, strategy, provider, storage_path):
+def update(
+    ctx,
+    symbol,
+    frequency,
+    asset_class,
+    lookback_days,
+    fill_gaps,
+    provider,
+    initial_start,
+    initial_end,
+    initial_load_days,
+    config_path,
+    storage_path,
+):
     """Perform incremental data updates."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
-
-        update_strategy = UpdateStrategy[strategy.upper()]
-        updater = IncrementalUpdater(strategy=update_strategy)
-
-        if not end:
-            end = datetime.now().strftime("%Y-%m-%d")
-        if not start:
-            start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-
-        actual_start, actual_end, update_type = updater.determine_update_range(
-            storage,
-            symbol,
-            datetime.strptime(start, "%Y-%m-%d"),
-            datetime.strptime(end, "%Y-%m-%d"),
-        )
-
-        if update_type == "none":
-            if not quiet:
-                print_success(f"Data already up to date for {symbol}")
-            return
-
-        if not quiet:
-            console.print(
-                f"{'Incremental' if update_type == 'incremental' else 'Full'} update "
-                f"from {actual_start.date()} to {actual_end.date()}"
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
+        key_exists = storage.exists(key)
+        if key_exists and (initial_start is not None or initial_end is not None):
+            raise click.UsageError(
+                "--initial-start and --initial-end apply only when the dataset does not exist."
             )
-
-        dm = DataManager()
-        new_data = dm.fetch(
+        rows_before = _storage_row_count(storage, key) if key_exists and not quiet else 0
+        manager = DataManager(config_path=config_path, storage=storage)
+        updated_key = manager.update(
             symbol,
-            actual_start.strftime("%Y-%m-%d"),
-            actual_end.strftime("%Y-%m-%d"),
+            frequency=frequency,
+            asset_class=asset_class,
+            lookback_days=lookback_days,
+            fill_gaps=fill_gaps,
             provider=provider,
+            initial_start=initial_start,
+            initial_end=initial_end,
+            initial_load_days=initial_load_days,
         )
+        rows_after = _storage_row_count(storage, updated_key) if not quiet else 0
+        if not quiet:
+            print_success(f"Updated {updated_key}")
+            console.print(f"   Rows: {rows_before:,} -> {rows_after:,}")
 
-        if new_data.is_empty():
-            if not quiet:
-                console.print("[yellow]No new data available[/yellow]")
-            return
-
-        result = updater.update_incremental(
-            storage,
-            tracker,
-            symbol,
-            new_data,
-            provider=provider or "auto",
-            strategy=update_strategy,
-        )
-
-        if result.success:
-            if not quiet:
-                print_success("Update successful")
-                console.print(
-                    f"   Added {result.rows_added} rows, updated {result.rows_updated} rows"
-                )
-                if result.gaps_filled > 0:
-                    console.print(f"   Filled {result.gaps_filled} gaps")
-        else:
-            console.print("[red]❌ Update failed[/red]")
-            if result.errors:
-                for error in result.errors:
-                    console.print(f"   {error}")
-            ctx.exit(1)
-
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
@@ -246,37 +369,65 @@ def update(ctx, symbol, start, end, strategy, provider, storage_path):
     type=click.Choice(["info", "warning", "error", "critical"]),
     help="Minimum severity to display",
 )
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storage_path):
+def validate(
+    ctx,
+    symbol,
+    validate_all,
+    anomalies,
+    save_report,
+    severity,
+    frequency,
+    asset_class,
+    config_path,
+    storage_path,
+):
     """Validate data quality and integrity."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
+        storage, _ = _resolve_storage(config_path, storage_path)
 
-        symbols = []
+        keys: list[str] = []
         if validate_all:
-            symbols = storage.list_keys()
+            keys = storage.list_keys()
         elif symbol:
-            symbols = [symbol]
+            keys = [f"{asset_class}/{frequency}/{symbol}"]
         else:
             console.print("[red]Error: Specify --symbol or --all[/red]")
             ctx.exit(1)
 
         total_issues = 0
+        metadata_manager = MetadataManager(storage)
 
-        for sym in symbols:
+        for key in keys:
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            sym = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
             if not quiet:
                 console.print(f"Validating {sym}...")
 
-            if not storage.exists(sym):
+            if not storage.exists(key):
                 console.print(f"[yellow]  Symbol {sym} not found in storage[/yellow]")
                 continue
 
-            df = storage.read(sym).collect()
+            df = storage.read(key).collect()
             issues = []
 
             # Schema check
@@ -322,17 +473,14 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
                     from ml4t.data.anomaly import (
                         AnomalyManager,
                         AnomalySeverity,
-                        PriceStalenessDetector,
-                        ReturnOutlierDetector,
-                        VolumeSpikeDetector,
                     )
 
                     manager = AnomalyManager()
-                    manager.detectors.append(PriceStalenessDetector(max_gap_days=3))
-                    manager.detectors.append(ReturnOutlierDetector(threshold=5.0))
-                    manager.detectors.append(VolumeSpikeDetector(threshold=10.0))
-
-                    report = manager.analyze(df, symbol=sym, asset_class="unknown")
+                    report = manager.analyze(
+                        df,
+                        symbol=sym,
+                        asset_class=str(metadata.get("asset_class") or asset_class),
+                    )
 
                     if severity != "info":
                         report = manager.filter_by_severity(report, severity)
@@ -374,75 +522,113 @@ def validate(ctx, symbol, validate_all, anomalies, save_report, severity, storag
         if total_issues > 0:
             ctx.exit(1)
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
 
 
+def _metadata_datetime(value: object) -> datetime | None:
+    """Parse one storage metadata timestamp as an aware UTC datetime."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _metadata_health(metadata: dict[str, object], stale_days: int) -> str:
+    """Classify a dataset from its canonical observation or update timestamp."""
+    observed_through = _metadata_datetime(metadata.get("end_date") or metadata.get("last_updated"))
+    if observed_through is None:
+        return "error"
+    return (
+        "stale" if observed_through < datetime.now(UTC) - timedelta(days=stale_days) else "healthy"
+    )
+
+
 @click.command()
 @click.option("--detailed", "-d", is_flag=True, help="Show detailed status")
-@click.option("--storage-path", default="./data", help="Storage directory path")
+@click.option("--stale-days", default=7, type=click.IntRange(min=0), show_default=True)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
 @click.pass_context
-def status(ctx, detailed, storage_path):
+def status(ctx, detailed, stale_days, config_path, storage_path):
     """Show system overview and health status."""
     verbose = ctx.obj.get("verbose", False)
     quiet = ctx.obj.get("quiet", False)
 
     try:
-        storage_config = StorageConfig(base_path=Path(storage_path))
-        storage = HiveStorage(storage_config)
-        tracker = MetadataTracker(Path(storage_path))
+        storage, resolved_storage_path = _resolve_storage(config_path, storage_path)
 
-        summary = tracker.get_summary()
+        metadata_manager = MetadataManager(storage)
+        datasets: list[tuple[str, dict[str, object], str]] = []
+        total_rows = 0
+        for key in storage.list_keys():
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            health = _metadata_health(metadata, stale_days)
+            row_count = _parse_row_count(metadata.get("row_count"))
+            if row_count is None:
+                health = "error"
+            else:
+                total_rows += row_count
+            datasets.append((key, metadata, health))
+
+        status_counts = {
+            name: sum(health == name for _, _, health in datasets)
+            for name in ("healthy", "stale", "error")
+        }
 
         if not quiet:
             table = Table(title="System Status", box=box.ROUNDED)
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="white")
 
-            table.add_row("Total Datasets", str(summary.get("total_datasets", 0)))
-            table.add_row("Healthy", f"[green]{summary.get('healthy', 0)}[/green]")
-            table.add_row("Stale", f"[yellow]{summary.get('stale', 0)}[/yellow]")
-            table.add_row("Error", f"[red]{summary.get('error', 0)}[/red]")
-            table.add_row("Total Rows", f"{summary.get('total_rows', 0):,}")
-            table.add_row("Total Updates", str(summary.get("total_updates", 0)))
+            table.add_row("Total Datasets", str(len(datasets)))
+            table.add_row("Healthy", f"[green]{status_counts['healthy']}[/green]")
+            table.add_row("Stale", f"[yellow]{status_counts['stale']}[/yellow]")
+            table.add_row("Error", f"[red]{status_counts['error']}[/red]")
+            table.add_row("Total Rows", f"{total_rows:,}")
 
             console.print(table)
 
-            if summary.get("by_asset_class"):
-                asset_table = Table(title="By Asset Class", box=box.SIMPLE)
-                asset_table.add_column("Asset Class", style="cyan")
-                asset_table.add_column("Count", style="white")
-
-                for asset_class, count in summary["by_asset_class"].items():
-                    asset_table.add_row(asset_class or "unknown", str(count))
-
-                console.print(asset_table)
-
         if detailed:
-            console.print("\n[bold]Detailed Dataset Information:[/bold]")
-
-            for sym in storage.list_keys():
-                metadata = tracker.get_metadata(sym)
-                if metadata:
-                    status_color = {"healthy": "green", "stale": "yellow", "error": "red"}.get(
-                        metadata.health_status, "white"
-                    )
-
-                    panel_content = f"""Provider: {metadata.provider}
-Frequency: {metadata.frequency}
-Rows: {metadata.total_rows:,}
-Date Range: {metadata.date_range_start.date()} to {metadata.date_range_end.date()}
-Last Update: {metadata.last_update}
-Updates: {metadata.update_count}
-Status: [{status_color}]{metadata.health_status}[/{status_color}]""".strip()
-
-                    panel = Panel(panel_content, title=f"Dataset: {sym}", border_style="cyan")
-                    console.print(panel)
+            detail_table = Table(title="Dataset Status", box=box.ROUNDED)
+            detail_table.add_column("Status")
+            detail_table.add_column("Key", style="dim")
+            detail_table.add_column("Symbol", style="cyan")
+            detail_table.add_column("Provider")
+            detail_table.add_column("Rows", justify="right")
+            detail_table.add_column("Data Through")
+            detail_table.add_column("Last Updated")
+            colors = {"healthy": "green", "stale": "yellow", "error": "red"}
+            for key, metadata, health in datasets:
+                row_count = metadata.get("row_count")
+                rows = _format_row_count(row_count)
+                detail_table.add_row(
+                    f"[{colors[health]}]{health.title()}[/{colors[health]}]",
+                    key,
+                    str(metadata.get("symbol") or key.rsplit("/", 1)[-1]),
+                    str(metadata.get("provider") or ""),
+                    rows,
+                    str(metadata.get("end_date") or "")[:10],
+                    str(metadata.get("last_updated") or "")[:19],
+                )
+            console.print(detail_table)
 
         if verbose:
-            console.print(f"\n[dim]Storage path: {storage_path}[/dim]")
+            console.print(f"\n[dim]Storage path: {resolved_storage_path}[/dim]")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e), verbose, e)
         ctx.exit(1)
@@ -459,20 +645,35 @@ Status: [{status_color}]{metadata.health_status}[/{status_color}]""".strip()
     type=click.Choice(["csv", "json", "parquet"]),
     help="Export format",
 )
-@click.option("--storage-path", default=None, help="Storage directory")
-def export(symbol, output, format_type, storage_path):
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
+def export(symbol, output, format_type, frequency, asset_class, config_path, storage_path):
     """Export data to various formats (CSV, JSON, Parquet)."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
-        config = StorageConfig(base_path=storage_path)
-        storage = HiveStorage(config)
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
 
         console.print(f"[bold]Reading data for {symbol}...[/bold]")
-        df = storage.read(symbol).collect()
+        if not storage.exists(key):
+            raise click.ClickException(f"No data found for {symbol}")
+        df = storage.read(key).collect()
 
         if df.is_empty():
-            console.print(f"[yellow]No data found for {symbol}[/yellow]")
-            return
+            raise click.ClickException(f"No data found for {symbol}")
 
         output_path = Path(output)
         console.print(f"[bold]Exporting to {output_path}...[/bold]")
@@ -486,6 +687,8 @@ def export(symbol, output, format_type, storage_path):
 
         print_success(f"Exported {len(df)} rows to {output_path}")
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()
@@ -493,22 +696,32 @@ def export(symbol, output, format_type, storage_path):
 
 @click.command()
 @click.option("--symbol", "-s", required=True, help="Symbol to show info for")
-@click.option("--storage-path", default=None, help="Storage directory")
-def info(symbol, storage_path):
+@click.option(
+    "--frequency",
+    type=click.Choice(["daily", "hourly", "weekly"]),
+    default="daily",
+    show_default=True,
+    help="Stored data frequency",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice(["equities", "crypto", "forex", "futures"]),
+    default="equities",
+    show_default=True,
+    help="Stored asset class",
+)
+@click.option("--config", "config_path", type=click.Path(exists=True), help="Configuration file")
+@click.option("--storage-path", type=click.Path(), help="Hive storage directory (default: ./data)")
+def info(symbol, frequency, asset_class, config_path, storage_path):
     """Show information about stored data."""
     try:
-        storage_path = Path(storage_path) if storage_path else Path.cwd() / "data"
-        config = StorageConfig(base_path=storage_path)
-        storage = HiveStorage(config)
-        tracker = MetadataTracker(base_path=storage_path)
+        storage, _ = _resolve_storage(config_path, storage_path)
+        key = f"{asset_class}/{frequency}/{symbol}"
+        if not storage.exists(key):
+            raise click.ClickException(f"No data found for {symbol}")
 
-        if not any(record.symbol == symbol for record in tracker.list_updates()):
-            console.print(f"[yellow]No data found for {symbol}[/yellow]")
-            return
-
-        df = storage.read(symbol).collect()
-        updates = [r for r in tracker.list_updates() if r.symbol == symbol]
-        latest_update = max(updates, key=lambda x: x.timestamp) if updates else None
+        df = storage.read(key).collect()
+        metadata = MetadataManager(storage).get_metadata_for_key(key) or {}
 
         table = Table(title=f"Data Info: {symbol}", box=box.ROUNDED)
         table.add_column("Property", style="cyan")
@@ -518,16 +731,16 @@ def info(symbol, storage_path):
         table.add_row("Rows", str(len(df)))
         table.add_row("Date Range", f"{df['timestamp'].min()} to {df['timestamp'].max()}")
         table.add_row("Columns", ", ".join(df.columns))
-
-        if latest_update:
-            table.add_row("Provider", latest_update.provider)
-            table.add_row("Last Updated", latest_update.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
-            table.add_row("Frequency", latest_update.frequency)
+        table.add_row("Provider", str(metadata.get("provider") or ""))
+        table.add_row("Last Updated", str(metadata.get("last_updated") or "")[:19])
+        table.add_row("Frequency", str(metadata.get("frequency") or frequency))
 
         console.print(table)
         console.print("\n[bold]Data Preview:[/bold]")
         console.print(df.head(5))
 
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()
@@ -539,93 +752,54 @@ def info(symbol, storage_path):
 @click.pass_context
 def list_data(_ctx, config, storage_path):
     """List all stored datasets."""
-    import json as json_module
-
-    import yaml
-
+    if config and storage_path:
+        raise click.UsageError("Use either --config or --storage-path, not both.")
     try:
         if config:
-            with open(config) as f:
-                cfg = yaml.safe_load(f)
-            storage_path = Path(cfg["storage"]["path"]).expanduser()
+            from ml4t.data.config import load_config
+
+            config_path = Path(config).resolve()
+            cfg = load_config(config_path)
+            storage, storage_path = _build_storage_from_config(cfg, config_path)
         elif storage_path:
             storage_path = Path(storage_path).expanduser()
+            storage = HiveStorage(StorageConfig(base_path=storage_path))
         else:
             console.print("[red]Either --config or --storage-path required[/red]")
             raise click.Abort()
 
         console.print(f"[cyan]Storage:[/cyan] {storage_path}\n")
 
-        metadata_dir = storage_path / ".metadata"
-        if not metadata_dir.exists():
+        keys = storage.list_keys()
+        if not keys:
             console.print("[yellow]No data found[/yellow]")
             return
 
-        futures_data = {}
-        spot_data = {}
+        metadata_manager = MetadataManager(storage)
+        table = Table(show_header=True, box=box.ROUNDED)
+        table.add_column("Key", style="dim")
+        table.add_column("Symbol", style="cyan")
+        table.add_column("Provider")
+        table.add_column("Rows", justify="right", style="green")
+        table.add_column("Date Range", style="dim")
+        table.add_column("Last Updated", style="dim")
 
-        for meta_file in metadata_dir.glob("*.json"):
-            with open(meta_file) as f:
-                meta = json_module.load(f)
+        for key in keys:
+            metadata = metadata_manager.get_metadata_for_key(key) or {}
+            symbol = str(metadata.get("symbol") or key.rsplit("/", 1)[-1])
+            provider = str(metadata.get("provider") or "")
+            row_count = metadata.get("row_count")
+            rows = _format_row_count(row_count)
+            start = str(metadata.get("start_date") or "")[:10]
+            end = str(metadata.get("end_date") or "")[:10]
+            updated = str(metadata.get("last_updated") or "")[:19]
+            table.add_row(key, symbol, provider, rows, f"{start} to {end}", updated)
 
-            custom = meta.get("custom", {})
-            provider = custom.get("provider")
-            symbol = custom.get("symbol")
+        console.print(table)
+        console.print(f"[bold]Total:[/bold] {len(keys)} dataset(s)")
 
-            if not symbol or not provider:
-                continue
-
-            data_info = {
-                "rows": meta.get("row_count", 0),
-                "start": custom.get("start_date", ""),
-                "end": custom.get("end_date", ""),
-                "updated": custom.get("last_updated", ""),
-            }
-
-            if provider == "databento":
-                futures_data[symbol] = data_info
-            elif provider == "cryptocompare":
-                spot_data[symbol] = data_info
-
-        if futures_data:
-            console.print("[bold]Futures (DataBento)[/bold]")
-            table = Table(show_header=True, box=box.ROUNDED)
-            table.add_column("Symbol", style="cyan")
-            table.add_column("Rows", justify="right", style="green")
-            table.add_column("Date Range", style="dim")
-            table.add_column("Last Updated", style="dim")
-
-            for sym in sorted(futures_data.keys()):
-                info_d = futures_data[sym]
-                rows = f"{info_d['rows']:,}"
-                date_range = f"{info_d['start'][:10]} → {info_d['end'][:10]}"
-                updated = info_d["updated"][:19] if info_d["updated"] else ""
-                table.add_row(sym, rows, date_range, updated)
-
-            console.print(table)
-            console.print()
-
-        if spot_data:
-            console.print("[bold]Spot (CryptoCompare)[/bold]")
-            table = Table(show_header=True, box=box.ROUNDED)
-            table.add_column("Symbol", style="cyan")
-            table.add_column("Rows", justify="right", style="green")
-            table.add_column("Date Range", style="dim")
-            table.add_column("Last Updated", style="dim")
-
-            for sym in sorted(spot_data.keys()):
-                info_d = spot_data[sym]
-                rows = f"{info_d['rows']:,}"
-                date_range = f"{info_d['start'][:10]} → {info_d['end'][:10]}"
-                updated = info_d["updated"][:19] if info_d["updated"] else ""
-                table.add_row(sym, rows, date_range, updated)
-
-            console.print(table)
-            console.print()
-
-        total = len(futures_data) + len(spot_data)
-        console.print(f"[bold]Total:[/bold] {total} dataset(s)")
-
+    except click.ClickException:
+        raise
     except Exception as e:
         print_error(str(e))
         raise click.Abort()

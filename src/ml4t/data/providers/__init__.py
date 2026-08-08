@@ -16,7 +16,7 @@ Available Providers:
     - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
     - PolymarketProvider: Polymarket prediction market history/order book snapshots
     - CoinGeckoProvider: CoinGecko crypto data (free, no API key)
-    - BinanceProvider: Binance cryptocurrency exchange (live API, may have geo-restrictions)
+    - BinanceProvider: Binance public market-data mirror and futures market data
     - BinancePublicProvider: Binance public data (bulk downloads, no geo-restrictions)
     - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
     - CryptoCompareProvider: CryptoCompare crypto data
@@ -36,14 +36,24 @@ If you need incremental update functionality, implement it separately using the 
 
 Example:
     >>> from ml4t.data.providers import CoinGeckoProvider
+    >>> from datetime import UTC, datetime, timedelta
     >>>
     >>> # Use provider directly
     >>> provider = CoinGeckoProvider()
-    >>> data = provider.fetch_ohlcv("bitcoin", "2024-01-01", "2024-01-31")
+    >>> end = datetime.now(UTC).date() - timedelta(days=1)
+    >>> data = provider.fetch_ohlcv("bitcoin", str(end - timedelta(days=6)), str(end))
 """
+
+from typing import TYPE_CHECKING
 
 # Base classes
 from ml4t.data.providers.base import BaseProvider, Provider
+from ml4t.data.providers.registry import (
+    PROVIDER_REGISTRY,
+    ProviderSpec,
+    advertised_provider_specs,
+    get_provider_spec,
+)
 
 # Equity providers
 try:
@@ -135,10 +145,13 @@ from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
 from ml4t.data.providers.twelve_data import TwelveDataProvider
 
 # Market data providers
-try:
+if TYPE_CHECKING:
     from ml4t.data.providers.databento import DataBentoProvider
-except ImportError:
-    DataBentoProvider = None  # type: ignore[assignment, misc]
+else:
+    try:
+        from ml4t.data.providers.databento import DataBentoProvider
+    except ImportError:
+        DataBentoProvider = None
 
 # Tick data providers
 from ml4t.data.providers.nasdaq_itch import ITCHSampleProvider
@@ -159,6 +172,10 @@ __all__ = [
     # Base classes
     "BaseProvider",
     "Provider",
+    "ProviderSpec",
+    "PROVIDER_REGISTRY",
+    "get_provider_spec",
+    "advertised_provider_specs",
     # Equity providers
     "YahooFinanceProvider",
     "AlpacaDataProvider",

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import ClassVar, Literal
+from warnings import warn
 
 import numpy as np
 import polars as pl
@@ -31,10 +32,14 @@ import structlog
 
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.synthetic import (
+    CalendarMode,
+    create_rng,
+    derive_symbol_seed,
     generate_ohlc_from_close,
     generate_timestamps,
     generate_volume,
-    get_bars_per_day,
+    get_periods_per_year,
+    validate_synthetic_frequency,
 )
 
 logger = structlog.get_logger()
@@ -61,6 +66,9 @@ class SyntheticProvider(BaseProvider):
         Annual volatility (standard deviation of returns)
     seed : int, optional
         Random seed for reproducibility
+    calendar_mode : {"equity", "continuous"}, default="equity"
+        Equity sessions use weekdays from 09:30 through 16:00. Continuous
+        sessions cover every UTC day.
     base_price : float, default=100.0
         Starting price level
     base_volume : float, default=1_000_000
@@ -74,12 +82,13 @@ class SyntheticProvider(BaseProvider):
     heston_rho : float, default=-0.7
         Heston: Correlation between price and variance shocks
         (negative = leverage effect: vol rises when price falls)
-    garch_omega : float, default=0.000002
-        GARCH: Constant term (sets long-run variance floor)
     garch_alpha : float, default=0.1
         GARCH: ARCH term weight (reaction to recent shocks)
     garch_beta : float, default=0.85
         GARCH: GARCH term weight (persistence of variance)
+    garch_omega : float, optional
+        Deprecated compatibility parameter. Omega is derived from annual volatility,
+        frequency, alpha, and beta so the requested unconditional variance is preserved.
 
     Example
     -------
@@ -99,9 +108,6 @@ class SyntheticProvider(BaseProvider):
     # No rate limiting needed for synthetic data
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1000, 1.0)
 
-    # Trading days per year
-    TRADING_DAYS = 252
-
     def __init__(
         self,
         model: Literal["gbm", "gbm_jump", "mean_revert", "heston", "garch"] = "gbm",
@@ -117,15 +123,19 @@ class SyntheticProvider(BaseProvider):
         heston_xi: float = 0.3,
         heston_rho: float = -0.7,
         # GARCH parameters
-        garch_omega: float = 0.000002,
+        garch_omega: float | None = None,
         garch_alpha: float = 0.1,
         garch_beta: float = 0.85,
+        calendar_mode: CalendarMode = "equity",
     ) -> None:
         """Initialize synthetic provider."""
         self.model = model
         self.annual_return = annual_return
         self.annual_volatility = annual_volatility
         self.seed = seed
+        if calendar_mode not in {"equity", "continuous"}:
+            raise ValueError("calendar_mode must be 'equity' or 'continuous'")
+        self.calendar_mode = calendar_mode
         self.base_price = base_price
         self.base_volume = base_volume
 
@@ -136,9 +146,15 @@ class SyntheticProvider(BaseProvider):
         self.heston_rho = heston_rho  # Price-variance correlation
 
         # GARCH model parameters
-        self.garch_omega = garch_omega  # Constant term
         self.garch_alpha = garch_alpha  # ARCH term
         self.garch_beta = garch_beta  # GARCH term
+        if garch_omega is not None:
+            warn(
+                "garch_omega is deprecated and ignored; omega is derived from "
+                "annual_volatility and the requested frequency",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Validate GARCH stationarity
         if model == "garch" and (garch_alpha + garch_beta) >= 1.0:
@@ -148,7 +164,7 @@ class SyntheticProvider(BaseProvider):
             )
 
         # Random state for reproducibility
-        self._rng = np.random.default_rng(seed)
+        self._rng = create_rng(seed)
 
         super().__init__(rate_limit=rate_limit or self.DEFAULT_RATE_LIMIT)
 
@@ -156,6 +172,10 @@ class SyntheticProvider(BaseProvider):
     def name(self) -> str:
         """Return the provider name."""
         return "synthetic"
+
+    def _validate_inputs(self, symbol: str, start: str, end: str, frequency: str) -> None:
+        super()._validate_inputs(symbol, start, end, frequency)
+        validate_synthetic_frequency(frequency)
 
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with the correct schema."""
@@ -357,7 +377,7 @@ class SyntheticProvider(BaseProvider):
         Where:
             r_t = return at time t
             σ²_t = conditional variance at time t
-            ω = constant term (garch_omega)
+            ω = constant term derived to preserve the configured unconditional variance
             α = ARCH term (garch_alpha) - reaction to recent shocks
             β = GARCH term (garch_beta) - persistence of variance
 
@@ -380,15 +400,12 @@ class SyntheticProvider(BaseProvider):
         beta = self.garch_beta
         mu = self.annual_return * dt
 
-        # Scale omega for the time step
-        # Long-run daily variance = annual_vol² / 252
-        daily_var = (self.annual_volatility**2) / self.TRADING_DAYS
-        # Set omega to achieve this long-run variance
-        omega_scaled = daily_var * (1 - alpha - beta)
+        period_variance = self.annual_volatility**2 * dt
+        omega_scaled = period_variance * (1 - alpha - beta)
 
         # Initialize at unconditional variance
         sigma2 = np.zeros(n_steps + 1)
-        sigma2[0] = daily_var
+        sigma2[0] = period_variance
 
         returns = np.zeros(n_steps)
 
@@ -435,7 +452,7 @@ class SyntheticProvider(BaseProvider):
         )
 
         # Generate timestamps using shared utility
-        timestamps = generate_timestamps(start_dt, end_dt, frequency)
+        timestamps = generate_timestamps(start_dt, end_dt, frequency, self.calendar_mode)
         n_steps = len(timestamps)
 
         if n_steps == 0:
@@ -448,14 +465,12 @@ class SyntheticProvider(BaseProvider):
             frequency=frequency,
         )
 
-        # Modify RNG state based on symbol for reproducibility
+        # Each seeded request starts from a stable symbol-specific stream.
         if self.seed is not None:
-            symbol_hash = hash(symbol) % (2**31)
-            self._rng = np.random.default_rng(self.seed + symbol_hash)
+            self._rng = create_rng(derive_symbol_seed(self.seed, symbol))
 
-        # Calculate time step in years
-        bars_per_day = get_bars_per_day(frequency)
-        dt = 1.0 / (self.TRADING_DAYS * bars_per_day)
+        periods_per_year = get_periods_per_year(frequency, self.calendar_mode)
+        dt = 1.0 / periods_per_year
 
         # Generate returns based on model
         if self.model == "gbm":
@@ -476,8 +491,8 @@ class SyntheticProvider(BaseProvider):
         closes = np.exp(log_prices[1:])  # Skip initial price
 
         # Generate OHLC using shared utility
-        daily_vol = self.annual_volatility / np.sqrt(self.TRADING_DAYS * bars_per_day)
-        opens, highs, lows = generate_ohlc_from_close(closes, daily_vol, rng=self._rng)
+        bar_volatility = self.annual_volatility / np.sqrt(periods_per_year)
+        opens, highs, lows = generate_ohlc_from_close(closes, bar_volatility, rng=self._rng)
 
         # Generate volume using shared utility
         volume = generate_volume(returns, base_volume=self.base_volume, rng=self._rng)
@@ -525,4 +540,4 @@ class SyntheticProvider(BaseProvider):
             New seed value. If None, uses original seed.
         """
         self.seed = seed if seed is not None else self.seed
-        self._rng = np.random.default_rng(self.seed)
+        self._rng = create_rng(self.seed)

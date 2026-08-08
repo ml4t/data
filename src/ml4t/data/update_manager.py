@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -19,11 +19,13 @@ from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
 logger = structlog.get_logger()
 
 
-def _ensure_datetime(dt: date | datetime) -> datetime:
-    """Ensure we have a datetime object."""
-    if isinstance(dt, date) and not isinstance(dt, datetime):
-        return datetime.combine(dt, datetime.min.time())
-    return dt
+def _ensure_datetime(value: Any) -> datetime:
+    """Return a UTC datetime scalar or reject an incompatible timestamp value."""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time(), UTC)
+    raise TypeError(f"Expected a date or datetime, got {type(value).__name__}")
 
 
 class UpdateStrategy(Enum):
@@ -159,8 +161,10 @@ class GapDetector:
             frequency: Data frequency
 
         Returns:
-            List of gaps found in storage
+            List of gaps found in storage, with UTC-aware bounds
         """
+        start_date = _ensure_datetime(start_date)
+        end_date = _ensure_datetime(end_date)
         try:
             # Read data from storage
             df = storage.read(key, start_date, end_date).collect()
@@ -180,9 +184,6 @@ class GapDetector:
 
             # Check for gap at the beginning
             first_timestamp = _ensure_datetime(df["timestamp"].min())
-            start_date = _ensure_datetime(start_date)
-            end_date = _ensure_datetime(end_date)
-
             if first_timestamp > start_date:
                 gaps.insert(
                     0,
@@ -261,8 +262,10 @@ class IncrementalUpdater:
             requested_end: Requested end date
 
         Returns:
-            Tuple of (actual_start, actual_end, update_type)
+            Tuple of UTC-aware (actual_start, actual_end, update_type)
         """
+        requested_start = _ensure_datetime(requested_start)
+        requested_end = _ensure_datetime(requested_end)
         try:
             # Check if data exists
             if not storage.exists(key):
@@ -275,9 +278,6 @@ class IncrementalUpdater:
                 return requested_start, requested_end, "full"
 
             last_timestamp = _ensure_datetime(df["timestamp"].max())
-            requested_end = _ensure_datetime(requested_end)
-            requested_start = _ensure_datetime(requested_start)
-
             # If requested end is before last data, no update needed
             if requested_end <= last_timestamp:
                 logger.info(
@@ -329,6 +329,7 @@ class IncrementalUpdater:
         start_time = time.time()
         strategy = strategy or self.strategy
         errors = []
+        rows_before = 0
 
         try:
             # Validate new data
@@ -346,7 +347,6 @@ class IncrementalUpdater:
                 )
 
             # Get existing data info
-            rows_before = 0
             existing_df = None
 
             if storage.exists(key):
@@ -362,6 +362,10 @@ class IncrementalUpdater:
 
             # Update metadata
             if tracker and result.success:
+                new_start = _ensure_datetime(new_data["timestamp"].min())
+                new_end = _ensure_datetime(new_data["timestamp"].max())
+                final_start = _ensure_datetime(final_df["timestamp"].min())
+                final_end = _ensure_datetime(final_df["timestamp"].max())
                 update_record = UpdateRecord(
                     timestamp=datetime.now(),
                     update_type=strategy.value,
@@ -369,8 +373,8 @@ class IncrementalUpdater:
                     rows_after=rows_after,
                     rows_added=result.rows_added,
                     rows_updated=result.rows_updated,
-                    start_date=new_data["timestamp"].min(),
-                    end_date=new_data["timestamp"].max(),
+                    start_date=new_start,
+                    end_date=new_end,
                     provider=provider,
                     duration_seconds=time.time() - start_time,
                     gaps_filled=result.gaps_filled,
@@ -381,8 +385,8 @@ class IncrementalUpdater:
                     key,
                     update_record,
                     rows_after,
-                    final_df["timestamp"].min(),
-                    final_df["timestamp"].max(),
+                    final_start,
+                    final_end,
                 )
 
             result.duration_seconds = time.time() - start_time
@@ -409,8 +413,8 @@ class IncrementalUpdater:
                 update_type=strategy.value,
                 rows_added=0,
                 rows_updated=0,
-                rows_before=rows_before if "rows_before" in locals() else 0,
-                rows_after=rows_before if "rows_before" in locals() else 0,
+                rows_before=rows_before,
+                rows_after=rows_before,
                 duration_seconds=time.time() - start_time,
                 errors=errors,
             )
@@ -452,6 +456,7 @@ class IncrementalUpdater:
             # Only add new data, never update existing
             if storage.exists(key):
                 existing_df = storage.read(key).collect()
+                existing_df, new_data = align_frames_for_concat(existing_df, new_data)
                 max_existing = existing_df["timestamp"].max()
 
                 # Filter new data to only include timestamps after existing
@@ -459,7 +464,6 @@ class IncrementalUpdater:
 
                 if not new_rows.is_empty():
                     # Append new rows
-                    existing_df, new_rows = align_frames_for_concat(existing_df, new_rows)
                     combined = pl.concat([existing_df, new_rows])
                     storage.delete(key)
                     storage.write(combined, key)
@@ -494,6 +498,7 @@ class IncrementalUpdater:
             # Fill gaps in existing data
             if storage.exists(key):
                 existing_df = storage.read(key).collect()
+                existing_df, new_data = align_frames_for_concat(existing_df, new_data)
 
                 # Detect gaps
                 gaps = self.gap_detector.detect_gaps(existing_df)
@@ -513,7 +518,6 @@ class IncrementalUpdater:
 
                 if not gap_data.is_empty():
                     # Merge with existing data
-                    existing_df, gap_data = align_frames_for_concat(existing_df, gap_data)
                     combined = pl.concat([existing_df, gap_data]).sort("timestamp")
                     storage.delete(key)
                     storage.write(combined, key)
@@ -550,10 +554,11 @@ class IncrementalUpdater:
         # Update existing and add new
         if storage.exists(key):
             existing_df = storage.read(key).collect()
+            existing_df, new_data = align_frames_for_concat(existing_df, new_data)
 
             # Separate overlapping and new data
-            min_new = new_data["timestamp"].min()
-            max_existing = existing_df["timestamp"].max()
+            min_new = _ensure_datetime(new_data["timestamp"].min())
+            max_existing = _ensure_datetime(existing_df["timestamp"].max())
 
             if min_new <= max_existing:
                 # There's overlap
@@ -567,7 +572,6 @@ class IncrementalUpdater:
                 )
 
                 # Combine all data
-                existing_filtered, new_data = align_frames_for_concat(existing_filtered, new_data)
                 combined = pl.concat([existing_filtered, new_data]).sort("timestamp")
 
                 storage.delete(key)
@@ -582,7 +586,6 @@ class IncrementalUpdater:
                     rows_after=len(combined),
                 )
             # No overlap, just append
-            existing_df, new_data = align_frames_for_concat(existing_df, new_data)
             combined = pl.concat([existing_df, new_data]).sort("timestamp")
             storage.delete(key)
             storage.write(combined, key)
@@ -654,7 +657,7 @@ class BackfillManager:
 
                 # Check data age
                 last_update = _ensure_datetime(df["timestamp"].max())
-                age_days = (datetime.now() - last_update).days
+                age_days = (datetime.now(UTC) - last_update).days
 
                 if age_days > max_age_days:
                     continue
@@ -705,7 +708,8 @@ class BackfillManager:
 
             # Factor 2: Data staleness (older last update = higher priority)
             if "last_update" in candidate:
-                days_old = (datetime.now() - candidate["last_update"]).days
+                last_update = _ensure_datetime(candidate["last_update"])
+                days_old = (datetime.now(UTC) - last_update).days
                 score += days_old
 
             # Factor 3: Importance

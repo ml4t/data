@@ -68,11 +68,13 @@ print(f"Total: {len(combined)} rows from 1990-2024")
 
 ## Data Source
 
-The Wiki Prices dataset was originally from Quandl's WIKI database before Quandl discontinued the free tier.
+The Wiki Prices dataset was originally published through Quandl's WIKI database. Updates stopped
+on March 27, 2018 after a source became unavailable. The provider therefore requires a local archive
+and rejects requested dates after the final observation.
 
 ---
 
 ## See Also
 
-- [Provider README](README.md)
-- [Example Config](../../configs/examples/sp500.yaml)
+- [Provider reference](index.md)
+- [Example symbol list](https://github.com/ml4t/data/blob/main/examples/symbols/sp500.txt)

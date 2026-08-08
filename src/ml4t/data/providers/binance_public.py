@@ -30,6 +30,18 @@ from ml4t.data.providers.base import BaseProvider
 logger = structlog.get_logger()
 
 
+async def _gather_or_cancel[ResultT](awaitables: list[Awaitable[ResultT]]) -> list[ResultT]:
+    """Collect concurrent results and finish cancelling every sibling after a failure."""
+    tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 class BinancePublicProvider(BaseProvider):
     """Provider for bulk historical data from Binance Public Data repository.
 
@@ -118,27 +130,6 @@ class BinancePublicProvider(BaseProvider):
         """Return the provider name."""
         return "binance_public"
 
-    def _create_empty_dataframe(self) -> pl.DataFrame:
-        """Create an empty DataFrame with the correct schema."""
-        return pl.DataFrame(
-            {
-                "timestamp": [],
-                "open": [],
-                "high": [],
-                "low": [],
-                "close": [],
-                "volume": [],
-            },
-            schema={
-                "timestamp": pl.Datetime("ms", "UTC"),
-                "open": pl.Float64,
-                "high": pl.Float64,
-                "low": pl.Float64,
-                "close": pl.Float64,
-                "volume": pl.Float64,
-            },
-        )
-
     def _normalize_symbol(self, symbol: str) -> str:
         """Normalize symbol to Binance format.
 
@@ -164,6 +155,10 @@ class BinancePublicProvider(BaseProvider):
             symbol = symbol + "USDT"
 
         return symbol
+
+    def _expected_ohlcv_symbol(self, symbol: str) -> str:
+        """Return the exchange symbol emitted by OHLCV transformations."""
+        return self._normalize_symbol(symbol)
 
     def _build_url(self, symbol: str, interval: str, date: datetime) -> str:
         """Build download URL for a specific date.
@@ -1149,6 +1144,7 @@ class BinancePublicProvider(BaseProvider):
                 [
                     pl.from_epoch(pl.col("open_time"), time_unit="ms")
                     .dt.replace_time_zone("UTC")
+                    .cast(pl.Datetime("us", "UTC"))
                     .alias("timestamp"),
                     pl.lit(symbol).alias("symbol"),
                     pl.col("open").cast(pl.Float64).alias("premium_index_open"),
@@ -1177,7 +1173,7 @@ class BinancePublicProvider(BaseProvider):
                 "premium_index_close": [],
             },
             schema={
-                "timestamp": pl.Datetime("ms", "UTC"),
+                "timestamp": pl.Datetime("us", "UTC"),
                 "symbol": pl.Utf8,
                 "premium_index_open": pl.Float64,
                 "premium_index_high": pl.Float64,
@@ -1409,13 +1405,18 @@ class BinancePublicProvider(BaseProvider):
         # Fetch all concurrently with semaphore for rate limiting
         semaphore = asyncio.Semaphore(20)  # Max concurrent requests
 
-        async def fetch_one(date: datetime, url: str) -> tuple[datetime, pl.DataFrame | None]:
+        async def fetch_one(
+            date: datetime, url: str
+        ) -> tuple[datetime, pl.DataFrame | None] | Exception:
             async with semaphore:
-                df = await self._download_and_parse_zip_async(url)
-                return (date, df)
+                try:
+                    df = await self._download_and_parse_zip_async(url)
+                    return (date, df)
+                except Exception as exc:
+                    return exc
 
         tasks = [fetch_one(date, url) for date, url in urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await _gather_or_cancel(tasks)
 
         # Collect successful results in order
         all_data: list[pl.DataFrame] = [first_df]
@@ -1520,7 +1521,7 @@ class BinancePublicProvider(BaseProvider):
         data = await self._fetch_and_transform_data_async(symbol, start, end, frequency)
 
         # Validate OHLCV data
-        validated = self._validate_ohlcv(data, self.name)
+        validated = self._validate_ohlcv(data, self.name, symbol)
 
         self.logger.info(
             "Successfully fetched OHLCV data (async)",
@@ -1580,7 +1581,7 @@ class BinancePublicProvider(BaseProvider):
                 return None
 
         tasks = [fetch_symbol(symbol) for symbol in symbols]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         all_data = [df for df in results if df is not None and not df.is_empty()]
 
@@ -1713,6 +1714,7 @@ class BinancePublicProvider(BaseProvider):
                     [
                         pl.from_epoch(pl.col("open_time"), time_unit="ms")
                         .dt.replace_time_zone("UTC")
+                        .cast(pl.Datetime("us", "UTC"))
                         .alias("timestamp"),
                         pl.lit(symbol).alias("symbol"),
                         pl.col("open").cast(pl.Float64).alias("premium_index_open"),
@@ -1771,13 +1773,16 @@ class BinancePublicProvider(BaseProvider):
         # Fetch all months concurrently
         semaphore = asyncio.Semaphore(10)
 
-        async def fetch_month(year: int, month: int) -> pl.DataFrame | None:
+        async def fetch_month(year: int, month: int) -> pl.DataFrame | None | Exception:
             async with semaphore:
-                url = self._build_premium_index_monthly_url(symbol, interval, year, month)
-                return await self._download_and_parse_premium_index_zip_async(url, symbol)
+                try:
+                    url = self._build_premium_index_monthly_url(symbol, interval, year, month)
+                    return await self._download_and_parse_premium_index_zip_async(url, symbol)
+                except Exception as exc:
+                    return exc
 
         tasks = [fetch_month(year, month) for year, month in months]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await _gather_or_cancel(tasks)
 
         all_data: list[pl.DataFrame] = []
         for i, result in enumerate(results):
@@ -1854,7 +1859,7 @@ class BinancePublicProvider(BaseProvider):
                 return None
 
         tasks = [fetch_symbol(s) for s in symbols]
-        results = await asyncio.gather(*tasks)
+        results = await _gather_or_cancel(tasks)
 
         all_data: list[pl.DataFrame] = []
         for df in results:

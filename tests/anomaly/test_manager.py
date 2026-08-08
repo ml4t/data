@@ -73,7 +73,7 @@ class TestAnomalyManagerInitialization:
         assert len(manager.detectors) == 0
 
     def test_partial_detector_config(self):
-        """Can enable only some detectors."""
+        """Disabled built-ins remain available for per-call overrides."""
         config = AnomalyConfig(
             return_outliers=ReturnOutlierConfig(enabled=True),
             volume_spikes=VolumeSpikeConfig(enabled=False),
@@ -81,8 +81,9 @@ class TestAnomalyManagerInitialization:
         )
         manager = AnomalyManager(config=config)
 
-        assert len(manager.detectors) == 1
+        assert len(manager.detectors) == 3
         assert manager.detectors[0].name == "return_outliers"
+        assert [detector.is_enabled() for detector in manager.detectors] == [True, False, False]
 
     def test_custom_detectors_added(self):
         """Custom detectors are added."""
@@ -102,8 +103,8 @@ class TestAnomalyManagerInitialization:
         custom = CustomTestDetector()
         manager = AnomalyManager(config=config, custom_detectors=[custom])
 
-        assert len(manager.detectors) == 1
-        assert manager.detectors[0].name == "custom_test"
+        assert len(manager.detectors) == 4
+        assert manager.detectors[-1].name == "custom_test"
 
 
 class TestAnomalyManagerAnalyze:

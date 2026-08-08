@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
+
 import polars as pl
 import structlog
 
@@ -13,6 +16,28 @@ from ml4t.data.anomaly.config import (
 )
 
 logger = structlog.get_logger()
+
+
+def _optional_float(value: object) -> float | None:
+    """Convert a Polars numeric scalar while preserving null statistics."""
+    if value is None:
+        return None
+    if isinstance(value, int | float | Decimal):
+        return float(value)
+    raise TypeError(f"Expected a numeric scalar, received {type(value).__name__}")
+
+
+def _float(value: object) -> float:
+    result = _optional_float(value)
+    if result is None:
+        raise TypeError("Expected a numeric scalar, received null")
+    return result
+
+
+def _datetime(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"Expected a datetime scalar, received {type(value).__name__}")
+    return value
 
 
 class ReturnOutlierDetector(AnomalyDetector):
@@ -69,12 +94,17 @@ class ReturnOutlierDetector(AnomalyDetector):
         returns = df["returns"]
 
         # Calculate MAD
-        median = returns.median()
-        mad = (returns - median).abs().median()
+        median = _optional_float(returns.median())
+        if median is None:
+            return []
+        mad = _optional_float((returns - median).abs().median())
 
         # Handle case where MAD is 0
         if mad == 0 or mad is None:
-            mad = 1.4826 * returns.abs().median()
+            absolute_median = _optional_float(returns.abs().median())
+            if absolute_median is None:
+                return []
+            mad = 1.4826 * absolute_median
 
         if mad == 0 or mad is None:  # Still 0, no variation
             return []
@@ -90,7 +120,9 @@ class ReturnOutlierDetector(AnomalyDetector):
         for idx in range(len(df)):
             if outliers[idx]:
                 row = df[idx]
-                z_score = modified_z[idx]
+                z_score = _float(modified_z[idx])
+                return_value = _float(row["returns"][0])
+                close_price = _float(row["close"][0])
 
                 # Determine severity based on z-score
                 if abs(z_score) > 5:
@@ -104,24 +136,24 @@ class ReturnOutlierDetector(AnomalyDetector):
 
                 anomalies.append(
                     Anomaly(
-                        timestamp=row["timestamp"][0],
+                        timestamp=_datetime(row["timestamp"][0]),
                         symbol=symbol,
                         type=AnomalyType.RETURN_OUTLIER,
                         severity=severity,
-                        value=row["returns"][0] * 100,  # Convert to percentage
+                        value=return_value * 100,  # Convert to percentage
                         expected_range=(
                             float(median - self.config.threshold * mad),
                             float(median + self.config.threshold * mad),
                         ),
                         threshold=self.config.threshold,
                         message=(
-                            f"Unusual return of {row['returns'][0] * 100:.2f}% "
+                            f"Unusual return of {return_value * 100:.2f}% "
                             f"(MAD z-score: {z_score:.2f})"
                         ),
                         metadata={
                             "method": "mad",
                             "z_score": float(z_score),
-                            "close_price": float(row["close"][0]),
+                            "close_price": close_price,
                         },
                     )
                 )
@@ -133,10 +165,10 @@ class ReturnOutlierDetector(AnomalyDetector):
         returns = df["returns"]
 
         # Calculate z-scores
-        mean = returns.mean()
-        std = returns.std()
+        mean = _optional_float(returns.mean())
+        std = _optional_float(returns.std())
 
-        if std == 0:  # No variation
+        if mean is None or std is None or std == 0:  # No variation
             return []
 
         z_scores = (returns - mean) / std
@@ -148,7 +180,8 @@ class ReturnOutlierDetector(AnomalyDetector):
         for idx in range(len(df)):
             if outliers[idx]:
                 row = df[idx]
-                z_score = z_scores[idx]
+                z_score = _float(z_scores[idx])
+                return_value = _float(row["returns"][0])
 
                 # Determine severity
                 if abs(z_score) > 4:
@@ -160,24 +193,23 @@ class ReturnOutlierDetector(AnomalyDetector):
 
                 anomalies.append(
                     Anomaly(
-                        timestamp=row["timestamp"][0],
+                        timestamp=_datetime(row["timestamp"][0]),
                         symbol=symbol,
                         type=AnomalyType.RETURN_OUTLIER,
                         severity=severity,
-                        value=row["returns"][0] * 100,
+                        value=return_value * 100,
                         expected_range=(
                             float(mean - self.config.threshold * std),
                             float(mean + self.config.threshold * std),
                         ),
                         threshold=self.config.threshold,
                         message=(
-                            f"Unusual return of {row['returns'][0] * 100:.2f}% "
-                            f"(z-score: {z_score:.2f})"
+                            f"Unusual return of {return_value * 100:.2f}% (z-score: {z_score:.2f})"
                         ),
                         metadata={
                             "method": "zscore",
                             "z_score": float(z_score),
-                            "close_price": float(row["close"][0]),
+                            "close_price": _float(row["close"][0]),
                         },
                     )
                 )
@@ -189,8 +221,10 @@ class ReturnOutlierDetector(AnomalyDetector):
         returns = df["returns"]
 
         # Calculate IQR
-        q1 = returns.quantile(0.25)
-        q3 = returns.quantile(0.75)
+        q1 = _optional_float(returns.quantile(0.25))
+        q3 = _optional_float(returns.quantile(0.75))
+        if q1 is None or q3 is None:
+            return []
         iqr = q3 - q1
 
         if iqr == 0:  # No variation
@@ -207,7 +241,7 @@ class ReturnOutlierDetector(AnomalyDetector):
         for idx in range(len(df)):
             if outliers[idx]:
                 row = df[idx]
-                return_val = row["returns"][0]
+                return_val = _float(row["returns"][0])
 
                 # Determine severity
                 extreme_lower = q1 - 3 * iqr
@@ -220,7 +254,7 @@ class ReturnOutlierDetector(AnomalyDetector):
 
                 anomalies.append(
                     Anomaly(
-                        timestamp=row["timestamp"][0],
+                        timestamp=_datetime(row["timestamp"][0]),
                         symbol=symbol,
                         type=AnomalyType.RETURN_OUTLIER,
                         severity=severity,
@@ -231,7 +265,7 @@ class ReturnOutlierDetector(AnomalyDetector):
                         metadata={
                             "method": "iqr",
                             "iqr": float(iqr),
-                            "close_price": float(row["close"][0]),
+                            "close_price": _float(row["close"][0]),
                         },
                     )
                 )
@@ -299,7 +333,10 @@ class VolumeSpikeDetector(AnomalyDetector):
         )
 
         for row in spikes.iter_rows(named=True):
-            z_score = row["volume_zscore"]
+            z_score = _float(row["volume_zscore"])
+            volume = _float(row["volume"])
+            volume_mean = _float(row["volume_mean"])
+            volume_std = _float(row["volume_std"])
 
             # Determine severity
             if abs(z_score) > 5:
@@ -310,27 +347,27 @@ class VolumeSpikeDetector(AnomalyDetector):
                 severity = AnomalySeverity.INFO
 
             # Calculate percentage change
-            pct_change = ((row["volume"] - row["volume_mean"]) / row["volume_mean"]) * 100
+            pct_change = ((volume - volume_mean) / volume_mean) * 100
 
             anomalies.append(
                 Anomaly(
-                    timestamp=row["timestamp"],
+                    timestamp=_datetime(row["timestamp"]),
                     symbol=symbol,
                     type=AnomalyType.VOLUME_SPIKE,
                     severity=severity,
-                    value=float(row["volume"]),
+                    value=volume,
                     expected_range=(
-                        float(row["volume_mean"] - self.config.threshold * row["volume_std"]),
-                        float(row["volume_mean"] + self.config.threshold * row["volume_std"]),
+                        volume_mean - self.config.threshold * volume_std,
+                        volume_mean + self.config.threshold * volume_std,
                     ),
                     threshold=self.config.threshold,
                     message=(
-                        f"Volume spike: {row['volume']:,.0f} "
+                        f"Volume spike: {volume:,.0f} "
                         f"({pct_change:+.1f}% vs {self.config.window}-day avg)"
                     ),
                     metadata={
                         "z_score": float(z_score),
-                        "average_volume": float(row["volume_mean"]),
+                        "average_volume": volume_mean,
                         "window": self.config.window,
                     },
                 )
@@ -423,7 +460,10 @@ class PriceStalenessDetector(AnomalyDetector):
         )
 
         for row in stale_periods.iter_rows(named=True):
-            days = row["days_unchanged"] - 1  # Adjust for actual unchanged days
+            days = int(_float(row["days_unchanged"])) - 1
+            stale_price = _float(row["stale_price"])
+            start_date = _datetime(row["start_date"])
+            end_date = _datetime(row["end_date"])
 
             # Determine severity based on staleness duration
             if days > 20:
@@ -437,18 +477,18 @@ class PriceStalenessDetector(AnomalyDetector):
 
             anomalies.append(
                 Anomaly(
-                    timestamp=row["end_date"],
+                    timestamp=end_date,
                     symbol=symbol,
                     type=AnomalyType.PRICE_STALE,
                     severity=severity,
-                    value=float(row["stale_price"]),
+                    value=stale_price,
                     threshold=float(self.config.max_unchanged_days),
-                    message=f"Price unchanged for {days} days at {row['stale_price']:.2f}",
+                    message=f"Price unchanged for {days} days at {stale_price:.2f}",
                     metadata={
-                        "start_date": row["start_date"].isoformat(),
-                        "end_date": row["end_date"].isoformat(),
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat(),
                         "days_unchanged": days,
-                        "stale_price": float(row["stale_price"]),
+                        "stale_price": stale_price,
                     },
                 )
             )

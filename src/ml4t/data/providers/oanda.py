@@ -12,11 +12,11 @@ import os
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-import oandapyV20  # type: ignore
-import oandapyV20.endpoints.instruments as instruments  # type: ignore
+import oandapyV20
+import oandapyV20.endpoints.instruments as instruments
 import polars as pl
 import structlog
-from oandapyV20.exceptions import V20Error  # type: ignore
+from oandapyV20.exceptions import V20Error
 
 from ml4t.data.core.exceptions import (
     AuthenticationError,

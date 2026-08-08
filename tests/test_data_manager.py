@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import datetime
+from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -25,7 +26,6 @@ class TestDataManagerInitialization:
         assert dm.config is not None
         assert dm.providers == {}  # No providers loaded by default
 
-    @pytest.mark.skip(reason="Config initialization not implemented in PRE-RELEASE")
     def test_init_with_env_vars(self):
         """Test DataManager initialization from environment variables."""
         with patch.dict(
@@ -35,11 +35,13 @@ class TestDataManagerInitialization:
                 "DATABENTO_API_KEY": "db-test",
                 "OANDA_API_KEY": "oanda_test",
             },
+            clear=True,
         ):
             dm = DataManager()
             assert "CRYPTOCOMPARE_API_KEY" in os.environ
             # Provider instances are created lazily
-            assert dm._available_providers == ["cryptocompare", "databento", "oanda"]
+            assert {"cryptocompare", "oanda"} <= set(dm._available_providers)
+            assert ("databento" in dm._available_providers) is (find_spec("databento") is not None)
 
     def test_init_with_yaml_config(self):
         """Test DataManager initialization from YAML config file."""
@@ -50,10 +52,10 @@ providers:
     rate_limit: 10
   databento:
     api_key: ${DATABENTO_API_KEY}
-    dataset: GLBX.MDP3
+    extra:
+      dataset: GLBX.MDP3
   oanda:
     api_key: ${OANDA_API_KEY}
-    account_id: test_account
 
 routing:
   patterns:
@@ -103,7 +105,7 @@ providers:
                 providers={"cryptocompare": {"rate_limit": 20}},
             )
             assert dm.output_format == "lazy"  # Parameter overrides YAML
-            assert dm.config["providers"]["cryptocompare"]["rate_limit"] == 20
+            assert dm.config["providers"]["cryptocompare"]["rate_limit"] == (1, 0.05)
         finally:
             Path(config_path).unlink()
 
@@ -164,9 +166,44 @@ class TestProviderRouting:
         assert router.get_provider("UNKNOWN") is None
         assert router.get_provider("") is None
 
+    @pytest.mark.parametrize(
+        ("symbol", "expected"),
+        [
+            ("EUR_USD", "oanda"),
+            ("ES.v.0", "databento"),
+            ("BTC-USD", None),
+            ("DOGE-USD", None),
+            ("ETH/USDT", None),
+            ("AAPL", None),
+            ("SPY", None),
+            ("GOOGL", None),
+            ("BTC", None),
+            ("BTCUSD", None),
+            ("EURUSD", None),
+            ("ESH4", None),
+            ("^GSPC", None),
+        ],
+    )
+    def test_default_routing_rejects_ambiguous_symbols(self, symbol, expected):
+        """Default routing never guesses among overlapping asset-class formats."""
+        router = ProviderRouter()
+        router.setup_default_patterns()
+
+        assert router.get_provider(symbol) == expected
+
 
 class TestDataManagerFetch:
     """Test DataManager fetch functionality."""
+
+    def test_ambiguous_bare_symbol_fails_before_provider_access(self):
+        """A bare ticker requires an explicit provider before any provider call."""
+        manager = DataManager()
+
+        with patch.object(manager._provider_manager, "get_provider") as get_provider:
+            with pytest.raises(ValueError, match="specify provider explicitly"):
+                manager.fetch("AAPL", "2024-01-01", "2024-01-05")
+
+        get_provider.assert_not_called()
 
     def test_fetch_basic(self):
         """Test basic fetch operation."""
@@ -529,14 +566,14 @@ class TestIntegration:
 
     def test_batch_fetch(self):
         """Test fetching multiple symbols efficiently."""
-        dm = DataManager()
-        dm.router.add_pattern(r"^(BTC|ETH)", "cryptocompare")
-        dm.router.add_pattern(r"^EUR", "oanda")
+        with DataManager() as dm:
+            dm.router.patterns.clear()
+            dm.router.add_pattern(r".*", "mock")
 
-        symbols = ["BTC", "ETH", "EURUSD"]
-        results = dm.fetch_batch(symbols, "2024-01-01", "2024-01-01")
+            symbols = ["BTC", "ETH", "EURUSD"]
+            results = dm.fetch_batch(symbols, "2024-01-01", "2024-01-01")
 
         assert isinstance(results, dict)
         assert set(results.keys()) == set(symbols)
         for _symbol, df in results.items():
-            assert df is None or isinstance(df, pl.DataFrame | pl.LazyFrame)
+            assert isinstance(df, pl.DataFrame | pl.LazyFrame)

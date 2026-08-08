@@ -207,7 +207,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for details.
 
 - **[Tutorials](../../docs/tutorials/)** - Step-by-step written guides
 - **[Examples](../)** - Python scripts
-- **[Provider Selection Guide](../../docs/provider-selection-guide.md)** - Choose providers
+- **[Provider Selection Guide](../../docs/getting-started/provider-selection.md)** - Choose providers
 - **[API Documentation](../../docs/api/)** - Complete API reference
 
 ---

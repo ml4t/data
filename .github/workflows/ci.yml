@@ -6,192 +6,75 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.10.9"
+  UV_NO_MANAGED_PYTHON: "1"
 
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev
 
-      - name: Run ruff check
-        run: uv run ruff check src/ tests/
-
-      - name: Run ruff format check
-        run: uv run ruff format --check src/ tests/
-
-  typecheck:
-    name: Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run ty check
-        run: uv run ty check
-
-  test-core:
-    name: Test Core (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          version: "latest"
-
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run deterministic core lane
-        run: uv run pytest tests/ -v --tb=short -W error::ResourceWarning
-
-  test-package-smoke:
-    name: Test Package Smoke (Wheel + CLI)
-    runs-on: ubuntu-latest
-    needs: [lint, typecheck]
-
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Build wheel
-        run: uv build
-
-      - name: Create isolated smoke environment
-        run: uv venv .smoke-venv --python ${{ env.PYTHON_VERSION }}
-
-      - name: Install built wheel
-        run: uv pip install --python .smoke-venv/bin/python dist/*.whl
-
-      - name: Verify import and CLI entrypoint
+      - name: Run ruff
         run: |
-          .smoke-venv/bin/python -c "import ml4t.data as m; print(m.__version__)"
-          .smoke-venv/bin/ml4t-data --help
+          uv run ruff check src/ tests/ scripts/
+          uv run ruff format --check src/ tests/ scripts/
 
-  test-integration-lane:
-    name: Test Integration/API-Key Lane
+  dependency-audit:
+    name: Dependency Audit
     runs-on: ubuntu-latest
-    needs: [lint, typecheck]
-    env:
-      CRYPTOCOMPARE_API_KEY: ${{ secrets.CRYPTOCOMPARE_API_KEY }}
-      DATABENTO_API_KEY: ${{ secrets.DATABENTO_API_KEY }}
-      OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
-
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          version: "latest"
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
 
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
+      - name: Install audit tooling
+        run: uv sync --locked --dev
 
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Run integration/API-key marker lane
+      - name: Audit the complete locked environment
         run: |
-          if [[ -z "${CRYPTOCOMPARE_API_KEY}" && -z "${DATABENTO_API_KEY}" && -z "${OANDA_API_KEY}" ]]; then
-            echo "No provider API keys configured; skipping integration/API-key lane."
-            exit 0
-          fi
-          uv run pytest tests/ -v --tb=short -m "(integration or requires_api_key) and not optional_dependency and not paid_tier"
+          uv export --locked --all-extras --all-groups --no-emit-project --no-hashes --output-file requirements-audit.txt
+          uv run pip-audit --requirement requirements-audit.txt
 
-  test-optional-dependency-lane:
-    name: Test Optional Dependency Lane
-    runs-on: ubuntu-latest
-    needs: [lint, typecheck]
-
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: uv sync --dev
-
-      - name: Install torch (CPU)
-        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Run optional dependency marker lane
-        run: |
-          set +e
-          uv run pytest tests/ -v --tb=short -m "optional_dependency and not integration"
-          rc=$?
-          if [[ $rc -ne 0 && $rc -ne 5 ]]; then
-            exit $rc
-          fi
-
-  build:
-    name: Build Package
-    runs-on: ubuntu-latest
-    needs: [lint, typecheck, test-core, test-package-smoke]
-    steps:
-      - uses: actions/checkout@v7.0.0
-        with:
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
-
-      - name: Build package
-        run: uv build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: dist
-          path: dist/
+  compatibility:
+    name: Supported Platforms
+    uses: ./.github/workflows/compatibility.yml
+    permissions:
+      contents: read

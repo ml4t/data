@@ -246,7 +246,7 @@ class MassiveProvider(BaseProvider):
         def _fetch_and_process() -> pl.DataFrame:
             raw_data = self._fetch_raw_data(symbol, start, end, frequency, asset_class=asset_class)
             data = self._transform_data(raw_data, symbol)
-            return self._validate_ohlcv(data, self.name)
+            return self._validate_ohlcv(data, self.name, symbol)
 
         frame = self._with_circuit_breaker(_fetch_and_process)
         self.logger.info("Fetched Massive OHLCV data", symbol=symbol, rows=len(frame))
@@ -383,7 +383,11 @@ class MassiveProvider(BaseProvider):
             )
 
             # Convert timestamp from milliseconds to datetime
-            df = df.with_columns(pl.from_epoch("timestamp_ms", time_unit="ms").alias("timestamp"))
+            df = df.with_columns(
+                pl.from_epoch("timestamp_ms", time_unit="ms")
+                .dt.replace_time_zone("UTC")
+                .alias("timestamp")
+            )
             df = df.drop("timestamp_ms")
 
             # Convert OHLCV columns to float

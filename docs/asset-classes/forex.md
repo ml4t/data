@@ -761,12 +761,12 @@ live_df = live.fetch_ohlcv("EUR_USD", start="2024-11-04", end="2024-11-04")
 ## Related Documentation
 
 **Getting Started**:
-- [Quick Start Guide](../README.md#quick-start)
+- [Quick Start Guide](../getting-started/quickstart.md)
 - [Tutorial 01: Understanding OHLCV Data](../tutorials/01_understanding_ohlcv.md)
 
 **Provider Setup**:
-- [Provider Selection Guide](../provider-selection-guide.md)
-- [Creating a Custom Provider](../creating_a_provider.md)
+- [Provider Selection Guide](../getting-started/provider-selection.md)
+- [Creating a Custom Provider](../contributing/creating-a-provider.md)
 
 **Best Practices**:
 - [Tutorial 02: Rate Limiting Best Practices](../tutorials/02_rate_limiting.md)
@@ -790,4 +790,5 @@ live_df = live.fetch_ohlcv("EUR_USD", start="2024-11-04", end="2024-11-04")
 5. **Set up data quality validation** (Tutorial 04) for your FX pipeline
 6. **Model spreads realistically** in backtests for accurate results
 
-**Questions or issues?** See [CONTRIBUTING.md](../../CONTRIBUTING.md) or open a GitHub issue.
+**Questions or issues?** See the [contribution guide](../contributing/index.md) or open a
+GitHub issue.

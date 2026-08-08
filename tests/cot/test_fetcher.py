@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -107,11 +107,16 @@ class TestCOTConfig:
         years = config.get_years()
         assert years == [2023]
 
+    def test_rejects_reversed_year_range(self):
+        """A reversed range fails instead of silently downloading no reports."""
+        with pytest.raises(ValueError, match="end_year must be greater"):
+            COTConfig(start_year=2024, end_year=2023)
+
     def test_storage_path_string_conversion(self):
         """Test storage_path string to Path conversion."""
         config = COTConfig(storage_path="~/test/path")
         assert isinstance(config.storage_path, Path)
-        assert str(config.storage_path).startswith("/")
+        assert config.storage_path.is_absolute()
 
     def test_storage_path_expansion(self):
         """Test storage_path home directory expansion."""
@@ -281,6 +286,27 @@ class TestCOTFetcher:
 
         result = fetcher.fetch_product("ES")
         assert result.is_empty()
+
+    def test_fetch_product_can_attach_authoritative_release_schedule(self):
+        config = COTConfig(start_year=2024, end_year=2024)
+        fetcher = COTFetcher(config)
+        fetcher._cache[("traders_in_financial_futures_fut", 2024)] = pl.DataFrame(
+            {
+                "Market_and_Exchange_Names": ["E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE"],
+                "Report_Date_as_YYYY-MM-DD": ["2024-01-02"],
+                "Open_Interest_All": [100_000],
+            }
+        )
+        schedule = pl.DataFrame(
+            {
+                "report_date": [date(2024, 1, 2)],
+                "available_at": [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)],
+            }
+        )
+
+        result = fetcher.fetch_product("ES", release_schedule=schedule)
+
+        assert result["available_at"].to_list() == [datetime(2024, 1, 5, 20, 30, tzinfo=UTC)]
 
     def test_add_computed_columns_financial(self):
         """Test _add_computed_columns for financial futures."""

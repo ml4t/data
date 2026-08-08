@@ -18,13 +18,17 @@ CoinGecko provides comprehensive cryptocurrency market data with broad coverage 
 ## Quick Start
 
 ```python
+from datetime import UTC, datetime, timedelta
+
 from ml4t.data.providers import CoinGeckoProvider
 
 provider = CoinGeckoProvider()
+end = datetime.now(UTC).date() - timedelta(days=1)
+start = end - timedelta(days=6)
 
 # Use CoinGecko IDs (not ticker symbols)
-df = provider.fetch_ohlcv("bitcoin", "2024-01-01", "2024-12-01", frequency="daily")
-df = provider.fetch_ohlcv("ethereum", "2024-01-01", "2024-12-01", frequency="daily")
+df = provider.fetch_ohlcv("bitcoin", str(start), str(end), frequency="daily")
+df = provider.fetch_ohlcv("ethereum", str(start), str(end), frequency="daily")
 
 provider.close()
 ```
@@ -53,6 +57,11 @@ Find IDs at [coingecko.com/api/documentation](https://www.coingecko.com/api/docu
 | `daily` | ✅ |
 | Intraday | ❌ |
 
+The OHLC endpoint can supply 29 complete UTC daily bars. Its 30-day response starts and
+ends partway through a UTC day, so the partial boundary days are excluded. Older requests
+fail with `DataValidationError` because CoinGecko returns four-day candles, which cannot
+be converted into correct daily OHLC values.
+
 ---
 
 ## Rate Limits
@@ -66,4 +75,4 @@ Find IDs at [coingecko.com/api/documentation](https://www.coingecko.com/api/docu
 ## See Also
 
 - [CoinGecko API](https://www.coingecko.com/en/api/pricing)
-- [Provider README](README.md)
+- [Provider reference](index.md)

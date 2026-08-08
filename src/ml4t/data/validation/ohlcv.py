@@ -1,7 +1,8 @@
 """OHLCV data validation."""
 
 import time
-from typing import Any
+from typing import Any, Literal
+from warnings import warn
 
 import polars as pl
 import structlog
@@ -11,6 +12,17 @@ from ml4t.data.validation.base import Severity, ValidationIssue, ValidationResul
 logger = structlog.get_logger()
 
 
+def _numeric_scalar(value: object, metric: str) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"'{metric}' must contain non-null numeric values")
+    return float(value)
+
+
+NegativePricePolicy = Literal["forbid", "warn", "allow"]
+_NUMERIC_COLUMNS = ("open", "high", "low", "close", "volume")
+_PRICE_COLUMNS = ("open", "high", "low", "close")
+
+
 class OHLCVValidator(Validator):
     """Validator for OHLCV (Open, High, Low, Close, Volume) data."""
 
@@ -18,7 +30,7 @@ class OHLCVValidator(Validator):
         self,
         check_nulls: bool = True,
         check_price_consistency: bool = True,
-        check_negative_prices: bool = True,
+        negative_price_policy: NegativePricePolicy | bool = "forbid",
         check_negative_volume: bool = True,
         check_duplicate_timestamps: bool = True,
         check_chronological_order: bool = True,
@@ -26,6 +38,8 @@ class OHLCVValidator(Validator):
         check_extreme_returns: bool = True,
         max_return_threshold: float = 0.5,  # 50% return threshold
         staleness_threshold: int = 5,  # Days of identical prices
+        *,
+        check_negative_prices: bool | None = None,
     ) -> None:
         """
         Initialize OHLCV validator with configurable checks.
@@ -33,7 +47,7 @@ class OHLCVValidator(Validator):
         Args:
             check_nulls: Check for null values
             check_price_consistency: Check high >= low, high >= close, etc.
-            check_negative_prices: Check for negative prices
+            negative_price_policy: Whether negative prices fail, warn, or are accepted
             check_negative_volume: Check for negative volume
             check_duplicate_timestamps: Check for duplicate timestamps
             check_chronological_order: Check timestamps are in order
@@ -41,10 +55,27 @@ class OHLCVValidator(Validator):
             check_extreme_returns: Check for extreme price returns
             max_return_threshold: Threshold for extreme returns (as fraction)
             staleness_threshold: Days of identical prices to flag as stale
+            check_negative_prices: Deprecated boolean alias for negative_price_policy
+
+        Numeric-column and finite-value checks are structural and always run.
         """
         self.check_nulls = check_nulls
         self.check_price_consistency = check_price_consistency
-        self.check_negative_prices = check_negative_prices
+        legacy_policy = negative_price_policy if isinstance(negative_price_policy, bool) else None
+        if check_negative_prices is not None and legacy_policy is not None:
+            raise ValueError("Specify check_negative_prices only once")
+        if check_negative_prices is not None:
+            legacy_policy = check_negative_prices
+        if legacy_policy is not None:
+            warn(
+                "check_negative_prices is deprecated; use negative_price_policy",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            negative_price_policy = "forbid" if legacy_policy else "allow"
+        if negative_price_policy not in {"forbid", "warn", "allow"}:
+            raise ValueError("negative_price_policy must be 'forbid', 'warn', or 'allow'")
+        self.negative_price_policy = negative_price_policy
         self.check_negative_volume = check_negative_volume
         self.check_duplicate_timestamps = check_duplicate_timestamps
         self.check_chronological_order = check_chronological_order
@@ -91,13 +122,19 @@ class OHLCVValidator(Validator):
             return result
 
         # Perform validation checks
+        if not self._check_numeric_columns(df, result):
+            result.duration_seconds = time.time() - start_time
+            return result
+
+        self._check_finite_values(df, result)
+
         if self.check_nulls:
             self._check_nulls(df, result)
 
         if self.check_price_consistency:
             self._check_price_consistency(df, result)
 
-        if self.check_negative_prices:
+        if self.negative_price_policy != "allow":
             self._check_negative_prices(df, result)
 
         if self.check_negative_volume:
@@ -118,9 +155,57 @@ class OHLCVValidator(Validator):
         result.duration_seconds = time.time() - start_time
         return result
 
+    def _check_numeric_columns(self, df: pl.DataFrame, result: ValidationResult) -> bool:
+        """Require numeric OHLCV values before running numeric checks."""
+        invalid_columns = [
+            column
+            for column in _NUMERIC_COLUMNS
+            if df.schema[column] != pl.Null and not df.schema[column].is_numeric()
+        ]
+        if invalid_columns:
+            result.add_issue(
+                ValidationIssue(
+                    severity=Severity.CRITICAL,
+                    check="numeric_columns",
+                    message=f"OHLCV columns must be numeric: {invalid_columns}",
+                    details={"columns": invalid_columns},
+                )
+            )
+            return False
+        return True
+
+    def _check_finite_values(self, df: pl.DataFrame, result: ValidationResult) -> None:
+        """Reject NaN and positive or negative infinity in every numeric column."""
+        counts = df.select(
+            *[
+                (pl.col(column).is_not_null() & ~pl.col(column).is_finite()).sum().alias(column)
+                for column in _NUMERIC_COLUMNS
+            ]
+        ).row(0, named=True)
+        invalid_columns = [column for column, count in counts.items() if count]
+        if not invalid_columns:
+            return
+
+        row_column = "__ml4t_validation_row__"
+        while row_column in df.columns:
+            row_column = f"_{row_column}"
+        indexed = df.with_row_index(row_column)
+        for column in invalid_columns:
+            invalid = indexed.filter(pl.col(column).is_not_null() & ~pl.col(column).is_finite())
+            result.add_issue(
+                ValidationIssue(
+                    severity=Severity.ERROR,
+                    check="non_finite_values",
+                    message=f"Found {len(invalid)} non-finite values in '{column}' column",
+                    details={"column": column, "non_finite_count": len(invalid)},
+                    row_count=len(invalid),
+                    sample_rows=invalid.get_column(row_column).to_list()[:10],
+                )
+            )
+
     def _check_nulls(self, df: pl.DataFrame, result: ValidationResult) -> None:
         """Check for null values in OHLCV columns."""
-        for col in ["open", "high", "low", "close", "volume"]:
+        for col in _NUMERIC_COLUMNS:
             null_count = df[col].null_count()
             if null_count > 0:
                 null_rows = df.with_row_index().filter(pl.col(col).is_null())["index"].to_list()
@@ -185,12 +270,13 @@ class OHLCVValidator(Validator):
 
     def _check_negative_prices(self, df: pl.DataFrame, result: ValidationResult) -> None:
         """Check for negative prices."""
-        for col in ["open", "high", "low", "close"]:
+        severity = Severity.ERROR if self.negative_price_policy == "forbid" else Severity.WARNING
+        for col in _PRICE_COLUMNS:
             negative_prices = df.filter(pl.col(col) < 0)
             if len(negative_prices) > 0:
                 result.add_issue(
                     ValidationIssue(
-                        severity=Severity.CRITICAL,
+                        severity=severity,
                         check="negative_prices",
                         message=f"Found {len(negative_prices)} negative prices in '{col}'",
                         details={"column": col},
@@ -314,7 +400,7 @@ class OHLCVValidator(Validator):
                     message=f"Found {len(extreme_returns)} extreme returns (>{self.max_return_threshold:.0%})",
                     details={
                         "threshold": self.max_return_threshold,
-                        "max_return": float(max_return) if max_return is not None else 0.0,
+                        "max_return": _numeric_scalar(max_return, "return"),
                         "count": len(extreme_returns),
                     },
                     row_count=len(extreme_returns),

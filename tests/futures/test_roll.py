@@ -11,10 +11,114 @@ from ml4t.data.futures.roll import (
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     OpenInterestBasedRoll,
+    RollEvent,
     TimeBasedRoll,
     VolumeBasedRoll,
 )
 from ml4t.data.futures.schema import AssetClass, ContractSpec, SettlementType
+
+
+def _ranked_history() -> pl.DataFrame:
+    records = []
+    volumes = {
+        date(2026, 1, 1): {"A": 100.0, "B": 50.0},
+        date(2026, 1, 2): {"A": 55.0, "B": 50.0},
+        date(2026, 1, 3): {"A": 40.0, "B": 80.0},
+        date(2026, 1, 4): {"A": 30.0, "B": 90.0},
+    }
+    for observation_date, ranked in volumes.items():
+        for symbol, volume in ranked.items():
+            records.append(
+                {
+                    "date": observation_date,
+                    "symbol": symbol,
+                    "close": 100.0 + (10.0 if symbol == "B" else 0.0) + observation_date.day,
+                    "volume": volume,
+                    "open_interest": volume,
+                }
+            )
+    return pl.DataFrame(records)
+
+
+class TestPointInTimeRollContract:
+    def test_volume_changes_do_not_imply_a_roll_when_symbol_identity_is_unchanged(self):
+        data = _ranked_history().filter(pl.col("date") <= date(2026, 1, 3))
+
+        rolls = VolumeBasedRoll(min_days_between_rolls=0).identify_rolls(data)
+
+        assert rolls == []
+
+    def test_volume_selection_uses_previous_observation(self):
+        data = _ranked_history()
+
+        rolls = VolumeBasedRoll(min_days_between_rolls=0).identify_rolls(data)
+
+        assert rolls == [date(2026, 1, 4)]
+
+    def test_confirmation_window_delays_change_until_history_is_available(self):
+        data = _ranked_history()
+
+        strategy = VolumeBasedRoll(lookback_days=2, min_days_between_rolls=0)
+
+        assert strategy.select_contracts(data).to_dicts() == [
+            {"date": date(2026, 1, 3), "symbol": "A"},
+            {"date": date(2026, 1, 4), "symbol": "A"},
+        ]
+        assert strategy.identify_rolls(data) == []
+
+    def test_roll_event_retains_contract_identity_and_paired_closes(self):
+        data = _ranked_history()
+
+        events = VolumeBasedRoll(min_days_between_rolls=0).identify_roll_events(data)
+
+        assert events == [
+            RollEvent(
+                date=date(2026, 1, 4),
+                old_symbol="A",
+                new_symbol="B",
+                old_close=104.0,
+                new_close=114.0,
+            )
+        ]
+
+    def test_roll_event_rejects_missing_old_contract_price(self):
+        data = _ranked_history().filter(
+            ~((pl.col("date") == date(2026, 1, 4)) & (pl.col("symbol") == "A"))
+        )
+
+        with pytest.raises(ValueError, match="exactly one close for contract 'A'"):
+            VolumeBasedRoll(min_days_between_rolls=0).identify_roll_events(data)
+
+    def test_lagged_selection_rejects_missing_selected_contract(self):
+        data = _ranked_history().filter(
+            ~((pl.col("date") == date(2026, 1, 4)) & (pl.col("symbol") == "A"))
+        )
+
+        with pytest.raises(ValueError, match="2026-01-04.*contract 'A'.*not observed"):
+            VolumeBasedRoll(lookback_days=2, min_days_between_rolls=0).select_contracts(data)
+
+    def test_time_roll_selects_only_contracts_observed_on_date(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2026, 1, 2), date(2026, 1, 2), date(2026, 1, 5)],
+                "symbol": ["A", "B", "B"],
+                "expiration": [date(2026, 1, 30), date(2026, 2, 27), date(2026, 2, 27)],
+            }
+        )
+
+        selections = TimeBasedRoll(days_before_expiration=0).select_contracts(data)
+
+        assert selections.to_dicts() == [
+            {"date": date(2026, 1, 2), "symbol": "A"},
+            {"date": date(2026, 1, 5), "symbol": "B"},
+        ]
+
+    def test_open_interest_selection_is_lagged(self):
+        data = _ranked_history()
+
+        rolls = HighestOpenInterestRoll().identify_rolls(data)
+
+        assert rolls == [date(2026, 1, 4)]
 
 
 def create_test_data_with_expiration(
@@ -82,6 +186,7 @@ def create_simple_test_data() -> pl.DataFrame:
             "high": [105.0, 106.0] * 3,
             "low": [99.0, 100.0] * 3,
             "close": [104.0, 105.0] * 3,
+            "symbol": ["A", "B"] * 3,
             "volume": [
                 10000.0,
                 5000.0,  # Day 1: Front has more volume
@@ -194,6 +299,18 @@ class TestTimeBasedRoll:
             assert isinstance(rolls_business_10, list)
             assert isinstance(rolls_calendar_10, list)
 
+    def test_conflicting_expirations_for_symbol_are_rejected(self):
+        data = pl.DataFrame(
+            {
+                "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "symbol": ["ESH24", "ESH24"],
+                "expiration": [date(2024, 3, 15), date(2024, 3, 16)],
+            }
+        )
+
+        with pytest.raises(ValueError, match="conflicting expiration"):
+            TimeBasedRoll().select_contracts(data)
+
 
 class TestFirstNoticeDateRoll:
     """Tests for FirstNoticeDateRoll strategy."""
@@ -277,6 +394,7 @@ class TestVolumeBasedRoll:
                     date(2024, 3, 1),
                     date(2024, 3, 1),
                 ],
+                "symbol": ["A", "B"] * 3,
                 "volume": [
                     10000.0,
                     2000.0,  # Jan: Front dominates
@@ -314,6 +432,7 @@ class TestOpenInterestBasedRoll:
         data = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 1)],
+                "symbol": ["A", "B"],
                 "open_interest": [None, None],
             }
         )
@@ -327,6 +446,7 @@ class TestOpenInterestBasedRoll:
         data = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "symbol": ["A", "A"],
                 "open_interest": [10000.0, 11000.0],
             }
         )
@@ -347,6 +467,7 @@ class TestOpenInterestBasedRoll:
                     date(2024, 1, 3),
                     date(2024, 1, 3),
                 ],
+                "symbol": ["A", "B"] * 3,
                 "open_interest": [
                     10000.0,
                     5000.0,  # Day 1: Front has more OI
@@ -382,6 +503,7 @@ class TestVolumeBasedRollDetailed:
         data = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 2)],
+                "symbol": ["A", "A"],
                 "volume": [10000.0, 11000.0],
             }
         )
@@ -395,6 +517,7 @@ class TestVolumeBasedRollDetailed:
         data = pl.DataFrame(
             {
                 "date": [date(2024, 1, 1), date(2024, 1, 1)],
+                "symbol": ["A", "B"],
                 "volume": [10000.0, 5000.0],
             }
         )
@@ -418,6 +541,7 @@ class TestVolumeBasedRollDetailed:
                     date(2024, 1, 4),
                     date(2024, 1, 4),
                 ],
+                "symbol": ["A", "B"] * 4,
                 "volume": [
                     10000.0,
                     2000.0,  # Day 1: Front dominates
@@ -448,6 +572,7 @@ class TestVolumeBasedRollDetailed:
                     date(2024, 3, 1),
                     date(2024, 3, 1),
                 ],
+                "symbol": ["A", "B"] * 3,
                 "volume": [
                     10000.0,
                     1000.0,  # Jan: Front heavily dominates
@@ -684,7 +809,7 @@ class TestHighestVolumeRoll:
 
         roll_dates = roll_strategy.identify_rolls(data, None)
         assert len(roll_dates) == 1
-        assert roll_dates[0] == date(2024, 1, 2)
+        assert roll_dates[0] == date(2024, 1, 3)
 
     def test_min_volume_filtering(self):
         """Test that contracts below min_volume are filtered."""
@@ -722,8 +847,11 @@ class TestHighestVolumeRoll:
                     date(2024, 1, 2),
                     date(2024, 1, 2),
                     date(2024, 1, 2),
+                    date(2024, 1, 3),
+                    date(2024, 1, 3),
+                    date(2024, 1, 3),
                 ],
-                "symbol": ["ESH24", "ESM24", "ESU24"] * 2,
+                "symbol": ["ESH24", "ESM24", "ESU24"] * 3,
                 "volume": [
                     10000.0,
                     5000.0,
@@ -731,6 +859,9 @@ class TestHighestVolumeRoll:
                     10000.0,
                     2000.0,
                     5000.0,  # ESU24 is now second highest (roll at rank=1)
+                    10000.0,
+                    2000.0,
+                    5000.0,
                 ],
             }
         )
@@ -738,7 +869,7 @@ class TestHighestVolumeRoll:
 
         roll_dates = roll_strategy.identify_rolls(data, None)
         assert len(roll_dates) == 1
-        assert roll_dates[0] == date(2024, 1, 2)
+        assert roll_dates[0] == date(2024, 1, 3)
 
     def test_single_contract_per_day(self):
         """Test with single contract per day."""
@@ -860,7 +991,7 @@ class TestHighestOpenInterestRoll:
 
         roll_dates = roll_strategy.identify_rolls(data, None)
         assert len(roll_dates) == 1
-        assert roll_dates[0] == date(2024, 1, 2)
+        assert roll_dates[0] == date(2024, 1, 3)
 
     def test_min_oi_filtering(self):
         """Test that contracts below min_oi are filtered."""
@@ -898,8 +1029,11 @@ class TestHighestOpenInterestRoll:
                     date(2024, 1, 2),
                     date(2024, 1, 2),
                     date(2024, 1, 2),
+                    date(2024, 1, 3),
+                    date(2024, 1, 3),
+                    date(2024, 1, 3),
                 ],
-                "symbol": ["ESH24", "ESM24", "ESU24"] * 2,
+                "symbol": ["ESH24", "ESM24", "ESU24"] * 3,
                 "open_interest": [
                     20000.0,
                     10000.0,
@@ -907,6 +1041,9 @@ class TestHighestOpenInterestRoll:
                     20000.0,
                     5000.0,
                     10000.0,  # ESU24 is now second highest (roll)
+                    20000.0,
+                    5000.0,
+                    10000.0,
                 ],
             }
         )
@@ -914,7 +1051,7 @@ class TestHighestOpenInterestRoll:
 
         roll_dates = roll_strategy.identify_rolls(data, None)
         assert len(roll_dates) == 1
-        assert roll_dates[0] == date(2024, 1, 2)
+        assert roll_dates[0] == date(2024, 1, 3)
 
     def test_filters_null_oi_values(self):
         """Test that null OI values are filtered out."""
@@ -925,13 +1062,17 @@ class TestHighestOpenInterestRoll:
                     date(2024, 1, 1),
                     date(2024, 1, 2),
                     date(2024, 1, 2),
+                    date(2024, 1, 3),
+                    date(2024, 1, 3),
                 ],
-                "symbol": ["ESH24", "ESM24", "ESH24", "ESM24"],
+                "symbol": ["ESH24", "ESM24", "ESH24", "ESM24", "ESH24", "ESM24"],
                 "open_interest": [
                     20000.0,
                     None,  # ESM24 has no OI
                     18000.0,
                     22000.0,  # Now both have OI, ESM24 highest (roll)
+                    17000.0,
+                    23000.0,
                 ],
             }
         )

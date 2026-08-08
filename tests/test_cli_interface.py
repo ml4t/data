@@ -7,10 +7,12 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import polars as pl
 import pytest
 from click.testing import CliRunner
 
+from ml4t.data import ProviderRoutingError
 from ml4t.data.cli_interface import cli
 
 
@@ -79,7 +81,7 @@ class TestFetchCommand:
                 ],
             )
 
-            assert result.exit_code == 0
+            assert result.exit_code == 0, result.output
             assert "Fetching BTC" in result.output
             assert "✅ Fetched 1 rows" in result.output
             mock_dm.fetch.assert_called_once_with(
@@ -126,10 +128,7 @@ class TestFetchCommand:
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = {
-            "BTC": mock_df,
-            "ETH": mock_df,
-        }
+        mock_dm.fetch.return_value = mock_df
 
         runner = CliRunner()
         result = runner.invoke(
@@ -147,9 +146,67 @@ class TestFetchCommand:
             ],
         )
 
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert "Fetching 2 symbols" in result.output
         assert "✅ Successfully fetched 2 symbols" in result.output
+        assert mock_dm.fetch.call_count == 2
+
+    @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_batch_rejects_unroutable_symbols_before_fetch(self, mock_dm_class):
+        """CLI route validation aborts before any provider request."""
+        mock_dm = MagicMock()
+        mock_dm_class.return_value = mock_dm
+        mock_dm.validate_routes.side_effect = ProviderRoutingError(
+            "No provider found for symbols: UNKNOWN.",
+            parameter="provider",
+            details={"symbols": ["UNKNOWN"]},
+        )
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "BTC",
+                "--symbol",
+                "UNKNOWN",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-02",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "No provider found for symbols: UNKNOWN" in result.output
+        mock_dm.fetch.assert_not_called()
+
+    @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_batch_all_failures_exit_nonzero(self, mock_dm_class):
+        """A batch with no successful result is not reported as successful."""
+        mock_dm = MagicMock()
+        mock_dm_class.return_value = mock_dm
+        mock_dm.router.get_provider.return_value = "mock"
+        mock_dm.fetch.side_effect = RuntimeError("provider unavailable")
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "AAPL",
+                "--symbol",
+                "MSFT",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-02",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "No symbols were fetched: provider unavailable" in result.output
+        assert "Successfully fetched 0" not in result.output
 
     def test_fetch_invalid_dates(self):
         """Test fetch with invalid date format."""
@@ -210,44 +267,12 @@ class TestUpdateCommand:
         assert result.exit_code == 0
         assert "Perform incremental data updates" in result.output
         assert "--symbol" in result.output
-        assert "--strategy" in result.output
+        assert "--lookback-days" in result.output
+        assert "--config" in result.output
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.IncrementalUpdater")
-    @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
-    def test_update_incremental(
-        self, mock_dm_class, mock_updater_class, mock_tracker_class, mock_storage_class
-    ):
-        """Test incremental update."""
-        # Setup mocks
-        mock_dm = MagicMock()
-        mock_dm_class.return_value = mock_dm
-        mock_updater = MagicMock()
-        mock_updater_class.return_value = mock_updater
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock determine_update_range
-        mock_updater.determine_update_range.return_value = (
-            datetime(2024, 1, 2),
-            datetime(2024, 1, 10),
-            "incremental",
-        )
-
-        # Mock fetch
-        mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 2)]})
-        mock_dm.fetch.return_value = mock_df
-
-        # Mock update result
-        mock_result = MagicMock()
-        mock_result.success = True
-        mock_result.rows_added = 5
-        mock_result.rows_updated = 0
-        mock_updater.update_incremental.return_value = mock_result
+    def test_update_initial_load_writes_canonical_dataset(self):
+        """The CLI delegates a first load to the public DataManager workflow."""
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -256,55 +281,93 @@ class TestUpdateCommand:
                 [
                     "update",
                     "--symbol",
-                    "BTC",
+                    "AAPL",
+                    "--provider",
+                    "mock",
                     "--start",
                     "2024-01-01",
                     "--end",
-                    "2024-01-10",
+                    "2024-01-03",
+                    "--storage-path",
+                    "data",
                 ],
             )
+            storage = create_storage("data")
 
-            assert result.exit_code == 0
-            assert "Incremental update from" in result.output
-            assert "✅ Update successful" in result.output
-            assert "Added 5 rows" in result.output
+            assert result.exit_code == 0, result.output
+            assert "Updated equities/daily/AAPL" in result.output
+            assert storage.exists("equities/daily/AAPL")
+            assert len(storage.read("equities/daily/AAPL").collect()) == 3
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.IncrementalUpdater")
-    def test_update_no_new_data(self, mock_updater_class, mock_tracker_class, mock_storage_class):
-        """Test update when no new data is needed."""
-        mock_updater = MagicMock()
-        mock_updater_class.return_value = mock_updater
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock determine_update_range returns "none" type
-        mock_updater.determine_update_range.return_value = (
-            datetime(2024, 1, 10),
-            datetime(2024, 1, 10),
-            "none",
-        )
+    def test_update_uses_configured_flat_store(self):
+        """The update command honors the canonical storage configuration."""
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
             result = runner.invoke(
                 cli,
                 [
                     "update",
                     "--symbol",
-                    "BTC",
+                    "AAPL",
+                    "--provider",
+                    "mock",
                     "--start",
                     "2024-01-01",
                     "--end",
-                    "2024-01-10",
+                    "2024-01-02",
+                    "--config",
+                    "config.yaml",
+                ],
+            )
+            storage = create_storage("flat-data", strategy="flat")
+
+            assert result.exit_code == 0, result.output
+            assert storage.exists("equities/daily/AAPL")
+
+    def test_update_rejects_initial_range_for_existing_dataset(self):
+        """Initial-load bounds cannot silently change an incremental update request."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            first = runner.invoke(
+                cli,
+                [
+                    "update",
+                    "--symbol",
+                    "AAPL",
+                    "--provider",
+                    "mock",
+                    "--initial-start",
+                    "2024-01-01",
+                    "--initial-end",
+                    "2024-01-03",
+                    "--storage-path",
+                    "data",
+                ],
+            )
+            second = runner.invoke(
+                cli,
+                [
+                    "update",
+                    "--symbol",
+                    "AAPL",
+                    "--provider",
+                    "mock",
+                    "--initial-start",
+                    "2023-01-01",
+                    "--storage-path",
+                    "data",
                 ],
             )
 
-            assert result.exit_code == 0
-            assert "Data already up to date" in result.output
+        assert first.exit_code == 0, first.output
+        assert second.exit_code == 2
+        assert "apply only when the dataset does not exist" in second.output
 
 
 class TestValidateCommand:
@@ -375,6 +438,50 @@ class TestValidateCommand:
             assert "❌ Validation issues found" in result.output
             assert "High < Low" in result.output
 
+    def test_validate_canonical_dataset_with_anomaly_analysis(self):
+        """Validation resolves canonical keys and constructs the anomaly pipeline."""
+        from datetime import timedelta
+
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("data")
+            timestamps = [datetime(2024, 1, 1) + timedelta(days=day) for day in range(30)]
+            closes = [100.0 + day for day in range(30)]
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": timestamps,
+                        "open": closes,
+                        "high": [close + 1.0 for close in closes],
+                        "low": [close - 1.0 for close in closes],
+                        "close": closes,
+                        "volume": [1_000.0 + day for day in range(30)],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(
+                cli,
+                [
+                    "validate",
+                    "--symbol",
+                    "AAPL",
+                    "--storage-path",
+                    "data",
+                    "--anomalies",
+                    "--severity",
+                    "critical",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Validating AAPL" in result.output
+        assert "Running anomaly detection" in result.output
+
 
 class TestStatusCommand:
     """Test the status command."""
@@ -386,78 +493,72 @@ class TestStatusCommand:
         assert result.exit_code == 0
         assert "Show system overview and health status" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_status_overview(self, mock_storage_class, mock_tracker_class):
-        """Test status overview display."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        # Mock storage list
-        mock_storage.list_keys.return_value = ["BTC", "ETH", "EURUSD"]
-
-        # Mock metadata summary
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 3,
-            "healthy": 2,
-            "stale": 1,
-            "error": 0,
-            "total_rows": 10000,
-            "total_updates": 50,
-            "by_asset_class": {"crypto": 2, "forex": 1},
-        }
+    def test_status_overview_reads_committed_metadata(self):
+        """Status reports data written through the public storage API."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["status"])
+        with runner.isolated_filesystem():
+            storage = create_storage("data")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime.now()],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(cli, ["status", "--storage-path", "data"])
 
         assert result.exit_code == 0
         assert "System Status" in result.output
-        # Table format uses │ separator instead of :
-        assert "Total Datasets" in result.output and "3" in result.output
-        assert "Healthy" in result.output and "2" in result.output
-        assert "Stale" in result.output and "1" in result.output
-        assert "Total Rows" in result.output and "10,000" in result.output
+        assert "Total Datasets" in result.output and "1" in result.output
+        assert "Healthy" in result.output and "1" in result.output
+        assert "Total Rows" in result.output and "1" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
-    def test_status_detailed(self, mock_storage_class, mock_tracker_class):
-        """Test detailed status with --detailed flag."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-
-        mock_storage.list_keys.return_value = ["BTC"]
-
-        # Mock detailed metadata
-        from ml4t.data.storage.metadata_tracker import DatasetMetadata
-
-        mock_metadata = DatasetMetadata(
-            symbol="BTC",
-            asset_class="crypto",
-            frequency="daily",
-            provider="cryptocompare",
-            first_update=datetime(2024, 1, 1),
-            last_update=datetime(2024, 1, 10),
-            total_rows=10,
-            date_range_start=datetime(2024, 1, 1),
-            date_range_end=datetime(2024, 1, 10),
-            update_count=1,
-            health_status="healthy",
-        )
-        mock_tracker.get_metadata.return_value = mock_metadata
+    def test_status_detailed_reads_configured_flat_store_and_marks_stale(self):
+        """Detailed status honors storage configuration and observation age."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["status", "--detailed"])
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+            result = runner.invoke(
+                cli,
+                ["status", "--config", "config.yaml", "--detailed", "--stale-days", "7"],
+            )
 
-        assert result.exit_code == 0
-        assert "Dataset: BTC" in result.output
-        assert "Provider: cryptocompare" in result.output
-        assert "Rows: 10" in result.output
-        assert "Status: healthy" in result.output
+        assert result.exit_code == 0, result.output
+        assert "Dataset Status" in result.output
+        assert "AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "Stale" in result.output
 
 
 class TestBatchOperations:
@@ -469,10 +570,7 @@ class TestBatchOperations:
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = {
-            "BTC": mock_df,
-            "ETH": mock_df,
-        }
+        mock_dm.fetch.return_value = mock_df
 
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -497,23 +595,28 @@ class TestBatchOperations:
             assert "Fetching 2 symbols from file" in result.output
 
     @patch("ml4t.data.cli.core.DataManager")
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_fetch_with_config(self, mock_dm_class):
         """Test fetching with configuration file."""
         mock_dm = MagicMock()
         mock_dm_class.return_value = mock_dm
         mock_df = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
         mock_dm.fetch.return_value = mock_df
+        mock_dm.router.get_provider.return_value = "cryptocompare"
 
         runner = CliRunner()
         with runner.isolated_filesystem():
             # Create config file
             config = {
-                "symbols": ["BTC", "ETH"],
-                "start": "2024-01-01",
-                "end": "2024-01-31",
-                "frequency": "hourly",
-                "provider": "cryptocompare",
+                "datasets": [
+                    {
+                        "name": "crypto",
+                        "symbols": ["BTC", "ETH"],
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-01-31",
+                        "frequency": "hourly",
+                        "provider": "cryptocompare",
+                    }
+                ]
             }
             with open("config.json", "w") as f:
                 json.dump(config, f)
@@ -529,6 +632,16 @@ class TestBatchOperations:
 
             assert result.exit_code == 0
             assert "Loading configuration from config.json" in result.output
+            assert mock_dm.fetch.call_count == 2
+            for symbol in ["BTC", "ETH"]:
+                mock_dm.fetch.assert_any_call(
+                    symbol,
+                    "2024-01-01",
+                    "2024-01-31",
+                    frequency="hourly",
+                    provider="cryptocompare",
+                )
+            mock_dm_class.assert_called_once_with(config_path="config.json")
 
 
 class TestProgressAndOutput:
@@ -541,10 +654,7 @@ class TestProgressAndOutput:
         mock_dm_class.return_value = mock_dm
 
         # Simulate multiple symbols for batch operation
-        mock_results = {}
-        for symbol in ["BTC", "ETH", "SOL", "ADA", "DOT"]:
-            mock_results[symbol] = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
-        mock_dm.fetch_batch.return_value = mock_results
+        mock_dm.fetch.return_value = pl.DataFrame({"timestamp": [datetime(2024, 1, 1)]})
 
         runner = CliRunner()
         result = runner.invoke(
@@ -572,43 +682,38 @@ class TestProgressAndOutput:
         assert result.exit_code == 0
         # Progress indicators should be in output
         assert "Fetching 5 symbols" in result.output
+        assert mock_dm.fetch.call_count == 5
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
-    def test_quiet_mode(self):
+    @patch("ml4t.data.cli.core.HiveStorage")
+    def test_quiet_mode(self, mock_storage_class):
         """Test quiet mode suppresses output."""
+        mock_storage_class.return_value.list_keys.return_value = []
         runner = CliRunner()
-        result = runner.invoke(cli, ["status", "--quiet"])
+        result = runner.invoke(cli, ["--quiet", "status"])
         assert result.exit_code == 0
-        # Only essential output, no decorative elements
-        assert "═" not in result.output  # No box drawing
+        assert result.output == ""
 
-    @pytest.mark.skip(reason="Verbose output format is implementation-specific")
-    def test_verbose_mode(self):
+    @patch("ml4t.data.cli.core.HiveStorage")
+    def test_verbose_mode(self, mock_storage_class):
         """Test verbose mode shows detailed information."""
+        mock_storage_class.return_value.list_keys.return_value = []
         runner = CliRunner()
         result = runner.invoke(cli, ["--verbose", "status"])
         assert result.exit_code == 0
-        # Should show debug information
-        assert "Configuration" in result.output or "Debug" in result.output
+        assert "Storage path: data" in result.output
 
 
 class TestShellCompletion:
     """Test shell completion support."""
 
-    @pytest.mark.skip(reason="CLI mock/config issues in PRE-RELEASE")
     def test_completion_installation(self):
         """Test shell completion installation command."""
         runner = CliRunner()
 
         # Test bash completion
-        result = runner.invoke(cli, ["--show-completion", "bash"])
+        result = runner.invoke(cli, ["show-completion", "bash"])
         assert result.exit_code == 0
-        assert "_QDATA_COMPLETE" in result.output
-
-    def test_completion_symbols(self):
-        """Test symbol completion suggestions."""
-        # This would require more complex setup with click's completion context
-        # Marking as a placeholder for manual testing
+        assert "_ML4T_DATA_COMPLETE" in result.output
 
 
 class TestErrorHandling:
@@ -648,8 +753,8 @@ class TestErrorHandling:
         assert "Error" in result.output
         assert "API key not configured" in result.output
 
-    def test_invalid_strategy(self):
-        """Test error for invalid update strategy."""
+    def test_invalid_frequency(self):
+        """Test error for an unsupported update frequency."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
@@ -657,13 +762,13 @@ class TestErrorHandling:
                 "update",
                 "--symbol",
                 "BTC",
-                "--strategy",
-                "invalid_strategy",
+                "--frequency",
+                "monthly",
             ],
         )
 
         assert result.exit_code != 0
-        assert "Invalid value for '--strategy'" in result.output
+        assert "Invalid value for '--frequency'" in result.output
 
 
 class TestVersionCommand:
@@ -803,6 +908,49 @@ class TestExportCommand:
             assert result.exit_code == 0
             assert "Exported 1 rows" in result.output
 
+    def test_export_reads_configured_flat_store(self):
+        """Export resolves canonical keys in a configured flat store."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+            result = runner.invoke(
+                cli,
+                [
+                    "export",
+                    "--symbol",
+                    "AAPL",
+                    "--output",
+                    "aapl.csv",
+                    "--config",
+                    "config.yaml",
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert Path("aapl.csv").is_file()
+            assert len(pl.read_csv("aapl.csv")) == 1
+
     @patch("ml4t.data.cli.core.HiveStorage")
     def test_export_empty_data(self, mock_storage_class):
         """Test export with empty data."""
@@ -818,7 +966,7 @@ class TestExportCommand:
                 cli, ["export", "--symbol", "BTC", "--output", "data.csv", "--format", "csv"]
             )
 
-            # Should indicate no data found
+            assert result.exit_code != 0
             assert "No data found" in result.output
 
 
@@ -832,21 +980,43 @@ class TestInfoCommand:
         assert result.exit_code == 0
         assert "Show information about stored data" in result.output
 
-    @patch("ml4t.data.cli.core.MetadataTracker")
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_info_no_data(self, mock_storage_class, mock_tracker_class):
+    def test_info_no_data(self):
         """Test info when no data exists."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.list_updates.return_value = []
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["info", "--symbol", "UNKNOWN", "--storage-path", "data"])
+
+            assert result.exit_code != 0
+            assert "No data found" in result.output
+
+    def test_info_reads_canonical_metadata_and_key(self):
+        """Info reads data and metadata written by DataManager."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
 
         runner = CliRunner()
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["info", "--symbol", "UNKNOWN"])
+            storage = create_storage("data")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            result = runner.invoke(cli, ["info", "--symbol", "AAPL", "--storage-path", "data"])
 
-            assert "No data found" in result.output
+        assert result.exit_code == 0, result.output
+        assert "Data Info: AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "daily" in result.output
 
 
 class TestHelperFunctions:
@@ -1006,6 +1176,31 @@ class TestFetchCommandExtended:
         assert "No symbols specified" in result.output or "Error" in result.output
 
     @patch("ml4t.data.cli.core.DataManager")
+    def test_fetch_materializes_configured_pandas_output(self, mock_dm_class):
+        """The CLI renders the supported pandas DataManager output format."""
+        mock_dm = MagicMock()
+        mock_dm.fetch.return_value = pd.DataFrame(
+            {"timestamp": [datetime(2024, 1, 1)], "close": [100.0]}
+        )
+        mock_dm_class.return_value = mock_dm
+
+        result = CliRunner().invoke(
+            cli,
+            [
+                "fetch",
+                "--symbol",
+                "AAPL",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-01",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Fetched 1 rows" in result.output
+
+    @patch("ml4t.data.cli.core.DataManager")
     def test_fetch_with_frequency(self, mock_dm_class):
         """Test fetch with different frequencies."""
         mock_dm = MagicMock()
@@ -1071,14 +1266,14 @@ class TestFetchCommandExtended:
 class TestUpdateCommandExtended:
     """Extended update command tests."""
 
-    def test_update_strategy_choices(self):
-        """Test all update strategy options are available."""
+    def test_update_contract_options(self):
+        """Test the update command exposes the DataManager update contract."""
         runner = CliRunner()
         result = runner.invoke(cli, ["update", "--help"])
-        assert "incremental" in result.output
-        assert "append_only" in result.output
-        assert "full_refresh" in result.output
-        assert "backfill" in result.output
+        assert "--lookback-days" in result.output
+        assert "--fill-gaps" in result.output
+        assert "--initial-load-days" in result.output
+        assert "--asset-class" in result.output
 
 
 class TestValidateCommandExtended:
@@ -1223,113 +1418,6 @@ class TestShowCompletionCommand:
 # =============================================================================
 
 
-class TestHealthCommand:
-    """Test the health command."""
-
-    def test_health_help(self):
-        """Test health command help."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["health", "--help"])
-        assert result.exit_code == 0
-        assert "Check health status" in result.output
-        assert "--storage-path" in result.output
-        assert "--stale-days" in result.output
-        assert "--detailed" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_no_datasets(self, mock_tracker_class):
-        """Test health command with no datasets."""
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {"total_datasets": 0}
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", "."])
-
-        assert result.exit_code == 0
-        assert "No datasets found" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_with_datasets(self, mock_tracker_class):
-        """Test health command with datasets."""
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 5,
-            "total_updates": 10,
-            "unique_providers": 2,
-            "unique_symbols": 5,
-        }
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", "."])
-
-        assert result.exit_code == 0
-        assert "5" in result.output  # total_datasets
-        assert "Dataset Health Summary" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_detailed(self, mock_tracker_class):
-        """Test health command with detailed flag."""
-        from datetime import datetime, timedelta
-
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 1,
-            "total_updates": 1,
-            "unique_providers": 1,
-            "unique_symbols": 1,
-        }
-
-        # Create mock update record
-        mock_update = MagicMock()
-        mock_update.symbol = "AAPL"
-        mock_update.provider = "yahoo"
-        mock_update.timestamp = datetime.now() - timedelta(days=2)
-        mock_tracker.list_updates.return_value = [mock_update]
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["health", "--storage-path", ".", "--detailed"])
-
-        assert result.exit_code == 0
-        assert "Per-Symbol Status" in result.output
-        assert "AAPL" in result.output
-
-    @patch("ml4t.data.cli.config.MetadataTracker")
-    def test_health_stale_detection(self, mock_tracker_class):
-        """Test health command detects stale data."""
-        from datetime import datetime, timedelta
-
-        mock_tracker = MagicMock()
-        mock_tracker_class.return_value = mock_tracker
-        mock_tracker.get_summary.return_value = {
-            "total_datasets": 1,
-            "total_updates": 1,
-            "unique_providers": 1,
-            "unique_symbols": 1,
-        }
-
-        # Create stale update record
-        mock_update = MagicMock()
-        mock_update.symbol = "AAPL"
-        mock_update.provider = "yahoo"
-        mock_update.timestamp = datetime.now() - timedelta(days=30)  # Very stale
-        mock_tracker.list_updates.return_value = [mock_update]
-
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            result = runner.invoke(
-                cli, ["health", "--storage-path", ".", "--detailed", "--stale-days", "7"]
-            )
-
-        assert result.exit_code == 0
-        assert "Stale" in result.output
-
-
 class TestListCommand:
     """Test the list command."""
 
@@ -1340,13 +1428,8 @@ class TestListCommand:
         assert result.exit_code == 0
         assert "List" in result.output
 
-    @patch("ml4t.data.cli.core.HiveStorage")
-    def test_list_no_data(self, mock_storage_class):
+    def test_list_no_data(self):
         """Test list command with no data."""
-        mock_storage = MagicMock()
-        mock_storage_class.return_value = mock_storage
-        mock_storage.list_metadata.return_value = []
-
         runner = CliRunner()
         with runner.isolated_filesystem():
             # Create a minimal config file
@@ -1361,6 +1444,94 @@ datasets: {}
 
         # Should not crash
         assert result.exit_code == 0
+
+    def test_list_reads_configured_flat_store(self):
+        """The CLI lists a dataset from a config-selected flat store."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage = create_storage("flat-data", strategy="flat")
+            DataManager(storage=storage, enable_validation=False).import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+            Path("config.yaml").write_text(
+                "storage:\n  path: flat-data\n  strategy: flat\n",
+                encoding="utf-8",
+            )
+
+            result = runner.invoke(cli, ["list", "--config", "config.yaml"])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "Total: 1 dataset(s)" in result.output
+
+    def test_list_reads_committed_dataset_metadata(self):
+        """The CLI lists datasets from generation-based storage metadata."""
+        from ml4t.data import DataManager
+        from ml4t.data.storage import create_storage
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            storage_path = Path("data")
+            storage = create_storage(storage_path)
+            manager = DataManager(storage=storage, enable_validation=False)
+            manager.import_data(
+                pl.DataFrame(
+                    {
+                        "timestamp": [datetime(2024, 1, 2)],
+                        "open": [100.0],
+                        "high": [101.0],
+                        "low": [99.0],
+                        "close": [100.5],
+                        "volume": [1_000.0],
+                    }
+                ),
+                symbol="AAPL",
+                provider="yahoo",
+            )
+
+            result = runner.invoke(cli, ["list", "--storage-path", str(storage_path)])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "yahoo" in result.output
+        assert "Total: 1 dataset(s)" in result.output
+
+    @patch("ml4t.data.cli.core.MetadataManager")
+    @patch("ml4t.data.cli.core._build_storage_from_config")
+    def test_list_tolerates_invalid_row_counts(self, build_storage, metadata_manager):
+        """Malformed row counts render a placeholder without hiding valid datasets."""
+        storage = MagicMock()
+        storage.list_keys.return_value = ["equities/daily/AAPL", "equities/daily/MSFT"]
+        build_storage.return_value = (storage, Path("data"))
+        metadata_manager.return_value.get_metadata_for_key.side_effect = [
+            {"symbol": "AAPL", "row_count": None},
+            {"symbol": "MSFT", "row_count": "1000"},
+        ]
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("config.yaml").write_text("storage:\n  path: data\n", encoding="utf-8")
+            result = runner.invoke(cli, ["list", "--config", "config.yaml"])
+
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "MSFT" in result.output
+        assert "1,000" in result.output
+        assert "Total: 2 dataset(s)" in result.output
 
 
 class TestDownloadFuturesCommand:
@@ -1385,9 +1556,12 @@ class TestDownloadFuturesCommand:
         assert result.exit_code != 0
         # Missing required option
 
-    @patch("ml4t.data.futures.FuturesDownloader")
+    @patch("ml4t.data.futures.FuturesDownloader", create=True)
+    @patch("ml4t.data.futures.require_databento")
     @patch("ml4t.data.futures.load_yaml_config")
-    def test_download_futures_dry_run(self, mock_load_config, mock_downloader_class):
+    def test_download_futures_dry_run(
+        self, mock_load_config, mock_require_databento, mock_downloader_class
+    ):
         """Test download-futures dry run."""
         # Setup mocks
         mock_config = MagicMock()
@@ -1414,6 +1588,7 @@ class TestDownloadFuturesCommand:
             result = runner.invoke(cli, ["download-futures", "-c", "config.yaml", "--dry-run"])
 
         assert result.exit_code == 0
+        mock_require_databento.assert_called_once_with("FuturesDownloader")
         assert "Dry run" in result.output
         assert "$15.50" in result.output
 
@@ -1480,18 +1655,59 @@ class TestDownloadCotCommand:
         assert result.exit_code == 0
         # Should show some product codes or product listing
 
-
-class TestServerCommand:
-    """Test the server command."""
-
-    def test_server_help(self):
-        """Test server command help."""
+    def test_download_cot_revalidates_config_overrides(self):
+        """Reject CLI year overrides that reverse a configured range."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["server", "--help"])
-        assert result.exit_code == 0
-        assert "Start" in result.output or "API server" in result.output
-        assert "--host" in result.output
-        assert "--port" in result.output
+        with runner.isolated_filesystem():
+            config = Path("cot.yaml")
+            config.write_text("products: [ES]\nstart_year: 2024\nend_year: 2025\n")
+            result = runner.invoke(
+                cli,
+                ["download-cot", "--config", str(config), "--end-year", "2023", "--dry-run"],
+            )
+
+        assert result.exit_code != 0
+        assert "end_year must be greater than or equal to start_year" in result.output
+
+
+@pytest.mark.parametrize(
+    "command_args",
+    [
+        ["update", "--symbol", "AAPL"],
+        ["validate", "--symbol", "AAPL"],
+        ["status"],
+        ["export", "--symbol", "AAPL", "--output", "aapl.csv"],
+        ["info", "--symbol", "AAPL"],
+        ["list"],
+    ],
+)
+def test_storage_commands_report_mutually_exclusive_options_as_usage_errors(command_args):
+    """Storage option conflicts retain Click's usage output and exit status."""
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        Path("config.yaml").write_text("storage:\n  base_path: data\n")
+        Path("data").mkdir()
+        result = runner.invoke(
+            cli,
+            [*command_args, "--config", "config.yaml", "--storage-path", "data"],
+        )
+
+    assert result.exit_code == 2
+    assert "Usage:" in result.output
+    assert "Use either --config or --storage-path" in result.output
+
+
+def test_unimplemented_server_command_is_not_advertised():
+    """The stable CLI must not expose a command backed by a missing module."""
+    runner = CliRunner()
+
+    help_result = runner.invoke(cli, ["--help"])
+    server_result = runner.invoke(cli, ["server"])
+
+    assert help_result.exit_code == 0
+    assert "server" not in help_result.output
+    assert server_result.exit_code == 2
+    assert "No such command 'server'" in server_result.output
 
 
 class TestUpdateAllCommand:

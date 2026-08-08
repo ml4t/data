@@ -6,16 +6,19 @@ pattern analysis. Both can be run from code or through the CLI.
 
 ## OHLCV Validation
 
-The `OHLCVValidator` performs eight configurable checks on any DataFrame with
-standard OHLCV columns (`timestamp`, `open`, `high`, `low`, `close`, `volume`).
+The `OHLCVValidator` performs eight configurable checks and two structural checks on
+any DataFrame with standard OHLCV columns (`timestamp`, `open`, `high`, `low`, `close`,
+`volume`). Structural numeric-type and finite-value checks cannot be disabled.
 
 ### Checks Performed
 
 | Check | Severity | What it catches |
 |-------|----------|-----------------|
+| Numeric columns | CRITICAL | Non-numeric OHLCV columns |
+| Finite values | ERROR | NaN or positive or negative infinity |
 | Null values | ERROR | Missing prices or volume in any OHLCV column |
 | Price consistency | ERROR | `high < low`, `high < open`, `low > close`, etc. |
-| Negative prices | CRITICAL | Any OHLC value below zero |
+| Negative prices | ERROR or WARNING | Any OHLC value below zero, depending on policy |
 | Negative volume | ERROR | Volume below zero |
 | Duplicate timestamps | ERROR | Multiple rows with the same timestamp |
 | Chronological order | ERROR | Timestamps not sorted ascending |
@@ -68,7 +71,9 @@ strict_rules = ValidationRulePresets.strict_rules()
 ```
 
 Available presets: `equity_rules()`, `crypto_rules()`, `forex_rules()`,
-`commodity_rules()`, `strict_rules()`, `relaxed_rules()`.
+`commodity_rules()`, `futures_rules()`, `strict_rules()`, `relaxed_rules()`.
+Commodity and futures presets report negative prices as warnings. The
+`negative_price_policy` setting accepts `"forbid"`, `"warn"`, or `"allow"`.
 
 ### Persistent Rule Sets
 

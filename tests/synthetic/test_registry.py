@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
 from ml4t.data.synthetic.registry import SyntheticRegistry
 
 # =============================================================================
@@ -122,6 +123,19 @@ def nonexistent_registry(tmp_path: Path) -> SyntheticRegistry:
 
 class TestSyntheticRegistryInit:
     """Test SyntheticRegistry initialization."""
+
+    def test_init_without_data_dir_uses_public_data_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Default construction does not depend on the private book-code package."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
+        monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
+        monkeypatch.delenv("QLDM_DATA_ROOT", raising=False)
+
+        registry = SyntheticRegistry()
+
+        assert registry.checkpoints_dir == tmp_path / "data" / "synthetic" / "checkpoints"
 
     def test_init_with_custom_data_dir(self, tmp_path: Path):
         """Test initialization with custom data directory."""
@@ -323,6 +337,45 @@ class TestRegistryMetadata:
         # Check cache was used (same object)
         assert len(registry._cache) == 1
 
+    def test_get_metadata_rejects_oversized_file(
+        self,
+        registry: SyntheticRegistry,
+        mock_checkpoint_dir: Path,
+        monkeypatch,
+    ):
+        metadata_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "metadata.json"
+        )
+        monkeypatch.setattr(LearnedSyntheticProvider, "MAX_METADATA_FILE_BYTES", 8)
+
+        with pytest.raises(ValueError, match="Metadata file exceeds"):
+            registry.get_metadata("timegan", "etf_returns")
+
+        assert metadata_file.stat().st_size > 8
+
+    def test_get_metadata_rejects_non_mapping_file(
+        self,
+        registry: SyntheticRegistry,
+        mock_checkpoint_dir: Path,
+    ):
+        metadata_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "metadata.json"
+        )
+        metadata_file.write_text("[]", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="JSON object"):
+            registry.get_metadata("timegan", "etf_returns")
+
     def test_get_metadata_different_experiments_cached_separately(
         self, registry: SyntheticRegistry
     ):
@@ -401,6 +454,25 @@ class TestRegistrySamples:
         with pytest.raises(FileNotFoundError, match="Samples file not found"):
             registry.load_samples("no_samples", "experiment")
 
+    def test_load_samples_rejects_unsupported_dtype(self, mock_checkpoint_dir: Path):
+        """Registry loading uses the same safe tensor contract as the provider."""
+        samples_file = (
+            mock_checkpoint_dir
+            / "synthetic"
+            / "checkpoints"
+            / "timegan"
+            / "etf_returns"
+            / "samples.npy"
+        )
+        np.save(samples_file, np.ones((2, 3, 1), dtype=np.int64))
+        registry = SyntheticRegistry(
+            data_dir=mock_checkpoint_dir,
+            checkpoints_subdir="synthetic/checkpoints",
+        )
+
+        with pytest.raises(ValueError, match="dtype"):
+            registry.load_samples("timegan", "etf_returns")
+
 
 # =============================================================================
 # TestRegistryProvider - Provider Creation
@@ -424,6 +496,22 @@ class TestRegistryProvider:
         """Test getting provider with specific seed."""
         provider = registry.get_provider("timegan", "etf_returns", seed=42)
         assert provider.seed == 42
+
+    def test_get_provider_rejects_incomplete_artifact(self, mock_checkpoint_dir: Path):
+        """Provider creation names the missing safe sample artifact."""
+        artifact = mock_checkpoint_dir / "synthetic" / "checkpoints" / "incomplete" / "experiment"
+        artifact.mkdir(parents=True)
+        (artifact / "metadata.json").write_text(
+            json.dumps({"generator": {"name": "incomplete"}}),
+            encoding="utf-8",
+        )
+        registry = SyntheticRegistry(
+            data_dir=mock_checkpoint_dir,
+            checkpoints_subdir="synthetic/checkpoints",
+        )
+
+        with pytest.raises(FileNotFoundError, match="samples.npy"):
+            registry.get_provider("incomplete", "experiment")
 
     def test_get_provider_default_experiment(self, registry: SyntheticRegistry):
         """Test getting provider with default experiment."""

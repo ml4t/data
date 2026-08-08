@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import structlog
 
 from ml4t.data.anomaly.base import AnomalyDetector, AnomalyReport
-from ml4t.data.anomaly.config import AnomalyConfig
+from ml4t.data.anomaly.config import (
+    AnomalyConfig,
+    PriceStalenessConfig,
+    ReturnOutlierConfig,
+    VolumeSpikeConfig,
+)
 from ml4t.data.anomaly.detectors import (
     PriceStalenessDetector,
     ReturnOutlierDetector,
@@ -38,15 +44,14 @@ class AnomalyManager:
         self.detectors: list[AnomalyDetector] = []
 
         if self.config.enabled:
-            # Initialize built-in detectors
-            if self.config.return_outliers.enabled:
-                self.detectors.append(ReturnOutlierDetector(self.config.return_outliers))
-
-            if self.config.volume_spikes.enabled:
-                self.detectors.append(VolumeSpikeDetector(self.config.volume_spikes))
-
-            if self.config.price_staleness.enabled:
-                self.detectors.append(PriceStalenessDetector(self.config.price_staleness))
+            # All built-ins remain available so per-symbol overrides can enable them.
+            self.detectors.extend(
+                [
+                    ReturnOutlierDetector(self.config.return_outliers),
+                    VolumeSpikeDetector(self.config.volume_spikes),
+                    PriceStalenessDetector(self.config.price_staleness),
+                ]
+            )
 
             # Add custom detectors
             if custom_detectors:
@@ -89,29 +94,71 @@ class AnomalyManager:
                 total_rows=len(df),
             )
 
+        timestamp_dtype = df.schema["timestamp"]
+        try:
+            if timestamp_dtype == pl.Date:
+                df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("us")))
+            elif timestamp_dtype == pl.String:
+                df = df.with_columns(pl.col("timestamp").str.to_datetime(strict=True))
+            elif not isinstance(timestamp_dtype, pl.Datetime):
+                raise TypeError(f"unsupported timestamp dtype {timestamp_dtype}")
+        except (pl.exceptions.PolarsError, TypeError) as exc:
+            logger.warning(
+                "Cannot analyze data with invalid timestamps",
+                symbol=symbol,
+                error=str(exc),
+            )
+            return AnomalyReport(
+                symbol=symbol,
+                start_date=datetime.now(),
+                end_date=datetime.now(),
+                total_rows=len(df),
+            )
+
         # Sort by timestamp
         df = df.sort("timestamp")
+
+        start_date = df["timestamp"].min()
+        end_date = df["timestamp"].max()
+        if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
+            logger.warning("Cannot analyze data without valid timestamps", symbol=symbol)
+            return AnomalyReport(
+                symbol=symbol,
+                start_date=datetime.now(),
+                end_date=datetime.now(),
+                total_rows=len(df),
+            )
 
         # Create report
         report = AnomalyReport(
             symbol=symbol,
-            start_date=df["timestamp"].min(),
-            end_date=df["timestamp"].max(),
+            start_date=start_date,
+            end_date=end_date,
             total_rows=len(df),
         )
 
         # Apply each detector
         for detector in self.detectors:
-            if not detector.is_enabled():
-                continue
-
             try:
                 # Get detector config with overrides
-                if hasattr(detector, "config"):
-                    detector_config = self.config.get_detector_config(
-                        detector.name, asset_class=asset_class, symbol=symbol
-                    )
-                    detector.config = detector_config
+                detector_config = self.config.get_detector_config(
+                    detector.name, asset_class=asset_class, symbol=symbol
+                )
+                if isinstance(detector, ReturnOutlierDetector):
+                    config = ReturnOutlierConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+                elif isinstance(detector, VolumeSpikeDetector):
+                    config = VolumeSpikeConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+                elif isinstance(detector, PriceStalenessDetector):
+                    config = PriceStalenessConfig(**detector_config.model_dump())
+                    detector.config = config
+                    detector.enabled = config.enabled
+
+                if not detector.is_enabled():
+                    continue
 
                 # Detect anomalies
                 anomalies = detector.detect(df, symbol)
@@ -225,7 +272,7 @@ class AnomalyManager:
 
         return filtered
 
-    def get_statistics(self, report: AnomalyReport) -> dict:
+    def get_statistics(self, report: AnomalyReport) -> dict[str, Any]:
         """
         Get statistics from anomaly report.
 

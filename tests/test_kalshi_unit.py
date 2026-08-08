@@ -180,6 +180,7 @@ class TestKalshiDataTransform:
             "close",
             "volume",
         ]
+        assert df.schema["timestamp"] == pl.Datetime("us", "UTC")
 
         # Check row count
         assert len(df) == 3

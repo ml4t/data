@@ -9,7 +9,6 @@ storage:
   strategy: hive
   base_path: ~/ml4t-data/economic
   compression: zstd
-  enable_locking: true
   metadata_tracking: true
 
 # FRED provider configuration
@@ -21,11 +20,6 @@ providers:
     rate_limit:
       requests_per_second: 1.5  # 90 req/min (FRED allows 120)
       burst_size: 10
-      retry_max_attempts: 3
-      retry_backoff_factor: 2.0
-    timeout: 30
-    cache_enabled: true
-    cache_ttl: 3600  # 1 hour cache
 
 # Symbol universes for economic data
 # FRED series IDs: https://fred.stlouisfed.org/
@@ -153,9 +147,8 @@ workflows:
     enabled: true
     on_error: continue
     schedule:
-      type: MONTHLY
-      day_of_month: 15  # Mid-month to catch BLS releases
-      time: "09:00"
+      type: CRON
+      cron: "0 9 15 * *"
       timezone: "US/Eastern"
 
   # Quarterly GDP update
@@ -166,10 +159,8 @@ workflows:
     enabled: true
     on_error: continue
     schedule:
-      type: QUARTERLY
-      month_of_quarter: 2  # 2nd month (expect advance estimate)
-      day_of_month: 1
-      time: "09:00"
+      type: CRON
+      cron: "0 9 1 2,5,8,11 *"
       timezone: "US/Eastern"
 
 # Global settings

@@ -1,6 +1,6 @@
 """Tests for sessions module (assigner and completer)."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 import polars as pl
@@ -74,12 +74,7 @@ class TestSessionAssigner:
         from ml4t.data.sessions.assigner import SessionAssigner
 
         assigner = SessionAssigner("NYSE")
-        df = pl.DataFrame(
-            {
-                "timestamp": pl.Series([], dtype=pl.Datetime("ns", "UTC")),
-                "close": pl.Series([], dtype=pl.Float64),
-            }
-        )
+        df = pl.DataFrame({"timestamp": [], "close": []})
 
         result = assigner.assign_sessions(df)
         assert "session_date" in result.columns
@@ -107,6 +102,54 @@ class TestSessionAssigner:
         assert "session_date" in result.columns
         assert len(result) == 3
 
+    def test_assigns_daily_period_labels_by_session_date(self):
+        """Midnight daily labels map to the exchange session on that date."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 8, tzinfo=UTC),
+                    datetime(2024, 1, 9, tzinfo=UTC),
+                    datetime(2024, 1, 6, tzinfo=UTC),
+                ],
+                "close": [100.0, 101.0, 99.0],
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [date(2024, 1, 8), date(2024, 1, 9), None]
+
+    def test_midnight_can_be_forced_to_intraday_containment(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)]})
+
+        result = assigner.assign_sessions(df, bar_frequency="intraday")
+
+        assert result["session_date"].to_list() == [None]
+
+    def test_assigns_nanosecond_provider_timestamps(self):
+        """Provider nanosecond timestamps match the calendar join unit."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2024, 1, 8, 14, 30, tzinfo=UTC)],
+                    dtype=pl.Datetime("ns", "UTC"),
+                )
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [date(2024, 1, 8)]
+
     def test_assign_sessions_with_explicit_dates(self):
         """Test session assignment with explicit start/end dates."""
         from ml4t.data.sessions.assigner import SessionAssigner
@@ -124,6 +167,133 @@ class TestSessionAssigner:
 
         result = assigner.assign_sessions(df, start_date="2024-01-01", end_date="2024-01-05")
         assert "session_date" in result.columns
+
+    def test_closed_market_timestamps_are_not_assigned(self):
+        """Weekend, holiday, premarket, and close timestamps remain outside a session."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 6, 17, tzinfo=UTC),  # Saturday
+                    datetime(2024, 7, 4, 15, tzinfo=UTC),  # Independence Day
+                    datetime(2024, 1, 8, 14, 29, tzinfo=UTC),  # Before open
+                    datetime(2024, 1, 8, 14, 30, tzinfo=UTC),  # Exact open
+                    datetime(2024, 1, 8, 21, 0, tzinfo=UTC),  # Exact close
+                ]
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [None, None, None, date(2024, 1, 8), None]
+
+    def test_strict_outside_session_policy_rejects_closed_timestamp(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame({"timestamp": [datetime(2024, 1, 6, 17, tzinfo=UTC)]})
+
+        with pytest.raises(ValueError, match="outside.*session"):
+            assigner.assign_sessions(df, outside_session="raise")
+
+    def test_null_timestamp_is_outside_session(self):
+        """Null timestamps remain unassigned instead of breaking the as-of join."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series(
+                    [datetime(2026, 1, 2, 14, 30, tzinfo=UTC), None],
+                    dtype=pl.Datetime("us", "UTC"),
+                ),
+                "value": [1, 2],
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result.get_column("session_date").to_list() == [date(2026, 1, 2), None]
+
+    def test_all_null_timestamps_are_rejected(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame({"timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC"))})
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            assigner.assign_sessions(df)
+
+    def test_assignment_preserves_columns_with_calendar_names(self):
+        """Calendar implementation details do not overwrite caller-owned columns."""
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        timestamp = datetime(2026, 1, 2, 14, 30, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "timestamp": [timestamp],
+                "session_start": ["caller value"],
+                "break_start": ["caller value"],
+                "session_date": [date(2000, 1, 1)],
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result.get_column("session_start").to_list() == ["caller value"]
+        assert result.get_column("break_start").to_list() == ["caller value"]
+        assert result.get_column("session_date").to_list() == [date(2026, 1, 2)]
+
+    def test_early_close_and_dst_boundaries_are_half_open(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 7, 3, 16, 59, tzinfo=UTC),
+                    datetime(2024, 7, 3, 17, 0, tzinfo=UTC),
+                    datetime(2024, 3, 11, 13, 29, tzinfo=UTC),
+                    datetime(2024, 3, 11, 13, 30, tzinfo=UTC),
+                ]
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [
+            date(2024, 7, 3),
+            None,
+            None,
+            date(2024, 3, 11),
+        ]
+
+    def test_calendar_break_is_outside_session(self):
+        from ml4t.data.sessions.assigner import SessionAssigner
+
+        assigner = SessionAssigner("JPX")
+        df = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 4, 2, 29, tzinfo=UTC),
+                    datetime(2024, 1, 4, 2, 30, tzinfo=UTC),
+                    datetime(2024, 1, 4, 3, 29, tzinfo=UTC),
+                    datetime(2024, 1, 4, 3, 30, tzinfo=UTC),
+                ]
+            }
+        )
+
+        result = assigner.assign_sessions(df)
+
+        assert result["session_date"].to_list() == [
+            date(2024, 1, 4),
+            None,
+            None,
+            date(2024, 1, 4),
+        ]
 
     def test_exchange_calendars_mapping(self):
         """Test that EXCHANGE_CALENDARS contains expected exchanges."""
@@ -167,15 +337,19 @@ class TestSessionCompleter:
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
-        df = pl.DataFrame(
-            {
-                "timestamp": pl.Series([], dtype=pl.Datetime("ns", "UTC")),
-                "close": pl.Series([], dtype=pl.Float64),
-            }
-        )
+        df = pl.DataFrame({"timestamp": [], "close": []})
 
         result = completer.complete_sessions(df)
         assert len(result) == 0
+
+    def test_all_null_timestamps_are_rejected(self):
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        df = pl.DataFrame({"timestamp": pl.Series([None], dtype=pl.Datetime("us", "UTC"))})
+
+        with pytest.raises(TypeError, match="non-null Datetime"):
+            completer.complete_sessions(df)
 
     def test_complete_sessions_with_data(self):
         """Test session completion with real data."""
@@ -202,6 +376,149 @@ class TestSessionCompleter:
         assert "session_date" in result.columns
         # Should have filled in gaps
         assert len(result) >= len(df)
+
+    def test_explicit_half_open_range_is_clipped_exactly(self):
+        """Completion returns only minutes inside the requested half-open interval."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        start = datetime(2026, 1, 2, 14, 30, tzinfo=UTC)
+        end = datetime(2026, 1, 2, 21, 0, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "timestamp": [start],
+                "open": [100.0],
+                "high": [110.0],
+                "low": [90.0],
+                "close": [105.0],
+                "volume": [1000.0],
+            }
+        )
+
+        result = completer.complete_sessions(df, start_date=start, end_date=end)
+
+        assert result.height == 390
+        assert result["timestamp"].min() == start
+        assert result["timestamp"].max() == end - timedelta(minutes=1)
+
+    def test_generated_bar_uses_prior_close_and_is_marked(self):
+        """A generated OHLC bar is a marked prior-close bar."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        start = datetime(2026, 1, 2, 14, 30, tzinfo=UTC)
+        end = datetime(2026, 1, 2, 14, 32, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "timestamp": [start],
+                "open": [100.0],
+                "high": [110.0],
+                "low": [90.0],
+                "close": [105.0],
+                "volume": [1000.0],
+            }
+        )
+
+        result = completer.complete_sessions(df, start_date=start, end_date=end)
+
+        assert result["is_imputed"].to_list() == [False, True]
+        assert result.select("open", "high", "low", "close").row(1) == (
+            105.0,
+            105.0,
+            105.0,
+            105.0,
+        )
+        assert result["volume"].to_list() == [1000.0, 0.0]
+
+    def test_second_session_open_uses_previous_close_and_metadata(self):
+        """A session-opening gap carries the prior close and symbol forward."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        first_close = datetime(2024, 1, 2, 20, 59, tzinfo=UTC)
+        second_observation = datetime(2024, 1, 3, 14, 32, tzinfo=UTC)
+        df = pl.DataFrame(
+            {
+                "timestamp": [first_close, second_observation],
+                "open": [100.0, 102.0],
+                "high": [100.0, 102.0],
+                "low": [100.0, 102.0],
+                "close": [100.0, 102.0],
+                "volume": [1000.0, 1200.0],
+                "symbol": ["AAPL", "AAPL"],
+            }
+        )
+
+        result = completer.complete_sessions(
+            df,
+            start_date=first_close,
+            end_date=second_observation + timedelta(minutes=1),
+        )
+
+        opening_gap = result.filter(
+            pl.col("timestamp").is_between(
+                datetime(2024, 1, 3, 14, 30, tzinfo=UTC),
+                second_observation,
+                closed="left",
+            )
+        )
+        assert opening_gap["close"].to_list() == [100.0, 100.0]
+        assert opening_gap["symbol"].to_list() == ["AAPL", "AAPL"]
+
+    def test_rejects_observations_outside_the_minute_template(self):
+        """Completion never silently replaces unmatched observations."""
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        daily = pl.DataFrame({"timestamp": [datetime(2024, 1, 8, tzinfo=UTC)], "close": [100.0]})
+
+        with pytest.raises(ValueError, match="outside the completion template"):
+            completer.complete_sessions(daily)
+
+    def test_forward_fill_uses_available_price_when_close_is_absent(self):
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        completer = SessionCompleter("NYSE")
+        start = datetime(2024, 1, 8, 14, 30, tzinfo=UTC)
+        df = pl.DataFrame({"timestamp": [start], "open": [100.0]})
+
+        result = completer.complete_sessions(
+            df,
+            start_date=start,
+            end_date=start + timedelta(minutes=2),
+        )
+
+        assert result["open"].to_list() == [100.0, 100.0]
+
+    def test_early_close_and_break_minutes_are_excluded(self):
+        from ml4t.data.sessions.completer import SessionCompleter
+
+        early_close_start = datetime(2024, 7, 3, 13, 30, tzinfo=UTC)
+        nyse = SessionCompleter("NYSE")
+        nyse_result = nyse.complete_sessions(
+            pl.DataFrame({"timestamp": [early_close_start], "close": [100.0]}),
+            start_date=early_close_start,
+            end_date=datetime(2024, 7, 3, 20, 0, tzinfo=UTC),
+        )
+
+        jpx_start = datetime(2024, 1, 4, 0, 0, tzinfo=UTC)
+        jpx = SessionCompleter("JPX")
+        jpx_result = jpx.complete_sessions(
+            pl.DataFrame({"timestamp": [jpx_start], "close": [100.0]}),
+            start_date=jpx_start,
+            end_date=datetime(2024, 1, 4, 6, 0, tzinfo=UTC),
+        )
+
+        assert nyse_result.height == 210
+        assert nyse_result["timestamp"].max() == datetime(2024, 7, 3, 16, 59, tzinfo=UTC)
+        assert jpx_result.height == 300
+        assert not jpx_result.filter(
+            pl.col("timestamp").is_between(
+                datetime(2024, 1, 4, 2, 30, tzinfo=UTC),
+                datetime(2024, 1, 4, 3, 30, tzinfo=UTC),
+                closed="left",
+            )
+        ).height
 
     def test_complete_sessions_fill_methods(self):
         """Test different fill methods."""

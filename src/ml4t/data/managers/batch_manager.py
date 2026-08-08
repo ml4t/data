@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import structlog
 
+from ml4t.data.utils.conversion import pandas_to_polars
+
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
 
@@ -111,8 +113,8 @@ class BatchManager:
                 if not isinstance(df, pl.DataFrame):
                     if hasattr(df, "collect"):
                         df = df.collect()
-                    elif hasattr(df, "to_polars"):
-                        df = pl.from_pandas(df)
+                    elif hasattr(df, "columns"):
+                        df = pandas_to_polars(df)
 
                 # Add symbol column
                 df_with_symbol = MultiAssetSchema.add_symbol_column(df, symbol)
@@ -268,6 +270,7 @@ class BatchManager:
         """
         if not self.storage:
             raise ValueError("Storage not configured")
+        storage = self.storage
 
         if not symbols:
             raise ValueError("symbols list cannot be empty")
@@ -298,10 +301,10 @@ class BatchManager:
             try:
                 key = f"{asset_class}/{frequency}/{symbol}"
 
-                if not self.storage.exists(key):
+                if not storage.exists(key):
                     return (symbol, None, "not_in_storage")
 
-                lazy_df = self.storage.read(key, start_date=start_dt, end_date=end_dt)
+                lazy_df = storage.read(key, start_date=start_dt, end_date=end_dt)
                 df = lazy_df.collect()
 
                 if df.is_empty():

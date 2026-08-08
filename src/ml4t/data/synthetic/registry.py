@@ -23,15 +23,17 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import structlog
 
+from ml4t.data.core.config import resolve_data_root
+
 if TYPE_CHECKING:
     from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+    from ml4t.data.synthetic.ohlcv_utils import CalendarMode
 
 logger = structlog.get_logger()
 
@@ -56,7 +58,7 @@ class SyntheticRegistry:
     Parameters
     ----------
     data_dir : Path, optional
-        Root data directory. If None, uses DATA_DIR from ml4t_code.
+        Root data directory. If None, uses the configured ML4T data root.
     checkpoints_subdir : str, default="synthetic/checkpoints"
         Subdirectory containing checkpoints relative to data_dir.
 
@@ -78,10 +80,7 @@ class SyntheticRegistry:
     ) -> None:
         """Initialize the registry."""
         if data_dir is None:
-            # Import here to avoid circular imports
-            from ml4t_code import DATA_DIR  # type: ignore[import-not-found]
-
-            data_dir = DATA_DIR
+            data_dir = resolve_data_root()
 
         self._data_dir = Path(data_dir)
         self._checkpoints_dir = self._data_dir / checkpoints_subdir
@@ -233,8 +232,9 @@ class SyntheticRegistry:
             return self._cache[cache_key]
 
         metadata_file = checkpoint_path / "metadata.json"
-        with open(metadata_file) as f:
-            metadata = json.load(f)
+        from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+
+        metadata = LearnedSyntheticProvider._load_metadata_file(metadata_file)
 
         self._cache[cache_key] = metadata
         return metadata
@@ -273,10 +273,13 @@ class SyntheticRegistry:
                 "The checkpoint may not have pre-generated samples."
             )
 
-        samples = np.load(samples_file)
+        from ml4t.data.providers.learned_synthetic import LearnedSyntheticProvider
+
+        samples = LearnedSyntheticProvider._load_samples_file(samples_file)
         logger.info(f"Loaded samples for {generator}", shape=samples.shape)
 
         if shuffle:
+            samples = np.array(samples, copy=True)
             rng = np.random.default_rng()
             rng.shuffle(samples)
 
@@ -290,6 +293,7 @@ class SyntheticRegistry:
         generator: str,
         experiment: str | None = None,
         seed: int | None = None,
+        calendar_mode: CalendarMode = "equity",
     ) -> LearnedSyntheticProvider:
         """Get a LearnedSyntheticProvider for OHLCV generation.
 
@@ -301,6 +305,8 @@ class SyntheticRegistry:
             Experiment name. If None, uses the first available.
         seed : int, optional
             Random seed for reproducibility.
+        calendar_mode : {"equity", "continuous"}, default="equity"
+            Calendar used to generate output timestamps.
 
         Returns
         -------
@@ -312,20 +318,11 @@ class SyntheticRegistry:
 
         checkpoint_path = self._get_checkpoint_path(generator, experiment)
 
-        # Prefer loading from samples (faster)
-        samples_file = checkpoint_path / "samples.npy"
-        if samples_file.exists():
-            return LearnedSyntheticProvider.from_samples(
-                samples_path=samples_file,
-                metadata_path=checkpoint_path / "metadata.json",
-                seed=seed,
-            )
-        else:
-            # Fall back to checkpoint loading
-            return LearnedSyntheticProvider.from_checkpoint(
-                checkpoint_path=checkpoint_path,
-                seed=seed,
-            )
+        return LearnedSyntheticProvider.from_checkpoint(
+            checkpoint_path=checkpoint_path,
+            seed=seed,
+            calendar_mode=calendar_mode,
+        )
 
     def get_info(self, generator: str, experiment: str | None = None) -> str:
         """Get a human-readable summary of a generator.

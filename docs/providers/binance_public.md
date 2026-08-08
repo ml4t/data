@@ -76,4 +76,4 @@ Same as Binance:
 
 - [Binance Data Portal](https://data.binance.vision)
 - [Binance Provider](binance.md)
-- [Provider README](README.md)
+- [Provider reference](index.md)
