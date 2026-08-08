@@ -411,13 +411,30 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Replace placeholder volume with the matching daily observation."""
         result = ohlc.drop("volume").join(volumes, on="timestamp", how="left")
-        if result["volume"].null_count():
+        missing = result.filter(pl.col("volume").is_null())
+        if missing.is_empty():
+            return result
+
+        complete = result.filter(pl.col("volume").is_not_null())
+        latest_volume_timestamp = volumes.get_column("timestamp").max()
+        missing_before_latest = (
+            latest_volume_timestamp is not None
+            and missing.filter(pl.col("timestamp") <= latest_volume_timestamp).height > 0
+        )
+        if complete.is_empty() or missing_before_latest:
             raise DataNotAvailableError(
                 self.name,
                 coin_id,
                 details={"error": "CoinGecko daily volume does not cover all OHLC days"},
             )
-        return result
+
+        logger.warning(
+            "Dropping trailing OHLC days while CoinGecko daily volume is pending",
+            coin_id=coin_id,
+            dropped_rows=missing.height,
+            first_missing=missing.get_column("timestamp").min(),
+        )
+        return complete
 
     def _validate_daily_window(self, days: int | str) -> None:
         """Reject source windows where CoinGecko returns four-day OHLC candles."""

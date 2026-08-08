@@ -577,7 +577,40 @@ class TestFetchOhlc:
         get.assert_not_awaited()
 
     def test_join_daily_volumes_rejects_partial_coverage(self, provider):
-        """A daily OHLC result is not returned with missing volume values."""
+        """A gap before the latest volume observation is rejected."""
+        ohlc = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 2, tzinfo=UTC),
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                ],
+                "open": [1.0, 2.0, 3.0],
+                "high": [1.0, 2.0, 3.0],
+                "low": [1.0, 2.0, 3.0],
+                "close": [1.0, 2.0, 3.0],
+                "volume": [0.0, 0.0, 0.0],
+            }
+        )
+        volumes = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                ],
+                "volume": [100.0, 300.0],
+            }
+        )
+
+        with pytest.raises(DataNotAvailableError) as error:
+            provider._join_daily_volumes(ohlc, volumes, "bitcoin")
+
+        assert error.value.details["error"] == (
+            "CoinGecko daily volume does not cover all OHLC days"
+        )
+
+    def test_join_daily_volumes_drops_only_pending_trailing_days(self, provider):
+        """A delayed trailing volume observation does not discard completed rows."""
         ohlc = pl.DataFrame(
             {
                 "timestamp": [
@@ -598,12 +631,18 @@ class TestFetchOhlc:
             }
         )
 
-        with pytest.raises(DataNotAvailableError) as error:
-            provider._join_daily_volumes(ohlc, volumes, "bitcoin")
+        result = provider._join_daily_volumes(ohlc, volumes, "bitcoin")
 
-        assert error.value.details["error"] == (
-            "CoinGecko daily volume does not cover all OHLC days"
-        )
+        assert result.to_dicts() == [
+            {
+                "timestamp": datetime(2024, 1, 1, tzinfo=UTC),
+                "open": 1.0,
+                "high": 1.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 100.0,
+            }
+        ]
 
 
 class TestFetchAndTransformData:
