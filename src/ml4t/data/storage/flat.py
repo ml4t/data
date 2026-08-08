@@ -6,7 +6,7 @@ Suitable for smaller datasets or when partitioning is not beneficial.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -104,17 +104,40 @@ class FlatStorage(StorageBackend):
         # Use lazy reading
         lf = pl.scan_parquet(file_path)
 
-        # Apply column selection
-        if columns:
-            lf = lf.select(columns)
-
         # Apply date filters if timestamp column exists
         schema = lf.collect_schema()
         if "timestamp" in schema:
-            if start_date:
-                lf = lf.filter(pl.col("timestamp") >= start_date)
-            if end_date:
-                lf = lf.filter(pl.col("timestamp") < end_date)
+            timestamp_type = schema["timestamp"]
+            if isinstance(timestamp_type, pl.Datetime):
+                timestamp = pl.col("timestamp")
+                if timestamp_type.time_zone is None:
+                    timestamp = timestamp.dt.replace_time_zone("UTC")
+                else:
+                    timestamp = timestamp.dt.convert_time_zone("UTC")
+                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
+
+            normalized_start = (
+                start_date.replace(tzinfo=UTC)
+                if start_date is not None and start_date.tzinfo is None
+                else start_date.astimezone(UTC)
+                if start_date is not None
+                else None
+            )
+            normalized_end = (
+                end_date.replace(tzinfo=UTC)
+                if end_date is not None and end_date.tzinfo is None
+                else end_date.astimezone(UTC)
+                if end_date is not None
+                else None
+            )
+            if normalized_start:
+                lf = lf.filter(pl.col("timestamp") >= normalized_start)
+            if normalized_end:
+                lf = lf.filter(pl.col("timestamp") < normalized_end)
+
+        # Select after timestamp filtering so callers can omit the filter column.
+        if columns:
+            lf = lf.select(columns)
 
         return lf
 

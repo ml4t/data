@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
+from inspect import signature
 from pathlib import Path
 from typing import Any, ClassVar, Protocol
 
@@ -28,7 +30,13 @@ class ExportStorage(Protocol):
 
     def exists(self, key: str) -> bool: ...
 
-    def read(self, key: str) -> pl.LazyFrame | pl.DataFrame | DataObject: ...
+    def read(
+        self,
+        key: str,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        columns: list[str] | None = None,
+    ) -> pl.LazyFrame | pl.DataFrame | DataObject: ...
 
     def list_keys(self) -> list[str]: ...
 
@@ -98,13 +106,16 @@ class ExportManager:
                 error=f"Dataset not found: {key}",
             )
 
-        data, symbol = self._read_dataset(key)
+        data, symbol, pushed_date_filter = self._read_dataset(key, options)
 
         # Create export config
+        export_options = dict(options)
+        if pushed_date_filter:
+            export_options.pop("date_filter", None)
         config = ExportConfig(
             output_path=Path(output_path),
             format=format_lower,
-            **options,
+            **export_options,
         )
 
         # Get exporter
@@ -149,22 +160,45 @@ class ExportManager:
 
         # Read all datasets
         datasets = {}
+        preflight_results: list[ExportResult] = []
+        pushed_date_filters: list[bool] = []
         total = len(keys)
 
         for idx, key in enumerate(keys):
             self._report_progress(f"Reading {key}", (idx + 1) / total * 0.5)
 
             if self.storage.exists(key):
-                data, symbol = self._read_dataset(key)
+                data, symbol, pushed_date_filter = self._read_dataset(key, options)
                 if symbol in datasets:
-                    raise ValueError(f"Multiple storage keys resolve to export symbol '{symbol}'")
+                    preflight_results.append(
+                        ExportResult(
+                            success=False,
+                            output_path=Path(output_path),
+                            rows_exported=0,
+                            file_size=0,
+                            duration_seconds=0,
+                            error=f"Multiple storage keys resolve to export symbol '{symbol}'",
+                        )
+                    )
+                    continue
                 datasets[symbol] = data
+                pushed_date_filters.append(pushed_date_filter)
             else:
                 logger.warning(f"Dataset not found: {key}")
+                preflight_results.append(
+                    ExportResult(
+                        success=False,
+                        output_path=Path(output_path),
+                        rows_exported=0,
+                        file_size=0,
+                        duration_seconds=0,
+                        error=f"Dataset not found: {key}",
+                    )
+                )
 
         if not datasets:
             logger.error("No valid datasets found")
-            return [
+            return preflight_results or [
                 ExportResult(
                     success=False,
                     output_path=Path(output_path),
@@ -176,10 +210,13 @@ class ExportManager:
             ]
 
         # Create export config
+        export_options = dict(options)
+        if pushed_date_filters and all(pushed_date_filters):
+            export_options.pop("date_filter", None)
         config = ExportConfig(
             output_path=Path(output_path),
             format=format_lower,
-            **options,
+            **export_options,
         )
 
         # Get exporter
@@ -198,7 +235,7 @@ class ExportManager:
         )
         self._report_progress(completion, 1.0)
 
-        return results
+        return [*preflight_results, *results]
 
     def export_pattern(
         self,
@@ -230,11 +267,43 @@ class ExportManager:
         # Export batch
         return self.export_batch(keys, output_path, format_type, **options)
 
-    def _read_dataset(self, key: str) -> tuple[pl.DataFrame, str]:
+    def _read_dataset(
+        self, key: str, options: dict[str, Any] | None = None
+    ) -> tuple[pl.DataFrame, str, bool]:
         """Read one dataset through the canonical frame-key storage protocol."""
+        options = options or {}
         stored = self.storage.read(key)
         if isinstance(stored, DataObject):
-            return stored.data, stored.metadata.symbol
+            data = stored.data
+            if "timestamp" in data.columns:
+                data = data.sort("timestamp")
+            return data, stored.metadata.symbol, False
+
+        pushed_date_filter = False
+        read_parameters = signature(self.storage.read).parameters
+        supports_pushdown = {"start_date", "end_date", "columns"}.issubset(read_parameters)
+        requested_columns = options.get("columns")
+        date_filter = options.get("date_filter")
+        if (
+            supports_pushdown
+            and isinstance(stored, pl.LazyFrame)
+            and (requested_columns is not None or date_filter is not None)
+        ):
+            schema = stored.collect_schema()
+            missing_columns = (
+                [column for column in requested_columns if column not in schema]
+                if isinstance(requested_columns, list)
+                else []
+            )
+            start_date, end_date = self._storage_date_bounds(date_filter)
+            pushed_date_filter = date_filter is not None
+            stored = self.storage.read(
+                key,
+                start_date=start_date,
+                end_date=end_date,
+                columns=None if missing_columns else requested_columns,
+            )
+
         if isinstance(stored, pl.LazyFrame):
             data = stored.collect()
         elif isinstance(stored, pl.DataFrame):
@@ -249,7 +318,30 @@ class ExportManager:
         symbol = self._symbol_from_metadata(metadata) or key.rsplit("/", 1)[-1]
         if not symbol:
             raise ValueError(f"No export symbol is available for storage key '{key}'")
-        return data, symbol
+        if "timestamp" in data.columns:
+            data = data.sort("timestamp")
+        return data, symbol, pushed_date_filter
+
+    @staticmethod
+    def _storage_date_bounds(
+        date_filter: object,
+    ) -> tuple[datetime | None, datetime | None]:
+        if not isinstance(date_filter, tuple) or len(date_filter) != 2:
+            return None, None
+
+        start_value, end_value = date_filter
+
+        def parse(value: object) -> datetime:
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+            return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+        start = parse(start_value)
+        end = parse(end_value)
+        if isinstance(end_value, str) and len(end_value) == 10:
+            end += timedelta(days=1)
+        else:
+            end += timedelta(microseconds=1)
+        return start, end
 
     @staticmethod
     def _symbol_from_metadata(metadata: Any) -> str | None:

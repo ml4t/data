@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import gzip
 import time
 from pathlib import Path
@@ -137,30 +136,3 @@ class CSVExporter(BaseExporter):
 
         with gzip.open(output_file, "wt", encoding="utf-8") as f:
             f.write(csv_string)
-
-    def _export_chunked(self, df: pl.DataFrame, output_file: Path) -> None:
-        """
-        Export large DataFrame in chunks.
-
-        Args:
-            df: Data to export
-            output_file: Output file path
-        """
-        # For very large datasets, process in batches
-        batch_size = self.config.batch_size
-
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
-            writer = None
-
-            for i in range(0, len(df), batch_size):
-                batch = df[i : i + batch_size]
-
-                if writer is None:
-                    # Write header with first batch
-                    fieldnames = batch.columns
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-
-                # Write batch
-                for row in batch.to_dicts():
-                    writer.writerow(row)

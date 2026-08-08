@@ -90,6 +90,29 @@ class TestCSVExporter:
             assert "returns" in df.columns
             assert len(df.columns) == 3  # timestamp, close, returns
 
+    def test_date_only_filter_includes_intraday_end_date(self, tmp_path) -> None:
+        data = pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 31, 16, 0, tzinfo=UTC),
+                    datetime(2024, 2, 1, 9, 30, tzinfo=UTC),
+                ],
+                "close": [100.0, 101.0],
+            }
+        )
+        exporter = CSVExporter(
+            ExportConfig(
+                output_path=tmp_path / "filtered.csv",
+                format="csv",
+                date_filter=("2024-01-31", "2024-01-31"),
+            )
+        )
+
+        result = exporter.export(data, "AAPL")
+
+        assert result.success, result.error
+        assert pl.read_csv(result.output_path).height == 1
+
     def test_export_batch_csv(self, sample_data: pl.DataFrame) -> None:
         """Test batch CSV export."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -567,3 +590,108 @@ class TestExportManagerProductionStorage:
 
         assert result.success is False
         assert result.error == "Requested export columns are missing: ['not_present']"
+
+    def test_storage_filters_are_pushed_down(self, storage, tmp_path, monkeypatch):
+        calls = []
+        storage_read = storage.read
+
+        def recording_read(key, start_date=None, end_date=None, columns=None):
+            calls.append((start_date, end_date, columns))
+            return storage_read(key, start_date, end_date, columns)
+
+        monkeypatch.setattr(storage, "read", recording_read)
+        result = ExportManager(storage).export(
+            "equities/daily/AAPL",
+            tmp_path / "filtered.csv",
+            "csv",
+            date_filter=("2024-01-02", "2024-01-02"),
+            columns=["timestamp", "close"],
+            include_metadata=False,
+        )
+
+        assert result.success, result.error
+        assert calls[-1] == (
+            datetime(2024, 1, 2, tzinfo=UTC),
+            datetime(2024, 1, 3, tzinfo=UTC),
+            ["timestamp", "close"],
+        )
+        assert pl.read_csv(result.output_path).height == 1
+
+    def test_batch_symbol_collision_is_reported_without_aborting(self, storage, tmp_path):
+        frame = storage.read("equities/daily/AAPL").collect()
+        storage.write(
+            frame,
+            "equities/hourly/AAPL-copy",
+            metadata={"symbol": "AAPL", "provider": "test"},
+        )
+        output = tmp_path / "collision"
+        output.mkdir()
+
+        results = ExportManager(storage).export_batch(
+            ["equities/daily/AAPL", "equities/hourly/AAPL-copy"],
+            output,
+            "csv",
+            include_metadata=False,
+        )
+
+        assert len(results) == 2
+        assert sum(result.success for result in results) == 1
+        assert any("Multiple storage keys" in (result.error or "") for result in results)
+        assert (output / "AAPL.csv").is_file()
+
+
+def test_openpyxl_batch_serializes_non_utc_datetimes(tmp_path, monkeypatch):
+    """The runtime openpyxl path accepts aware datetimes and preserves offsets."""
+    from openpyxl import load_workbook
+
+    import ml4t.data.export.formats.excel as excel_module
+
+    monkeypatch.setattr(excel_module, "EXCEL_ENGINE", "openpyxl")
+    timestamp = pl.Series(
+        "timestamp",
+        [datetime(2024, 1, 2, 9, 30)],
+        dtype=pl.Datetime("us", "America/New_York"),
+    )
+    exporter = ExcelExporter(
+        ExportConfig(
+            output_path=tmp_path / "openpyxl.xlsx",
+            format="excel",
+            include_metadata=False,
+        )
+    )
+
+    result = exporter.export_batch({"AAPL": pl.DataFrame({"timestamp": timestamp})})
+
+    assert result[0].success, result[0].error
+    workbook = load_workbook(result[0].output_path, read_only=True, data_only=True)
+    assert workbook["AAPL"]["A2"].value.endswith("-05:00")
+
+
+def test_hive_export_is_sorted_independently_of_partition_creation_order(tmp_path):
+    storage = HiveStorage(
+        StorageConfig(
+            base_path=tmp_path / "hive-order",
+            strategy="hive",
+            partition_granularity="day",
+        )
+    )
+    storage.write(
+        pl.DataFrame(
+            {
+                "timestamp": [
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                    datetime(2024, 1, 2, tzinfo=UTC),
+                ],
+                "close": [103.0, 102.0],
+            }
+        ),
+        "equities/daily/AAPL",
+    )
+
+    result = ExportManager(storage).export(
+        "equities/daily/AAPL", tmp_path / "ordered.csv", "csv", include_metadata=False
+    )
+
+    assert result.success, result.error
+    exported = pl.read_csv(result.output_path, try_parse_dates=True)
+    assert exported["close"].to_list() == [102.0, 103.0]

@@ -143,7 +143,7 @@ class HiveStorage(StorageBackend):
 
         if not (start_date or end_date):
             # No filtering, return all partitions
-            return list(key_path.glob(glob_pattern))
+            return sorted(key_path.glob(glob_pattern))
 
         # With date filtering, we need to prune partitions
         partition_paths = []

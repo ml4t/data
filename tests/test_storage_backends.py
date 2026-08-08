@@ -3,7 +3,7 @@
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -119,8 +119,8 @@ class TestStorageBackends:
 
         # Should have June data only
         assert len(df) == 30
-        assert df["timestamp"].min() >= start
-        assert df["timestamp"].max() < end
+        assert df["timestamp"].min() >= start.replace(tzinfo=UTC)
+        assert df["timestamp"].max() < end.replace(tzinfo=UTC)
 
     @pytest.mark.parametrize("strategy", ["hive", "flat"])
     def test_column_selection(self, temp_dir, sample_data, strategy):
@@ -269,7 +269,8 @@ class TestStorageBackends:
 
         storage.write(replacement, "prices")
 
-        assert storage.read("prices").collect().equals(replacement)
+        expected = replacement.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
         metadata = storage.get_metadata("prices")
         assert metadata is not None
         assert metadata["row_count"] == 1
@@ -306,12 +307,13 @@ class TestStorageBackends:
         with pytest.raises(OSError, match="injected partition failure"):
             storage.write(replacement, "prices")
 
-        assert storage.read("prices").collect().equals(original)
+        expected = original.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
         assert storage._current_commit("prices").commit_id == previous_commit.commit_id
         assert storage.get_metadata("prices") == previous_commit.metadata
         assert not list(storage._key_path("prices").glob(".staging-*"))
         restarted = create_storage(temp_dir, strategy="hive")
-        assert restarted.read("prices").collect().equals(original)
+        assert restarted.read("prices").collect().equals(expected)
 
     def test_pointer_failure_preserves_previous_commit(self, temp_dir, monkeypatch):
         storage = create_storage(temp_dir, strategy="flat")
@@ -328,10 +330,11 @@ class TestStorageBackends:
         with pytest.raises(OSError, match="injected pointer failure"):
             storage.write(replacement, "prices")
 
-        assert storage.read("prices").collect().equals(original)
+        expected = original.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        assert storage.read("prices").collect().equals(expected)
         assert storage._current_commit("prices").commit_id == previous_commit.commit_id
         restarted = create_storage(temp_dir, strategy="flat")
-        assert restarted.read("prices").collect().equals(original)
+        assert restarted.read("prices").collect().equals(expected)
 
     def test_next_write_removes_unpublished_staging_directory(self, temp_dir):
         storage = create_storage(temp_dir, strategy="flat")

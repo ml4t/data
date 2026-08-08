@@ -162,22 +162,24 @@ Features:
 
 For datasets with millions of rows:
 
-1. **Use compression** - Reduces file size by 70-90%
-2. **Filter by date** - Export only needed time periods
-3. **Select columns** - Export only required fields
-4. **Use chunking** - Automatically handled for large exports
+1. Filter by date so storage reads only matching partitions.
+2. Select columns so storage projects only required fields.
+3. Use gzip compression when the smaller output justifies its additional memory use.
 
 ### Memory Usage
 
-The export system processes data in chunks to minimize memory usage:
+Date and column filters are applied by production storage before collection. The filtered
+result is then held in memory while it is transformed and written. Gzip CSV export also
+creates the CSV payload in memory, so narrow the date range and columns before exporting a
+large dataset.
 
 ```python
-# Configure batch size for large exports
 result = manager.export(
     key="equities/minute/AAPL",
     output_path="./large_export.csv",
-    format="csv",
-    batch_size=100000  # Process 100k rows at a time
+    format_type="csv",
+    date_filter=("2024-01-01", "2024-01-31"),
+    columns=["timestamp", "close", "volume"]
 )
 ```
 
@@ -186,7 +188,7 @@ result = manager.export(
 Export operations return detailed results:
 
 ```python
-result = manager.export(key="data/key", output_path="./out", format="csv")
+result = manager.export(key="data/key", output_path="./out", format_type="csv")
 
 if result.success:
     print(f"Success! Exported {result.rows_exported} rows")
@@ -203,19 +205,33 @@ else:
    - Excel for business reports
    - JSON for web applications
 
-2. **Use compression for large files**:
-   ```bash
-   ml4t-data export equities/minute/AAPL --output ./exports/ --compression gzip
+2. **Use compression when required**:
+   ```python
+   manager.export(
+       key="equities/minute/AAPL",
+       output_path="./exports/AAPL.csv.gz",
+       format_type="csv",
+       compression="gzip"
+   )
    ```
 
 3. **Filter unnecessary data**:
-   ```bash
-   ml4t-data export crypto/minute/BTC --start 2024-01-01 --end 2024-01-31
+   ```python
+   manager.export(
+       key="crypto/minute/BTC",
+       output_path="./exports/BTC.csv",
+       format_type="csv",
+       date_filter=("2024-01-01", "2024-01-31")
+   )
    ```
 
 4. **Batch similar exports**:
-   ```bash
-   ml4t-data export "equities/daily/*" --output ./daily_report.xlsx --format excel
+   ```python
+   manager.export_pattern(
+       pattern="equities/daily/*",
+       output_path="./daily_report.xlsx",
+       format_type="excel"
+   )
    ```
 
 5. **Validate exports**:
@@ -227,18 +243,24 @@ else:
 
 ### Excel Export Issues
 
-If Excel export fails, ensure xlsxwriter is installed:
+Excel export uses the included openpyxl dependency. XlsxWriter is optional:
 
 ```bash
-pip install xlsxwriter
+uv add xlsxwriter
 ```
 
 ### Memory Errors
 
-For very large datasets, use CSV format with compression:
+For large datasets, filter at storage read time before exporting:
 
-```bash
-ml4t-data export large/dataset --format csv --compression gzip
+```python
+manager.export(
+    key="large/dataset",
+    output_path="./exports/data.csv",
+    format_type="csv",
+    date_filter=("2024-01-01", "2024-01-31"),
+    columns=["timestamp", "close"]
+)
 ```
 
 ### Permission Errors
