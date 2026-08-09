@@ -214,10 +214,12 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             AuthenticationError: If either credential is missing.
             DataValidationError: If ``feed`` is not a supported value.
         """
-        self.api_key = api_key or os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
-        self.api_secret = (
+        resolved_api_key = api_key or os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID")
+        resolved_api_secret = (
             api_secret or os.getenv("ALPACA_API_SECRET") or os.getenv("APCA_API_SECRET_KEY")
         )
+        self.api_key = resolved_api_key.strip() if resolved_api_key else None
+        self.api_secret = resolved_api_secret.strip() if resolved_api_secret else None
         if not self.api_key or not self.api_secret:
             raise AuthenticationError(
                 provider="alpaca",

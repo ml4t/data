@@ -15,10 +15,12 @@ REQUIRED_CONTRACTS = (
     "tiingo",
     "massive",
     "finnhub",
-    "cryptocompare",
     "databento",
     "oanda",
 )
+UNVERIFIED_CONTRACTS = {
+    "cryptocompare": "account registration unavailable during 0.1.0 release validation",
+}
 RUN_TITLE_PREFIX = "Provider Contract - "
 
 
@@ -89,6 +91,8 @@ def main() -> None:
     )
     for provider in REQUIRED_CONTRACTS:
         print(f"{provider}: {successful[provider]}")
+    for provider, reason in UNVERIFIED_CONTRACTS.items():
+        print(f"{provider}: unverified - {reason}")
 
 
 if __name__ == "__main__":

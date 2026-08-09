@@ -128,7 +128,11 @@ fred = FREDProvider().fetch_series("GDP", "2020-01-01", "2024-12-31")
 | Massive | US equities, options, futures, forex, crypto |
 | Finnhub | 70+ global exchanges |
 | OANDA | Forex broker data |
-| CryptoCompare | Crypto market data; free account key required |
+| CryptoCompare | Included adapter; not release-qualified for 0.1.0 |
+
+CryptoCompare account registration was unavailable during the 0.1.0 release review, so no live
+contract evidence was obtained. The adapter remains available for evaluation, but CryptoCompare is
+not part of the release-qualified provider set until its contract passes on a release commit.
 
 ## Specialized Modules
 

@@ -2,6 +2,9 @@
 
 Choose the right data provider for your needs with this decision flowchart.
 
+CryptoCompare is included for evaluation but is not release-qualified for 0.1.0. Account
+registration was unavailable during release validation, so no live contract evidence was obtained.
+
 ## Quick Decision Flowchart
 
 ```mermaid
@@ -17,7 +20,7 @@ flowchart TD
 
     %% Crypto Path
     CryptoChoice -->|No API key| CoinGecko[CoinGecko<br/>Public API]
-    CryptoChoice -->|API key is acceptable| CryptoCompare[CryptoCompare<br/>Free/Paid]
+    CryptoChoice -->|API key is acceptable| CryptoCompare[CryptoCompare<br/>Unverified for 0.1.0]
 
     %% US Stocks Path
     USChoice -->|FREE only| USFree{Call volume?}
@@ -64,7 +67,7 @@ flowchart TD
 | Provider | Crypto | US Stocks | Global Stocks | Forex | Futures | API Key | Free Tier | Best For |
 |----------|--------|-----------|---------------|-------|---------|---------|-----------|----------|
 | **CoinGecko** | ✅ | ❌ | ❌ | ❌ | ❌ | No | Unlimited | Crypto historical |
-| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | ❌ | Yes | Good | Crypto real-time |
+| **CryptoCompare** | ✅ | ❌ | ❌ | ❌ | ❌ | Yes | Unverified | Evaluation only |
 | **Tiingo** | ✅ | ✅ | ❌ | ❌ | ❌ | Yes | 1000/day | High-quality stocks |
 | **EODHD** | ❌ | ✅ | ✅ | ❌ | ❌ | Yes | 20 calls/day, one-year history | Global stocks |
 | **Finnhub** | ✅ | ✅ | ✅ | ✅ | ❌ | Yes | US quotes; OHLC is paid | Quotes and company data |
@@ -83,7 +86,6 @@ flowchart TD
 | **Tiingo** | 1000 calls | 500 symbols | Daily stock updates |
 | **EODHD** | 20 calls | Account limit | Global stock testing |
 | **Twelve Data** | 800 calls | ~24K calls | Multi-asset research |
-| **CryptoCompare** | Varies | Varies | Crypto real-time |
 | **Massive Stocks Basic** | 5 calls/minute | Account limit | US aggregate data |
 
 #### Paid Tiers (Affordable)

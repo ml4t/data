@@ -79,6 +79,23 @@ class TestAlpacaProviderInit:
             assert provider.api_key == "k"
             assert provider.api_secret == "s"
 
+    def test_credentials_strip_surrounding_whitespace(self):
+        """Copied credentials cannot introduce invalid HTTP header whitespace."""
+        provider = AlpacaDataProvider(api_key="  k\n", api_secret="s\r\n")
+
+        assert provider.api_key == "k"
+        assert provider.api_secret == "s"
+        assert provider._auth_headers == {
+            "APCA-API-KEY-ID": "k",
+            "APCA-API-SECRET-KEY": "s",
+        }
+
+    @pytest.mark.parametrize("credential", ["", " ", "\r\n"])
+    def test_whitespace_only_credentials_raise(self, credential):
+        """Credentials that normalize to empty are rejected locally."""
+        with patch.dict("os.environ", {}, clear=True), pytest.raises(AuthenticationError):
+            AlpacaDataProvider(api_key=credential, api_secret="s")
+
     def test_init_with_apca_env_fallback(self):
         """Alpaca SDK/CLI env names are honored as a fallback."""
         with patch.dict(

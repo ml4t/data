@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.verify_provider_contract_runs import REQUIRED_CONTRACTS, validate_contract_runs
+from scripts.verify_provider_contract_runs import (
+    REQUIRED_CONTRACTS,
+    UNVERIFIED_CONTRACTS,
+    validate_contract_runs,
+)
 
 
 def _run(provider: str, commit: str, conclusion: str = "success") -> dict[str, str]:
@@ -23,6 +27,11 @@ def test_all_required_contracts_must_pass_for_the_release_commit() -> None:
     successful = validate_contract_runs(runs, commit)
 
     assert tuple(successful) == REQUIRED_CONTRACTS
+
+
+def test_unverified_cryptocompare_is_not_release_qualified() -> None:
+    assert set(UNVERIFIED_CONTRACTS) == {"cryptocompare"}
+    assert set(REQUIRED_CONTRACTS).isdisjoint(UNVERIFIED_CONTRACTS)
 
 
 def test_contracts_from_another_commit_do_not_satisfy_release_policy() -> None:

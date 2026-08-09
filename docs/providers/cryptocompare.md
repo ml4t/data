@@ -3,13 +3,15 @@
 **Provider**: `CryptoCompareProvider`
 **Website**: [cryptocompare.com](https://www.cryptocompare.com)
 **API Key**: Required
-**Free Tier**: 250,000 calls/month
+**0.1.0 status**: Included for evaluation; not release-qualified
 
 ---
 
 ## Overview
 
-CryptoCompare provides comprehensive cryptocurrency historical data with good coverage and reasonable free tier.
+CryptoCompare account registration was unavailable during the 0.1.0 release review. The adapter is
+included for evaluation, but it has no successful live contract evidence for this release. Do not
+treat it as a release-qualified provider until a later release records a successful contract run.
 
 **Best For**: Crypto historical data, alternative to Binance
 
@@ -60,8 +62,7 @@ Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptoco
 
 ## Rate Limits
 
-- Free: 250,000 calls/month
-- Paid: $19.99+/mo for higher limits
+Consult CryptoCompare's current terms before use. Access and limits were not verified for 0.1.0.
 
 ---
 
