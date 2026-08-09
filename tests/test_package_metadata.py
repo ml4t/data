@@ -42,6 +42,14 @@ def test_supported_python_and_platform_metadata() -> None:
     assert "Programming Language :: Python :: 3.15" not in classifiers
 
 
+def test_license_uses_spdx_metadata() -> None:
+    """Built distributions declare the MIT license using PEP 639 metadata."""
+    project = load_project()
+
+    assert project["license"] == "MIT"
+    assert project["license-files"] == ["LICENSE"]
+
+
 def test_source_distribution_contains_release_verifiers() -> None:
     """Tests shipped in the source archive can import their release helpers."""
     included = set(load_config()["tool"]["hatch"]["build"]["targets"]["sdist"]["include"])
@@ -96,3 +104,39 @@ def test_core_futures_import_does_not_require_databento_extra() -> None:
     )
 
     subprocess.run([sys.executable, "-c", script], cwd=PROJECT_ROOT, check=True)
+
+
+def test_core_import_is_silent_without_optional_provider_dependencies() -> None:
+    """Missing optional provider clients do not write during a core import."""
+    script = textwrap.dedent(
+        """
+        import builtins
+
+        original_import = builtins.__import__
+
+        def block_optional_clients(name, *args, **kwargs):
+            if (
+                name == "databento"
+                or name.startswith("databento.")
+                or name == "oandapyV20"
+                or name.startswith("oandapyV20.")
+            ):
+                raise ModuleNotFoundError("blocked optional dependency", name=name)
+            return original_import(name, *args, **kwargs)
+
+        builtins.__import__ = block_optional_clients
+
+        import ml4t.data
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout == ""
+    assert completed.stderr == ""

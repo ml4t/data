@@ -31,7 +31,8 @@ name = "ml4t-data"
 dynamic = ["version"]
 description = "High-performance market data management library with unified multi-provider interface"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "ML4T Team", email = "info@ml4trading.io" },
 ]

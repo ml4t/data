@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+from email.message import Message
 from email.parser import Parser
 from pathlib import Path
 
@@ -18,7 +19,7 @@ PROJECT_NAME = "ml4t-data"
 TAG_PATTERN = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)$")
 
 
-def _metadata_from_wheel(path: Path) -> tuple[str, str]:
+def _metadata_from_wheel(path: Path) -> Message:
     with zipfile.ZipFile(path) as archive:
         metadata_files = [
             name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
@@ -26,11 +27,10 @@ def _metadata_from_wheel(path: Path) -> tuple[str, str]:
         if len(metadata_files) != 1:
             raise ValueError(f"{path.name} must contain exactly one METADATA file")
         content = archive.read(metadata_files[0]).decode("utf-8")
-    metadata = Parser().parsestr(content)
-    return metadata["Name"], metadata["Version"]
+    return Parser().parsestr(content)
 
 
-def _metadata_from_sdist(path: Path) -> tuple[str, str]:
+def _metadata_from_sdist(path: Path) -> Message:
     with tarfile.open(path, mode="r:gz") as archive:
         metadata_files = [
             member
@@ -43,8 +43,7 @@ def _metadata_from_sdist(path: Path) -> tuple[str, str]:
         if extracted is None:
             raise ValueError(f"could not read PKG-INFO from {path.name}")
         content = extracted.read().decode("utf-8")
-    metadata = Parser().parsestr(content)
-    return metadata["Name"], metadata["Version"]
+    return Parser().parsestr(content)
 
 
 def validate_distributions(
@@ -69,10 +68,21 @@ def validate_distributions(
 
     archives = [*wheels, *sdists]
     metadata = [_metadata_from_wheel(wheels[0]), _metadata_from_sdist(sdists[0])]
-    if any(name != PROJECT_NAME for name, _ in metadata):
-        raise ValueError(f"distribution name must be {PROJECT_NAME!r}: {metadata}")
+    names = [item["Name"] for item in metadata]
+    if any(name != PROJECT_NAME for name in names):
+        raise ValueError(f"distribution name must be {PROJECT_NAME!r}: {names}")
 
-    versions = {version for _, version in metadata}
+    for item in metadata:
+        license_expression = item["License-Expression"]
+        license_files = item.get_all("License-File", [])
+        if license_expression != "MIT" or "LICENSE" not in license_files:
+            raise ValueError(
+                "distribution license metadata must declare "
+                f"License-Expression: MIT and License-File: LICENSE: "
+                f"expression={license_expression!r}, files={license_files!r}"
+            )
+
+    versions = {item["Version"] for item in metadata}
     if len(versions) != 1:
         raise ValueError(f"wheel and sdist versions differ: {sorted(versions)}")
     version = versions.pop()
@@ -106,7 +116,7 @@ def verify_install(archive: Path, version: str) -> None:
         python = _venv_python(venv)
         subprocess.run(["uv", "pip", "install", "--python", str(python), str(archive)], check=True)
         subprocess.run(["uv", "pip", "check", "--python", str(python)], check=True)
-        subprocess.run(
+        completed = subprocess.run(
             [
                 str(python),
                 "-c",
@@ -116,7 +126,14 @@ def verify_install(archive: Path, version: str) -> None:
                 ),
             ],
             check=True,
+            capture_output=True,
+            text=True,
         )
+        if completed.stdout or completed.stderr:
+            raise ValueError(
+                f"{archive.name} import must be silent: "
+                f"stdout={completed.stdout!r}, stderr={completed.stderr!r}"
+            )
         subprocess.run([str(_venv_cli(venv)), "--help"], check=True, stdout=subprocess.DEVNULL)
 
 

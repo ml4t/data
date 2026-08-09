@@ -23,6 +23,7 @@ import pytest
 from ml4t.data.core.exceptions import (
     DataNotAvailableError,
     DataValidationError,
+    NetworkError,
     SymbolNotFoundError,
 )
 from ml4t.data.providers.kalshi import KalshiProvider
@@ -540,6 +541,71 @@ class TestKalshiListMethods:
             call_kwargs = mock_get.call_args[1]
             params = call_kwargs["params"]
             assert params["series_ticker"] == "KXINFL"
+
+    def test_list_markets_retries_unauthenticated_html_403_once(self, provider):
+        """A transient edge-layer rejection is retried once for public data."""
+        forbidden = MagicMock()
+        forbidden.status_code = 403
+        forbidden.headers = {"content-type": "text/html; charset=utf-8"}
+        forbidden.text = "<!doctype html><title>Forbidden</title>"
+
+        success = MagicMock()
+        success.status_code = 200
+        success.json.return_value = {"markets": [{"ticker": "KXINFL-25JAN"}]}
+
+        with (
+            patch.object(provider.session, "get", side_effect=[forbidden, success]) as mock_get,
+            patch("ml4t.data.providers.kalshi.time.sleep") as mock_sleep,
+        ):
+            markets = provider.list_markets()
+
+        assert markets == [{"ticker": "KXINFL-25JAN"}]
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once_with(provider.EDGE_403_RETRY_DELAY)
+
+    def test_list_markets_stops_after_one_html_403_retry(self, provider):
+        """A persistent edge rejection remains an explicit network failure."""
+        forbidden = MagicMock()
+        forbidden.status_code = 403
+        forbidden.headers = {"content-type": "text/html"}
+        forbidden.text = "<html><title>Forbidden</title></html>"
+
+        with (
+            patch.object(provider.session, "get", side_effect=[forbidden, forbidden]) as mock_get,
+            patch("ml4t.data.providers.kalshi.time.sleep") as mock_sleep,
+            pytest.raises(NetworkError, match="HTTP 403"),
+        ):
+            provider.list_markets()
+
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once_with(provider.EDGE_403_RETRY_DELAY)
+
+    @pytest.mark.parametrize(
+        ("api_key", "content_type", "body"),
+        [
+            (None, "application/json", '{"error": "forbidden"}'),
+            ("test_api_key", "text/html", "<html><title>Forbidden</title></html>"),
+        ],
+    )
+    def test_list_markets_does_not_retry_authoritative_403(
+        self, provider, api_key, content_type, body
+    ):
+        """API and authenticated authorization failures are not retried."""
+        provider.api_key = api_key
+        forbidden = MagicMock()
+        forbidden.status_code = 403
+        forbidden.headers = {"content-type": content_type}
+        forbidden.text = body
+
+        with (
+            patch.object(provider.session, "get", return_value=forbidden) as mock_get,
+            patch("ml4t.data.providers.kalshi.time.sleep") as mock_sleep,
+            pytest.raises(NetworkError, match="HTTP 403"),
+        ):
+            provider.list_markets()
+
+        mock_get.assert_called_once()
+        mock_sleep.assert_not_called()
 
     def test_list_series_success(self, provider):
         """Test successful list_series with mocked response."""

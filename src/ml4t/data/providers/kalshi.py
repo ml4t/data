@@ -34,6 +34,7 @@ Example:
     >>> provider.close()
 """
 
+import time
 from datetime import datetime
 from typing import Any, ClassVar
 
@@ -75,6 +76,9 @@ class KalshiProvider(BaseProvider):
 
     # Kalshi API base URL (elections domain provides all markets)
     BASE_URL: ClassVar[str] = "https://api.elections.kalshi.com/trade-api/v2"
+
+    # Public requests can be rejected transiently by Kalshi's edge layer.
+    EDGE_403_RETRY_DELAY: ClassVar[float] = 1.0
 
     # Map common frequency names to Kalshi period_interval values
     FREQUENCY_MAP: ClassVar[dict[str, int]] = {
@@ -119,6 +123,20 @@ class KalshiProvider(BaseProvider):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    def _is_unauthenticated_edge_forbidden(self, response: Any) -> bool:
+        """Identify an HTML 403 from the public API edge layer."""
+        if self.api_key or response.status_code != 403:
+            return False
+
+        headers = getattr(response, "headers", {})
+        content_type = str(headers.get("content-type", "")).lower()
+        body = str(getattr(response, "text", "")).lstrip().lower()
+        return (
+            "text/html" in content_type
+            or body.startswith("<!doctype html")
+            or body.startswith("<html")
+        )
 
     def _extract_series_ticker(self, market_ticker: str) -> str:
         """Extract series ticker from market ticker.
@@ -575,6 +593,19 @@ class KalshiProvider(BaseProvider):
                 params=params,
                 headers=self._get_headers(),
             )
+
+            if self._is_unauthenticated_edge_forbidden(response):
+                self.logger.warning(
+                    "Kalshi public endpoint returned an HTML 403; retrying once",
+                    endpoint=endpoint,
+                )
+                time.sleep(self.EDGE_403_RETRY_DELAY)
+                self._acquire_rate_limit()
+                response = self.session.get(
+                    endpoint,
+                    params=params,
+                    headers=self._get_headers(),
+                )
 
             if response.status_code != 200:
                 raise NetworkError(

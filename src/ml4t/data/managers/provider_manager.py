@@ -185,11 +185,7 @@ class ProviderManager:
             try:
                 provider_classes[spec.name] = spec.load_class()
             except ImportError:
-                logger.debug(
-                    "Provider dependency is not installed",
-                    provider=spec.name,
-                    extra=spec.extra,
-                )
+                continue
 
         cls._PROVIDER_CLASSES = provider_classes
         return provider_classes
