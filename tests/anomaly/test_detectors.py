@@ -10,7 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 import polars as pl
 import pytest
@@ -25,6 +25,7 @@ from ml4t.data.anomaly.detectors import (
     PriceStalenessDetector,
     ReturnOutlierDetector,
     VolumeSpikeDetector,
+    _datetime,
 )
 
 
@@ -666,3 +667,66 @@ class TestDetectorIntegration:
         assert AnomalyType.RETURN_OUTLIER in return_types
         assert AnomalyType.VOLUME_SPIKE in volume_types
         assert AnomalyType.PRICE_STALE in stale_types
+
+
+class TestDateTypedTimestamps:
+    """A daily bar's timestamp is a ``pl.Date``, and every detector must accept one.
+
+    Every other fixture in this file builds ``timestamp`` from ``datetime``, so nothing
+    here ever passed a ``pl.Date`` column, and ``_datetime`` rejecting one shipped in
+    0.1.0. The book's ``load_us_equities()`` returns daily bars with a ``Date``
+    timestamp, which is the correct dtype for a daily series, and every detector call
+    against it raised ``TypeError: Expected a datetime scalar, received date``.
+    """
+
+    @staticmethod
+    def _daily_bars_with_a_spike() -> pl.DataFrame:
+        closes = [100.0]
+        for i in range(1, 50):
+            if i == 25:
+                closes.append(closes[-1] * 1.20)
+            elif i == 26:
+                closes.append(closes[-1] * 0.85)
+            else:
+                closes.append(closes[-1] * (1 + 0.005 * (((i * 7) % 11) - 5) / 5))
+
+        volumes = [1_000_000] * 50
+        volumes[30] = 20_000_000
+
+        return pl.DataFrame(
+            {
+                "timestamp": [datetime(2024, 1, 1) + timedelta(days=i) for i in range(50)],
+                "open": closes,
+                "high": [p * 1.01 for p in closes],
+                "low": [p * 0.99 for p in closes],
+                "close": closes,
+                "volume": volumes,
+            }
+        ).with_columns(pl.col("timestamp").cast(pl.Date))
+
+    @pytest.mark.parametrize(
+        "detector",
+        [
+            ReturnOutlierDetector(),
+            VolumeSpikeDetector(),
+            PriceStalenessDetector(),
+        ],
+        ids=["return_outlier", "volume_spike", "price_staleness"],
+    )
+    def test_detector_accepts_a_date_column(self, detector) -> None:
+        """No detector raises on a ``pl.Date`` timestamp."""
+        detector.detect(self._daily_bars_with_a_spike(), "TEST")
+
+    def test_a_date_is_reported_as_midnight(self) -> None:
+        """A ``pl.Date`` becomes a ``datetime`` at midnight, losing nothing."""
+        anomalies = ReturnOutlierDetector().detect(self._daily_bars_with_a_spike(), "TEST")
+
+        assert anomalies, "the 20% spike must still be detected on a Date column"
+        for anomaly in anomalies:
+            assert isinstance(anomaly.timestamp, datetime)
+            assert anomaly.timestamp.time() == time.min
+
+    def test_a_non_temporal_scalar_is_still_rejected(self) -> None:
+        """Widening to ``date`` must not turn the check into no check at all."""
+        with pytest.raises(TypeError, match="date or datetime"):
+            _datetime("2024-01-01")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 import polars as pl
@@ -35,9 +35,17 @@ def _float(value: object) -> float:
 
 
 def _datetime(value: object) -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"Expected a datetime scalar, received {type(value).__name__}")
-    return value
+    """Convert a Polars temporal scalar, accepting a Date column as midnight.
+
+    A daily bar's timestamp is a ``pl.Date``, so requiring ``pl.Datetime`` here rejected
+    every daily series a detector was given. ``datetime`` is a subclass of ``date``, so
+    it has to be tested first.
+    """
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, time.min)
+    raise TypeError(f"Expected a date or datetime scalar, received {type(value).__name__}")
 
 
 class ReturnOutlierDetector(AnomalyDetector):
