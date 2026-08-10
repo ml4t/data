@@ -6,6 +6,7 @@ with measured 7x query performance improvement.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,28 @@ from .keys import (
 )
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class Partition:
+    """One Parquet partition backing a storage key.
+
+    ``values`` maps each partition column to its value, so a caller reports what a
+    partition covers without parsing the path. The key directory is an encoded name and
+    the generation directory is an implementation detail; neither is meant to be read.
+    """
+
+    path: Path
+    values: dict[str, int]
+    size_bytes: int
+
+    @property
+    def label(self) -> str:
+        """Partition columns joined as they are conventionally displayed, e.g. ``2023-01``."""
+        return "-".join(
+            f"{value:02d}" if column != "year" else str(value)
+            for column, value in self.values.items()
+        )
 
 
 class HiveStorage(StorageBackend):
@@ -386,6 +409,47 @@ class HiveStorage(StorageBackend):
         if len(lazy_frames) == 1:
             return lazy_frames[0]
         return pl.concat(lazy_frames, how="vertical_relaxed")
+
+    def partitions(
+        self,
+        key: str,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> list[Partition]:
+        """Describe the partitions currently backing a key.
+
+        The on-disk layout is not addressable from outside: the key directory is an
+        encoded name and writes land in a generation directory that changes on every
+        write. Anything that needs to report what is stored - how many partitions, what
+        each covers, how large it is - has to ask, and this is the way to ask.
+
+        Args:
+            key: Storage key
+            start_date: Optional start date filter, pruning as ``read`` does
+            end_date: Optional end date filter
+
+        Returns:
+            One ``Partition`` per Parquet file, ordered by partition value
+
+        Example:
+            >>> for part in storage.partitions(key):  # doctest: +SKIP
+            ...     print(part.label, part.size_bytes)
+        """
+        partition_cols = self._get_partition_columns()
+        generation_path = self._current_commit(key).generation_path
+        found = [
+            Partition(
+                path=path,
+                values=self._extract_partition_values(path, partition_cols),
+                size_bytes=path.stat().st_size,
+            )
+            for path in self._find_partition_paths(
+                generation_path, partition_cols, start_date, end_date
+            )
+        ]
+        # Sorted by value, not by path: the directory names are unpadded, so a path sort
+        # puts month=10 immediately after month=1.
+        return sorted(found, key=lambda part: tuple(part.values[col] for col in partition_cols))
 
     def list_keys(self) -> list[str]:
         """List all keys in storage.

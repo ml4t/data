@@ -21,7 +21,7 @@ from .data_profile import (
     save_profile,
 )
 from .flat import FlatStorage
-from .hive import HiveStorage
+from .hive import HiveStorage, Partition
 from .legacy_migration import (
     LegacyStorageEntry,
     LegacyStorageMigration,
@@ -78,6 +78,7 @@ __all__ = [
     "LegacyStorageMigration",
     "LegacyStorageMigrationError",
     "ProfileMixin",
+    "Partition",
     "PartitionGranularity",
     "StorageBackend",
     "StorageConfig",

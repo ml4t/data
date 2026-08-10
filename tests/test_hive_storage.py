@@ -1,7 +1,7 @@
 """Tests for Hive partitioned storage module."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import polars as pl
 import pytest
@@ -678,3 +678,74 @@ class TestHiveStorageSlashInKey:
 
         result = storage.read("provider/symbol").collect()
         assert len(result) == 1
+
+
+class TestPartitionsAccessor:
+    """``partitions`` is the only way to report what is stored.
+
+    The key directory is an encoded name and writes land in a generation directory that
+    changes on every write, so nothing outside the library can address the layout. A
+    caller that needs to say how many partitions exist and what each covers - the book's
+    Ch2 data-management notebook does exactly this - has to be able to ask.
+    """
+
+    @staticmethod
+    def _daily_bars(months: int = 14) -> pl.DataFrame:
+        n = months * 30
+        return pl.DataFrame(
+            {
+                "timestamp": [datetime(2023, 1, 1) + timedelta(days=i) for i in range(n)],
+                "symbol": ["AAPL"] * n,
+                "open": [1.0] * n,
+                "high": [1.0] * n,
+                "low": [1.0] * n,
+                "close": [1.0] * n,
+                "volume": [1] * n,
+            }
+        )
+
+    @pytest.fixture
+    def stored(self, tmp_path):
+        """A key holding 14 monthly partitions."""
+        storage = HiveStorage(StorageConfig(base_path=tmp_path, partition_granularity="month"))
+        key = "equities_daily_AAPL"
+        storage.write(self._daily_bars(), key)
+        return storage, key
+
+    def test_one_partition_per_month(self, stored):
+        storage, key = stored
+
+        parts = storage.partitions(key)
+
+        assert len(parts) == 14
+        assert all(part.path.is_file() for part in parts)
+        assert all(part.size_bytes > 0 for part in parts)
+        assert parts[0].values == {"year": 2023, "month": 1}
+
+    def test_ordered_by_value_not_by_path(self, stored):
+        """Partition directories are unpadded, so a path sort puts month=10 after month=1."""
+        storage, key = stored
+
+        labels = [part.label for part in storage.partitions(key)]
+
+        assert labels == sorted(labels), "labels must already be chronological"
+        assert labels[:3] == ["2023-01", "2023-02", "2023-03"]
+
+    def test_date_range_prunes_the_same_way_read_does(self, stored):
+        storage, key = stored
+
+        pruned = storage.partitions(
+            key, start_date=datetime(2023, 6, 1), end_date=datetime(2023, 8, 31)
+        )
+
+        assert [part.label for part in pruned] == ["2023-06", "2023-07", "2023-08"]
+
+    def test_reports_the_current_generation_after_a_rewrite(self, stored):
+        """A write makes a new generation; partitions must not report the superseded one."""
+        storage, key = stored
+        storage.write(self._daily_bars(months=3), key)
+
+        parts = storage.partitions(key)
+
+        assert [part.label for part in parts] == ["2023-01", "2023-02", "2023-03"]
+        assert len({part.path.parent.parent for part in parts}) == 1
