@@ -319,6 +319,7 @@ class TestPerformanceIntegration:
         finally:
             Universe.remove_custom("test_perf_10")
 
+    @pytest.mark.slow
     def test_storage_load_100_symbols_performance(self, tmp_path):
         """Test loading 100 symbols from storage completes in <1 second."""
         # Create storage and populate with 100 symbols
