@@ -48,7 +48,12 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     build = release["jobs"]["build"]
     publish = release["jobs"]["publish"]
 
-    assert build["needs"] == ["compatibility", "provider-contracts", "quality"]
+    assert build["needs"] == [
+        "ecosystem-qualification",
+        "compatibility",
+        "provider-contracts",
+        "quality",
+    ]
     assert publish["needs"] == "build"
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}

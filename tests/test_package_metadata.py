@@ -25,7 +25,7 @@ def test_supported_python_and_platform_metadata() -> None:
     project = load_project()
     classifiers = set(project["classifiers"])
 
-    assert project["requires-python"] == ">=3.12,<3.15"
+    assert project["requires-python"] == ">=3.12"
     assert "Development Status :: 5 - Production/Stable" in classifiers
     assert "Operating System :: OS Independent" not in classifiers
     assert {

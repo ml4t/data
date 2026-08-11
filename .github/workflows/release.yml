@@ -18,6 +18,14 @@ env:
   NO_MKDOCS_2_WARNING: "1"
 
 jobs:
+  ecosystem-qualification:
+    name: Ecosystem Qualification
+    permissions:
+      contents: read
+    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@9921873f47ce9beb298ad50814e898f6fa0e6a85 # v0.1.0
+    with:
+      import-package: ml4t.data
+
   compatibility:
     name: Release Compatibility
     uses: ./.github/workflows/compatibility.yml
@@ -83,7 +91,7 @@ jobs:
   build:
     name: Build Validated Artifacts
     runs-on: ubuntu-latest
-    needs: [compatibility, provider-contracts, quality]
+    needs: [ecosystem-qualification, compatibility, provider-contracts, quality]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

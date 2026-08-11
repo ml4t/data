@@ -1,0 +1,66 @@
+name: Feature request
+description: Request a concrete new or expanded capability
+title: "[Feature]: "
+labels:
+  - "type: feature"
+  - "priority: normal"
+  - "status: needs-triage"
+  - "compatibility: affected"
+body:
+  - type: dropdown
+    id: library
+    attributes:
+      label: Owning library
+      options:
+        - data
+        - engineer
+        - backtest
+        - specs
+        - live
+        - diagnostic
+        - models
+        - ecosystem
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Current package version
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the workflow that cannot be completed or is unnecessarily difficult.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Required outcome
+      description: State observable behavior without prescribing an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing alternatives
+      description: Describe workarounds or related APIs already considered.
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      options:
+        - Existing API extension
+        - New cross-library contract
+        - Potentially incompatible behavior
+        - No known compatibility impact
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true

@@ -1,0 +1,80 @@
+name: Bug report
+description: Report reproducible incorrect behavior in ecosystem policy or tooling
+title: "[Bug]: "
+labels:
+  - "type: bug"
+  - "priority: normal"
+  - "status: needs-triage"
+  - "compatibility: affected"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Do not disclose suspected vulnerabilities here.
+  - type: dropdown
+    id: library
+    attributes:
+      label: Affected library
+      options:
+        - data
+        - engineer
+        - backtest
+        - specs
+        - live
+        - diagnostic
+        - models
+        - ecosystem
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Affected package version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Python version, operating system, installation method, and relevant extras.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest complete example and error output.
+    validations:
+      required: true
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      options:
+        - Public behavior or results
+        - Python or operating-system support
+        - Cross-library contract
+        - Installation or dependency resolution
+        - No known compatibility impact
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: State the observable conditions that demonstrate the issue is resolved.
+    validations:
+      required: true

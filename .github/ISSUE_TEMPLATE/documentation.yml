@@ -1,0 +1,55 @@
+name: Documentation problem
+description: Report missing, incorrect, or difficult documentation
+title: "[Docs]: "
+labels:
+  - "type: documentation"
+  - "priority: normal"
+  - "status: needs-triage"
+  - "compatibility: none"
+body:
+  - type: dropdown
+    id: library
+    attributes:
+      label: Affected library
+      options:
+        - data
+        - engineer
+        - backtest
+        - specs
+        - live
+        - diagnostic
+        - models
+        - ecosystem
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package or documentation version
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Page or API location
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: State what is missing, incorrect, or difficult to follow.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Required documentation outcome
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true

@@ -70,7 +70,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Typing :: Typed",
 ]
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12"
 
 # Core dependencies
 dependencies = [
