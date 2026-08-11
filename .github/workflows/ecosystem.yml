@@ -13,6 +13,6 @@ jobs:
   qualification:
     permissions:
       contents: read
-    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@7bd81975055de8afaf3c8a17dfc9d858e411192e # v0.1.0
+    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@812cf4e7c28aaec93e57a94e39f897e963744378 # v0.1.0
     with:
       import-package: ml4t.data
