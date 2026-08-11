@@ -17,6 +17,7 @@ jobs:
   qualification:
     permissions:
       contents: read
-    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@736599a738747dcf1e874a4e552ca018c0057cab # v0.1.0
+    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@457678d8860d0c816b1dc376e7e2691daa93af4d # v0.1.0
     with:
       import-package: ml4t.data
+      prerelease-exception: python-315-polars
