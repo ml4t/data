@@ -10,6 +10,7 @@ Market data acquisition and storage library for ML4T 3rd Edition.
 | `tests/`           | Test suite                       |
 | `examples/`        | Usage examples                   |
 | `docs/`            | MkDocs documentation             |
+| `docs/book-guide/index.md` | Chapter-to-API cross-reference: which book notebook uses which class/function |
 
 ## Key Modules
 
