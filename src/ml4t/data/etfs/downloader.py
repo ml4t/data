@@ -350,7 +350,7 @@ class ETFDataManager(ProfileMixin):
 
     def _regenerate_combined(self) -> None:
         """Regenerate combined file from individual ticker files."""
-        all_data = self.load_all()
+        all_data = self.load_symbols(self.config.get_all_symbols())
         if not all_data.is_empty():
             self._save_combined(all_data)
 
