@@ -5,6 +5,7 @@ difficult to trigger with normal usage.
 """
 
 import io
+import re
 import zipfile
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -14,7 +15,7 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.exceptions import DataValidationError
-from ml4t.data.providers.binance_public import BinancePublicProvider
+from ml4t.data.providers.binance_public import BinancePublicProvider, _failure_reason
 
 
 class TestMarketValidation:
@@ -258,3 +259,60 @@ class TestSessionConfiguration:
     def test_default_rate_limit(self):
         """Test default rate limit is set."""
         assert BinancePublicProvider.DEFAULT_RATE_LIMIT == (1000, 60.0)
+
+
+class TestAsyncDownloadFailuresAreLegible:
+    """An async download failure must say which day failed and why.
+
+    `str(exc)` is empty for an exception raised with no arguments, and the async
+    daily path logged nothing else. Run 33988501549 of the book repository's
+    reader-install job emitted 569 lines reading `Failed to download:` - no symbol,
+    no date, no reason - which is what turned a five-symbol Binance outage into an
+    undiagnosable failure of a whole seven-dataset job.
+    """
+
+    def test_an_argumentless_exception_still_names_its_type(self) -> None:
+        class Unexplained(Exception):
+            pass
+
+        assert _failure_reason(Unexplained()) == "Unexplained"
+
+    def test_a_message_is_kept_alongside_the_type(self) -> None:
+        assert _failure_reason(ValueError("HTTP 404")) == "ValueError: HTTP 404"
+
+    def test_a_whitespace_only_message_does_not_produce_a_dangling_colon(self) -> None:
+        assert _failure_reason(RuntimeError("   ")) == "RuntimeError"
+
+    def test_the_daily_async_path_logs_the_date_and_the_reason(self, capsys) -> None:
+        """The regression: a bare exception used to render as `Failed to download:`."""
+        import asyncio
+
+        provider = BinancePublicProvider()
+
+        async def explode(url: str):
+            raise TimeoutError
+
+        async def first_available(**kwargs):
+            return (datetime(2024, 1, 1, tzinfo=UTC), pl.DataFrame())
+
+        with (
+            patch.object(provider, "_download_and_parse_zip_async", side_effect=explode),
+            patch.object(provider, "_find_first_available_date_async", side_effect=first_available),
+        ):
+            asyncio.run(
+                provider._fetch_daily_data_async(
+                    "BTCUSDT",
+                    "1h",
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 3, tzinfo=UTC),
+                )
+            )
+
+        # structlog's console renderer colours the fields, so drop the escapes first.
+        rendered = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+        assert "Failed to download" in rendered
+        assert "date=2024-01-02" in rendered
+        assert "symbol=BTCUSDT" in rendered
+        assert "reason=TimeoutError" in rendered
+        # The defect: a subject-less, reason-less line.
+        assert "Failed to download:" not in rendered

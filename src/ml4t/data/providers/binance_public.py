@@ -42,6 +42,19 @@ async def _gather_or_cancel[ResultT](awaitables: list[Awaitable[ResultT]]) -> li
         raise
 
 
+def _failure_reason(error: BaseException) -> str:
+    """Describe an exception that may carry no message of its own.
+
+    `str(exc)` is empty for an exception raised with no arguments, and the async
+    download paths logged nothing but that. Run 33988501549 of the book repository's
+    reader-install job emitted 569 lines reading `Failed to download:` with no
+    subject and no reason, which is what turned a five-symbol Binance outage into an
+    undiagnosable failure of the whole job.
+    """
+    message = str(error).strip()
+    return f"{type(error).__name__}: {message}" if message else type(error).__name__
+
+
 class BinancePublicProvider(BaseProvider):
     """Provider for bulk historical data from Binance Public Data repository.
 
@@ -1407,24 +1420,31 @@ class BinancePublicProvider(BaseProvider):
 
         async def fetch_one(
             date: datetime, url: str
-        ) -> tuple[datetime, pl.DataFrame | None] | Exception:
+        ) -> tuple[datetime, pl.DataFrame | None] | tuple[datetime, Exception]:
             async with semaphore:
                 try:
                     df = await self._download_and_parse_zip_async(url)
                     return (date, df)
                 except Exception as exc:
-                    return exc
+                    # Carry the date out with the failure; without it the warning
+                    # cannot say which day of the window was missing.
+                    return (date, exc)
 
         tasks = [fetch_one(date, url) for date, url in urls]
         results = await _gather_or_cancel(tasks)
 
         # Collect successful results in order
         all_data: list[pl.DataFrame] = [first_df]
-        for result in results:
+        for date, result in results:
             if isinstance(result, Exception):
-                logger.warning(f"Failed to download: {result}")
+                logger.warning(
+                    "Failed to download",
+                    symbol=symbol,
+                    date=date.date().isoformat(),
+                    reason=_failure_reason(result),
+                )
                 continue
-            date, df = result
+            df = result
             if df is not None and not df.is_empty():
                 all_data.append(df)
 
@@ -1787,7 +1807,13 @@ class BinancePublicProvider(BaseProvider):
         all_data: list[pl.DataFrame] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.debug(f"Monthly fetch failed for {months[i]}: {result}")
+                year, month = months[i]
+                logger.debug(
+                    "Monthly fetch failed",
+                    symbol=symbol,
+                    month=f"{year}-{month:02d}",
+                    reason=_failure_reason(result),
+                )
                 continue
             if result is not None and not result.is_empty():
                 all_data.append(result)
