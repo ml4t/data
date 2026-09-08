@@ -39,6 +39,8 @@ coverage/
 # Claude Code (local development only)
 CLAUDE.md
 .claude/
+.codex/
+.workspace/
 .agentic_documentation/
 .skills-outputs/
 planning/
