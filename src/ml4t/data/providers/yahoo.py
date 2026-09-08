@@ -53,6 +53,22 @@ def _chunks(lst: list[Any], n: int) -> Iterator[list[Any]]:
         yield lst[i : i + n]
 
 
+def _drop_priceless_rows(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop bars that carry no price at all.
+
+    From the US close until Yahoo consolidates the daily bar, ``yf.download`` returns a
+    final row for the current exchange date with volume and null OHLC. It is not a
+    session: keeping it writes null prices into storage and into everything derived from
+    them. A row with prices and zero volume is a real halted session and is kept.
+    """
+    price_columns = ("open", "high", "low", "close")
+    present = [column for column in price_columns if column in df.columns]
+    if not present:
+        return df
+    has_price = pl.any_horizontal(pl.col(column).is_not_null() for column in present)
+    return df.filter(has_price)
+
+
 class YahooFinanceProvider(BaseProvider):
     """
     Thin wrapper around yfinance for API consistency and incremental updates.
@@ -194,6 +210,14 @@ class YahooFinanceProvider(BaseProvider):
             # Convert to Polars with symbol column
             df = self._convert_to_polars(df_pandas, symbol)
 
+            if df.is_empty():
+                # Every row was the current session's placeholder; the window holds no bar.
+                raise SymbolNotFoundError(
+                    "yahoo",
+                    symbol,
+                    details={"start": start, "end": end_str, "frequency": frequency},
+                )
+
             logger.info("Successfully fetched data", symbol=symbol, rows=len(df))
             return df
 
@@ -279,6 +303,7 @@ class YahooFinanceProvider(BaseProvider):
                 pl.col("volume").cast(pl.Float64),
             )
             .with_columns(pl.lit(symbol.upper()).alias("symbol"))
+            .pipe(_drop_priceless_rows)
             .select(["timestamp", "symbol", "open", "high", "low", "close", "volume"])
         )
 
@@ -587,10 +612,7 @@ class YahooFinanceProvider(BaseProvider):
                     ]
                 )
 
-                # Drop rows where all OHLCV are null (symbol had no data for that date)
-                df_symbol = df_symbol.filter(
-                    pl.col("close").is_not_null() | pl.col("open").is_not_null()
-                )
+                df_symbol = _drop_priceless_rows(df_symbol)
 
                 if len(df_symbol) > 0:
                     records.append(df_symbol)
