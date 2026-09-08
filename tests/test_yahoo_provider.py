@@ -6,6 +6,7 @@ import pandas as pd
 import polars as pl
 import pytest
 
+from ml4t.data.core.exceptions import SymbolNotFoundError
 from ml4t.data.providers.yahoo import YahooFinanceProvider
 
 
@@ -215,3 +216,69 @@ class TestYahooFinanceProvider:
             # Check that the correct interval was used
             call_kwargs = mock_download.call_args[1]
             assert call_kwargs["interval"] == expected_interval
+
+
+class TestYahooCurrentSessionPlaceholderBar:
+    """From the US close until Yahoo consolidates the daily bar it returns a row with
+    volume and no prices. The single-symbol and batch paths must agree about that row."""
+
+    @staticmethod
+    def _frame_with_placeholder() -> pd.DataFrame:
+        """The frame observed on 2026-09-03: a final row carrying volume and NaN OHLC."""
+        return pd.DataFrame(
+            {
+                ("Close", "AAPL"): [324.959991, float("nan")],
+                ("High", "AAPL"): [328.399994, float("nan")],
+                ("Low", "AAPL"): [323.529999, float("nan")],
+                ("Open", "AAPL"): [326.869995, float("nan")],
+                ("Volume", "AAPL"): [33776400, 37197362],
+            },
+            index=pd.DatetimeIndex(
+                [pd.Timestamp("2026-09-02"), pd.Timestamp("2026-09-03")], name="Date"
+            ),
+        )
+
+    @patch("ml4t.data.providers.yahoo.yf.download")
+    def test_fetch_ohlcv_drops_the_placeholder_bar(self, mock_download: MagicMock) -> None:
+        mock_download.return_value = self._frame_with_placeholder()
+
+        df = YahooFinanceProvider().fetch_ohlcv("AAPL", "2026-09-02", "2026-09-03", "daily")
+
+        assert len(df) == 1
+        assert df["timestamp"].dt.date().to_list() == [pd.Timestamp("2026-09-02").date()]
+        assert df["open"].to_list() == [326.869995]
+
+    @patch("ml4t.data.providers.yahoo.yf.download")
+    def test_fetch_and_batch_agree_on_the_placeholder_bar(self, mock_download: MagicMock) -> None:
+        """The defect was the disagreement: batch_load succeeded where update() raised."""
+        provider = YahooFinanceProvider()
+
+        mock_download.return_value = self._frame_with_placeholder()
+        single = provider.fetch_ohlcv("AAPL", "2026-09-02", "2026-09-03", "daily")
+
+        mock_download.return_value = self._frame_with_placeholder()
+        batch = provider.fetch_batch_ohlcv(["AAPL"], "2026-09-02", "2026-09-03", "daily")
+
+        assert single["timestamp"].dt.date().to_list() == batch["timestamp"].dt.date().to_list()
+
+    @patch("ml4t.data.providers.yahoo.yf.download")
+    def test_a_row_with_prices_and_no_volume_is_kept(self, mock_download: MagicMock) -> None:
+        """Only a priceless row is a placeholder. A halted session with zero volume is a bar."""
+        frame = self._frame_with_placeholder()
+        frame.loc[pd.Timestamp("2026-09-03")] = [325.0, 325.0, 325.0, 325.0, 0]
+        mock_download.return_value = frame
+
+        df = YahooFinanceProvider().fetch_ohlcv("AAPL", "2026-09-02", "2026-09-03", "daily")
+
+        assert len(df) == 2
+
+    @patch("ml4t.data.providers.yahoo.yf.download")
+    def test_a_response_of_nothing_but_placeholders_is_not_data(
+        self, mock_download: MagicMock
+    ) -> None:
+        """Dropping every row must not report an empty fetch as a successful one."""
+        frame = self._frame_with_placeholder().iloc[1:]
+        mock_download.return_value = frame
+
+        with pytest.raises(SymbolNotFoundError):
+            YahooFinanceProvider().fetch_ohlcv("AAPL", "2026-09-03", "2026-09-03", "daily")
