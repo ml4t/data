@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from ml4t.data.core.config import resolve_storage_path
-from ml4t.data.futures.adjustment import BackAdjustment, RatioAdjustment
+from ml4t.data.futures.adjustment import BackAdjustment, NoAdjustment, RatioAdjustment
 from ml4t.data.futures.continuous import (
     ContinuousContractBuilder,
     build_continuous_contract,
@@ -557,3 +557,71 @@ class TestContinuousContractEdgeCases:
             )
 
             mock_raw.assert_called_once()
+
+
+class TestContinuousContractRemovesRollGap:
+    """End-to-end: the series a reader gets back carries no artificial roll-day move."""
+
+    @staticmethod
+    def _two_contract_panel() -> pl.DataFrame:
+        """Front month at 100 rising by 1/day, deferred 10 points above it in contango.
+
+        Volume moves to the deferred contract on 2024-01-04, so a roll follows.
+        """
+        dates = [date(2024, 1, day) for day in range(1, 7)]
+        front_close = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
+        back_close = [close + 10.0 for close in front_close]
+        front_volume = [10000.0, 10000.0, 10000.0, 1000.0, 1000.0, 1000.0]
+        back_volume = [1000.0, 1000.0, 1000.0, 10000.0, 10000.0, 10000.0]
+        return pl.DataFrame(
+            {
+                "date": dates * 2,
+                "symbol": ["ESH24"] * 6 + ["ESM24"] * 6,
+                "open": front_close + back_close,
+                "high": front_close + back_close,
+                "low": front_close + back_close,
+                "close": front_close + back_close,
+                "volume": front_volume + back_volume,
+            }
+        )
+
+    def _build(self, adjustment_method) -> pl.DataFrame:
+        builder = ContinuousContractBuilder(
+            roll_strategy=VolumeBasedRoll(min_days_between_rolls=0),
+            adjustment_method=adjustment_method,
+        )
+        with patch("ml4t.data.futures.continuous.parse_quandl_chris_raw") as mock_raw:
+            mock_raw.return_value = self._two_contract_panel()
+            return builder.build("ES")
+
+    def test_unadjusted_series_carries_the_roll_gap(self):
+        """The premise: without adjustment the roll day shows a jump no contract made."""
+        result = self._build(NoAdjustment())
+        roll_index = result["is_roll_date"].to_list().index(True)
+
+        assert result["is_roll_date"].sum() == 1
+        raw_move = result["adjusted_close"][roll_index] - result["adjusted_close"][roll_index - 1]
+        assert raw_move == pytest.approx(11.0)  # 10.0 of spread, 1.0 of genuine move
+
+    def test_back_adjusted_roll_day_moves_by_the_old_contract_only(self):
+        result = self._build(BackAdjustment())
+        roll_index = result["is_roll_date"].to_list().index(True)
+
+        move = result["adjusted_close"][roll_index] - result["adjusted_close"][roll_index - 1]
+        assert move == pytest.approx(1.0)
+
+    def test_ratio_adjusted_roll_day_returns_the_old_contract_return(self):
+        result = self._build(RatioAdjustment())
+        roll_index = result["is_roll_date"].to_list().index(True)
+
+        adjusted_return = (
+            result["adjusted_close"][roll_index] / result["adjusted_close"][roll_index - 1] - 1
+        )
+        # The outgoing contract rose 1 point off its own prior close of 103 on the roll day.
+        assert adjusted_return == pytest.approx(1.0 / 103.0)
+
+    def test_adjusted_series_ends_on_the_traded_price(self):
+        """Back-adjustment anchors the most recent bar; only history is shifted."""
+        for method in (BackAdjustment(), RatioAdjustment()):
+            result = self._build(method)
+            assert result["adjusted_close"][-1] == pytest.approx(result["close"][-1])
