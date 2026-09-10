@@ -117,11 +117,38 @@ class TestFXMacroDataRequests:
 
         url = get.call_args.args[0]
         params = get.call_args.kwargs["params"]
+        headers = get.call_args.kwargs["headers"]
         assert url == "https://api.fxmacrodata.com/v1/announcements/usd/inflation"
-        assert params["api_key"] == "test_key"
+        assert headers["X-API-Key"] == "test_key"
+        assert "api_key" not in params
         assert params["start_date"] == "2025-01-01"
         assert params["limit"] == 1
         assert "end_date" not in params
+
+    def test_api_key_is_never_sent_as_a_query_parameter(self, provider):
+        response = _response(payload=ANNOUNCEMENT_PAYLOAD)
+
+        with patch.object(provider.session, "get", return_value=response) as get:
+            provider.fetch_announcements("USD", "inflation", limit=1)
+
+        params = get.call_args.kwargs["params"]
+        url = get.call_args.args[0]
+        assert "test_key" not in url
+        assert not any(value == "test_key" for value in params.values())
+
+    def test_no_auth_header_is_sent_without_a_key(self):
+        # clear=True matches the init tests: without it an ambient
+        # FXMACRODATA_API_KEY/FXMD_API_KEY in the developer's environment would
+        # be picked up and the assertion would pass for the wrong reason.
+        with patch.dict("os.environ", {}, clear=True):
+            provider = FXMacroDataProvider(rate_limit=(1000, 1.0))
+        try:
+            response = _response(payload=ANNOUNCEMENT_PAYLOAD)
+            with patch.object(provider.session, "get", return_value=response) as get:
+                provider.fetch_announcements("USD", "inflation", limit=1)
+            assert get.call_args.kwargs["headers"] is None
+        finally:
+            provider.close()
 
     def test_fetch_catalogue_reshapes_indicator_mapping(self, provider):
         payload = {
