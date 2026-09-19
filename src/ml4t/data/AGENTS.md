@@ -1,46 +1,35 @@
-# ml4t.data - Package Index
+# `ml4t.data` source guide
 
-## Core Modules
+This directory implements the `ml4t.data` package. Follow the repository-level `AGENTS.md` for
+quality, compatibility, and release requirements. This guide only routes source changes.
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| data_manager.py | 564 | Main orchestration API |
-| update_manager.py | 829 | Incremental update system |
-| universe.py | 987 | Asset universe management |
-| provider_updater.py | 449 | Provider coordination |
+## Change locations
 
-## Subpackages
+| Area | Responsibility |
+|---|---|
+| `providers/` | Provider contracts, registry metadata, synchronous and asynchronous adapters |
+| `storage/` | Storage protocols, path and key handling, Parquet backends, metadata, and migrations |
+| `futures/` | Futures symbology, downloads, continuous contracts, rolls, and adjustments |
+| `data_manager.py`, `update_manager.py`, `provider_updater.py`, `managers/` | Acquisition and update orchestration |
+| `core/`, `config/` | Shared models, configuration, and exception types |
+| `assets/`, `calendar/`, `sessions/` | Asset contracts and trading-session behavior |
+| `validation/`, `anomaly/`, `security/` | Data validation, anomaly checks, and input safety |
+| `synthetic/` | Deterministic synthetic data models and registry integration |
+| `cli/`, `cli_interface.py` | Command-line behavior exposed by the `ml4t-data` entry point |
 
-| Directory | Lines | Purpose |
-|-----------|-------|---------|
-| providers/ | 14k | 20 live provider adapters + synthetic/testing providers |
-| storage/ | 4.6k | Hive-partitioned backends + profiling |
-| futures/ | 4.6k | Databento futures downloader |
-| etfs/ | 600 | ETFDataManager (Yahoo Finance) |
-| crypto/ | 420 | CryptoDataManager (Binance Public) |
-| core/ | 1k | Models, schemas, config |
-| utils/ | 1.6k | Rate limiting, gaps, retry |
-| assets/ | 1.3k | Asset class definitions |
-| anomaly/ | 1k | Data quality detection |
-| cot/ | 1k | CFTC COT data |
-| validation/ | 1.2k | OHLC validation |
-| sessions/ | 462 | Session assignment |
-| macro/ | 455 | Macro data downloader |
-| calendar/ | 359 | Trading calendars |
-| export/ | 231 | CSV/JSON/Excel export |
+Providers, storage, and futures contain directory-specific `AGENTS.md` files. Use those guides when
+editing within those subsystems. Public API and usage details belong in `docs/api/`,
+`docs/user-guide/`, and `docs/providers/` rather than here.
 
-## Book Data Managers
+## Package boundaries
 
-Simplified managers for ML4T book readers with built-in profiling:
-
-| Manager | Asset | Source | Profiling |
-|---------|-------|--------|-----------|
-| `ETFDataManager` | ETFs | Yahoo Finance | `generate_profile()` |
-| `CryptoDataManager` | Crypto | Binance Public | `generate_profile()` |
-| `FuturesDataManager` | Futures | Databento | `generate_profile(product)` |
-
-All managers inherit from `ProfileMixin` for on-demand column statistics.
-
-## Key
-
-`DataManager`, `UpdateManager`, `HiveStorage`, `ProfileMixin`, `get_provider()`
+- Keep `src/ml4t/` as a namespace package without an `__init__.py` file.
+- Re-export only supported public names from package `__init__.py` files. Test imports from an
+  installed wheel when changing exports.
+- Keep optional-provider imports isolated so the base package works without every provider extra.
+- Route data paths through `core.config`; shared callers must not invent another environment-variable
+  or default-path convention.
+- Extend shared protocols and models deliberately. A contract change requires tests for adapters,
+  orchestration, and storage consumers that rely on it.
+- Add tests in the matching `tests/` area and use the repository's established markers for any
+  non-default lane.

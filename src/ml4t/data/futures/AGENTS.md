@@ -1,116 +1,32 @@
-# futures/ - Databento Futures Data
+# Futures subsystem guide
 
-CME futures data downloading and continuous contract construction.
+This directory owns futures symbology, Databento-backed acquisition, continuous-contract
+construction, roll selection, and price adjustment. It is not the general provider registry or the
+generic storage layer.
 
-## Downloader Classes
+## Change locations
 
-| Class                  | Symbology           | Schema     | Use Case                            |
-| ---------------------- | ------------------- | ---------- | ----------------------------------- |
-| `ContinuousDownloader` | `ES.v.0` (volume)   | `ohlcv-1h` | Pre-rolled continuous, Hive output  |
-| `IndividualDownloader` | `ESH24` (raw)       | `ohlcv-1h` | Specific contracts for roll demo    |
-| `FuturesDownloader`    | `ES.FUT` (parent)   | `ohlcv-1d` | All contracts, bulk download        |
-| `FuturesDataManager`   | `ES.FUT` (parent)   | `ohlcv-1d` | High-level interface + profiling    |
+| File | Responsibility |
+|---|---|
+| `parser.py`, `databento_parser.py` | Contract symbols and Databento record conversion |
+| `schema.py`, `definitions.py` | Contract specifications and definition data |
+| `downloader.py` | Parent-symbol downloads |
+| `continuous_downloader.py`, `individual_downloader.py` | Continuous and individual-contract acquisition |
+| `continuous.py`, `roll.py`, `adjustment.py` | Continuous series, roll decisions, and price adjustment |
+| `config.py` | Futures-specific configuration |
+| `book_downloader.py` | Higher-level futures workflow used by the book examples |
 
-## Key Files
+## Invariants
 
-| File                      | Purpose                                      |
-| ------------------------- | -------------------------------------------- |
-| `continuous_downloader.py` | ContinuousDownloader class                   |
-| `individual_downloader.py` | IndividualDownloader class                   |
-| `downloader.py`            | FuturesDownloader class                      |
-| `book_downloader.py`       | FuturesDataManager for book readers          |
-| `databento_parser.py`      | Contract symbol parsing (MONTH_CODES, etc.)  |
-| `continuous.py`            | ContinuousContractBuilder                    |
-| `roll.py`                  | Roll strategies (VolumeBasedRoll, etc.)      |
-| `adjustment.py`            | Price adjustment methods (BackAdjustment)    |
-| `config.py`                | Configuration dataclasses                    |
-| `schema.py`                | Contract specifications (ContractSpec)       |
-| `definitions.py`           | DefinitionsDownloader                        |
+- Keep symbol parsing and contract-calendar logic separate from network acquisition.
+- Preserve the distinction between parent, individual, and continuous symbols in code and tests.
+- Route filesystem defaults through the package data-root helpers; do not embed workstation paths.
+- Keep Databento optional. Importing unrelated `ml4t.data` modules must not require the extra.
+- Mock external calls in the default test suite. Credentialed or live checks use the established
+  integration markers.
+- Treat output schemas and roll or adjustment behavior as public contracts. Add regression tests for
+  boundary dates and representative symbols when changing them.
 
-## Contract Symbol Formats
-
-| Format       | Example    | Description                        |
-| ------------ | ---------- | ---------------------------------- |
-| Continuous   | `ES.v.0`   | Volume-rolled front month          |
-| Continuous   | `ES.c.1`   | Calendar-rolled second month       |
-| Individual   | `ESH24`    | March 2024 contract                |
-| Parent       | `ES.FUT`   | All contracts for product          |
-
-## Month Codes
-
-| Code | Month     | Code | Month     |
-| ---- | --------- | ---- | --------- |
-| F    | January   | N    | July      |
-| G    | February  | Q    | August    |
-| H    | March     | U    | September |
-| J    | April     | V    | October   |
-| K    | May       | X    | November  |
-| M    | June      | Z    | December  |
-
-## Usage Examples
-
-```python
-# Continuous contracts
-from ml4t.data.futures import ContinuousDownloader, ContinuousDownloadConfig
-
-config = ContinuousDownloadConfig(
-    products=["ES", "CL"],
-    start="2020-01-01",
-    end="2025-12-31",
-    tenors=[0, 1, 2],
-    schema="ohlcv-1h",
-)
-downloader = ContinuousDownloader(config)
-downloader.download_all()
-
-# Individual contracts
-from ml4t.data.futures import IndividualDownloader, IndividualDownloadConfig
-
-config = IndividualDownloadConfig(
-    products={
-        "ES": {"months": [3, 6, 9, 12]},   # Quarterly
-        "CL": {"months": list(range(1, 13))},  # Monthly
-    },
-    years=[2024, 2025],
-    schema="ohlcv-1h",
-)
-downloader = IndividualDownloader(config)
-downloader.download_all()
-```
-
-## Data Profiling (FuturesDataManager)
-
-```python
-from ml4t.data.futures import FuturesDataManager
-
-manager = FuturesDataManager.from_config("config.yaml")
-
-# Generate profile for specific product
-profile = manager.generate_profile("ES")
-print(profile.summary())
-
-# Load existing profile
-profile = manager.load_profile("ES")
-
-# Generate profiles for all products
-profiles = manager.generate_all_profiles()
-```
-
-## Output Structure
-
-```
-futures/
-├── continuous/              # ContinuousDownloader output
-│   └── product={PRODUCT}/
-│       └── year={YEAR}/
-│           └── data.parquet
-├── individual/              # IndividualDownloader output
-│   └── {PRODUCT}/
-│       └── data.parquet
-├── ohlcv_1d/                # FuturesDataManager output
-│   └── product={PRODUCT}/
-│       ├── year={YEAR}/
-│       │   └── data.parquet
-│       └── _profile.json    # Per-product profile
-└── definitions.parquet      # Contract specifications
-```
+Run `uv run pytest tests/futures -q -ra` for focused verification, then run the root quality gates.
+User-facing behavior and examples belong in the futures API documentation and
+`docs/book-guide/index.md`, not in this file.
