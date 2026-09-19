@@ -1,4 +1,4 @@
-"""Utility functions for QLDM."""
+"""Utility functions for ml4t-data."""
 
 from ml4t.data.utils.format import pivot_to_stacked, pivot_to_wide
 

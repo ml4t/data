@@ -11,7 +11,7 @@ Key Concepts:
 - Detecting toxic order flow and liquidity events
 - Proper backtesting with microsecond-precision data
 
-Author: QuantLab Team
+Author: Stefan Jansen
 Date: August 2025
 """
 

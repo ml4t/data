@@ -1,15 +1,4 @@
-"""Binance Public Data provider for bulk historical downloads.
-
-This provider downloads from data.binance.vision, Binance's public data repository.
-Unlike the live API (BinanceProvider), this:
-- Works globally without geographic restrictions
-- Downloads bulk ZIP files (not rate-limited)
-- Provides historical data going back years
-- Uses MIT-licensed data distribution
-
-Repository: https://data.binance.vision
-GitHub: https://github.com/binance/binance-public-data
-"""
+"""Binance Public Data provider for historical spot and futures archives."""
 
 from __future__ import annotations
 
@@ -60,12 +49,11 @@ class BinancePublicProvider(BaseProvider):
 
     Downloads from data.binance.vision - Binance's public S3 bucket with
     historical market data. This is separate from the live API and has
-    no geographic restrictions.
+    public historical archives.
 
     Features:
     - No API key required
-    - No rate limits (public S3 bucket)
-    - Works globally (no geo-restrictions)
+    - Public files without account credentials
     - Historical data going back years
     - Spot and USD-M futures markets
     - Daily and monthly aggregated files
@@ -1513,8 +1501,7 @@ class BinancePublicProvider(BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data for a symbol.
 
-        This is 3-5x faster than sync for multi-day fetches due to
-        concurrent HTTP requests.
+        Uses concurrent HTTP requests for independent daily files.
 
         Args:
             symbol: Symbol to fetch (e.g., "BTCUSDT")
@@ -1762,7 +1749,7 @@ class BinancePublicProvider(BaseProvider):
     ) -> pl.DataFrame:
         """Async version: Fetch premium index data for a single symbol.
 
-        3-5x faster than sync version due to concurrent HTTP requests.
+        Uses concurrent HTTP requests for independent daily files.
 
         Args:
             symbol: Futures symbol (e.g., "BTCUSDT")
@@ -1837,7 +1824,7 @@ class BinancePublicProvider(BaseProvider):
     ) -> pl.DataFrame:
         """Async version: Fetch premium index for multiple symbols in parallel.
 
-        Significantly faster than sync version - downloads all symbols concurrently.
+        Downloads data for independent symbols concurrently.
 
         Args:
             symbols: List of futures symbols (e.g., ["BTCUSDT", "ETHUSDT"])
@@ -1915,8 +1902,7 @@ class BinancePublicProvider(BaseProvider):
     ) -> pl.DataFrame:
         """Sync wrapper for parallel premium index download.
 
-        Uses asyncio internally for parallel downloads, 3-10x faster than
-        the sequential version for multiple symbols.
+        Uses asyncio internally to download data for multiple symbols concurrently.
 
         Args:
             symbols: List of futures symbols

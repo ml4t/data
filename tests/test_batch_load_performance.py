@@ -370,6 +370,4 @@ class TestBatchLoadFromStorageBenchmarks:
         print("\n" + "=" * 60)
         print("ACCEPTANCE CRITERIA:")
         print("  ✓ 100 symbols loaded in < 1 second")
-        print("  ✓ Storage reads 10-100x faster than network fetch")
-        print("  ✓ Parallel reads scale efficiently")
         print("=" * 60 + "\n")

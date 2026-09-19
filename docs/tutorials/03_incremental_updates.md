@@ -579,7 +579,7 @@ print(f"Incremental: {incremental_time:.1f}s")
 # Incremental: 34.2s (34 seconds)
 
 print(f"Speedup: {naive_time / incremental_time:.1f}x faster")
-# Speedup: 10.0x faster
+# Compare elapsed times in your environment
 ```
 
 ## Summary

@@ -26,7 +26,7 @@ logger = structlog.get_logger()
 class BatchManager:
     """Manages parallel batch loading operations.
 
-    This class provides high-performance parallel data fetching for
+    This class provides parallel data fetching for
     multiple symbols, with support for universes and storage integration.
 
     Attributes:

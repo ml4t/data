@@ -391,8 +391,8 @@ class YahooFinanceProvider(BaseProvider):
         """
         Fetch OHLCV data for multiple symbols efficiently using batch downloads.
 
-        This method is ~20x faster than calling fetch_ohlcv() for each symbol
-        individually because it uses yfinance's multi-ticker download capability.
+        This method uses yfinance's multi-ticker download capability instead of issuing one
+        library call per symbol.
 
         Use this for:
         - Initial data acquisition (hundreds of symbols)

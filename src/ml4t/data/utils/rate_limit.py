@@ -1,4 +1,4 @@
-"""Rate limiting utilities for QLDM."""
+"""Rate limiting utilities for ml4t-data."""
 
 from __future__ import annotations
 

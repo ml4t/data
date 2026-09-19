@@ -1,23 +1,6 @@
-"""Twelve Data provider for multi-asset market data.
+"""Twelve Data provider for authenticated multi-asset market data.
 
-Twelve Data provides comprehensive market data for stocks, forex, and cryptocurrencies
-across 50+ global exchanges.
-
-API Documentation: https://twelvedata.com/docs
-
-Free Tier Limits:
-- 800 API requests per day
-- 8 requests per minute (strictest rate limit)
-- 15+ years of historical data
-
-Example:
-    >>> from ml4t.data.providers.twelve_data import TwelveDataProvider
-    >>> provider = TwelveDataProvider(api_key="your_key")
-    >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
-
-Async Example:
-    >>> async with TwelveDataProvider(api_key="your_key") as provider:
-    ...     data = await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-31")
+Account plans determine endpoint access, request quotas, and historical depth.
 """
 
 import os
@@ -41,17 +24,12 @@ logger = structlog.get_logger()
 
 
 class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
-    """Twelve Data provider for multi-asset market data.
+    """Fetch stock, ETF, index, foreign exchange, and cryptocurrency data.
 
-    Supports stocks, ETFs, indices, forex, and cryptocurrencies.
-    Async support for 10x faster batch fetches.
-
-    Rate Limits (Free Tier):
-    - 8 requests per minute (strictest limit)
-    - 800 requests per day
+    ``DEFAULT_RATE_LIMIT`` is a conservative client pacing value. Account quotas still apply.
     """
 
-    # 8 requests per minute = 0.133/second
+    # Conservative client-side request pace; account quotas still apply.
     DEFAULT_RATE_LIMIT = (8, 60.0)
 
     # Map frequency to Twelve Data interval format
@@ -235,7 +213,7 @@ class TwelveDataProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data for a symbol.
 
-        This is 3-10x faster than sync when fetching multiple symbols
+        This fetches multiple symbols
         concurrently using asyncio.gather() or async_batch_load().
 
         Args:

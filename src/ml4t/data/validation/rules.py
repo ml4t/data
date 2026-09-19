@@ -248,7 +248,7 @@ class ValidationRulePresets:
 
     @staticmethod
     def strict_rules() -> ValidationRuleConfig:
-        """Strict validation rules for high-quality data."""
+        """Strict validation rules for market data."""
         return ValidationRuleConfig(
             check_nulls=True,
             check_price_consistency=True,

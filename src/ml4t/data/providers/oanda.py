@@ -32,9 +32,9 @@ logger = structlog.get_logger()
 
 
 class OandaProvider(BaseProvider):
-    """OANDA provider for institutional-grade FX market data.
+    """OANDA provider for authenticated foreign exchange market data.
 
-    OANDA provides high-quality foreign exchange data with excellent coverage
+    OANDA provides foreign exchange data
     of major, minor, and exotic currency pairs.
     """
 

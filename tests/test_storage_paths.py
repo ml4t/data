@@ -29,7 +29,6 @@ else:
 def test_resolve_data_root_prefers_ml4t_data_path(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "ml4t-data-root"
     monkeypatch.setenv("ML4T_DATA_PATH", str(root))
-    monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
     monkeypatch.delenv("QLDM_DATA_ROOT", raising=False)
 
     assert resolve_data_root() == root.resolve()
@@ -37,7 +36,6 @@ def test_resolve_data_root_prefers_ml4t_data_path(monkeypatch, tmp_path: Path) -
 
 def test_resolve_data_root_falls_back_to_local_data(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
-    monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
     monkeypatch.delenv("QLDM_DATA_ROOT", raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -72,7 +70,6 @@ def test_config_models_follow_ml4t_data_path(monkeypatch, tmp_path: Path) -> Non
 def test_config_warns_for_legacy_data_root(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "legacy-data"
     monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
-    monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
     monkeypatch.setenv("QLDM_DATA_ROOT", str(root))
 
     with pytest.warns(DeprecationWarning, match="QLDM_DATA_ROOT is deprecated"):

@@ -1,4 +1,4 @@
-"""Asset class abstractions for QLDM."""
+"""Asset class abstractions for ml4t-data."""
 
 from ml4t.data.assets.asset_class import AssetClass, AssetInfo
 from ml4t.data.assets.contracts import (

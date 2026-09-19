@@ -1,27 +1,6 @@
-"""Massive data provider with Polygon compatibility.
+"""Massive market-data provider with Polygon credential compatibility.
 
-Massive.com, formerly Polygon.io, offers comprehensive financial data across
-multiple asset classes:
-- Stocks (equities)
-- Options
-- Futures
-- Cryptocurrencies
-- Forex
-
-Rate Limits:
-    - Free tier: 5 requests/minute
-    - Paid tiers: higher or unlimited usage depending on product
-
-Authentication:
-    Requires API key from https://massive.com/
-    Set MASSIVE_API_KEY or POLYGON_API_KEY, or pass api_key explicitly.
-
-Example:
-    >>> from ml4t.data.providers.polygon import MassiveProvider
-    >>> provider = MassiveProvider(api_key="your_key")
-    >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
-    >>> futures = provider.fetch_ohlcv("ESM6", "2024-01-01", "2024-01-31", asset_class="futures")
-    >>> provider.close()
+Account products determine asset-class access, request quotas, and historical depth.
 """
 
 import os
@@ -68,7 +47,7 @@ class MassiveProvider(BaseProvider):
     API_KEY_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_API_KEY", "POLYGON_API_KEY")
     BASE_URL_ENV_VARS: ClassVar[tuple[str, str]] = ("MASSIVE_BASE_URL", "POLYGON_BASE_URL")
 
-    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (5, 60.0)  # Basic free tier
+    DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (5, 60.0)  # Conservative client pace
 
     # Map frequencies to Massive/Polygon timespans.
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {

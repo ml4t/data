@@ -52,7 +52,7 @@ class ITCHSampleProvider:
 
     ## Why Use ITCH Sample Data?
 
-    **Best For**:
+    **Use cases**:
     - Learning market microstructure concepts
     - Testing order book reconstruction algorithms
     - Demonstrating tick-level data analysis

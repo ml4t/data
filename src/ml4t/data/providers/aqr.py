@@ -150,7 +150,7 @@ class AQRFactorProvider(BaseProvider):
     AQR Capital Management is a global investment management firm built around
     the core principle that a systematic, disciplined approach to managing money
     adds value. Founded in 1998, AQR pioneered many factor investing strategies
-    and provides high-quality research data freely to support academic research.
+    and publishes research data for academic use.
 
     ## Why AQR Factor Data?
 

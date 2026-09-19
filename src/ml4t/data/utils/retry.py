@@ -1,4 +1,4 @@
-"""Retry utilities for QLDM."""
+"""Retry utilities for ml4t-data."""
 
 from collections.abc import Callable
 from typing import Any, TypeVar, cast

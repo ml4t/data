@@ -55,12 +55,6 @@ workflows:
       - mock_crypto
     enabled: true
     on_error: continue  # Continue to test all components
-    pre_hooks:
-      - "echo 'Starting test pipeline at $(date)'"
-      - "rm -rf ./test_data/validation_reports/*"  # Clean old reports
-    post_hooks:
-      - "python tests/validate_pipeline.py"
-      - "echo 'Test pipeline completed at $(date)'"
 
   - name: stress_test
     description: Stress test with high-frequency mock data
@@ -90,7 +84,4 @@ storage:
   compression: none  # No compression for easier debugging
 
 # Development-only settings
-env:
-  QLDM_DEV_MODE: "true"
-  QLDM_SKIP_AUTH: "true"  # Skip authentication in dev
-  QLDM_MOCK_TIME: "2023-12-01T12:00:00Z"  # Fixed time for tests
+env: {}

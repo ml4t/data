@@ -1,4 +1,4 @@
-"""Async rate limiting utilities for QLDM."""
+"""Async rate limiting utilities for ml4t-data."""
 
 from __future__ import annotations
 

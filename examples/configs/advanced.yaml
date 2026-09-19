@@ -1,16 +1,16 @@
-# Advanced QData Configuration Example
+# Advanced ML4T Data configuration example
 # Demonstrates environment variables, multiple providers, and complex workflows
 
 # Storage with custom configuration
 storage:
   strategy: hive
-  base_path: ${QDATA_STORAGE_PATH:~/qdata/storage}
+  base_path: ${ML4T_DATA_PATH:./market-data}
   compression: zstd
   lock_timeout: 60  # Longer timeout for large operations
   partition_cols: ["year", "month", "day"]  # More granular partitioning
 
 # Global settings
-log_level: ${QDATA_LOG_LEVEL:INFO}
+log_level: ${ML4T_DATA_LOG_LEVEL:INFO}
 parallel_downloads: 4  # More parallel downloads for multiple providers
 
 # Multiple data providers with API keys from environment
@@ -19,14 +19,14 @@ providers:
     type: yahoo
     enabled: true
     rate_limit:
-      requests_per_second: ${QDATA_YAHOO_RATE_LIMIT:2.0}
+      requests_per_second: ${ML4T_DATA_YAHOO_RATE_LIMIT:2.0}
 
   - name: databento
     type: databento
     enabled: true
     api_key: ${DATABENTO_API_KEY}
     rate_limit:
-      requests_per_second: 100.0  # Databento allows high throughput
+      requests_per_second: 100.0
       burst_size: 10
     extra:
       dataset: "XNAS.ITCH"
@@ -38,7 +38,7 @@ providers:
     extra:
       practice: true
     rate_limit:
-      requests_per_second: 120.0  # OANDA's limit
+      requests_per_second: 120.0
       burst_size: 5
 
   - name: cryptocompare
@@ -46,7 +46,7 @@ providers:
     enabled: true
     api_key: ${CRYPTOCOMPARE_API_KEY}
     rate_limit:
-      requests_per_second: ${QDATA_CRYPTO_RATE_LIMIT:10.0}
+      requests_per_second: ${ML4T_DATA_CRYPTO_RATE_LIMIT:10.0}
     extra:
       exchange: "CCCAGG"
 
@@ -137,10 +137,6 @@ workflows:
       timezone: "US/Eastern"
     enabled: true
     on_error: retry
-    pre_hooks:
-      - "echo 'Starting market close update at $(date)'"
-    post_hooks:
-      - "python -m qdata.validation.run --dataset sp500_daily"
 
   # High-frequency futures update
   - name: futures_continuous
@@ -180,8 +176,6 @@ workflows:
       timezone: "UTC"
     enabled: true
     on_error: continue
-    post_hooks:
-      - "python -m qdata.reports.weekly --email admin@example.com"
 
 # Validation configuration
 validation:

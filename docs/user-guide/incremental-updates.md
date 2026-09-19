@@ -307,9 +307,9 @@ ml4t-data update -s AAPL --show-status
 
 ### Update Speed
 
-- Incremental updates are 10-100x faster than full loads
-- Gap detection adds minimal overhead (<1 second)
-- File locking has negligible performance impact
+- Incremental updates request only missing date ranges
+- Gap detection runs before provider requests
+- File locking prevents concurrent writers from replacing each other's data
 
 ## Future Enhancements
 

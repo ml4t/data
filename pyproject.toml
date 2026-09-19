@@ -1,4 +1,4 @@
-# ML4T Data - High-performance market data management for quantitative finance
+# ML4T Data package configuration
 # Independent package configuration for standalone distribution
 
 [build-system]
@@ -29,7 +29,7 @@ include = [
 [project]
 name = "ml4t-data"
 dynamic = ["version"]
-description = "Market data acquisition, storage, and update workflows for machine learning for trading"
+description = "Market data acquisition, storage, and update workflows for machine learning for trading."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

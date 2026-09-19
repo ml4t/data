@@ -9,7 +9,7 @@
 
 ## Overview
 
-TwelveData provides multi-asset coverage including stocks, forex, and crypto with a generous free tier.
+Twelve Data provides authenticated stock, foreign exchange, and cryptocurrency data. Account plans determine quotas and historical depth.
 
 **Best For**: Multi-asset coverage, alternative data source
 

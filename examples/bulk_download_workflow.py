@@ -331,7 +331,7 @@ print(df.head(10))
 # %% [markdown]
 # ### Key Advantages of ml4t-data
 #
-# 1. **Polars Output**: 10-100x faster for downstream operations
+# 1. **Polars Output**: columnar data for downstream operations
 # 2. **Long Format**: One row per symbol per timestamp (easier for ML)
 # 3. **Validated Schema**: Consistent columns across all providers
 # 4. **Logging**: Structured logging for debugging
@@ -564,10 +564,10 @@ print(symbol_stats.head(10))
 #
 # ### Key Takeaways
 #
-# 1. **Use batch downloads** for >10 symbols (5-20x faster)
+# 1. **Use batch downloads** to group multi-symbol provider requests
 # 2. **Chunk large universes** (50 symbols/chunk with 1s delay)
 # 3. **Always validate** data quality before backtesting
-# 4. **Use ml4t-data** for production workflows (handles chunking, validation, Polars output)
+# 4. **Use ml4t-data** for recurring workflows (handles chunking, validation, Polars output)
 #
 # ### Performance Reference
 #

@@ -1,22 +1,6 @@
-"""CoinGecko cryptocurrency data provider.
+"""CoinGecko provider for public and authenticated cryptocurrency OHLCV data.
 
-CoinGecko provides free cryptocurrency data with API key (Demo plan).
-Demo plan (free): 30 calls/minute, 10,000 calls/month.
-Public API (no key): 5-15 calls/minute (varies).
-
-Performance Note:
-- This is a simple wrapper for consistent API across providers
-- For advanced features (coin list, price API, market data), use the CoinGecko API directly
-- Rate limiting is handled by BaseProvider
-
-Async Example:
-    last_complete_day = datetime.now(UTC).date() - timedelta(days=1)
-    async with CoinGeckoProvider() as provider:
-        df = await provider.fetch_ohlcv_async(
-            "BTC",
-            str(last_complete_day - timedelta(days=6)),
-            str(last_complete_day),
-        )
+Account plans and public endpoints determine request quotas and available history.
 """
 
 from __future__ import annotations
@@ -45,22 +29,10 @@ logger = structlog.get_logger()
 
 
 class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
-    """Simple CoinGecko wrapper for OHLCV data with consistent API.
+    """Fetch daily cryptocurrency OHLCV data through the CoinGecko interface.
 
-    This provider exists primarily to provide:
-    - Consistent API across all providers (fetch_ohlcv interface)
-    - Polars DataFrame output (standardized schema)
-    - Symbol column in results
-    - Structured logging and typed exceptions
-    - Async support for 10x faster batch fetches
-
-    For advanced CoinGecko features (coin lists, price API, market metrics),
-    use the CoinGecko API directly or dedicated crypto data libraries.
-
-    Rate Limits:
-    - Demo plan (with API key): 30 calls/minute
-    - Public API (no key): 10 calls/minute
-    - Pro tier: 500 calls/minute (requires paid key)
+    Advanced CoinGecko endpoints remain outside this adapter. Request quotas depend on the
+    selected public or authenticated API plan.
     """
 
     # Common symbol to CoinGecko ID mappings
@@ -703,7 +675,7 @@ class CoinGeckoProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data for a cryptocurrency.
 
-        This is 3-10x faster than sync when fetching multiple symbols
+        This fetches multiple symbols
         concurrently using asyncio.gather() or async_batch_load().
 
         Args:
