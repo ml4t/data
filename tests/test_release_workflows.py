@@ -51,7 +51,6 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     assert build["needs"] == [
         "ecosystem-qualification",
         "compatibility",
-        "provider-contracts",
         "quality",
     ]
     assert publish["needs"] == "build"
@@ -146,18 +145,11 @@ def test_provider_contract_dispatch_selects_exactly_one_job() -> None:
     assert "allow-paid-requests" not in inputs
 
 
-def test_release_requires_provider_contracts_for_the_tagged_commit() -> None:
+def test_live_provider_availability_does_not_block_package_releases() -> None:
     jobs = _load("release.yml")["jobs"]
-    verification = jobs["provider-contracts"]
-    step = next(
-        step
-        for step in verification["steps"]
-        if step.get("name") == "Require successful live contracts for this commit"
-    )
 
-    assert verification["permissions"] == {"actions": "read", "contents": "read"}
-    assert step["env"]["RELEASE_COMMIT"] == "${{ github.sha }}"
-    assert "verify_provider_contract_runs.py" in step["run"]
+    assert "provider-contracts" not in jobs
+    assert "provider-contracts" not in jobs["build"]["needs"]
 
 
 def test_release_rechecks_quality_docs_and_dependencies() -> None:
