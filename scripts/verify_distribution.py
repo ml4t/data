@@ -11,12 +11,25 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+from email import policy
 from email.message import Message
 from email.parser import Parser
 from pathlib import Path
 
+from packaging.specifiers import SpecifierSet
+
 PROJECT_NAME = "ml4t-data"
 TAG_PATTERN = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)$")
+EXPECTED_DESCRIPTION = (
+    "Market data acquisition, storage, and update workflows for machine learning for trading."
+)
+EXPECTED_URLS = {
+    "Homepage": "https://www.ml4trading.io/",
+    "Documentation": "https://www.ml4trading.io/docs/data/",
+    "Repository": "https://github.com/ml4t/data",
+    "Issues": "https://github.com/ml4t/data/issues",
+    "Changelog": "https://github.com/ml4t/data/blob/main/CHANGELOG.md",
+}
 
 
 def _metadata_from_wheel(path: Path) -> Message:
@@ -27,7 +40,7 @@ def _metadata_from_wheel(path: Path) -> Message:
         if len(metadata_files) != 1:
             raise ValueError(f"{path.name} must contain exactly one METADATA file")
         content = archive.read(metadata_files[0]).decode("utf-8")
-    return Parser().parsestr(content)
+    return Parser(policy=policy.default).parsestr(content)
 
 
 def _metadata_from_sdist(path: Path) -> Message:
@@ -43,7 +56,7 @@ def _metadata_from_sdist(path: Path) -> Message:
         if extracted is None:
             raise ValueError(f"could not read PKG-INFO from {path.name}")
         content = extracted.read().decode("utf-8")
-    return Parser().parsestr(content)
+    return Parser(policy=policy.default).parsestr(content)
 
 
 def validate_distributions(
@@ -81,6 +94,31 @@ def validate_distributions(
                 f"License-Expression: MIT and License-File: LICENSE: "
                 f"expression={license_expression!r}, files={license_files!r}"
             )
+        expected_scalars = {
+            "Summary": EXPECTED_DESCRIPTION,
+            "Author-email": "Stefan Jansen <stefan@applied-ai.com>",
+            "Maintainer-email": "Stefan Jansen <pm@ml4trading.io>",
+        }
+        for field, expected in expected_scalars.items():
+            if item[field] != expected:
+                raise ValueError(f"{field} is {item[field]!r}, expected {expected!r}")
+        if SpecifierSet(str(item["Requires-Python"])) != SpecifierSet(">=3.12,<3.15"):
+            raise ValueError("Requires-Python differs from >=3.12,<3.15")
+        project_urls = {}
+        for value in item.get_all("Project-URL", []):
+            label, separator, url = value.partition(", ")
+            if separator:
+                project_urls[label] = url
+        if project_urls != EXPECTED_URLS:
+            raise ValueError("Project-URL metadata differs from canonical URLs")
+        keywords = {
+            value.strip() for value in str(item["Keywords"] or "").split(",") if value.strip()
+        }
+        if (
+            not {"finance", "quantitative-finance", "algorithmic-trading", "market-data"}
+            <= keywords
+        ):
+            raise ValueError("distribution keywords omit a required term")
 
     versions = {item["Version"] for item in metadata}
     if len(versions) != 1:
@@ -135,6 +173,9 @@ def verify_install(archive: Path, version: str) -> None:
                 f"stdout={completed.stdout!r}, stderr={completed.stderr!r}"
             )
         subprocess.run([str(_venv_cli(venv)), "--help"], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [str(python), str(Path(__file__).with_name("run_readme_quickstart.py"))], check=True
+        )
 
 
 def main() -> None:

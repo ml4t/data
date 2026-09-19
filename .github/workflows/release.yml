@@ -1,14 +1,22 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+      candidate-sha:
+        description: Full commit SHA currently at the tip of main
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.version }}
   cancel-in-progress: false
 
 env:
@@ -18,8 +26,42 @@ env:
   NO_MKDOCS_2_WARNING: "1"
 
 jobs:
+  preflight:
+    name: Validate Unpublished Main Candidate
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      tree: ${{ steps.identity.outputs.tree }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch current main without tags
+        run: git fetch origin main --no-tags
+      - name: Check candidate identity and public version absence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/check_release_preflight.py
+          --version "${{ inputs.version }}"
+          --candidate-sha "${{ inputs.candidate-sha }}"
+          --repository "${{ github.repository }}"
+          --workflow-sha "${{ github.sha }}"
+      - name: Record accepted candidate
+        id: identity
+        run: |
+          {
+            echo "commit=${{ inputs.candidate-sha }}"
+            echo "tree=$(git rev-parse 'HEAD^{tree}')"
+            echo "version=${{ inputs.version }}"
+          } >> "$GITHUB_OUTPUT"
+
   ecosystem-qualification:
     name: Ecosystem Qualification
+    needs: preflight
     permissions:
       contents: read
     uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@457678d8860d0c816b1dc376e7e2691daa93af4d # v0.1.0
@@ -29,138 +71,254 @@ jobs:
 
   compatibility:
     name: Release Compatibility
-    uses: ./.github/workflows/compatibility.yml
+    needs: preflight
     permissions:
       contents: read
+    uses: ./.github/workflows/compatibility.yml
 
   quality:
-    name: Release Quality and Security
+    name: Source Quality and Security
+    needs: preflight
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
-
-      - name: Install the complete release environment
+      - name: Install the complete locked environment
         run: uv sync --locked --all-extras --all-groups
-
-      - name: Check source quality
+      - name: Run source quality gates
         run: |
           uv run ruff check src/ tests/ scripts/
           uv run ruff format --check src/ tests/ scripts/
           uv run ty check
-
-      - name: Build documentation strictly
-        run: uv run mkdocs build --strict
-
-      - name: Audit the complete locked environment
+          uv run pytest tests/ -q -ra
+          uv run pytest tests/ -q -ra -W error::ResourceWarning
+      - name: Audit locked dependencies
         run: |
           uv export --locked --all-extras --all-groups --no-emit-project --no-hashes --output-file requirements-audit.txt
           uv run pip-audit --requirement requirements-audit.txt
+      - name: Require provider contract evidence for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          uv run python scripts/verify_provider_contract_runs.py
+          --repository "${{ github.repository }}"
+          --commit "${{ needs.preflight.outputs.commit }}"
 
   build:
-    name: Build Validated Artifacts
+    name: Build Candidate Once
+    needs: [preflight, ecosystem-qualification, compatibility, quality]
     runs-on: ubuntu-latest
-    needs: [ecosystem-qualification, compatibility, quality]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.preflight.outputs.commit }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
-
-      - name: Install verification tooling
-        run: uv sync --locked --dev
-
-      - name: Build distributions
-        run: uv build --out-dir dist/packages
-
-      - name: Check package metadata rendering
-        run: uv run twine check dist/packages/*
-
-      - name: Validate tag, metadata, installs, and checksums
+      - name: Install build and documentation tooling
+        run: uv sync --locked --dev --extra docs
+      - name: Build distributions once
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: >-
-          uv run python scripts/verify_distribution.py --dist-dir dist/packages
-          --expected-tag "$RELEASE_TAG" --write-checksums --checksum-file dist/SHA256SUMS
-
-      - name: Upload validated distributions
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.preflight.outputs.version }}
+        run: uv build --out-dir candidate/dist
+      - name: Validate metadata and clean installations
+        run: |
+          uv run twine check candidate/dist/*
+          uv run python scripts/verify_distribution.py \
+            --dist-dir candidate/dist \
+            --expected-tag "v${{ needs.preflight.outputs.version }}"
+      - name: Write and verify the commit-bound candidate manifest
+        run: |
+          uv run python scripts/release_candidate.py create candidate \
+            --commit-sha "${{ needs.preflight.outputs.commit }}" \
+            --git-tree "${{ needs.preflight.outputs.tree }}"
+          uv run python scripts/release_candidate.py verify candidate \
+            --expected-commit "${{ needs.preflight.outputs.commit }}" \
+            --expected-tree "${{ needs.preflight.outputs.tree }}" \
+            --expected-tag "v${{ needs.preflight.outputs.version }}"
+      - name: Build and verify revision-identified documentation
+        env:
+          ML4T_DOCS_COMMIT: ${{ needs.preflight.outputs.commit }}
+          ML4T_DOCS_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          uv run mkdocs build --strict --site-dir candidate/site
+          uv run python scripts/verify_documentation_identity.py \
+            --site candidate/site \
+            --expected-library data \
+            --expected-version "$ML4T_DOCS_VERSION" \
+            --expected-commit "$ML4T_DOCS_COMMIT"
+      - name: Upload immutable candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: validated-dist
-          path: dist/
+          name: release-candidate-${{ needs.preflight.outputs.commit }}
+          path: |
+            candidate/dist/
+            candidate/candidate.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload immutable documentation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docs-${{ needs.preflight.outputs.commit }}
+          path: candidate/site/
           if-no-files-found: error
           retention-days: 14
 
-  publish:
-    name: Publish to PyPI
+  documentation:
+    name: Deploy and Verify Qualified Documentation
+    needs: [preflight, build]
     runs-on: ubuntu-latest
-    needs: build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-${{ needs.preflight.outputs.commit }}
+          path: candidate-site/
+      - name: Verify documentation before deployment
+        run: >-
+          python scripts/verify_documentation_identity.py
+          --site candidate-site
+          --expected-library data
+          --expected-version "${{ needs.preflight.outputs.version }}"
+          --expected-commit "${{ needs.preflight.outputs.commit }}"
+      - name: Require documentation deploy credentials
+        env:
+          DOCS_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
+        run: test -n "$DOCS_DEPLOY_KEY"
+      - name: Deploy the qualified documentation artifact
+        uses: cpina/github-action-push-to-another-repository@55306faa4ed53b815ae49e564af8cfb359d32ae2 # v1.7.3
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
+        with:
+          source-directory: candidate-site/
+          destination-github-username: ml4t
+          destination-repository-name: website
+          target-directory: static/docs/data/
+          target-branch: main
+          commit-message: "docs(data): release ${{ needs.preflight.outputs.version }} from ${{ needs.preflight.outputs.commit }}"
+          user-name: ml4t-bot
+          user-email: bot@ml4trading.io
+      - name: Verify deployed documentation identity
+        run: >-
+          python scripts/verify_documentation_identity.py
+          --url https://www.ml4trading.io/docs/data/
+          --url https://www.ml4trading.io/docs/data/api/
+          --url https://www.ml4trading.io/docs/data/providers/
+          --expected-library data
+          --expected-version "${{ needs.preflight.outputs.version }}"
+          --expected-commit "${{ needs.preflight.outputs.commit }}"
+          --attempts 12
+          --delay 10
+
+  publish:
+    name: Publish Exact Candidate to PyPI
+    needs: [preflight, documentation]
+    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: read
-      id-token: write # Required for PyPI trusted publishing.
+      id-token: write
     steps:
-      - name: Download validated distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: validated-dist
-          path: dist/
-
-      - name: Verify artifact checksums
-        working-directory: dist/packages
-        run: sha256sum --check ../SHA256SUMS
-
-      - name: Publish to PyPI
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ needs.preflight.outputs.commit }}
+          path: candidate/
+      - name: Verify retained candidate
+        run: >-
+          python scripts/release_candidate.py verify candidate
+          --expected-commit "${{ needs.preflight.outputs.commit }}"
+          --expected-tree "${{ needs.preflight.outputs.tree }}"
+          --expected-tag "v${{ needs.preflight.outputs.version }}"
+      - name: Publish through trusted publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/packages/
+          packages-dir: candidate/dist/
+          verify-metadata: true
 
   github-release:
-    name: Create GitHub Release
+    name: Create Tag and GitHub Release
+    needs: [preflight, publish]
     runs-on: ubuntu-latest
-    needs: publish
     permissions:
-      contents: write # Required to create the GitHub release.
+      contents: write
     steps:
-      - name: Download validated distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: validated-dist
-          path: dist/
-
-      - name: Create GitHub release with validated distributions
+          name: release-candidate-${{ needs.preflight.outputs.commit }}
+          path: candidate/
+      - name: Create release from the published candidate
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "v${{ needs.preflight.outputs.version }}"
+          candidate/dist/* candidate/candidate.json
+          --repo "${{ github.repository }}"
+          --target "${{ needs.preflight.outputs.commit }}"
+          --generate-notes
+
+  post-publication:
+    name: Verify Package, Release, and Documentation
+    needs: [preflight, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ needs.preflight.outputs.commit }}
+          path: candidate/
+      - name: Verify PyPI metadata and GitHub release digests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/verify_published_release.py
+          --manifest candidate/candidate.json
+          --repository "${{ github.repository }}"
+      - name: Install the published wheel and execute the README quick start
         run: |
-          tag="$RELEASE_TAG"
-          args=("$tag" dist/packages/* dist/SHA256SUMS --generate-notes)
-          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(a|b|rc)[0-9]+$ ]]; then
-            args+=(--prerelease)
-          fi
-          gh release create "${args[@]}"
+          uv venv --python 3.12 .release-venv
+          uv pip install --python .release-venv/bin/python "ml4t-data==${{ needs.preflight.outputs.version }}"
+          .release-venv/bin/python scripts/run_readme_quickstart.py
+      - name: Recheck deployed documentation identity
+        run: >-
+          python scripts/verify_documentation_identity.py
+          --url https://www.ml4trading.io/docs/data/
+          --url https://www.ml4trading.io/docs/data/api/
+          --expected-library data
+          --expected-version "${{ needs.preflight.outputs.version }}"
+          --expected-commit "${{ needs.preflight.outputs.commit }}"
+          --attempts 6
+          --delay 10
