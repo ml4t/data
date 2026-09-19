@@ -35,6 +35,7 @@ def version_failure(value: str) -> str | None:
         str(version) != value
         or len(version.release) != 3
         or version.is_devrelease
+        or version.is_postrelease
         or version.local is not None
     ):
         return "release version must be normalized X.Y.Z or X.Y.ZaN/X.Y.ZbN/X.Y.ZrcN"

@@ -33,7 +33,7 @@ VERSION = "1.2.3"
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
-@pytest.mark.parametrize("version", ["1.2", "v1.2.3", "1.2.3.dev1", "1.2.3+local"])
+@pytest.mark.parametrize("version", ["1.2", "v1.2.3", "1.2.3.dev1", "1.2.3.post1", "1.2.3+local"])
 def test_release_preflight_rejects_ambiguous_versions(version: str) -> None:
     assert version_failure(version) is not None
 
