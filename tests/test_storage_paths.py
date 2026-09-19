@@ -81,6 +81,17 @@ def test_config_warns_for_legacy_data_root(monkeypatch, tmp_path: Path) -> None:
     assert config.data_root == root.resolve()
 
 
+def test_empty_preferred_data_root_uses_valid_legacy_fallback(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "legacy-data"
+    monkeypatch.setenv("ML4T_DATA_PATH", "")
+    monkeypatch.setenv("QLDM_DATA_ROOT", str(root))
+
+    with pytest.warns(DeprecationWarning, match="QLDM_DATA_ROOT is deprecated"):
+        config = Config()
+
+    assert config.data_root == root.resolve()
+
+
 def test_provider_default_paths_follow_ml4t_data_path(monkeypatch, tmp_path: Path) -> None:
     root = tmp_path / "configured-data"
     monkeypatch.setenv("ML4T_DATA_PATH", str(root))

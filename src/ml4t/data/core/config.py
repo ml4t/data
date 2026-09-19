@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 from ml4t.data.storage.config import StorageConfig
 
 PREFERRED_DATA_ENV_VAR = "ML4T_DATA_PATH"
-LEGACY_DATA_ENV_VARS = ("ML4T_DATA_DIR", "QLDM_DATA_ROOT")
+LEGACY_DATA_ENV_VARS = ("QLDM_DATA_ROOT",)
+PREFERRED_LOG_ENV_VAR = "ML4T_DATA_LOG_LEVEL"
 DEFAULT_RELATIVE_DATA_ROOT = Path("data")
 
 
@@ -27,7 +28,7 @@ def resolve_data_root(data_root: str | Path | None = None) -> Path:
     Resolution order:
     1. Explicit `data_root`
     2. `ML4T_DATA_PATH`
-    3. Legacy env vars (`ML4T_DATA_DIR`, `QLDM_DATA_ROOT`) with warning
+    3. Legacy `QLDM_DATA_ROOT` with warning
     4. Project-local `./data`
     """
     if data_root is not None:
@@ -84,7 +85,7 @@ class CacheConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Main configuration for QLDM."""
+    """Main configuration for ml4t-data."""
 
     data_root: Path = Field(default_factory=resolve_data_root)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -109,8 +110,9 @@ class Config(BaseModel):
             or any(env_var in os.environ for env_var in LEGACY_DATA_ENV_VARS)
         ):
             data["data_root"] = resolve_data_root()
-        if "QLDM_LOG_LEVEL" in os.environ:
-            data["log_level"] = os.environ["QLDM_LOG_LEVEL"]
+        preferred_log_level = os.getenv(PREFERRED_LOG_ENV_VAR)
+        if preferred_log_level:
+            data["log_level"] = preferred_log_level
         if "storage" not in data:
             data["storage"] = {"base_path": data.get("data_root", resolve_data_root())}
 
