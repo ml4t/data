@@ -593,14 +593,17 @@ class FXMacroDataProvider(RateLimitMixin, SessionMixin):
 
     def _request_json(self, path: str, params: dict[str, Any]) -> Any:
         clean_params = {key: value for key, value in params.items() if value is not None}
-        if self.api_key:
-            clean_params["api_key"] = self.api_key
+        # Send the key as a header rather than a query parameter. FXMacroData
+        # accepts both, but documents the header as the preferred transport for
+        # server-side clients: a key in the query string is recorded verbatim by
+        # proxies, CDNs and server access logs along the whole request path.
+        headers = {"X-API-Key": self.api_key} if self.api_key else None
 
         url = f"{self.base_url}/{path.lstrip('/')}"
         self._acquire_rate_limit()
 
         try:
-            response = self.session.get(url, params=clean_params)
+            response = self.session.get(url, params=clean_params, headers=headers)
         except httpx.RequestError as err:
             raise NetworkError(provider=self.name, message=f"Request failed: {err}") from err
 
