@@ -232,7 +232,7 @@ jobs:
           --expected-library data
           --expected-version "${{ needs.preflight.outputs.version }}"
           --expected-commit "${{ needs.preflight.outputs.commit }}"
-          --attempts 12
+          --attempts 24
           --delay 10
 
   publish:
