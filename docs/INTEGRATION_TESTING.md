@@ -238,4 +238,4 @@ When adding new providers:
 ---
 
 *Last updated: 2025-08-28*
-*Maintained by: ML4T Data Development Team*
+*Maintained by: Stefan Jansen <pm@ml4trading.io>*
