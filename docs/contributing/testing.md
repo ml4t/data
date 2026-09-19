@@ -18,7 +18,7 @@ pytest -n 4
 ```
 
 **Performance**: Tests run in parallel by default using `pytest-xdist`:
-- **24 cores**: ~7 seconds for 345 tests (130x speedup vs sequential)
+- Parallel execution is optional and should be measured on the target machine
 - **Sequential** (`-n 0`): ~15 minutes for full suite
 
 ### Run Integration Tests

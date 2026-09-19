@@ -38,6 +38,13 @@ class TestConfigLoader:
         finally:
             os.chdir(original_cwd)
 
+    def test_save_without_path_uses_current_filename(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        ConfigLoader().save(DataConfig())
+
+        assert (tmp_path / "ml4t.data.yaml").exists()
+
     def test_load_basic_yaml(self, tmp_path):
         """Test loading basic YAML configuration."""
         config_file = tmp_path / "config.yaml"

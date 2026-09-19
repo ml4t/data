@@ -13,7 +13,7 @@ Key Concepts:
 - Combinatorial Purged Cross-Validation (CPCV)
 - Deflated Sharpe Ratio for multiple testing
 
-Author: QuantLab Team
+Author: Stefan Jansen
 Date: August 2025
 """
 

@@ -4,7 +4,6 @@ This provider supports:
 - OHLCV data for perpetual swap contracts
 - Historical and current funding rates
 - No API key required for public market data
-- No geo-restrictions (works globally)
 
 API Documentation: https://www.okx.com/docs-v5/en/
 
@@ -34,10 +33,9 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
 
     Features:
     - No API key required for public market data
-    - No geo-restrictions (unlike Binance/Bybit)
     - Perpetual swap contracts with funding rates
-    - High-quality historical data
-    - Async support for 10x faster batch fetches
+    - Historical market data
+    - Asynchronous batch fetch methods
 
     Symbols use OKX format: BTC-USDT-SWAP, ETH-USDT-SWAP, etc.
     """
@@ -487,7 +485,7 @@ class OKXProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data from OKX.
 
-        This is 3-10x faster than sync when fetching multiple symbols
+        This fetches multiple symbols
         concurrently using asyncio.gather() or async_batch_load().
 
         Args:

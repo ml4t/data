@@ -9,7 +9,7 @@
 
 ## Overview
 
-Tiingo provides US equity data with a generous free tier, good for alternative data source or Yahoo Finance backup.
+Tiingo provides authenticated US equity data. Account plans determine quotas and historical depth.
 
 **Best For**: US equities alternative, redundancy
 

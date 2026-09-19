@@ -495,10 +495,9 @@ def _fetch_raw_data(self, symbol, start, end, frequency):
 
 ### Why Polars Instead of Pandas?
 
-**Performance**: 10-100x faster for common operations
-**Memory**: More efficient memory usage
-**Type Safety**: Better type system
-**Future**: Better maintained, more modern
+Providers and storage use the same columnar frame type, schema expressions, and native Parquet
+integration. This avoids conversion at the provider-storage boundary. Pandas remains a core
+dependency for calendar and vendor interoperability.
 
 ### Why Global Rate Limiting?
 

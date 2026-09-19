@@ -1,47 +1,7 @@
-"""Data provider implementations.
+"""Provider implementations and registry metadata.
 
-This module provides unified access to multiple financial data providers.
-
-Available Providers:
-    - BaseProvider: Abstract base class for all providers
-    - YahooFinanceProvider: Yahoo Finance (free, no API key)
-    - AlpacaDataProvider: Alpaca US stocks and crypto (free IEX feed, two-credential auth)
-    - TiingoProvider: Tiingo stocks (free tier: 1000 req/day, 500 symbols/month)
-    - FinnhubProvider: Finnhub multi-asset data (free tier: 60 req/min)
-    - EODHDProvider: EODHD global equities (free tier: 500 req/day, 1 year depth)
-    - FREDProvider: FRED economic data (free, 120 req/min)
-    - FXMacroDataProvider: FX macro releases, calendars, COT, commodities, sentiment
-    - AQRFactorProvider: AQR research factors (QMJ, BAB, VME)
-    - FamaFrenchProvider: Fama-French factors (3-factor, 5-factor, momentum)
-    - KalshiProvider: Kalshi prediction markets (no API key needed for public data)
-    - PolymarketProvider: Polymarket prediction market history/order book snapshots
-    - CoinGeckoProvider: CoinGecko crypto data (free, no API key)
-    - BinanceProvider: Binance public market-data mirror and futures market data
-    - BinancePublicProvider: Binance public data (bulk downloads, no geo-restrictions)
-    - OKXProvider: OKX crypto perpetuals and funding rates (no geo-restrictions)
-    - CryptoCompareProvider: CryptoCompare crypto data
-    - TwelveDataProvider: Twelve Data multi-asset (stocks, forex, crypto)
-    - MassiveProvider: Massive multi-asset (stocks, options, futures, crypto, forex)
-    - PolygonProvider: Deprecated alias for MassiveProvider
-    - OandaProvider: Oanda forex and CFDs
-    - DataBentoProvider: DataBento market data
-    - ITCHSampleProvider: NASDAQ TotalView-ITCH sample data (tick-level, free)
-    - WikiPricesProvider: Quandl Wiki Prices (US equities 1962-2018, free)
-    - SyntheticProvider: Synthetic data generator (no network required)
-    - LearnedSyntheticProvider: ML-based synthetic data generator (no network required)
-    - MockProvider: Mock provider for testing
-
-Note: Updater classes have been removed to simplify the library.
-If you need incremental update functionality, implement it separately using the provider's fetch_ohlcv() method.
-
-Example:
-    >>> from ml4t.data.providers import CoinGeckoProvider
-    >>> from datetime import UTC, datetime, timedelta
-    >>>
-    >>> # Use provider directly
-    >>> provider = CoinGeckoProvider()
-    >>> end = datetime.now(UTC).date() - timedelta(days=1)
-    >>> data = provider.fetch_ohlcv("bitcoin", str(end - timedelta(days=6)), str(end))
+Use ``advertised_provider_specs`` to inspect capabilities, credential requirements, and
+optional dependency extras without importing each provider implementation.
 """
 
 from typing import TYPE_CHECKING

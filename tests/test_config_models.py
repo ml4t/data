@@ -312,7 +312,7 @@ class TestWorkflowConfig:
 
 
 class TestDataConfig:
-    """Test main QLDM configuration model."""
+    """Test the main ml4t-data configuration model."""
 
     def test_minimal_config(self):
         """Test minimal valid configuration."""
@@ -329,7 +329,7 @@ class TestDataConfig:
         """Test complete configuration."""
         config = DataConfig(
             version="1.0",
-            base_dir=Path("/var/lib/qldm"),
+            base_dir=Path("/var/lib/ml4t-data"),
             log_level="DEBUG",
             providers=[
                 ProviderConfig(
@@ -364,12 +364,12 @@ class TestDataConfig:
                 "compression": "zstd",
             },
             env={
-                "QLDM_TEST": "value",
+                "ML4T_DATA_TEST": "value",
             },
         )
 
         assert config.version == "1.0"
-        assert config.base_dir == Path("/var/lib/qldm")
+        assert config.base_dir == Path("/var/lib/ml4t-data")
         assert len(config.providers) == 1
         assert len(config.datasets) == 1
         assert len(config.workflows) == 1
@@ -377,7 +377,7 @@ class TestDataConfig:
         assert config.validation["enabled"] is True
         # Storage dict gets converted to StorageConfig when possible
         assert config.storage.compression == CompressionType.ZSTD
-        assert config.env["QLDM_TEST"] == "value"
+        assert config.env["ML4T_DATA_TEST"] == "value"
 
     def test_get_provider(self):
         """Test get_provider method."""

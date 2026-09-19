@@ -3,13 +3,15 @@ name: Docs
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: docs
+  group: docs-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,59 +22,38 @@ env:
 
 jobs:
   build:
-    name: Build Docs
+    name: Strict Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Install Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
-
-      - name: Install dependencies
+      - name: Install locked documentation environment
         run: uv sync --locked --dev --extra docs
-
-      - name: Build docs
+      - name: Record source identity
+        run: |
+          echo "ML4T_DOCS_VERSION=$(uv run python -c 'from ml4t.data import __version__; print(__version__)')" >> "$GITHUB_ENV"
+          echo "ML4T_DOCS_COMMIT=${GITHUB_SHA}" >> "$GITHUB_ENV"
+      - name: Build documentation strictly
         run: uv run mkdocs build --strict
-
-      - name: Upload rendered docs
+      - name: Verify rendered identity
+        run: >-
+          uv run python scripts/verify_documentation_identity.py
+          --site site
+          --expected-library data
+          --expected-version "$ML4T_DOCS_VERSION"
+          --expected-commit "$ML4T_DOCS_COMMIT"
+      - name: Upload rendered documentation
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: docs-site
+          name: docs-site-${{ github.sha }}
           path: site/
           if-no-files-found: error
-
-  deploy:
-    name: Deploy Docs
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Download rendered docs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: docs-site
-          path: site/
-
-      - name: Deploy to website repo
-        uses: cpina/github-action-push-to-another-repository@55306faa4ed53b815ae49e564af8cfb359d32ae2 # v1.7.3
-        env:
-          SSH_DEPLOY_KEY: ${{ secrets.DOCS_DEPLOY_KEY }}
-        with:
-          source-directory: site/
-          destination-github-username: ml4t
-          destination-repository-name: website
-          target-directory: static/docs/data/
-          target-branch: main
-          commit-message: "docs(data): update from ml4t/data@${{ github.sha }}"
-          user-name: ml4t-bot
-          user-email: bot@ml4trading.io

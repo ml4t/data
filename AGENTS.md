@@ -1,79 +1,73 @@
-# ml4t-data Library
+# ml4t-data contributor guide
 
-Market data acquisition and storage library for ML4T 3rd Edition.
+`ml4t-data` provides market-data acquisition, validation, storage, and update workflows for
+machine-learning-for-trading applications. The public Python package is `ml4t.data`; package
+metadata and supported Python versions are authoritative in `pyproject.toml`.
 
-## Structure
+## Repository map
 
-| Directory          | Purpose                          |
-| ------------------ | -------------------------------- |
-| `src/ml4t/data/`   | Package root                     |
-| `tests/`           | Test suite                       |
-| `examples/`        | Usage examples                   |
-| `docs/`            | MkDocs documentation             |
+- `src/ml4t/data/` contains the package. Its `AGENTS.md` routes work within the source tree.
+- `tests/` contains deterministic unit and contract tests. Tests needing credentials or live
+  services belong in an explicitly marked integration lane.
+- `docs/` contains the MkDocs site. Start with `docs/index.md`; use
+  `docs/book-guide/index.md` for book chapter-to-API mappings.
+- `examples/` contains maintained runnable examples and configuration samples.
+- `scripts/` contains release and verification programs used by GitHub Actions.
+- `.github/workflows/` defines pull-request, compatibility, documentation, security, and release
+  automation.
 
-## Key Modules
+The principal source areas are provider adapters and routing in `providers/`, persistence in
+`storage/`, futures acquisition and contract construction in `futures/`, orchestration in
+`data_manager.py`, `update_manager.py`, and `managers/`, and shared contracts in `core/`, `assets/`,
+`config/`, and `validation/`. Providers, storage, and futures have more specific guides in their
+directories.
 
-| Module        | Purpose                                        |
-| ------------- | ---------------------------------------------- |
-| `futures/`    | Databento futures downloaders and roll logic   |
-| `etfs/`       | ETFDataManager for Yahoo Finance ETF data      |
-| `crypto/`     | CryptoDataManager for Binance premium index    |
-| `providers/`  | 20 live provider adapters + synthetic/testing providers |
-| `storage/`    | Hive-partitioned Parquet + ProfileMixin        |
-| `managers/`   | Data orchestration and updates                 |
-| `assets/`     | Asset universe definitions                     |
-| `cot/`        | Commitment of Traders data                     |
+## Public surface
 
-## Futures Module Classes
-
-| Class                  | Purpose                                            |
-| ---------------------- | -------------------------------------------------- |
-| `ContinuousDownloader` | Pre-rolled continuous contracts (.v.0, .v.1, .v.2) |
-| `IndividualDownloader` | Specific contract symbols (ESH24, CLF24, etc.)     |
-| `FuturesDownloader`    | All contracts via parent symbology ({PRODUCT}.FUT) |
-| `FuturesDataManager`   | High-level interface for book readers              |
-
-## Book Data Managers (with Profiling)
-
-| Manager | Asset Class | Source | Profiling |
-|---------|-------------|--------|-----------|
-| `ETFDataManager` | 50 ETFs | Yahoo Finance | `generate_profile()` |
-| `CryptoDataManager` | Crypto | Binance Public | `generate_profile()` |
-| `FuturesDataManager` | CME Futures | Databento | `generate_profile(product)` |
-
-All managers support on-demand data profiling via `ProfileMixin`.
-
-## Entry Points
+Prefer supported imports from `ml4t.data` or documented subpackages. The synthetic provider is the
+offline reference workflow:
 
 ```python
-# ETF data (Yahoo Finance)
-from ml4t.data.etfs import ETFDataManager
+from ml4t.data.providers import SyntheticProvider
 
-# Crypto premium index (Binance Public - no API key needed)
-from ml4t.data.crypto import CryptoDataManager
-
-# Futures data (Databento)
-from ml4t.data.futures import FuturesDataManager
-
-# Data profiling
-from ml4t.data.storage import ProfileMixin, generate_profile
+provider = SyntheticProvider(seed=42)
+data = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-10", "daily")
 ```
 
-## Commands
+Provider-specific dependencies are optional. Keep imports usable without unrelated extras, and do
+not require credentials or network access at import time. User-facing behavior belongs in the
+documentation, not in agent guides.
+
+## Change rules
+
+- Preserve the PEP 420 namespace layout: do not add `src/ml4t/__init__.py`.
+- Keep default tests deterministic and offline. Mark live, paid-tier, credentialed, and slow tests
+  with the existing pytest markers.
+- Resolve storage roots through the shared configuration helpers. Do not introduce hard-coded home
+  directories.
+- Use shared exceptions, retry, rate-limit, and provider contracts rather than adapter-specific
+  variants of the same behavior.
+- Treat `CHANGELOG.md` and generated version files as generated artifacts; do not edit them by hand.
+- Keep release artifacts bound to one commit. Publishing is performed by the release workflow after
+  qualification and documentation deployment, never by a local publish command.
+
+## Verification
+
+Install the complete development environment with `uv sync --locked --all-extras --all-groups`.
+Run focused tests while editing, then run the repository gates:
 
 ```bash
-# Development
-uv sync
-uv run pytest tests/ -q
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 uv run ty check
-pre-commit run --all-files
-
-# Build & publish
+uv run pytest tests -q -ra
+uv run pytest tests -q -ra -W error::ResourceWarning
+uv run mkdocs build --strict
 uv build
-uv publish
+actionlint .github/workflows/*.yml
+pre-commit run --all-files
 ```
 
-## Version
-
-Check `pyproject.toml` for current version.
-PyPI: https://pypi.org/project/ml4t-data/
+For packaging or release changes, also run the verification scripts used by
+`.github/workflows/release.yml`. Never bypass hooks or weaken provider-specific checks to make a
+shared gate pass.

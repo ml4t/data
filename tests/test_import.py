@@ -13,8 +13,8 @@ def test_ml4t_data_import():
 
 def test_ml4t_data_metadata():
     """Test ml4t.data metadata is correct."""
-    assert ml4t.data.__author__ == "ML4T Team"
-    assert ml4t.data.__email__ == "info@ml4trading.io"
+    assert ml4t.data.__author__ == "Stefan Jansen"
+    assert ml4t.data.__email__ == "stefan@applied-ai.com"
 
 
 def test_cli_interface_exports_entrypoints():

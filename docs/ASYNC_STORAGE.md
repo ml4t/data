@@ -1,6 +1,7 @@
 # Async Storage Backend Guide
 
-ML4T Data now includes a high-performance async storage backend that provides non-blocking I/O operations for improved concurrency and scalability.
+ML4T Data includes an async storage backend that provides non-blocking I/O for workloads that
+coordinate storage with other asynchronous operations.
 
 ## Overview
 

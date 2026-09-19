@@ -1,4 +1,4 @@
-"""Data migration framework for QLDM."""
+"""Data migration framework for ml4t-data."""
 
 from __future__ import annotations
 
@@ -548,7 +548,7 @@ class BackupManager:
 
 # Example migrations
 def create_standard_migrations() -> list[Migration]:
-    """Create standard migrations for QLDM."""
+    """Create standard migrations for ml4t-data."""
     migrations = []
 
     # Migration to add volume column if missing

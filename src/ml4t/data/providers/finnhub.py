@@ -1,25 +1,6 @@
-"""Finnhub data provider.
+"""Finnhub provider for authenticated market data.
 
-Finnhub provides comprehensive financial market data with global coverage.
-
-API Documentation: https://finnhub.io/docs/api
-Pricing: https://finnhub.io/pricing
-
-Tier limitations:
-
-FREE TIER (60 API calls/minute):
-- Real-time US equity quotes
-- Selected US company data
-
-PAID TIER:
-- Historical OHLCV
-- Global market data and extended history
-
-Example:
-    >>> from ml4t.data.providers.finnhub import FinnhubProvider
-    >>> provider = FinnhubProvider(api_key="your_key")
-    >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
-    >>> provider.close()
+Endpoint availability, request quotas, and historical depth depend on the account plan.
 """
 
 import os
@@ -54,16 +35,12 @@ logger = structlog.get_logger()
 
 
 class FinnhubProvider(BaseProvider):
-    """Finnhub data provider.
+    """Fetch Finnhub market data through synchronous provider methods.
 
-    Supports stocks, ETFs, forex, and crypto with multiple resolutions.
-
-    Rate Limits:
-    - Free tier: 60 requests/minute for supported endpoints such as US quotes
-    - Paid tier: Historical OHLC and higher limits depend on the current plan
+    ``DEFAULT_RATE_LIMIT`` is a conservative client pacing value. Account quotas still apply.
     """
 
-    # Free tier: 60 requests/min = 1 per second
+    # Conservative client-side request pace; account quotas still apply.
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1, 1.0)
 
     # Map frequency to Finnhub resolution codes
@@ -138,7 +115,7 @@ class FinnhubProvider(BaseProvider):
         return "finnhub"
 
     def fetch_quote(self, symbol: str) -> dict[str, str | int | float]:
-        """Fetch a real-time US equity quote available on Finnhub's free tier.
+        """Fetch a real-time US equity quote from Finnhub.
 
         Args:
             symbol: US equity symbol, such as ``AAPL``.

@@ -127,6 +127,7 @@ If Wikipedia scraping fails (403 errors, page structure changes), you can:
 ```python
 from pathlib import Path
 
+
 def load_symbols(filename: str) -> list[str]:
     """Load symbols from file, ignoring comments and blank lines."""
     symbol_file = Path(__file__).parent / "symbols" / filename
@@ -140,6 +141,7 @@ def load_symbols(filename: str) -> list[str]:
                 symbols.append(line)
 
     return symbols
+
 
 # Use the most recent dated file
 symbols = load_symbols("sp500_full_2025-11-24.txt")

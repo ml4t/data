@@ -111,7 +111,7 @@ not mutate the process environment:
 
 ```yaml
 env:
-  ML4T_DATA_DIR: ~/ml4t-data
+  ML4T_DATA_PATH: ~/ml4t-data
   DEFAULT_PROVIDER: yahoo
 ```
 

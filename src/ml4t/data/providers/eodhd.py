@@ -1,28 +1,7 @@
-"""EODHD data provider.
+"""EODHD provider for authenticated equity market data.
 
-EODHD provides affordable global equities data with 60+ exchanges and
-150,000+ tickers worldwide.
-
-API Documentation: https://eodhd.com/financial-apis/
-
-Free Tier Limits:
-- 20 API calls per day
-- 1 year historical depth
-- Daily/weekly/monthly OHLCV data
-- Global coverage (60+ exchanges)
-
-Symbol Format:
-- Use SYMBOL.EXCHANGE format (e.g., "AAPL.US", "VOD.LSE", "BMW.FRA")
-
-Example:
-    >>> from ml4t.data.providers.eodhd import EODHDProvider
-    >>> provider = EODHDProvider(api_key="your_key")
-    >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31", exchange="US")
-    >>> provider.close()
-
-Async Example:
-    >>> async with EODHDProvider(api_key="your_key") as provider:
-    ...     data = await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-01-31")
+Account plans determine endpoint access, request quotas, and historical depth. Symbols use the
+``SYMBOL.EXCHANGE`` format.
 """
 
 import os
@@ -57,26 +36,12 @@ logger = structlog.get_logger()
 
 
 class EODHDProvider(AsyncSessionMixin, BaseProvider):
-    """EODHD data provider.
+    """Fetch equity OHLCV and fundamentals data from EODHD.
 
-    Supports global equities with daily/weekly/monthly OHLCV data.
-
-    Rate Limits (Free Tier):
-    - 20 API calls per day
-    - 1 year historical depth
-
-    Supports both sync and async operations:
-        # Sync
-        provider = EODHDProvider()
-        df = provider.fetch_ohlcv("AAPL", start, end)
-
-        # Async (10x faster for batch fetches)
-        async with EODHDProvider() as provider:
-            df = await provider.fetch_ohlcv_async("AAPL", start, end)
+    ``DEFAULT_RATE_LIMIT`` is a conservative client pacing value. Account quotas still apply.
     """
 
-    # Stay below EODHD's documented 1,000 requests/minute server limit.
-    # Account-specific daily API-call budgets cannot be modeled as an inter-request delay.
+    # Conservative client-side request pace; account quotas still apply.
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (10, 1.0)
 
     # Map frequency to EODHD period codes
@@ -229,7 +194,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
                     symbol=formatted_symbol,
                     details={
                         "warning": data[0]["warning"],
-                        "tier_limitation": "Free tier is limited to 1 year of historical data",
+                        "tier_limitation": "Requested history is unavailable for the current account plan",
                     },
                 )
 
@@ -551,7 +516,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
                     symbol=formatted_symbol,
                     details={
                         "warning": data[0]["warning"],
-                        "tier_limitation": "Free tier is limited to 1 year of historical data",
+                        "tier_limitation": "Requested history is unavailable for the current account plan",
                     },
                 )
 
@@ -578,7 +543,7 @@ class EODHDProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data for a symbol.
 
-        This is 3-10x faster than sync when fetching multiple symbols
+        This fetches multiple symbols
         concurrently using asyncio.gather() or async_batch_load().
 
         Args:

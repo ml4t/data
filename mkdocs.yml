@@ -1,9 +1,8 @@
 # ML4T Data Documentation
-# MkDocs Material configuration with Picasso Blue palette
-# Template for all ml4t-* libraries
+# MkDocs Material configuration
 
 site_name: ML4T Data
-site_description: High-performance market data acquisition for quantitative finance
+site_description: Market data acquisition, storage, and update workflows for machine learning for trading.
 site_url: https://www.ml4trading.io/docs/data/
 repo_url: https://github.com/ml4t/data
 repo_name: ml4t/data
@@ -112,6 +111,7 @@ nav:
     - Installation: getting-started/installation.md
     - Quickstart: getting-started/quickstart.md
     - Provider Selection: getting-started/provider-selection.md
+    - Migration from QLDM: getting-started/migration.md
 
   - User Guide:
     - user-guide/index.md
@@ -169,11 +169,14 @@ nav:
 
 # Extra configuration
 extra:
+  release:
+    library: data
+    version: !ENV [ML4T_DOCS_VERSION, dev]
+    commit: !ENV [ML4T_DOCS_COMMIT, 0000000000000000000000000000000000000000]
+
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ml4t/data
-    - icon: fontawesome/brands/twitter
-      link: https://twitter.com/mlaboratory
 
   generator: false  # Hide "Made with Material for MkDocs"
 
@@ -189,33 +192,14 @@ copyright: Copyright &copy; 2024-2026 Stefan Jansen
 not_in_nav: |
   /ASYNC_STORAGE.md
   /FEATURES.md
-  /INCREMENTAL_UPDATES.md
   /INSTALLATION.md
   /INTEGRATION_TESTING.md
   /SESSION_MANAGEMENT.md
-  /TESTING.md
   /crypto_providers.md
   /export_guide.md
-  /multi_asset_guide.md
   /yahoo_provider.md
-  /asset-classes/README.md
-  /asset-classes/crypto.md
-  /asset-classes/equities.md
-  /asset-classes/forex.md
-  /asset-classes/futures.md
   /providers/databento_reference.md
   /providers/mock.md
-  /storage/INCREMENTAL_ARCHITECTURE.md
-  /storage/PARTITIONING_GUIDE.md
-  /user-guide/getting-started.md
 
 validation:
   omitted_files: warn
-
-# Historical audits remain in the repository but are not published as current user documentation.
-exclude_docs: |
-  /FEATURE_INVENTORY.md
-  /GAP_ANALYSIS.md
-  /wiki_prices_status.md
-  /yahoo_bulk_download_analysis.md
-  /providers/PROVIDER_AUDIT.md

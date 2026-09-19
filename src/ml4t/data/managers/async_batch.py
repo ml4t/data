@@ -1,7 +1,7 @@
-"""Async batch operations for high-performance data loading.
+"""Async batch operations for data loading.
 
-This module provides async batch loading using asyncio.gather() for
-3-5x speedup over thread-based parallel loading.
+This module uses asyncio.gather() to fetch independent symbols concurrently
+through providers that expose an asynchronous interface.
 
 Usage:
     from ml4t.data.managers.async_batch import async_batch_load
@@ -15,9 +15,6 @@ Usage:
             end="2024-12-31",
         )
 
-Performance Comparison:
-    - Thread-based (BatchManager): ~1x baseline
-    - Async (async_batch_load): ~3-5x faster for I/O-bound operations
 """
 
 from __future__ import annotations
@@ -45,8 +42,8 @@ async def async_batch_load(
 ) -> pl.DataFrame:
     """Load OHLCV data for multiple symbols concurrently.
 
-    Uses asyncio.gather() for concurrent fetching, providing 3-5x
-    speedup over thread-based approaches for I/O-bound operations.
+    Uses asyncio.gather() and a concurrency limit to coordinate independent
+    provider requests.
 
     Args:
         provider: Async provider implementing fetch_ohlcv_async
@@ -196,7 +193,7 @@ async def async_batch_load_dict(
 
 
 class AsyncBatchManager:
-    """Async batch manager for high-performance data loading.
+    """Async batch manager for data loading.
 
     Provides async versions of BatchManager methods using
     asyncio.gather() for concurrent operations.

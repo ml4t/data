@@ -130,7 +130,6 @@ class TestSyntheticRegistryInit:
         """Default construction does not depend on the private book-code package."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("ML4T_DATA_PATH", raising=False)
-        monkeypatch.delenv("ML4T_DATA_DIR", raising=False)
         monkeypatch.delenv("QLDM_DATA_ROOT", raising=False)
 
         registry = SyntheticRegistry()

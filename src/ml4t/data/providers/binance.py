@@ -30,8 +30,8 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
     - No API key required for public market data
     - Spot and futures market support
     - Real-time and historical data
-    - High rate limits for public endpoints
-    - Async support for 10x faster batch fetches
+    - Public market-data endpoints
+    - Asynchronous batch fetch methods
 
     API Documentation: https://binance-docs.github.io/apidocs/
     """
@@ -299,7 +299,7 @@ class BinanceProvider(AsyncSessionMixin, BaseProvider):
     ) -> pl.DataFrame:
         """Async fetch OHLCV data for a cryptocurrency.
 
-        This is 3-10x faster than sync when fetching multiple symbols
+        This fetches multiple symbols
         concurrently using asyncio.gather() or async_batch_load().
 
         Args:

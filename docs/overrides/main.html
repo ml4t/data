@@ -2,6 +2,9 @@
 
 {% block extrahead %}
   {{ super() }}
+  <meta name="ml4t-library" content="{{ config.extra.release.library }}">
+  <meta name="ml4t-version" content="{{ config.extra.release.version }}">
+  <meta name="ml4t-commit" content="{{ config.extra.release.commit }}">
   <link
     rel="stylesheet"
     href="{{ 'assets/stylesheets/ml4t-docs-theme.css' | url }}"

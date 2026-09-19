@@ -1,20 +1,6 @@
-"""Tiingo data provider.
+"""Tiingo provider for authenticated equity and ETF data.
 
-Tiingo provides stock market data with extensive historical coverage and
-adjusted prices for splits/dividends.
-
-API Documentation: https://www.tiingo.com/documentation/end-of-day
-
-Free Tier Limits:
-- 1000 API calls per day
-- Historical daily data (5+ years)
-- 500 unique symbols per month
-
-Example:
-    >>> from ml4t.data.providers.tiingo import TiingoProvider
-    >>> provider = TiingoProvider(api_key="your_key")
-    >>> data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31")
-    >>> provider.close()
+Account plans determine request quotas and historical depth.
 """
 
 import os
@@ -38,17 +24,12 @@ logger = structlog.get_logger()
 
 
 class TiingoProvider(BaseProvider):
-    """Tiingo data provider.
+    """Fetch daily raw and adjusted OHLCV data from Tiingo.
 
-    Supports stocks and ETFs with daily OHLCV data (raw and adjusted).
-
-    Rate Limits (Free Tier):
-    - 1000 requests per day
-    - 500 unique symbols per month
+    ``DEFAULT_RATE_LIMIT`` is a conservative client pacing value. Account quotas still apply.
     """
 
-    # Free tier: 1000 requests/day = ~0.69 per minute = 1 per 86.4 seconds
-    # Conservative: 1 request per 90 seconds
+    # Conservative client-side request pace; account quotas still apply.
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (1, 90.0)
 
     # Map frequency to Tiingo intervals

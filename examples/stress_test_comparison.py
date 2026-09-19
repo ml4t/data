@@ -265,7 +265,7 @@ def main():
     stats_yfinance = test_direct_yfinance(tickers, start_date, end_date)
 
     # Test 2: ML4T Data approach
-    print("\n[2/2] Testing QDATA PROVIDER (0.5 req/sec, automatic rate limiting)")
+    print("\n[2/2] Testing ML4T DATA PROVIDER (0.5 req/sec, automatic rate limiting)")
     print("=" * 80)
     stats_ml4t_data = test_ml4t_data_provider(tickers, start_date, end_date)
 

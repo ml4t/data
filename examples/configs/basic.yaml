@@ -1,11 +1,10 @@
-# Basic QData Configuration Example
-# This file demonstrates basic configuration for QData with the new unified system
+# Basic ML4T Data configuration example
 
-# Storage configuration - Uses Hive partitioning for 7x query performance
+# Storage configuration
 storage:
   strategy: hive  # 'hive' for partitioned or 'flat' for single file
-  base_path: ~/qdata/storage
-  compression: zstd  # Best compression/speed balance
+  base_path: ./market-data
+  compression: zstd
   metadata_tracking: true  # Track update timestamps
 
 # Data providers configuration

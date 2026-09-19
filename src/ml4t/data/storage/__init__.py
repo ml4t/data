@@ -1,7 +1,7 @@
 """ML4T Data storage module.
 
 Provides configurable storage backends with Hive partitioning for
-high-performance time-series data management.
+time-series data management.
 """
 
 from __future__ import annotations

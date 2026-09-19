@@ -18,7 +18,27 @@ def _write_distributions(
     license_expression: str | None = "MIT",
     license_file: str | None = "LICENSE",
 ) -> None:
-    metadata_fields = ["Metadata-Version: 2.4", "Name: ml4t-data", f"Version: {version}"]
+    metadata_fields = [
+        "Metadata-Version: 2.4",
+        "Name: ml4t-data",
+        f"Version: {version}",
+        "Summary: Market data acquisition, storage, and update workflows for machine learning for trading.",
+        "Author-email: Stefan Jansen <stefan@applied-ai.com>",
+        "Maintainer-email: Stefan Jansen <pm@ml4trading.io>",
+        "Requires-Python: >=3.12,<3.15",
+        "Keywords: finance,quantitative-finance,algorithmic-trading,market-data",
+        "Classifier: Development Status :: 5 - Production/Stable",
+        "Classifier: License :: OSI Approved :: MIT License",
+        "Classifier: Programming Language :: Python :: 3.12",
+        "Classifier: Programming Language :: Python :: 3.13",
+        "Classifier: Programming Language :: Python :: 3.14",
+        "Classifier: Typing :: Typed",
+        "Project-URL: Homepage, https://www.ml4trading.io/",
+        "Project-URL: Documentation, https://www.ml4trading.io/docs/data/",
+        "Project-URL: Repository, https://github.com/ml4t/data",
+        "Project-URL: Issues, https://github.com/ml4t/data/issues",
+        "Project-URL: Changelog, https://github.com/ml4t/data/blob/main/CHANGELOG.md",
+    ]
     if license_expression is not None:
         metadata_fields.append(f"License-Expression: {license_expression}")
     if license_file is not None:

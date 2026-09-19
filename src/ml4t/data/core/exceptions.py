@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
+import warnings
+from typing import TYPE_CHECKING, Any
+
+__all__ = [
+    "AuthenticationError",
+    "CircuitBreakerOpenError",
+    "ConfigurationError",
+    "DataNotAvailableError",
+    "DataValidationError",
+    "LockError",
+    "ML4TDataError",
+    "NetworkError",
+    "ProviderError",
+    "ProviderRoutingError",
+    "QldmError",
+    "RateLimitError",
+    "StorageError",
+    "SymbolNotFoundError",
+]
 
 
 class ML4TDataError(Exception):
@@ -21,8 +39,26 @@ class ML4TDataError(Exception):
         self.details = details or {}
 
 
-# Backward compatibility alias
-QldmError = ML4TDataError
+if TYPE_CHECKING:
+    QldmError = ML4TDataError
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve deprecated module attributes."""
+    if name == "QldmError":
+        warnings.warn(
+            "QldmError is deprecated; use ML4TDataError instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        return ML4TDataError
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    """Include compatibility attributes in module discovery."""
+    return sorted(set(globals()) | set(__all__))
 
 
 class ProviderError(ML4TDataError):

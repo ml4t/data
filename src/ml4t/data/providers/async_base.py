@@ -1,7 +1,7 @@
-"""Async base provider for high-performance concurrent fetching.
+"""Async base provider for concurrent fetching.
 
-This module provides AsyncBaseProvider for providers that support
-async/await operations, enabling 3-5x speedup for batch operations.
+This module provides AsyncBaseProvider for providers that support async/await
+operations and concurrent batch requests.
 
 Usage:
     class MyAsyncProvider(AsyncBaseProvider):
@@ -21,7 +21,7 @@ Usage:
         # Single fetch
         df = await provider.fetch_ohlcv_async("AAPL", "2024-01-01", "2024-12-31")
 
-        # Batch fetch (3-5x faster than sync)
+        # Fetch independent symbols concurrently
         results = await provider.batch_fetch_async(
             ["AAPL", "MSFT", "GOOGL"],
             "2024-01-01",

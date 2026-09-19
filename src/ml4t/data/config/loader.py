@@ -307,7 +307,7 @@ class ConfigLoader:
         """
         save_path = path or self.config_path
         if not save_path:
-            save_path = Path.cwd() / "mlquant.data.yaml"
+            save_path = Path.cwd() / "ml4t.data.yaml"
 
         # Convert to dictionary with JSON-compatible types
         data = config.model_dump(exclude_none=True, exclude_defaults=False, mode="json")

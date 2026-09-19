@@ -1,11 +1,11 @@
-"""ML4T Data - Modern financial data management library with unified provider interface."""
+"""Market data acquisition, storage, and update workflows for ML4T."""
 
 try:
     from ml4t.data._version import __version__
 except ImportError:
     __version__ = "0.0.0.dev0"
-__author__ = "ML4T Team"
-__email__ = "info@ml4trading.io"
+__author__ = "Stefan Jansen"
+__email__ = "stefan@applied-ai.com"
 
 # Contract specifications (always available - no external dependencies)
 # Asset classes

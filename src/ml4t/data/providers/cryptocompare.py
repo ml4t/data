@@ -20,16 +20,9 @@ logger = structlog.get_logger()
 
 
 class CryptoCompareProvider(BaseProvider):
-    """
-    Provider for cryptocurrency data from CryptoCompare API.
+    """Fetch cryptocurrency OHLCV data from CryptoCompare.
 
-    Features:
-    - Spot price data for major cryptocurrencies
-    - Historical OHLCV data
-    - Multiple exchange support
-    - Free tier: 100,000 calls/month
-
-    API Documentation: https://min-api.cryptocompare.com/documentation
+    Endpoint limits and account quotas are external service constraints.
     """
 
     BASE_URL = "https://min-api.cryptocompare.com/data/v2"
@@ -44,18 +37,18 @@ class CryptoCompareProvider(BaseProvider):
         "1day": "histoday",
     }
 
-    # Limits for each frequency (free tier)
+    # Maximum observations accepted by each history endpoint
     FREQUENCY_LIMITS: ClassVar[dict[str, int]] = {
         "histominute": 2000,  # Max 2000 minutes per call
         "histohour": 2000,  # Max 2000 hours per call
         "histoday": 2000,  # Max 2000 days per call
     }
 
-    # Override default rate limiting for CryptoCompare (100k calls/month free)
+    # Conservative client-side request pace
     DEFAULT_RATE_LIMIT: ClassVar[tuple[int, float]] = (
         10,
         60.0,
-    )  # 10 requests per minute for free tier
+    )
     MAX_RATE_LIMIT_ATTEMPTS: ClassVar[int] = 3
     DEFAULT_RETRY_AFTER: ClassVar[float] = 6.0
     MAX_RETRY_AFTER: ClassVar[float] = 60.0

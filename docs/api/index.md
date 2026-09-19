@@ -269,8 +269,9 @@ without inheriting from `BaseProvider`.
 
 ### Config
 
-Pydantic model for top-level library configuration. Reads defaults from
-environment variables (`QLDM_DATA_ROOT`, `QLDM_LOG_LEVEL`).
+Pydantic model for top-level library configuration. Reads `ML4T_DATA_PATH` and
+`ML4T_DATA_LOG_LEVEL`. Former QLDM names are covered by the
+[migration guide](../getting-started/migration.md).
 
 ```python
 from ml4t.data import Config

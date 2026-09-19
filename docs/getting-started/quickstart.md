@@ -1,86 +1,56 @@
-# Quickstart
+# Generate OHLCV data without an external service
 
-Get market data in under 5 minutes.
+This tutorial verifies the installation and introduces the provider interface with deterministic,
+locally generated data.
 
-## Basic Usage
+## Install the package
+
+Use CPython 3.12, 3.13, or 3.14.
+
+```bash
+pip install ml4t-data
+```
+
+## Generate a daily series
+
+```python
+from ml4t.data.providers import SyntheticProvider
+
+provider = SyntheticProvider(seed=42)
+data = provider.fetch_ohlcv("SYNTH", "2024-01-01", "2024-01-10", "daily")
+
+assert not data.is_empty()
+assert {"timestamp", "symbol", "open", "high", "low", "close", "volume"} <= set(data.columns)
+print(data)
+```
+
+`SyntheticProvider` follows the same OHLCV interface as network-backed providers. The fixed seed
+makes the generated series repeatable, so this example works in a clean environment without
+credentials.
+
+## Fetch external data
+
+Choose a provider only after checking its dependency and service requirements. For example, Yahoo
+Finance support requires the `yahoo` extra:
+
+```bash
+pip install "ml4t-data[yahoo]"
+```
 
 ```python
 from ml4t.data.providers import YahooFinanceProvider
 
-# Create a provider
 provider = YahooFinanceProvider()
-
-# Fetch OHLCV data
-df = provider.fetch_ohlcv(
-    symbol="AAPL",
-    start="2024-01-01",
-    end="2024-12-31",
-    frequency="daily"
-)
-
-print(df.head())
+data = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-31", "daily")
 ```
 
-## Multiple Symbols (Async)
+This second example requires network access and is subject to the provider's availability and usage
+terms. See [provider selection](provider-selection.md) before using an adapter in a recurring
+workflow.
 
-For faster multi-symbol fetches, use async batch loading:
+## Next steps
 
-```python
-import asyncio
-from ml4t.data.managers.async_batch import async_batch_load
-from ml4t.data.providers import YahooFinanceProvider
-
-async def main():
-    async with YahooFinanceProvider() as provider:
-        df = await async_batch_load(
-            provider,
-            symbols=["AAPL", "MSFT", "GOOGL", "AMZN", "META"],
-            start="2024-01-01",
-            end="2024-12-31",
-        )
-    return df
-
-df = asyncio.run(main())
-print(f"Fetched {len(df)} rows for {df['symbol'].n_unique()} symbols")
-```
-
-## CLI Usage
-
-```bash
-# Fetch data via command line
-ml4t-data fetch AAPL MSFT GOOGL \
-    --start 2024-01-01 \
-    --provider yahoo \
-    --output ~/data
-
-# Update all datasets from config
-ml4t-data update-all -c ml4t-data.yaml
-```
-
-## Configuration File
-
-Create `ml4t-data.yaml` for automated updates:
-
-```yaml
-storage:
-  base_path: ~/ml4t-data
-
-datasets:
-  - name: sp500
-    provider: yahoo
-    symbols_file: sp500.txt
-    frequency: daily
-    start_date: 2020-01-01
-```
-
-Then run:
-
-```bash
-ml4t-data update-all -c ml4t-data.yaml
-```
-
-## Next Steps
-
-- [Provider Selection Guide](provider-selection.md) - Choose the right data source
-- [User Guide](../user-guide/index.md) - Complete documentation
-- [API Reference](../api/index.md) - Detailed API docs
+- [Configure local storage](../user-guide/configuration.md)
+- [Update an existing dataset](../user-guide/incremental-updates.md)
+- [Validate market data](../user-guide/data-quality.md)
+- [Inspect the provider API](../api/index.md)

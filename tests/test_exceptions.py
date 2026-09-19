@@ -1,5 +1,9 @@
 """Test core exception classes."""
 
+import importlib
+
+import pytest
+
 
 class TestCoreExceptions:
     """Test core exception functionality."""
@@ -19,11 +23,30 @@ class TestCoreExceptions:
 
     def test_qldm_error_backward_compat(self):
         """Test QldmError backward compatibility alias."""
-        from ml4t.data.core.exceptions import ML4TDataError, QldmError
+        from ml4t.data.core.exceptions import ML4TDataError
+
+        with pytest.warns(DeprecationWarning, match="QldmError is deprecated"):
+            from ml4t.data.core.exceptions import QldmError
 
         assert QldmError is ML4TDataError
         exc = QldmError("Test error")
         assert isinstance(exc, ML4TDataError)
+
+    def test_qldm_error_is_discoverable(self):
+        """Test that module discovery includes the compatibility alias."""
+        exceptions = importlib.import_module("ml4t.data.core.exceptions")
+
+        assert "QldmError" in dir(exceptions)
+        assert "QldmError" in exceptions.__all__
+
+    def test_qldm_error_star_import_warns_and_succeeds(self):
+        """Test that star imports retain the deprecated compatibility alias."""
+        namespace: dict[str, object] = {}
+
+        with pytest.warns(DeprecationWarning, match="QldmError is deprecated"):
+            exec("from ml4t.data.core.exceptions import *", namespace)
+
+        assert namespace["QldmError"] is namespace["ML4TDataError"]
 
     def test_data_validation_error(self):
         """Test DataValidationError functionality."""

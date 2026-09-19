@@ -1,5 +1,6 @@
 """Tests for core abstractions."""
 
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,12 +27,27 @@ class TestConfig:
     def test_config_from_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Test configuration from environment variables."""
         data_root = tmp_path / "custom-path"
-        monkeypatch.setenv("QLDM_DATA_ROOT", str(data_root))
-        monkeypatch.setenv("QLDM_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("ML4T_DATA_PATH", str(data_root))
+        monkeypatch.setenv("ML4T_DATA_LOG_LEVEL", "DEBUG")
 
         config = Config()
         assert config.data_root == data_root
         assert config.log_level == "DEBUG"
+
+    def test_preferred_env_takes_precedence_without_warning(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The preferred data root wins without warning when the legacy name is also set."""
+        preferred_root = tmp_path / "preferred"
+        legacy_root = tmp_path / "legacy"
+        monkeypatch.setenv("ML4T_DATA_PATH", str(preferred_root))
+        monkeypatch.setenv("QLDM_DATA_ROOT", str(legacy_root))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            config = Config()
+
+        assert config.data_root == preferred_root.resolve()
 
     def test_storage_config_validation(self) -> None:
         """Test storage configuration validation."""
