@@ -49,26 +49,30 @@ def test_publish_uses_only_the_validated_package_directory() -> None:
     publish = release["jobs"]["publish"]
 
     assert build["needs"] == [
+        "preflight",
         "ecosystem-qualification",
         "compatibility",
         "quality",
     ]
-    assert publish["needs"] == "build"
+    assert publish["needs"] == ["preflight", "documentation"]
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"contents": "read", "id-token": "write"}
 
     publish_action = next(
-        step for step in publish["steps"] if step.get("name") == "Publish to PyPI"
+        step
+        for step in publish["steps"]
+        if step.get("name") == "Publish through trusted publishing"
     )
-    assert publish_action["with"]["packages-dir"] == "dist/packages/"
+    assert publish_action["with"]["packages-dir"] == "candidate/dist/"
 
     github_release = release["jobs"]["github-release"]
     create_step = next(
         step
         for step in github_release["steps"]
-        if step.get("name") == "Create GitHub release with validated distributions"
+        if step.get("name") == "Create release from the published candidate"
     )
-    assert create_step["env"]["GH_REPO"] == "${{ github.repository }}"
+    assert create_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "candidate/candidate.json" in create_step["run"]
 
 
 def test_compatibility_checkout_fetches_release_tags() -> None:

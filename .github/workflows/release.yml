@@ -81,7 +81,6 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     permissions:
-      actions: read
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -109,13 +108,17 @@ jobs:
         run: |
           uv export --locked --all-extras --all-groups --no-emit-project --no-hashes --output-file requirements-audit.txt
           uv run pip-audit --requirement requirements-audit.txt
-      - name: Require provider contract evidence for this commit
+      - name: Build and verify documentation
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          uv run python scripts/verify_provider_contract_runs.py
-          --repository "${{ github.repository }}"
-          --commit "${{ needs.preflight.outputs.commit }}"
+          ML4T_DOCS_COMMIT: ${{ needs.preflight.outputs.commit }}
+          ML4T_DOCS_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          uv run mkdocs build --strict
+          uv run python scripts/verify_documentation_identity.py \
+            --site site \
+            --expected-library data \
+            --expected-version "$ML4T_DOCS_VERSION" \
+            --expected-commit "$ML4T_DOCS_COMMIT"
 
   build:
     name: Build Candidate Once
