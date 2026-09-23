@@ -154,7 +154,7 @@ listed and resolved over time, so a set of markets picked today is a survivor sa
 | Source | What it measures | History | Access | ml4t-data |
 |--------|------------------|---------|--------|-----------|
 | [Kalshi](https://docs.kalshi.com/welcome) | CFTC-regulated event contracts: economics, politics, weather, sports | From the July 2021 launch | Public market-data API; trading needs a verified account | Yes: [`KalshiProvider`](kalshi.md) |
-| [Polymarket](https://docs.polymarket.com/) | Event contracts on a crypto platform; open to US users again since December 2025 through QCEX, a CFTC-licensed exchange acquired in 2025 | From 2020 | Public market data | Yes: [`PolymarketProvider`](polymarket.md) |
+| [Polymarket](https://docs.polymarket.com/) | Event contracts on a crypto platform; CFTC approval for intermediated US access, November 2025 | From 2020 | Public market data | Yes: [`PolymarketProvider`](polymarket.md) |
 
 ---
 
@@ -199,8 +199,8 @@ needs its own client.
 | Refinitiv ESG scores | LSEG ESG data; a new LSEG ESG Scores suite launched March 2026 |
 | Reddit and X APIs | Paid access (Reddit since July 2023; X pay-per-use since February 2026) |
 | Stocktwits API | Closed to new developers |
-| Polymarket (closed to US users 2022 to 2025) | US access since December 2025 through QCEX, a CFTC-licensed exchange acquired in 2025 |
-| PredictIt | CFTC approval to operate as a regulated exchange, September 2025 |
+| Polymarket (closed to US users from 2022) | [Amended CFTC order of designation](https://www.prnewswire.com/news-releases/polymarket-receives-cftc-approval-of-amended-order-of-designation-enabling-intermediated-us-market-access-302625833.html) for intermediated US access, November 2025 |
+| PredictIt | [CFTC approval to operate a regulated exchange](https://www.bloomberg.com/news/articles/2025-09-05/predictit-gains-cftc-approval-to-launch-regulated-exchange), September 2025 |
 | Quandl | Nasdaq Data Link (September 2021) |
 
 ## See Also
