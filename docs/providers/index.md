@@ -80,6 +80,7 @@ provider's capabilities before passing it to `DataManager` or `async_batch_load(
 | Foreign exchange | Oanda, Twelve Data, FXMacroData |
 | Economic series | FRED, FXMacroData |
 | Academic factors | Fama-French, AQR |
+| Equity fundamentals | Yahoo Finance, EODHD, Finnhub, Massive; other vendors and the SEC routes are compared in [Fundamental Data Sources](fundamentals.md) |
 
 Provider access, coverage, retention, and redistribution terms can differ by account tier. Confirm
 the provider page and the provider's current terms before selecting it for a production dataset.
