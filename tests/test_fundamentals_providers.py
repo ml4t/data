@@ -222,46 +222,119 @@ class TestMassiveFundamentals:
     def provider(self):
         return MassiveProvider(api_key="test_key", rate_limit=(100, 1.0))
 
-    def test_fetch_financials(self, provider):
+    # Income-statement record as documented for GET /stocks/financials/v1/income-statements
+    # (Apple fiscal Q3 2025), trimmed to a few line items.
+    INCOME_RECORD = {
+        "tickers": ["AAPL"],
+        "cik": "0000320193",
+        "period_end": "2025-06-28",
+        "filing_date": "2025-08-01",
+        "fiscal_quarter": 3,
+        "fiscal_year": 2025,
+        "timeframe": "quarterly",
+        "revenue": 94036000000,
+        "consolidated_net_income_loss": 23434000000,
+        "diluted_earnings_per_share": 1.57,
+    }
+
+    @staticmethod
+    def _response(payload):
         response = MagicMock()
         response.status_code = 200
-        response.json.return_value = {
-            "results": [
-                {
-                    "end_date": "2024-12-31",
-                    "filing_date": "2025-02-01",
-                    "fiscal_period": "FY",
-                    "fiscal_year": 2024,
-                    "financials": {
-                        "income_statement": {
-                            "revenues": {"value": 100.0, "unit": "USD"},
-                            "net_income_loss": {"value": 20.0, "unit": "USD"},
-                        }
-                    },
-                }
-            ]
-        }
+        response.json.return_value = payload
+        return response
+
+    def test_fetch_financials_parses_flat_statement_records(self, provider):
+        payload = {"status": "OK", "request_id": "r1", "results": [self.INCOME_RECORD]}
 
         with patch.object(provider.rate_limiter, "acquire"):
-            with patch.object(provider.session, "get", return_value=response) as get:
-                frame = provider.fetch_financials("AAPL")
+            with patch.object(provider.session, "get", return_value=self._response(payload)) as get:
+                frame = provider.fetch_financials("aapl", statement="income", period="quarterly")
 
-        assert len(frame) == 2
-        assert set(frame["line_item"]) == {"revenues", "net_income_loss"}
-        assert get.call_args.kwargs["params"]["timeframe"] == "annual"
+        assert get.call_args.args[0] == (
+            "https://api.massive.com/stocks/financials/v1/income-statements"
+        )
+        params = get.call_args.kwargs["params"]
+        assert params["tickers"] == "AAPL"
+        assert params["timeframe"] == "quarterly"
+        assert params["sort"] == "period_end.desc"
+
+        assert set(frame["line_item"]) == {
+            "revenue",
+            "consolidated_net_income_loss",
+            "diluted_earnings_per_share",
+        }
+        row = frame.filter(frame["line_item"] == "revenue").row(0, named=True)
+        assert row["value"] == 94036000000.0
+        assert row["period_end"] == "2025-06-28"
+        assert row["filed_at"] == "2025-08-01"
+        assert row["fiscal_year"] == 2025
+        assert row["fiscal_period"] == "Q3"
+        assert row["statement_type"] == "income"
+        assert row["period_type"] == "quarterly"
+        assert row["source"] == "stocks/financials/v1/income-statements"
+
+    def test_fetch_financials_follows_next_url_until_limit(self, provider):
+        second = {**self.INCOME_RECORD, "period_end": "2025-03-29", "fiscal_quarter": 2}
+        third = {**self.INCOME_RECORD, "period_end": "2024-12-28", "fiscal_quarter": 1}
+        next_url = "https://api.massive.com/stocks/financials/v1/income-statements?cursor=abc"
+        pages = [
+            self._response({"status": "OK", "results": [self.INCOME_RECORD], "next_url": next_url}),
+            self._response(
+                {"status": "OK", "results": [second, third], "next_url": next_url + "d"}
+            ),
+        ]
+
+        with patch.object(provider.rate_limiter, "acquire"):
+            with patch.object(provider.session, "get", side_effect=pages) as get:
+                frame = provider.fetch_financials("AAPL", period="quarterly", limit=2)
+
+        assert get.call_count == 2
+        assert get.call_args_list[1].args[0] == next_url
+        assert get.call_args_list[1].kwargs["params"] == {"apiKey": "test_key"}
+        assert sorted(set(frame["period_end"])) == ["2025-03-29", "2025-06-28"]
+
+    @pytest.mark.parametrize(
+        ("statement", "period", "path", "timeframe", "fiscal_period"),
+        [
+            ("balance", "annual", "balance-sheets", "annual", "FY"),
+            ("cashflow", "quarterly", "cash-flow-statements", "quarterly", "Q3"),
+            ("income", "ttm", "income-statements", "trailing_twelve_months", "TTM"),
+        ],
+    )
+    def test_fetch_financials_routes_statement_and_period(
+        self, provider, statement, period, path, timeframe, fiscal_period
+    ):
+        record = {**self.INCOME_RECORD, "timeframe": timeframe}
+        payload = {"status": "OK", "results": [record]}
+
+        with patch.object(provider.rate_limiter, "acquire"):
+            with patch.object(provider.session, "get", return_value=self._response(payload)) as get:
+                frame = provider.fetch_financials("AAPL", statement=statement, period=period)
+
+        assert get.call_args.args[0].endswith(f"/stocks/financials/v1/{path}")
+        assert get.call_args.kwargs["params"]["timeframe"] == timeframe
+        assert set(frame["statement_type"]) == {statement}
+        assert set(frame["fiscal_period"]) == {fiscal_period}
+
+    def test_fetch_financials_rejects_ttm_balance_sheet(self, provider):
+        with pytest.raises(DataValidationError, match="balance sheets"):
+            provider.fetch_financials("AAPL", statement="balance", period="ttm")
 
     def test_fetch_company_metrics(self, provider):
+        # Shape of a live /stocks/financials/v1/ratios row: flat fields, dated by `date`.
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {
             "results": [
                 {
                     "ticker": "AAPL",
-                    "end_date": "2024-12-31",
-                    "fiscal_period": "FY",
-                    "fiscal_year": 2024,
-                    "valuation": {"price_to_earnings": 30.0},
-                    "profitability": {"return_on_equity": 0.45},
+                    "cik": "0000320193",
+                    "date": "2026-09-22",
+                    "price": 339.75,
+                    "market_cap": 4958372655000.0,
+                    "price_to_earnings": 38.5,
+                    "return_on_equity": 1.5,
                 }
             ]
         }
@@ -270,11 +343,13 @@ class TestMassiveFundamentals:
             with patch.object(provider.session, "get", return_value=response):
                 frame = provider.fetch_company_metrics("AAPL")
 
-        assert len(frame) == 2
         assert set(frame["metric"]) == {
-            "valuation.price_to_earnings",
-            "profitability.return_on_equity",
+            "price",
+            "market_cap",
+            "price_to_earnings",
+            "return_on_equity",
         }
+        assert set(frame["as_of"]) == {"2026-09-22"}
 
     def test_fetch_company_metrics_provider_options_are_keyword_only(self, provider):
         signature = inspect.signature(provider.fetch_company_metrics)
