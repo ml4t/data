@@ -8,7 +8,7 @@ is known about its point-in-time behavior, the access tier, and whether `ml4t-da
 
 !!! note "Verified September 2026"
     Alternative data vendors are acquired, merged and repackaged often. Every entry below was
-    checked against the vendor's own site or a published announcement in September 2026. Few
+    checked in September 2026 against the vendor's own site, a press release, or published reporting. Few
     vendors publish their timestamp and revision policy; where it is not public, the table says
     "not documented" and the question belongs in your due diligence. Confirm the current terms
     before you build on any of them.
@@ -63,8 +63,8 @@ without names. These questions are answered before any backtest, not after.
 | [RavenPack](https://www.ravenpack.com/) | Entity-level news analytics: relevance, sentiment and event classification | From 2000 (Dow Jones edition), 2007 (web edition) | Records carry the news timestamp; revision policy not documented publicly | Institutional; academic via WRDS | No |
 | [LSEG MarketPsych Analytics](https://www.lseg.com/en/data-analytics/market-data/quantitative-economic-data-solutions/marketpsych-analytics-and-models) | Sentiment and emotion scores from news and social media across equities, macro, FX, crypto and commodities | From 1998 | Minute-level to daily series; revision policy not documented publicly | Institutional | No |
 | [Dow Jones Factiva DNA](https://www.dowjones.com/business-intelligence/factiva/) | Licensed premium news archive with metadata, via API, snapshots and streams | Archive depth varies by publication | Publication timestamps per article | Institutional | No |
-| [Benzinga News API](https://www.benzinga.com/apis/cloud-product/stock-news-api/) | Financial news headlines and articles, Wilshire 5000 and TSX coverage | Not documented | `created` and `updated` timestamps per article | Paid, licensed by news channel | No |
-| [SEC EDGAR full-text search](https://www.sec.gov/edgar/search/efts-faq.html) | Full text of SEC filings | From May 2001 | Every filing carries its acceptance timestamp | Free | No |
+| [Benzinga Newsfeed API](https://docs.benzinga.com/api-reference/news-api/overview) | Financial news headlines and articles, Wilshire 5000 and TSX coverage | Not documented | `created` and `updated` timestamps per article; `updatedSince` returns changes | Paid | No |
+| [SEC EDGAR full-text search](https://www.sec.gov/edgar/search/efts-faq.html) | Full text of SEC filings | From 2001 | Every filing carries its acceptance timestamp | Free | No |
 
 ---
 
@@ -76,7 +76,7 @@ a project around any of these.
 | Source | What it measures | Status | Access | ml4t-data |
 |--------|------------------|--------|--------|-----------|
 | [Stocktwits API](https://api.stocktwits.com/developers) | Investor message stream with cashtags and self-reported sentiment | Closed to new developer registrations | Not open to new developers | No |
-| [Reddit Data API](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) | Posts and comments, including investing subreddits | Paid for commercial use since June 2023 | Commercial license required | No |
+| [Reddit Data API](https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki) | Posts and comments, including investing subreddits | Paid for commercial use since July 2023 | Commercial license required | No |
 | [X API](https://docs.x.com/x-api/getting-started/pricing) | Posts and engagement | Pay-per-use credits since February 2026, replacing subscription tiers | Paid | No |
 
 ---
@@ -89,8 +89,8 @@ a project around any of these.
 | [Sensor Tower](https://sensortower.com/product/mobile-app/app-performance-insights) | App downloads, revenue, rankings and usage estimates; includes the former data.ai | Not documented | Modeled estimates; revision policy not documented publicly | Enterprise; free top charts | No |
 | [Thinknum](https://www.thinknum.com/) | Web-collected company data: job listings, headcount, product prices, store locations | Not documented | Not documented | Institutional | No |
 | [YipitData](https://www.yipitdata.com/) | Company KPI and revenue estimates from web, app and transaction data | Not documented | Not documented | Institutional | No |
-| [Revelio Labs](https://www.reveliolabs.com/data) | Workforce composition and flows, job postings, employee sentiment, layoff notices | Workforce data from 2007 to 2008; postings from 2021 | Not documented | Paid; academic via WRDS | No |
-| [LinkUp](https://www.linkup.com/data) | Job postings collected directly from employer websites | From 2007 | Each posting is timestamped when found, updated and removed | Institutional | No |
+| [Revelio Labs](https://www.reveliolabs.com/data) | Workforce composition and flows, job postings, employee sentiment, layoff notices | Workforce composition from 2007, transitions from 2008, postings from 2021 | Not documented | Paid; academic via WRDS | No |
+| [LinkUp](https://www.linkup.com/data) | Job postings collected directly from employer websites | From 2007 | New, updated and removed listings are captured nightly | Institutional | No |
 
 ---
 
@@ -111,11 +111,11 @@ so ask how the vendor weights the panel and whether history is reweighted when i
 
 | Source | What it measures | History | Access | ml4t-data |
 |--------|------------------|---------|--------|-----------|
-| [Placer.ai](https://www.placer.ai/products/api) | Visits to stores and venues from a mobile-device panel | From January 2017 | Free tools, paid platform, enterprise API | No |
-| [Advan Research Patterns+](https://advanresearch.com/products/patternsplus) | Foot traffic to points of interest; took over SafeGraph's Patterns product | Weekly data from January 2017 | Institutional | No |
-| [Planet Labs](https://www.planet.com/industries/education-and-research/) | Satellite imagery: near-daily medium resolution and tasked high resolution | Archive from 2009 | Commercial; education and research program for university users | No |
-| [RS Metrics](https://rsmetrics.com/) | Asset-level signals from satellite imagery: metal stockpiles, industrial activity | Operating since 2009 | Institutional; academic program | No |
-| [Kpler](https://www.kpler.com/product/commodities) | Commodity flows from ship tracking (AIS), satellite, customs and port data; now owns MarineTraffic and Spire Maritime | MarineTraffic AIS archive from 2010 | Institutional | No |
+| [Placer.ai](https://www.placer.ai/products/api) | Visits to stores and venues from a mobile-device panel | Not documented | Free tools, paid platform, enterprise API | No |
+| [Advan Research Patterns+](https://advanresearch.com/products/patternsplus) | Foot traffic to points of interest, US and Canada; took over SafeGraph's Patterns product | Weekly updates; history from 2019 | Institutional | No |
+| [Planet Labs](https://www.planet.com/industries/education-and-research/) | Satellite imagery: near-daily medium resolution and tasked high resolution | Archive from 2009 (RapidEye, 2009 to 2020) | Commercial; education and research program for university users | No |
+| [RS Metrics](https://rsmetrics.com/) | Asset-level signals from satellite imagery: metals production at smelters, retail parking lots | Not documented | Institutional; data for research | No |
+| [Kpler](https://www.kpler.com/product/commodities) | Commodity flows from ship tracking (AIS), satellite, customs and port data; now owns MarineTraffic and Spire Maritime | Not documented | Institutional | No |
 
 ---
 
@@ -126,10 +126,10 @@ history as a sequence of vintages, and check which methodology produced each val
 
 | Source | What it measures | History and methodology | Access | ml4t-data |
 |--------|------------------|-------------------------|--------|-----------|
-| [MSCI ESG Ratings](https://www.msci.com/data-and-analytics/sustainability-solutions/esg-ratings) | Industry-relative ESG ratings (AAA to CCC), about 17,000 issuers | Ratings since 2007; methodology revised several times since | Institutional; free public lookup for a subset | No |
-| [Morningstar Sustainalytics ESG Risk Ratings](https://www.sustainalytics.com/esg-data) | Unmanaged ESG risk score (0 to 100), 16,000+ companies | A score change log exists; vintage policy not documented publicly | Institutional | No |
-| [LSEG ESG Scores](https://www.lseg.com/en/media-centre/press-releases/2026/lseg-launches-new-suite-esg-scores-sustainability-analytics) | ESG scores from 220+ indicators, plus controversies | New suite launched March 2026; the earlier Refinitiv-era scores are being retired | Institutional | No |
-| [S&P Global ESG Scores](https://www.marketplace.spglobal.com/en/datasets/s-p-global-esg-scores-(171)) | Scores from the annual Corporate Sustainability Assessment, about 13,000 companies | Annual assessments; history from 2013 | Free public scores for a subset; full data paid | No |
+| [MSCI ESG Ratings](https://www.msci.com/data-and-analytics/sustainability-solutions/esg-ratings) | Industry-relative ESG ratings (AAA to CCC), about 17,000 issuers | Time series since 2007 | Institutional; free public lookup for a subset | No |
+| [Morningstar Sustainalytics ESG Risk Ratings](https://www.sustainalytics.com/esg-data) | Unmanaged ESG risk score, 16,000+ companies | A score change log exists; vintage policy not documented publicly | Institutional | No |
+| [LSEG ESG Scores](https://www.lseg.com/en/media-centre/press-releases/2026/lseg-launches-new-suite-esg-scores-sustainability-analytics) | ESG scores from 220+ indicators, plus controversies | New suite launched March 2026 on 220 standardised indicators; how it relates to earlier LSEG scores is not documented publicly | Institutional | No |
+| [S&P Global ESG Scores](https://www.marketplace.spglobal.com/en/datasets/s-p-global-esg-scores-(171)) | Scores from the annual Corporate Sustainability Assessment | Annual assessments; history not documented publicly | Institutional | No |
 | [RepRisk](https://www.reprisk.com/insights/resources/methodology) | Reputational and conduct risk from news and stakeholder sources | Daily series with a consistent methodology since January 2007 | Institutional | No |
 
 ---
@@ -138,10 +138,10 @@ history as a sequence of vintages, and check which methodology produced each val
 
 | Source | What it measures | History | Access | ml4t-data |
 |--------|------------------|---------|--------|-----------|
-| [FactSet Supply Chain Relationships](https://www.factset.com/marketplace/catalog/product/factset-supply-chain-relationships) (formerly Revere) | Customer, supplier, partner and competitor links between companies | Not documented | Institutional; academic via WRDS | No |
+| [FactSet Supply Chain Relationships](https://www.factset.com/marketplace/catalog/product/factset-supply-chain-relationships) (formerly Revere) | Customer, supplier, partner and competitor links between companies | North America from 2003; other regions from 2011 to 2016 | Institutional; academic via WRDS | No |
 | [Bloomberg Supply Chain (SPLC)](https://professional.bloomberg.com/institutions/corporations/supply-chain/) | Supplier and customer relationships with revenue and cost exposure, 100,000+ companies | From 2006 | Bloomberg Terminal and enterprise feed | No |
-| [S&P Global Panjiva](https://www.marketplace.spglobal.com/en/datasets/panjiva-supply-chain-intelligence-(22)) | Shipment-level customs records, 2 billion+ records | US data from 2007 | Limited free search; full data institutional | No |
-| [ImportGenius](https://www.importgenius.com/pricing) | US and international bill-of-lading records | US imports from 2006, exports from 2014 on the full tier | Retail paid tiers | No |
+| [S&P Global Panjiva](https://www.marketplace.spglobal.com/en/datasets/panjiva-supply-chain-intelligence-(22)) | Shipment-level customs records, 2 billion+ records | Not documented | Institutional | No |
+| [ImportGenius](https://www.importgenius.com/pricing) | US and international bill-of-lading records | US imports from 2006, exports from January 2014 on the Pro and Enterprise tiers | Self-serve subscriptions; enterprise plans | No |
 
 ---
 
@@ -153,8 +153,8 @@ listed and resolved over time, so a set of markets picked today is a survivor sa
 
 | Source | What it measures | History | Access | ml4t-data |
 |--------|------------------|---------|--------|-----------|
-| [Kalshi](https://docs.kalshi.com/welcome) | CFTC-regulated event contracts: economics, politics, weather, sports | From the 2021 launch | Public market-data API; trading needs a verified account | Yes: [`KalshiProvider`](kalshi.md) |
-| [Polymarket](https://docs.polymarket.com/) | Event contracts on a crypto platform; a CFTC-regulated US exchange (QCX) relaunched in 2025 to 2026 | From 2020 | Public market data | Yes: [`PolymarketProvider`](polymarket.md) |
+| [Kalshi](https://docs.kalshi.com/welcome) | CFTC-regulated event contracts: economics, politics, weather, sports | From the July 2021 launch | Public market-data API; trading needs a verified account | Yes: [`KalshiProvider`](kalshi.md) |
+| [Polymarket](https://docs.polymarket.com/) | Event contracts on a crypto platform; open to US users again since December 2025 through QCEX, a CFTC-licensed exchange acquired in 2025 | From 2020 | Public market data | Yes: [`PolymarketProvider`](polymarket.md) |
 
 ---
 
@@ -164,16 +164,16 @@ Marketplaces simplify procurement; they do not validate point-in-time behavior o
 
 | Source | What it offers | Access |
 |--------|----------------|--------|
-| [Nasdaq Data Link](https://data.nasdaq.com/) (formerly Quandl) | Catalog of financial and alternative datasets from 400+ publishers, some free | Free account for free datasets; paid for premium |
+| [Nasdaq Data Link](https://data.nasdaq.com/) (formerly Quandl) | Catalog of financial, economic and alternative datasets, some free | Free account for free datasets; paid for premium |
 | [Snowflake Marketplace](https://docs.snowflake.com/en/collaboration/collaboration-marketplace-about) | Datasets shared into a Snowflake account and queried in place | Free, trial and paid listings |
 | [AWS Data Exchange](https://aws.amazon.com/data-exchange/) | Datasets delivered into AWS, billed through AWS | Per-product subscriptions |
 | [Eagle Alpha](https://www.eaglealpha.com/) | Alternative data discovery and advisory, 2,500+ dataset profiles | Institutional |
-| [Neudata](https://www.neudata.co/) | Alternative data discovery and research, about 2,800 datasets tracked | Institutional |
-| [Datarade](https://datarade.ai/platforms) | Directory of data providers across industries | Free to browse; each provider sets its own terms |
+| [Neudata](https://www.neudata.co/) | Alternative data discovery and research, 7,000+ datasets in its catalog | Institutional |
+| [Datarade](https://datarade.ai/platforms) | Directory of data providers and data marketplaces | Free to browse; each provider sets its own terms |
 
 Of the free datasets that made Quandl popular, the WIKI prices table is frozen at April 2018
-(`ml4t-data` wraps it as [Wiki Prices](wiki_prices.md)), and the Zillow real-estate database is
-no longer in the catalog.
+(`ml4t-data` wraps it as [Wiki Prices](wiki_prices.md)), and the Zillow real-estate database
+no longer has a catalog page and was last refreshed in July 2025.
 
 ---
 
@@ -190,17 +190,17 @@ needs its own client.
 
 | Then | Now |
 |------|-----|
-| data.ai (formerly App Annie) | Part of Sensor Tower since March 2024 |
-| Earnest Analytics | Part of Consumer Edge since 2025 |
+| data.ai (formerly App Annie) | Part of Sensor Tower since 2024 |
+| Earnest Analytics | Part of Consumer Edge |
 | SafeGraph Patterns (foot traffic) | Sold to Advan Research; SafeGraph now sells places, geometry and spend data |
-| Orbital Insight | Acquired by Privateer, April 2024 |
+| Orbital Insight | Acquired by Privateer, May 2024 |
 | MarineTraffic | Acquired by Kpler, March 2023 |
 | Spire Maritime | Acquired by Kpler, April 2025 |
-| Refinitiv ESG scores | Replaced by the LSEG ESG Scores suite, March 2026 |
-| Reddit and X APIs | Paid access (Reddit since June 2023; X pay-per-use since February 2026) |
+| Refinitiv ESG scores | LSEG ESG data; a new LSEG ESG Scores suite launched March 2026 |
+| Reddit and X APIs | Paid access (Reddit since July 2023; X pay-per-use since February 2026) |
 | Stocktwits API | Closed to new developers |
-| Polymarket (outside the US since 2022) | US exchange via the 2025 acquisition of CFTC-licensed QCEX |
-| PredictIt | Operating under an amended CFTC no-action letter (2025) |
+| Polymarket (closed to US users 2022 to 2025) | US access since December 2025 through QCEX, a CFTC-licensed exchange acquired in 2025 |
+| PredictIt | CFTC approval to operate as a regulated exchange, September 2025 |
 | Quandl | Nasdaq Data Link (September 2021) |
 
 ## See Also
