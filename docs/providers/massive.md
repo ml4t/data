@@ -106,6 +106,39 @@ or pass `asset_class="futures"` when calling `fetch_ohlcv()`.
 
 ---
 
+## Fundamentals
+
+`fetch_financials()` reads Massive's financial statement endpoints and returns the shared
+long-form statement schema, one row per period and line item:
+
+| `statement` | Endpoint | Periods |
+|-------------|----------|---------|
+| `income` | `/stocks/financials/v1/income-statements` | `annual`, `quarterly`, `ttm` |
+| `balance` | `/stocks/financials/v1/balance-sheets` | `annual`, `quarterly` |
+| `cashflow` | `/stocks/financials/v1/cash-flow-statements` | `annual`, `quarterly`, `ttm` |
+
+```python
+income = provider.fetch_financials("AAPL", statement="income", period="quarterly", limit=8)
+ratios = provider.fetch_company_metrics("AAPL")  # /stocks/financials/v1/ratios
+```
+
+Periods come back most recent first; `limit` caps the number of periods and the provider
+follows `next_url` until it is reached. Line items keep Massive's field names (`revenue`,
+`total_assets`, `net_cash_from_operating_activities`). `fiscal_period` is `Q1`-`Q4`, `FY`
+or `TTM`.
+
+`filed_at` is Massive's `filing_date`: the most recent SEC filing that included the period,
+not the filing that first reported it. A quarter repeated as a comparative in a later
+report carries that later date, and its values may reflect later restatements. Neither
+column tells you what was known on a given date, so these statements are not point-in-time
+data.
+
+The statement endpoints need Stocks Advanced or the Financials & Ratios expansion. Earlier
+versions of this provider called a financials endpoint that Massive retired on 2026-06-22,
+which now returns HTTP 404.
+
+---
+
 ## API Key Setup
 
 ```bash
@@ -139,7 +172,6 @@ POLYGON_API_KEY=your_existing_polygon_key
 |---------|---------------|----------|
 | Options chains | Advanced | HIGH |
 | Options Greeks | Advanced | HIGH |
-| Financials | Advanced | HIGH |
 | Trades (tick) | Developer | MEDIUM |
 | Quotes (NBBO) | Developer | MEDIUM |
 | WebSockets | Any | NOT PLANNED |

@@ -72,16 +72,32 @@ class MassiveProvider(BaseProvider):
         "1minute": "minute",
     }
 
-    FINANCIAL_STATEMENT_SECTION_MAP: ClassVar[dict[StatementType, tuple[str, ...]]] = {
-        "income": ("income_statement", "income"),
-        "balance": ("balance_sheet", "balance"),
-        "cashflow": ("cash_flow_statement", "cash_flow", "cashflow"),
+    FINANCIAL_STATEMENT_PATHS: ClassVar[dict[StatementType, str]] = {
+        "income": "/stocks/financials/v1/income-statements",
+        "balance": "/stocks/financials/v1/balance-sheets",
+        "cashflow": "/stocks/financials/v1/cash-flow-statements",
     }
 
     FINANCIAL_PERIOD_MAP: ClassVar[dict[PeriodType, str]] = {
         "annual": "annual",
         "quarterly": "quarterly",
+        "ttm": "trailing_twelve_months",
     }
+
+    # Record fields that describe the filing rather than a statement line item.
+    FINANCIAL_RECORD_METADATA: ClassVar[frozenset[str]] = frozenset(
+        {
+            "cik",
+            "filing_date",
+            "fiscal_quarter",
+            "fiscal_year",
+            "period_end",
+            "tickers",
+            "timeframe",
+        }
+    )
+
+    FINANCIAL_PAGE_SIZE_MAX: ClassVar[int] = 50_000
 
     def __init__(
         self,
@@ -393,45 +409,62 @@ class MassiveProvider(BaseProvider):
         period: str = "annual",
         limit: int = 100,
     ) -> pl.DataFrame:
-        """Fetch Massive stock financial statements in canonical long form."""
+        """Fetch Massive stock financial statements in canonical long form.
+
+        Reads the income-statements, balance-sheets and cash-flow-statements endpoints,
+        most recent period first, following ``next_url`` until ``limit`` periods are read.
+        Trailing-twelve-months periods exist for income and cash flow statements only.
+
+        ``filed_at`` is Massive's ``filing_date``: the most recent SEC filing that included
+        the period, which is later than the original filing when a later report restated
+        or repeated it as a comparative. It is not a point-in-time availability date, and
+        values may reflect later restatements.
+        """
         try:
             statement_type = normalize_statement_type(statement)
             period_type = normalize_period_type(period)
         except ValueError as err:
             raise DataValidationError(self.name, str(err)) from err
 
-        if period_type == "ttm":
+        if period_type == "ttm" and statement_type == "balance":
             raise DataValidationError(
                 self.name,
-                "Massive financial statements support annual and quarterly periods",
+                "Massive balance sheets support annual and quarterly periods",
                 field="period",
                 value=period,
             )
+        if limit < 1:
+            raise DataValidationError(
+                self.name, "limit must be a positive integer", field="limit", value=limit
+            )
 
-        data = self._request_json(
-            "/stocks/financials/v1/financials",
+        path = self.FINANCIAL_STATEMENT_PATHS[statement_type]
+        records = self._paginate_results(
+            path,
             {
-                "ticker": symbol.upper(),
+                "tickers": symbol.upper(),
                 "timeframe": self.FINANCIAL_PERIOD_MAP[period_type],
-                "limit": limit,
+                "sort": "period_end.desc",
+                "limit": min(limit, self.FINANCIAL_PAGE_SIZE_MAX),
             },
+            max_results=limit,
         )
+
         rows: list[dict[str, Any]] = []
-        for record in data.get("results", []):
-            if not isinstance(record, dict):
-                continue
-            financials = record.get("financials", {})
-            if not isinstance(financials, dict):
-                continue
-            section = self._pick_statement_section(financials, statement_type)
-            if not section:
-                continue
+        for record in records:
+            line_items = {
+                key: value
+                for key, value in record.items()
+                if key not in self.FINANCIAL_RECORD_METADATA
+            }
             combined = {
-                **section,
-                "end_date": record.get("end_date"),
+                **line_items,
+                "end_date": record.get("period_end"),
                 "filing_date": record.get("filing_date"),
-                "fiscal_period": record.get("fiscal_period"),
                 "fiscal_year": record.get("fiscal_year"),
+                "fiscal_period": self._fiscal_period_label(
+                    period_type, record.get("fiscal_quarter")
+                ),
             }
             rows.extend(
                 records_to_financials_rows(
@@ -440,10 +473,32 @@ class MassiveProvider(BaseProvider):
                     provider=self.name,
                     statement_type=statement_type,
                     period_type=period_type,
-                    source="stocks/financials/v1/financials",
+                    source=path.lstrip("/"),
                 )
             )
         return rows_to_financials_frame(rows)
+
+    @staticmethod
+    def _fiscal_period_label(period_type: PeriodType, fiscal_quarter: Any) -> str | None:
+        if period_type == "annual":
+            return "FY"
+        if period_type == "ttm":
+            return "TTM"
+        return f"Q{fiscal_quarter}" if fiscal_quarter is not None else None
+
+    def _paginate_results(
+        self, path: str, params: dict[str, Any], *, max_results: int
+    ) -> list[dict[str, Any]]:
+        """Collect ``results`` records across ``next_url`` pages, up to ``max_results``."""
+        records: list[dict[str, Any]] = []
+        data = self._request_json(path, params)
+        while True:
+            records.extend(item for item in data.get("results", []) if isinstance(item, dict))
+            next_url = data.get("next_url")
+            if len(records) >= max_results or not isinstance(next_url, str) or not next_url:
+                return records[:max_results]
+            # next_url carries the query as an opaque cursor; only the key is re-sent.
+            data = self._get_json(next_url, {})
 
     def fetch_company_metrics(
         self,
@@ -475,8 +530,11 @@ class MassiveProvider(BaseProvider):
         return rows_to_company_metrics_frame(rows)
 
     def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Fetch JSON from a Massive endpoint."""
-        endpoint = f"{self.base_url}{path}"
+        """Fetch JSON from a Massive endpoint path."""
+        return self._get_json(f"{self.base_url}{path}", params)
+
+    def _get_json(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Fetch JSON from an absolute Massive URL, adding the API key."""
         request_params = {**params, "apiKey": self.api_key}
         try:
             self.rate_limiter.acquire(blocking=True)
@@ -514,18 +572,6 @@ class MassiveProvider(BaseProvider):
             raise
         except Exception as err:
             raise NetworkError(provider=self.name, message=f"Request failed: {endpoint}") from err
-
-    @classmethod
-    def _pick_statement_section(
-        cls,
-        financials: dict[str, Any],
-        statement_type: StatementType,
-    ) -> dict[str, Any]:
-        for key in cls.FINANCIAL_STATEMENT_SECTION_MAP[statement_type]:
-            section = financials.get(key)
-            if isinstance(section, dict):
-                return section
-        return {}
 
 
 class PolygonProvider(MassiveProvider):

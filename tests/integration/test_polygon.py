@@ -220,3 +220,22 @@ class TestMassiveProvider:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
+
+
+class TestMassiveFinancials:
+    """Financial statements endpoints (Stocks Advanced or Financials & Ratios expansion)."""
+
+    def test_fetch_quarterly_income_statement(self, provider):
+        frame = provider.fetch_financials("AAPL", statement="income", period="quarterly", limit=2)
+
+        assert frame["period_end"].n_unique() == 2
+        assert "revenue" in frame["line_item"].to_list()
+        assert frame["filed_at"].null_count() == 0
+        assert frame["fiscal_period"].str.starts_with("Q").all()
+
+    def test_fetch_annual_balance_sheet(self, provider):
+        frame = provider.fetch_financials("AAPL", statement="balance", period="annual", limit=1)
+
+        assert frame["period_end"].n_unique() == 1
+        assert "total_assets" in frame["line_item"].to_list()
+        assert set(frame["fiscal_period"]) == {"FY"}
