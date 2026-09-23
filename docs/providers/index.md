@@ -2,6 +2,10 @@
 
 ML4T Data supports 20+ live and specialized data providers, plus synthetic and testing providers.
 
+For the wider vendor landscape, including sources the library does not wrap, see
+[Market Data Sources](market_data.md), [Fundamental Data Sources](fundamentals.md) and
+[Alternative Data Sources](alternative_data.md).
+
 ## Provider Comparison
 
 | Provider | Asset Class | Free Tier | Async | API Key |
