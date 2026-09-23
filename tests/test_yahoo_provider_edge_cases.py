@@ -27,8 +27,12 @@ class TestFetchAndTransformDataErrors:
 
     def test_empty_data_raises_symbol_not_found(self, provider):
         """Test empty download raises SymbolNotFoundError."""
-        with patch("yfinance.download") as mock_download:
+        with (
+            patch("yfinance.download") as mock_download,
+            patch("ml4t.data.providers.yahoo.yf.Ticker") as mock_ticker,
+        ):
             mock_download.return_value = pd.DataFrame()
+            mock_ticker.return_value.history.return_value = pd.DataFrame()
 
             with pytest.raises(SymbolNotFoundError) as exc_info:
                 provider._fetch_and_transform_data(
@@ -74,8 +78,12 @@ class TestFetchAndTransformDataErrors:
 
     def test_propagates_symbol_not_found_error(self, provider):
         """Test SymbolNotFoundError is propagated without wrapping."""
-        with patch("yfinance.download") as mock_download:
+        with (
+            patch("yfinance.download") as mock_download,
+            patch("ml4t.data.providers.yahoo.yf.Ticker") as mock_ticker,
+        ):
             mock_download.return_value = pd.DataFrame()  # Empty = not found
+            mock_ticker.return_value.history.return_value = pd.DataFrame()
 
             with pytest.raises(SymbolNotFoundError):
                 provider._fetch_and_transform_data("MISSING", "2024-01-01", "2024-01-31", "daily")
