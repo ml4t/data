@@ -522,7 +522,7 @@ class MassiveProvider(BaseProvider):
                     symbol=symbol,
                     provider=self.name,
                     period=record.get("fiscal_period"),
-                    as_of=record.get("end_date"),
+                    as_of=record.get("date") or record.get("end_date"),
                     source="stocks/financials/v1/ratios",
                     metrics=metrics,
                 )

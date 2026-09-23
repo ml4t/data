@@ -218,10 +218,6 @@ class TestMassiveProvider:
 #     ... (all updater tests commented out)
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "-s"])
-
-
 class TestMassiveFinancials:
     """Financial statements endpoints (Stocks Advanced or Financials & Ratios expansion)."""
 
@@ -239,3 +235,13 @@ class TestMassiveFinancials:
         assert frame["period_end"].n_unique() == 1
         assert "total_assets" in frame["line_item"].to_list()
         assert set(frame["fiscal_period"]) == {"FY"}
+
+    def test_fetch_company_metrics_is_dated(self, provider):
+        frame = provider.fetch_company_metrics("AAPL")
+
+        assert "market_cap" in frame["metric"].to_list()
+        assert frame["as_of"].null_count() == 0
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s"])

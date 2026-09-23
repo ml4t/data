@@ -322,17 +322,19 @@ class TestMassiveFundamentals:
             provider.fetch_financials("AAPL", statement="balance", period="ttm")
 
     def test_fetch_company_metrics(self, provider):
+        # Shape of a live /stocks/financials/v1/ratios row: flat fields, dated by `date`.
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {
             "results": [
                 {
                     "ticker": "AAPL",
-                    "end_date": "2024-12-31",
-                    "fiscal_period": "FY",
-                    "fiscal_year": 2024,
-                    "valuation": {"price_to_earnings": 30.0},
-                    "profitability": {"return_on_equity": 0.45},
+                    "cik": "0000320193",
+                    "date": "2026-09-22",
+                    "price": 339.75,
+                    "market_cap": 4958372655000.0,
+                    "price_to_earnings": 38.5,
+                    "return_on_equity": 1.5,
                 }
             ]
         }
@@ -341,11 +343,13 @@ class TestMassiveFundamentals:
             with patch.object(provider.session, "get", return_value=response):
                 frame = provider.fetch_company_metrics("AAPL")
 
-        assert len(frame) == 2
         assert set(frame["metric"]) == {
-            "valuation.price_to_earnings",
-            "profitability.return_on_equity",
+            "price",
+            "market_cap",
+            "price_to_earnings",
+            "return_on_equity",
         }
+        assert set(frame["as_of"]) == {"2026-09-22"}
 
     def test_fetch_company_metrics_provider_options_are_keyword_only(self, provider):
         signature = inspect.signature(provider.fetch_company_metrics)
