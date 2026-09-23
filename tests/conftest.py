@@ -110,6 +110,23 @@ def block_external_network(request, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
     monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
+
+    # yfinance sends through curl_cffi, whose libcurl opens sockets in C and never
+    # reaches the patches above.
+    try:
+        from curl_cffi import requests as curl_requests
+    except ImportError:
+        curl_requests = None
+    if curl_requests is not None:
+
+        def guarded_curl_request(session, method, url, *args, **kwargs):
+            reject_external(url)
+
+        async def guarded_async_curl_request(session, method, url, *args, **kwargs):
+            reject_external(url)
+
+        monkeypatch.setattr(curl_requests.Session, "request", guarded_curl_request)
+        monkeypatch.setattr(curl_requests.AsyncSession, "request", guarded_async_curl_request)
     yield
     if violations and not request.node.get_closest_marker("network_guard_probe"):
         pytest.fail(f"Offline test attempted external network access: {violations!r}")

@@ -105,20 +105,19 @@ class TestYahooFinanceProvider:
     @patch("ml4t.data.providers.yahoo.yf.download")
     def test_empty_response_handling(self, mock_download: MagicMock) -> None:
         """Test handling of empty responses."""
-        # Mock empty response
+        # Mock empty response, and an empty retry through Ticker.history
         mock_download.return_value = pd.DataFrame()
 
         provider = YahooFinanceProvider()
 
-        # Empty response should raise SymbolNotFoundError
-        from ml4t.data.core.exceptions import SymbolNotFoundError
-
-        with pytest.raises(SymbolNotFoundError):
-            provider.fetch_ohlcv(
-                symbol="INVALID",
-                start="2024-01-01",
-                end="2024-01-03",
-            )
+        with patch("ml4t.data.providers.yahoo.yf.Ticker") as mock_ticker:
+            mock_ticker.return_value.history.return_value = pd.DataFrame()
+            with pytest.raises(SymbolNotFoundError):
+                provider.fetch_ohlcv(
+                    symbol="INVALID",
+                    start="2024-01-01",
+                    end="2024-01-03",
+                )
 
     @patch("ml4t.data.providers.yahoo.yf.download")
     def test_rate_limiting(self, mock_download: MagicMock) -> None:
