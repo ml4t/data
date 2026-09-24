@@ -55,7 +55,7 @@ class ProviderUpdater(ABC):
         """Initialize provider updater.
 
         Args:
-            provider_name: Name of data provider (e.g., "yahoo", "polygon")
+            provider_name: Name of data provider (e.g., "yahoo", "massive")
             storage: Storage backend supporting incremental updates
             safety_margin_minutes: Minutes to subtract from latest timestamp
                                    to avoid missing data due to delayed updates

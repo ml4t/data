@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 from tenacity import wait_none
 
+import ml4t.data.providers as providers
 from ml4t.data.core.exceptions import (
     AuthenticationError,
     DataValidationError,
@@ -16,11 +17,15 @@ from ml4t.data.core.exceptions import (
     RateLimitError,
     SymbolNotFoundError,
 )
-from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
+from ml4t.data.providers.polygon import MassiveProvider
 
 
 class TestMassiveProviderInit:
     """Tests for canonical Massive provider initialization."""
+
+    def test_removed_polygon_provider_is_not_exported(self):
+        """Only the canonical provider class is public."""
+        assert not hasattr(providers, "PolygonProvider")
 
     def test_init_with_api_key(self):
         """Test initialization with API key."""
@@ -60,51 +65,6 @@ class TestMassiveProviderInit:
         provider = MassiveProvider(api_key="test_key", base_url="https://api.polygon.io/")
 
         assert provider.base_url == "https://api.polygon.io"
-
-
-class TestPolygonProviderInit:
-    """Tests for provider initialization."""
-
-    def test_init_with_api_key(self):
-        """Test initialization with API key."""
-        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
-            provider = PolygonProvider(api_key="test_key")
-
-        assert provider.name == "polygon"
-        assert provider.api_key == "test_key"
-        assert provider.base_url == "https://api.massive.com"
-
-    def test_init_with_env_api_key(self):
-        """Test initialization with API key from environment."""
-        with patch.dict("os.environ", {"POLYGON_API_KEY": "env_key"}, clear=True):
-            with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
-                provider = PolygonProvider()
-
-            assert provider.api_key == "env_key"
-
-    def test_init_without_api_key_raises_error(self):
-        """Test initialization without API key raises AuthenticationError."""
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(AuthenticationError, match="API key required"):
-                PolygonProvider()
-
-    def test_init_custom_rate_limit(self):
-        """Test initialization with custom rate limit."""
-        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
-            provider = PolygonProvider(api_key="test_key", rate_limit=(100, 60.0))
-
-        # Provider should be initialized successfully
-        assert provider is not None
-
-
-class TestNameProperty:
-    """Tests for name property."""
-
-    def test_name_returns_polygon(self):
-        """Test name property returns correct value."""
-        with pytest.warns(DeprecationWarning, match="PolygonProvider is deprecated"):
-            provider = PolygonProvider(api_key="test_key")
-        assert provider.name == "polygon"
 
 
 class TestFetchRawData:

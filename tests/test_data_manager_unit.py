@@ -181,13 +181,13 @@ class TestMassiveProviderConfig:
         assert manager.is_available("massive")
         assert not manager.is_available("polygon")
 
-    def test_provider_manager_detects_legacy_polygon_alias(self):
-        """Test POLYGON_API_KEY keeps both massive and polygon provider names available."""
+    def test_legacy_polygon_key_does_not_restore_removed_provider_name(self):
+        """The former key still configures Massive without restoring its removed alias."""
         with patch.dict("os.environ", {"POLYGON_API_KEY": "polygon_key"}, clear=True):
             manager = ProviderManager({"providers": {}})
 
         assert manager.is_available("massive")
-        assert manager.is_available("polygon")
+        assert not manager.is_available("polygon")
 
 
 class TestDataManagerValidateDates:

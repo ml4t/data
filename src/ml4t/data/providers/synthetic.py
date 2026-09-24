@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import ClassVar, Literal
-from warnings import warn
 
 import numpy as np
 import polars as pl
@@ -86,9 +85,6 @@ class SyntheticProvider(BaseProvider):
         GARCH: ARCH term weight (reaction to recent shocks)
     garch_beta : float, default=0.85
         GARCH: GARCH term weight (persistence of variance)
-    garch_omega : float, optional
-        Deprecated compatibility parameter. Omega is derived from annual volatility,
-        frequency, alpha, and beta so the requested unconditional variance is preserved.
 
     Example
     -------
@@ -123,7 +119,6 @@ class SyntheticProvider(BaseProvider):
         heston_xi: float = 0.3,
         heston_rho: float = -0.7,
         # GARCH parameters
-        garch_omega: float | None = None,
         garch_alpha: float = 0.1,
         garch_beta: float = 0.85,
         calendar_mode: CalendarMode = "equity",
@@ -148,13 +143,6 @@ class SyntheticProvider(BaseProvider):
         # GARCH model parameters
         self.garch_alpha = garch_alpha  # ARCH term
         self.garch_beta = garch_beta  # GARCH term
-        if garch_omega is not None:
-            warn(
-                "garch_omega is deprecated and ignored; omega is derived from "
-                "annual_volatility and the requested frequency",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         # Validate GARCH stationarity
         if model == "garch" and (garch_alpha + garch_beta) >= 1.0:

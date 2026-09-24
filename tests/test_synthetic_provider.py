@@ -4,6 +4,7 @@ These tests verify the synthetic data generator creates realistic OHLCV data
 with proper relationships and statistical properties.
 """
 
+import inspect
 import json
 import os
 import subprocess
@@ -18,6 +19,11 @@ from ml4t.data.providers.synthetic import SyntheticProvider
 from ml4t.data.synthetic import get_bars_per_day, get_periods_per_year
 
 
+def test_removed_garch_omega_parameter_is_not_in_signature():
+    """The 0.2 API no longer accepts the ignored compatibility parameter."""
+    assert "garch_omega" not in inspect.signature(SyntheticProvider).parameters
+
+
 class TestSyntheticProviderBasics:
     """Basic functionality tests."""
 
@@ -29,12 +35,6 @@ class TestSyntheticProviderBasics:
     def test_provider_name(self, provider):
         """Test provider name is correct."""
         assert provider.name == "synthetic"
-
-    def test_legacy_garch_omega_is_accepted_with_deprecation(self):
-        with pytest.warns(DeprecationWarning, match="garch_omega"):
-            provider = SyntheticProvider(model="garch", garch_omega=0.000002, seed=42)
-
-        assert provider.model == "garch"
 
     def test_invalid_calendar_mode_is_rejected(self):
         with pytest.raises(ValueError, match="calendar_mode"):

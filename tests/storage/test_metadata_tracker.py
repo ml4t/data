@@ -281,7 +281,7 @@ class TestDatasetMetadata:
             "symbol": "GOOGL",
             "asset_class": "equities",
             "frequency": "daily",
-            "provider": "polygon",
+            "provider": "massive",
             "first_update": "2024-01-01T00:00:00",
             "last_update": "2024-01-15T00:00:00",
             "total_rows": 500,
@@ -297,7 +297,7 @@ class TestDatasetMetadata:
 
         assert metadata.symbol == "GOOGL"
         assert metadata.asset_class == "equities"
-        assert metadata.provider == "polygon"
+        assert metadata.provider == "massive"
         assert metadata.total_rows == 500
         assert metadata.update_count == 10
         assert metadata.last_check == datetime(2024, 1, 15, 12, 0, 0)

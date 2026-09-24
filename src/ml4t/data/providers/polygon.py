@@ -4,7 +4,6 @@ Account products determine asset-class access, request quotas, and historical de
 """
 
 import os
-import warnings
 from typing import Any, ClassVar, Literal
 
 import polars as pl
@@ -572,28 +571,3 @@ class MassiveProvider(BaseProvider):
             raise
         except Exception as err:
             raise NetworkError(provider=self.name, message=f"Request failed: {endpoint}") from err
-
-
-class PolygonProvider(MassiveProvider):
-    """Deprecated compatibility alias for Polygon.io integrations.
-
-    Use ``MassiveProvider`` for new code.
-    """
-
-    def __init__(
-        self,
-        api_key: str | None = None,
-        rate_limit: tuple[int, float] | None = None,
-        base_url: str | None = None,
-    ) -> None:
-        warnings.warn(
-            "PolygonProvider is deprecated; use MassiveProvider instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(api_key=api_key, rate_limit=rate_limit, base_url=base_url)
-
-    @property
-    def name(self) -> str:
-        """Return provider name."""
-        return "polygon"

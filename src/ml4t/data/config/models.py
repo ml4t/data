@@ -63,7 +63,6 @@ class ProviderType(StrEnum):
     DATABENTO = "databento"
     MASSIVE = "massive"
     OANDA = "oanda"
-    POLYGON = "polygon"
     TWELVE_DATA = "twelve_data"
     NASDAQ_ITCH = "nasdaq_itch"
     WIKI_PRICES = "wiki_prices"

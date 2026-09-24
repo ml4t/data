@@ -13,7 +13,7 @@ import structlog
 # Set TESTING environment variable for all tests
 os.environ["TESTING"] = "true"
 
-NETWORK_MARKERS = ("integration", "real_api", "requires_api_key", "paid_tier")
+NETWORK_MARKERS = ("integration", "requires_api_key", "paid_tier")
 LOCAL_HOSTNAMES = {"localhost", "localhost.localdomain", "ip6-localhost"}
 
 # Configure structlog for tests without format_exc_info to avoid warnings

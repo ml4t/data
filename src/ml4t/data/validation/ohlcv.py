@@ -2,7 +2,6 @@
 
 import time
 from typing import Any, Literal
-from warnings import warn
 
 import polars as pl
 import structlog
@@ -30,7 +29,7 @@ class OHLCVValidator(Validator):
         self,
         check_nulls: bool = True,
         check_price_consistency: bool = True,
-        negative_price_policy: NegativePricePolicy | bool = "forbid",
+        negative_price_policy: NegativePricePolicy = "forbid",
         check_negative_volume: bool = True,
         check_duplicate_timestamps: bool = True,
         check_chronological_order: bool = True,
@@ -38,8 +37,6 @@ class OHLCVValidator(Validator):
         check_extreme_returns: bool = True,
         max_return_threshold: float = 0.5,  # 50% return threshold
         staleness_threshold: int = 5,  # Days of identical prices
-        *,
-        check_negative_prices: bool | None = None,
     ) -> None:
         """
         Initialize OHLCV validator with configurable checks.
@@ -55,24 +52,11 @@ class OHLCVValidator(Validator):
             check_extreme_returns: Check for extreme price returns
             max_return_threshold: Threshold for extreme returns (as fraction)
             staleness_threshold: Days of identical prices to flag as stale
-            check_negative_prices: Deprecated boolean alias for negative_price_policy
 
         Numeric-column and finite-value checks are structural and always run.
         """
         self.check_nulls = check_nulls
         self.check_price_consistency = check_price_consistency
-        legacy_policy = negative_price_policy if isinstance(negative_price_policy, bool) else None
-        if check_negative_prices is not None and legacy_policy is not None:
-            raise ValueError("Specify check_negative_prices only once")
-        if check_negative_prices is not None:
-            legacy_policy = check_negative_prices
-        if legacy_policy is not None:
-            warn(
-                "check_negative_prices is deprecated; use negative_price_policy",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            negative_price_policy = "forbid" if legacy_policy else "allow"
         if negative_price_policy not in {"forbid", "warn", "allow"}:
             raise ValueError("negative_price_policy must be 'forbid', 'warn', or 'allow'")
         self.negative_price_policy = negative_price_policy

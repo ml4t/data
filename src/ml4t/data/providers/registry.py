@@ -267,16 +267,6 @@ _SPECS = (
         credentials=(_credential("api_key", "POLYGON_API_KEY", "MASSIVE_API_KEY"),),
     ),
     _spec(
-        "polygon",
-        "polygon",
-        "PolygonProvider",
-        "Deprecated Polygon alias for Massive",
-        "ohlcv",
-        credentials=(_credential("api_key", "POLYGON_API_KEY"),),
-        advertised=False,
-        deprecated=True,
-    ),
-    _spec(
         "twelve_data",
         "twelve_data",
         "TwelveDataProvider",
