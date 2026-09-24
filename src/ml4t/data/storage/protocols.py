@@ -22,7 +22,7 @@ class IncrementalStorageBackend(Protocol):
 
         Args:
             symbol: Symbol identifier (e.g., "AAPL", "BTC-USD")
-            provider: Data provider name (e.g., "yahoo", "polygon")
+            provider: Data provider name (e.g., "yahoo", "massive")
 
         Returns:
             Latest timestamp in the dataset, or None if no data exists

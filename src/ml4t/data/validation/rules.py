@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from warnings import warn
 
 import structlog
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from ml4t.data.assets.asset_class import AssetClass
 from ml4t.data.validation.ohlcv import NegativePricePolicy
@@ -53,28 +52,6 @@ class ValidationRuleConfig(BaseModel):
     asset_class: AssetClass = Field(default=AssetClass.EQUITY, description="Asset class")
 
     model_config = ConfigDict(use_enum_values=True, extra="forbid")
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_negative_price_flag(cls, data: object) -> object:
-        """Map persisted boolean rules without silently reversing their behavior."""
-        if not isinstance(data, dict) or "check_negative_prices" not in data:
-            return data
-        migrated = dict(data)
-        legacy_value = migrated.pop("check_negative_prices")
-        if not isinstance(legacy_value, bool):
-            raise ValueError("check_negative_prices must be a boolean")
-        if "negative_price_policy" in migrated:
-            raise ValueError(
-                "Use either deprecated check_negative_prices or negative_price_policy, not both"
-            )
-        warn(
-            "check_negative_prices is deprecated; use negative_price_policy",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        migrated["negative_price_policy"] = "forbid" if legacy_value else "allow"
-        return migrated
 
 
 @dataclass

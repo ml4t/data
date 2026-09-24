@@ -7,6 +7,7 @@ Tests cover:
 - Configuration options
 """
 
+import inspect
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
@@ -41,6 +42,10 @@ def create_valid_ohlcv_df(
 
 class TestOHLCVValidatorInitialization:
     """Test validator initialization and configuration."""
+
+    def test_removed_negative_price_boolean_is_not_in_signature(self):
+        """The 0.2 API exposes only the explicit policy."""
+        assert "check_negative_prices" not in inspect.signature(OHLCVValidator).parameters
 
     def test_default_initialization(self):
         """All checks enabled by default."""
@@ -1095,13 +1100,6 @@ class TestConfigurableChecksDisabled:
 def test_invalid_negative_price_policy_is_rejected():
     with pytest.raises(ValueError, match="negative_price_policy"):
         OHLCVValidator(negative_price_policy="sometimes")
-
-
-def test_legacy_negative_price_flag_is_mapped_with_deprecation():
-    with pytest.warns(DeprecationWarning, match="check_negative_prices"):
-        validator = OHLCVValidator(check_negative_prices=False)
-
-    assert validator.negative_price_policy == "allow"
 
 
 class TestEdgeCases:

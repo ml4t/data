@@ -101,7 +101,7 @@ except ImportError:
     OandaProvider = None  # type: ignore
 
 # Multi-asset providers
-from ml4t.data.providers.polygon import MassiveProvider, PolygonProvider
+from ml4t.data.providers.polygon import MassiveProvider
 from ml4t.data.providers.twelve_data import TwelveDataProvider
 
 # Market data providers
@@ -161,7 +161,6 @@ __all__ = [
     "OandaProvider",
     # Multi-asset providers
     "MassiveProvider",
-    "PolygonProvider",
     "TwelveDataProvider",
     # Market data providers
     "DataBentoProvider",

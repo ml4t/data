@@ -32,7 +32,7 @@ providers:
   # Premium providers (require API keys)
   - name: massive
     type: massive
-    api_key: ${POLYGON_API_KEY}
+    api_key: ${MASSIVE_API_KEY}
     rate_limit: 5.0
 
   # Development/testing

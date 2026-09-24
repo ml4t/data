@@ -1,10 +1,10 @@
-"""Integration tests for Massive/Polygon provider (real API calls).
+"""Integration tests for the Massive provider (real API calls).
 
 These tests verify the Massive provider works correctly with actual API calls.
 
 Requirements:
     - MASSIVE_API_KEY or POLYGON_API_KEY environment variable must be set
-    - Free tier: 5 requests/minute (tests respect rate limits)
+    - An account plan that permits the requested datasets
     - API key from: https://massive.com/
 
 Test Coverage:

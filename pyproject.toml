@@ -23,7 +23,6 @@ include = [
     "/scripts/verify_provider_contract_runs.py",
     "/README.md",
     "/LICENSE",
-    "/CHANGELOG.md",
 ]
 
 [project]
@@ -160,7 +159,7 @@ Homepage = "https://www.ml4trading.io/"
 Documentation = "https://www.ml4trading.io/docs/data/"
 Repository = "https://github.com/ml4t/data"
 Issues = "https://github.com/ml4t/data/issues"
-Changelog = "https://github.com/ml4t/data/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/ml4t/data/releases"
 
 [dependency-groups]
 test = [
@@ -209,7 +208,6 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "paid_tier: marks tests requiring paid API tier (skipped by default)",
     "integration: marks tests as integration tests requiring external APIs",
-    "real_api: marks tests that use real API calls (deprecated, use integration)",
     "requires_api_key: marks tests requiring specific API keys",
     "expensive: marks tests with high API costs",
     "network_guard_probe: exercises the offline network guard itself",

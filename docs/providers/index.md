@@ -8,8 +8,8 @@ For the wider vendor landscape, including sources the library does not wrap, see
 
 ## Provider Comparison
 
-| Provider | Asset Class | Free Tier | Async | API Key |
-|----------|-------------|-----------|-------|---------|
+| Provider | Asset Class | Access | Async | API Key |
+|----------|-------------|--------|-------|---------|
 | [Yahoo Finance](yahoo.md) | Stocks, ETFs, Crypto | Unlimited | Thread | No |
 | [CoinGecko](coingecko.md) | Crypto | 10K+ coins | Native | No |
 | [FRED](fred.md) | Economic Data | 120/min | Thread | Yes |
@@ -25,7 +25,7 @@ For the wider vendor landscape, including sources the library does not wrap, see
 | [Tiingo](tiingo.md) | US Stocks | 1000/day | Thread | Yes |
 | [TwelveData](twelve_data.md) | Multi-asset | 800/day | Native | Yes |
 | [DataBento](databento.md) | Futures, Options | Free metadata; metered history | Thread | Yes |
-| [Massive](massive.md) | Multi-asset | Free tier | Thread | Yes |
+| [Massive](massive.md) | Multi-asset | Account-dependent | Thread | Yes |
 | [Finnhub](finnhub.md) | US quotes; premium OHLCV | 60 requests/minute | Thread | Yes |
 | [Binance](binance.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |

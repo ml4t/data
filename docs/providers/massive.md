@@ -1,185 +1,85 @@
-# Massive Provider
+# Massive provider
 
-**Provider**: `MassiveProvider`
-**Legacy Alias**: `PolygonProvider`
-**Website**: [massive.com](https://massive.com)
-**API Key**: Required
-**Free Tier**: 5 API calls/minute
+`MassiveProvider` retrieves aggregate bars for stocks, options, futures, crypto, and foreign
+exchange. It also retrieves stock financial statements and company ratios. A Massive account and
+API key are required; accessible datasets, history, and request quotas depend on the account.
 
----
+## Configure access
 
-## Overview
+Set `MASSIVE_API_KEY` or pass the key directly:
 
-Massive, formerly Polygon.io, provides comprehensive market data across stocks,
-options, futures, forex, and crypto with institutional-quality tick, quote,
-reference, and aggregate bar data.
+```bash
+export MASSIVE_API_KEY=your_api_key
+```
 
-**Best For**: US equities, options research, futures reference data, tick data,
-and multi-asset research workflows.
+Accounts created under the former Polygon.io name can continue to use `POLYGON_API_KEY`. If both
+variables are set, `MASSIVE_API_KEY` takes precedence.
 
-**Compatibility**: Existing Polygon.io API keys remain valid. New code should use
-`MassiveProvider` and `MASSIVE_API_KEY`; `PolygonProvider` and `POLYGON_API_KEY`
-remain supported for backward compatibility.
-
-**Pricing**:
-| Tier | Price | Features |
-|------|-------|----------|
-| Basic (Free) | $0/mo | 5 calls/min, 2yr history, EOD |
-| Starter | $29/mo | Unlimited calls, 5yr history, 15min delayed |
-| Developer | $79/mo | 10yr history, trades data |
-| Advanced | $199/mo | 20yr+ history, real-time, quotes, financials |
-
----
-
-## Quick Start
+## Fetch aggregate bars
 
 ```python
-import os
-os.environ["MASSIVE_API_KEY"] = "your_key_here"
-
 from ml4t.data.providers import MassiveProvider
 
 provider = MassiveProvider()
-
-# Stocks
-df = provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-12-01", frequency="daily")
-
-# Options
-options = provider.fetch_ohlcv(
-    "O:SPY240119C00480000",
-    "2024-01-01",
-    "2024-01-19",
-    frequency="daily",
-)
-
-# Futures use Massive's futures endpoint; use a prefix or explicit asset class
-futures = provider.fetch_ohlcv(
-    "F:ESM6",
-    "2024-01-01",
-    "2024-01-31",
-    frequency="daily",
-)
-
-# Crypto and forex
-btc = provider.fetch_ohlcv("X:BTCUSD", "2024-01-01", "2024-01-31", frequency="daily")
-eurusd = provider.fetch_ohlcv("C:EURUSD", "2024-01-01", "2024-01-31", frequency="daily")
-
-provider.close()
+try:
+    bars = provider.fetch_ohlcv(
+        "AAPL",
+        "2024-01-01",
+        "2024-01-31",
+        frequency="daily",
+    )
+finally:
+    provider.close()
 ```
 
----
+The provider accepts daily, weekly, monthly, hourly, and minute aliases. Symbols select the asset
+route as follows:
 
-## Asset Classes
+| Asset class | Symbol example | Routing rule |
+|---|---|---|
+| Stocks | `AAPL` | Default for an unprefixed symbol |
+| Options | `O:SPY240119C00480000` | `O:` prefix |
+| Futures | `F:ESM6` | `F:` or `FUT:` prefix |
+| Crypto | `X:BTCUSD` | `X:` prefix |
+| Foreign exchange | `C:EURUSD` | `C:` prefix |
 
-| Asset Class | Symbol Format | REST Route |
-|-------------|---------------|------------|
-| Stocks | `AAPL` | aggregate bars |
-| Options | `O:SPY240119C00480000` | aggregate bars |
-| Futures | `F:ESM6` or `asset_class="futures"` | futures aggregate bars |
-| Crypto | `X:BTCUSD` | aggregate bars |
-| Forex | `C:EURUSD` | aggregate bars |
+An unprefixed futures symbol is ambiguous with an equity symbol. Pass
+`asset_class="futures"` or add the `F:` prefix.
 
-Unprefixed futures tickers can be ambiguous with equities. Use the `F:` prefix
-or pass `asset_class="futures"` when calling `fetch_ohlcv()`.
+## Fetch fundamentals
 
----
-
-## Supported Frequencies
-
-| Frequency | Free Tier | Paid Tier |
-|-----------|-----------|-----------|
-| `daily` | Yes (2yr) | Yes (20yr+) |
-| `1h` | No | Yes |
-| `1m` | No | Yes |
-| Tick | No | Yes (Developer+) |
-
----
-
-## Coverage
-
-- **Stocks**: All US exchanges (NYSE, NASDAQ, etc.)
-- **Options**: Full OPRA data (Advanced tier)
-- **Futures**: CME, CBOT, COMEX, NYMEX contracts, products, schedules, and bars
-- **Crypto**: Major cryptocurrencies
-- **Forex**: Major pairs
-- **Indices**: Major US indices
-
----
-
-## Fundamentals
-
-`fetch_financials()` reads Massive's financial statement endpoints and returns the shared
-long-form statement schema, one row per period and line item:
-
-| `statement` | Endpoint | Periods |
-|-------------|----------|---------|
-| `income` | `/stocks/financials/v1/income-statements` | `annual`, `quarterly`, `ttm` |
-| `balance` | `/stocks/financials/v1/balance-sheets` | `annual`, `quarterly` |
-| `cashflow` | `/stocks/financials/v1/cash-flow-statements` | `annual`, `quarterly`, `ttm` |
+`fetch_financials()` returns the shared long-form statement schema. Supported statements are
+`income`, `balance`, and `cashflow`; supported periods are `annual` and `quarterly`. Income and cash
+flow statements also accept `ttm`.
 
 ```python
-income = provider.fetch_financials("AAPL", statement="income", period="quarterly", limit=8)
-ratios = provider.fetch_company_metrics("AAPL")  # /stocks/financials/v1/ratios
+provider = MassiveProvider()
+try:
+    income = provider.fetch_financials(
+        "AAPL",
+        statement="income",
+        period="quarterly",
+        limit=8,
+    )
+    ratios = provider.fetch_company_metrics("AAPL")
+finally:
+    provider.close()
 ```
 
-Periods come back most recent first; `limit` caps the number of periods and the provider
-follows `next_url` until it is reached. Line items keep Massive's field names (`revenue`,
-`total_assets`, `net_cash_from_operating_activities`). `fiscal_period` is `Q1`-`Q4`, `FY`
-or `TTM`.
+Results are ordered most recent first, and `limit` caps the number of statement periods. The
+`filed_at` field is the most recent SEC filing that included a period. A later filing can repeat or
+restate an earlier period, so this field does not establish when a value first became available.
+Do not treat these results as point-in-time data without an independent filing-history check.
 
-`filed_at` is Massive's `filing_date`: the most recent SEC filing that included the period,
-not the filing that first reported it. A quarter repeated as a comparative in a later
-report carries that later date, and its values may reflect later restatements. Neither
-column tells you what was known on a given date, so these statements are not point-in-time
-data.
+## Rate limiting and failures
 
-The statement endpoints need Stocks Advanced or the Financials & Ratios expansion. Earlier
-versions of this provider called a financials endpoint that Massive retired on 2026-06-22,
-which now returns HTTP 404.
+The default client pace is five calls per minute. This is a conservative local setting, not a
+statement about the service plan. Pass `rate_limit=(calls, period_seconds)` to use a lower pace
+required by an account or workload.
 
----
+Authentication failures raise `AuthenticationError`; HTTP rate limits raise `RateLimitError` with
+the reported retry delay; missing symbols raise `SymbolNotFoundError`; other transport and response
+failures use the shared provider exception types.
 
-## API Key Setup
-
-```bash
-# Environment variable
-export MASSIVE_API_KEY=your_api_key_here
-```
-
-Get your API key at [massive.com](https://massive.com).
-
-Existing users can continue to use:
-
-```bash
-POLYGON_API_KEY=your_existing_polygon_key
-```
-
----
-
-## Rate Limits
-
-| Tier | Limit |
-|------|-------|
-| Basic | 5 calls/minute |
-| Starter | Unlimited |
-| Developer+ | Unlimited |
-
----
-
-## Not Yet Implemented
-
-| Feature | Tier Required | Priority |
-|---------|---------------|----------|
-| Options chains | Advanced | HIGH |
-| Options Greeks | Advanced | HIGH |
-| Trades (tick) | Developer | MEDIUM |
-| Quotes (NBBO) | Developer | MEDIUM |
-| WebSockets | Any | NOT PLANNED |
-
----
-
-## See Also
-
-- [Massive Pricing](https://massive.com/pricing)
-- [Massive REST Docs](https://massive.com/docs)
-- [Polygon compatibility note](polygon.md)
+See the current [Massive API documentation](https://massive.com/docs) and
+[account plans](https://massive.com/pricing) for service-side coverage and limits.

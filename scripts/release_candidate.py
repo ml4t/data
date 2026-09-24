@@ -26,7 +26,7 @@ EXPECTED_URLS = {
     "Documentation": "https://www.ml4trading.io/docs/data/",
     "Repository": "https://github.com/ml4t/data",
     "Issues": "https://github.com/ml4t/data/issues",
-    "Changelog": "https://github.com/ml4t/data/blob/main/CHANGELOG.md",
+    "Changelog": "https://github.com/ml4t/data/releases",
 }
 EXPECTED_KEYWORDS = {"finance", "quantitative-finance", "algorithmic-trading", "market-data"}
 EXPECTED_CLASSIFIERS = {

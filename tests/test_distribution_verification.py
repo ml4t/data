@@ -37,7 +37,7 @@ def _write_distributions(
         "Project-URL: Documentation, https://www.ml4trading.io/docs/data/",
         "Project-URL: Repository, https://github.com/ml4t/data",
         "Project-URL: Issues, https://github.com/ml4t/data/issues",
-        "Project-URL: Changelog, https://github.com/ml4t/data/blob/main/CHANGELOG.md",
+        "Project-URL: Changelog, https://github.com/ml4t/data/releases",
     ]
     if license_expression is not None:
         metadata_fields.append(f"License-Expression: {license_expression}")
