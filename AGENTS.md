@@ -47,7 +47,7 @@ documentation, not in agent guides.
   directories.
 - Use shared exceptions, retry, rate-limit, and provider contracts rather than adapter-specific
   variants of the same behavior.
-- Treat `CHANGELOG.md` and generated version files as generated artifacts; do not edit them by hand.
+- Treat generated version files as generated artifacts; do not edit them by hand.
 - Keep release artifacts bound to one commit. Publishing is performed by the release workflow after
   qualification and documentation deployment, never by a local publish command.
 
