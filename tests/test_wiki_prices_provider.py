@@ -3,6 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import polars as pl
 import pytest
@@ -645,5 +646,7 @@ class TestDatasetConstants:
 
     def test_nasdaq_export_url(self):
         """Test NASDAQ_EXPORT_URL is valid."""
-        assert "nasdaq.com" in WikiPricesProvider.NASDAQ_EXPORT_URL
-        assert "WIKI/PRICES" in WikiPricesProvider.NASDAQ_EXPORT_URL
+        parsed = urlparse(WikiPricesProvider.NASDAQ_EXPORT_URL)
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "data.nasdaq.com"
+        assert parsed.path == "/api/v3/datatables/WIKI/PRICES.csv"

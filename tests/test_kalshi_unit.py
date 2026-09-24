@@ -16,6 +16,7 @@ Test Coverage:
 
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import polars as pl
 import pytest
@@ -62,8 +63,10 @@ class TestKalshiProviderInit:
     def test_base_url(self):
         """Test base URL is correct."""
         provider = KalshiProvider()
-        assert "elections.kalshi.com" in provider.BASE_URL
-        assert "trade-api/v2" in provider.BASE_URL
+        parsed = urlparse(provider.BASE_URL)
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "api.elections.kalshi.com"
+        assert parsed.path == "/trade-api/v2"
         provider.close()
 
 
