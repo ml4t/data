@@ -53,7 +53,7 @@ emit `DeprecationWarning` and will not be removed before version 1.0.
 
 - [Documentation](https://www.ml4trading.io/docs/data/)
 - [Issue tracker](https://github.com/ml4t/data/issues)
-- [Release notes](CHANGELOG.md)
+- [Release notes](https://github.com/ml4t/data/releases)
 - [License](LICENSE)
 
 The library supplies data to [ml4t-engineer](https://github.com/ml4t/engineer) feature workflows and
