@@ -5,6 +5,7 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pandas as pd
 import polars as pl
@@ -530,4 +531,6 @@ class TestConstants:
 
     def test_base_url(self):
         """Test BASE_URL is valid AQR URL."""
-        assert "aqr.com" in AQRFactorProvider.BASE_URL
+        parsed = urlparse(AQRFactorProvider.BASE_URL)
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "www.aqr.com"
