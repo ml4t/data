@@ -70,5 +70,6 @@ Get your API key at [twelvedata.com/account](https://twelvedata.com/account).
 
 ## See Also
 
+- [Equity](equities.md) and [foreign exchange](fx.md) source references
 - [TwelveData Pricing](https://twelvedata.com/pricing)
 - [Provider reference](index.md)

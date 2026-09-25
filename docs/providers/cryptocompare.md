@@ -68,5 +68,6 @@ Consult CryptoCompare's current terms before use. Access and limits were not ver
 
 ## See Also
 
+- [Cryptocurrency data sources](crypto.md)
 - [CryptoCompare Pricing](https://min-api.cryptocompare.com/pricing)
 - [Provider reference](index.md)

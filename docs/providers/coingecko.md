@@ -74,5 +74,6 @@ be converted into correct daily OHLC values.
 
 ## See Also
 
+- [Cryptocurrency data sources](crypto.md)
 - [CoinGecko API](https://www.coingecko.com/en/api/pricing)
 - [Provider reference](index.md)

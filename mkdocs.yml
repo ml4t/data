@@ -140,6 +140,7 @@ nav:
     - Alpaca: providers/alpaca.md
     - CoinGecko: providers/coingecko.md
     - FRED: providers/fred.md
+    - FXMacroData: providers/fxmacrodata.md
     - Fama-French: providers/fama_french.md
     - AQR: providers/aqr.md
     - Wiki Prices: providers/wiki_prices.md

@@ -110,6 +110,7 @@ ff5_mom = provider.fetch_combined(["ff5", "mom"])
 
 ## See Also
 
+- [Research factor data sources](factors.md)
 - [Ken French Data Library](https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html)
 - [AQR Provider](aqr.md)
 - [Provider reference](index.md)

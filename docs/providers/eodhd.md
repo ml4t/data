@@ -112,5 +112,6 @@ Get your API key at [eodhd.com/register](https://eodhd.com/register).
 
 ## See Also
 
+- [Equity](equities.md), [ETF](etfs.md), and [fundamental](fundamentals.md) source references
 - [EODHD Pricing](https://eodhd.com/pricing)
 - [Provider reference](index.md)

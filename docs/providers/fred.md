@@ -74,6 +74,7 @@ Get your free API key at [fred.stlouisfed.org/docs/api/fred](https://fred.stloui
 
 ## See Also
 
+- [Macroeconomic](macro.md) and [fixed-income](fixed_income.md) source references
 - [FRED API Docs](https://fred.stlouisfed.org/docs/api/fred/)
 - [Example Config](https://github.com/ml4t/data/blob/main/examples/configs/fred_economic.yaml)
 - [Provider reference](index.md)

@@ -60,5 +60,6 @@ Get your API key at [tiingo.com/account/api/token](https://api.tiingo.com/accoun
 
 ## See Also
 
+- [Equity](equities.md) and [ETF](etfs.md) source references
 - [Tiingo Pricing](https://tiingo.com/about/pricing)
 - [Provider reference](index.md)

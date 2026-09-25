@@ -146,5 +146,6 @@ headers, and retries transient failures per pagination page.
 
 ## See Also
 
+- [Equity](equities.md) and [ETF](etfs.md) source references
 - [Alpaca Market Data docs](https://docs.alpaca.markets/us/docs/about-market-data-api)
 - [Provider README](index.md)

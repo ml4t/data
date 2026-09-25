@@ -181,6 +181,7 @@ streaming, use `provider.client` directly.
 
 ## See Also
 
+- [Equity](equities.md), [futures](futures.md), and [options](options.md) source references
 - [Databento Pricing](https://databento.com/pricing)
 - [Databento Reference](databento_reference.md) - Detailed schema guide
 - [Provider reference](index.md)
