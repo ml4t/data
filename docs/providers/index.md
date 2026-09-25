@@ -2,9 +2,11 @@
 
 ML4T Data supports 20+ live and specialized data providers, plus synthetic and testing providers.
 
-For the wider vendor landscape, including sources the library does not wrap, see
-[Market Data Sources](market_data.md), [Fundamental Data Sources](fundamentals.md) and
-[Alternative Data Sources](alternative_data.md).
+For the wider vendor landscape, including sources the library does not wrap, start with
+[Market Data Sources](market_data.md) or go directly to the [equity](equities.md),
+[ETF](etfs.md), [futures](futures.md), [options](options.md), [foreign exchange](fx.md), or
+[cryptocurrency](crypto.md) reference. [Fundamental Data Sources](fundamentals.md) and
+[Alternative Data Sources](alternative_data.md) cover non-price inputs.
 
 ## Provider Comparison
 
