@@ -71,5 +71,6 @@ Get credentials by opening a practice account at [oanda.com](https://www.oanda.c
 
 ## See Also
 
+- [Foreign exchange data sources](fx.md)
 - [Oanda API](https://developer.oanda.com)
 - [Provider reference](index.md)

@@ -91,6 +91,7 @@ When using AQR data, cite the relevant papers:
 
 ## See Also
 
+- [Research factor data sources](factors.md)
 - [AQR Datasets](https://www.aqr.com/Insights/Datasets)
 - [Fama-French Provider](fama_french.md)
 - [Provider reference](index.md)

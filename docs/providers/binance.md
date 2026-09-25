@@ -72,6 +72,7 @@ Binance may block access from certain countries. Consider using `BinancePublicPr
 
 ## See Also
 
+- [Cryptocurrency data sources](crypto.md)
 - [Binance API](https://www.binance.com/en/binance-api)
 - [BinancePublic Provider](binance_public.md)
 - [Provider reference](index.md)

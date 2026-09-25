@@ -83,3 +83,7 @@ failures use the shared provider exception types.
 
 See the current [Massive API documentation](https://massive.com/docs) and
 [account plans](https://massive.com/pricing) for service-side coverage and limits.
+
+Compare the relevant products in the [equity](equities.md), [ETF](etfs.md),
+[futures](futures.md), [options](options.md), [foreign exchange](fx.md), and
+[fundamental](fundamentals.md) source references.

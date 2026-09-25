@@ -2,9 +2,13 @@
 
 ML4T Data supports 20+ live and specialized data providers, plus synthetic and testing providers.
 
-For the wider vendor landscape, including sources the library does not wrap, see
-[Market Data Sources](market_data.md), [Fundamental Data Sources](fundamentals.md) and
-[Alternative Data Sources](alternative_data.md).
+For the wider vendor landscape, including sources the library does not wrap, start with
+[Market Data Sources](market_data.md) or go directly to the [equity](equities.md),
+[ETF](etfs.md), [futures](futures.md), [options](options.md), [foreign exchange](fx.md), or
+[cryptocurrency](crypto.md) reference. Separate references cover [fixed income](fixed_income.md),
+[macroeconomic data](macro.md), [fundamentals](fundamentals.md),
+[alternative data](alternative_data.md), [research factors](factors.md), and
+[prediction markets](prediction_markets.md).
 
 ## Provider Comparison
 
@@ -82,8 +86,9 @@ provider's capabilities before passing it to `DataManager` or `async_batch_load(
 | Futures and options | Databento, Massive |
 | Cryptocurrency | Binance, Binance Public, OKX, CoinGecko, CryptoCompare |
 | Foreign exchange | Oanda, Twelve Data, FXMacroData |
-| Economic series | FRED, FXMacroData |
-| Academic factors | Fama-French, AQR |
+| Economic series | FRED, FXMacroData; external official sources are compared in [Macroeconomic Data Sources](macro.md) |
+| Academic factors | Fama-French, AQR; external libraries are compared in [Research Factor Data Sources](factors.md) |
+| Prediction markets | Kalshi, Polymarket; external markets are compared in [Prediction-Market Data Sources](prediction_markets.md) |
 | Equity fundamentals | Yahoo Finance, EODHD, Finnhub, Massive; other vendors and the SEC routes are compared in [Fundamental Data Sources](fundamentals.md) |
 
 Provider access, coverage, retention, and redistribution terms can differ by account tier. Confirm

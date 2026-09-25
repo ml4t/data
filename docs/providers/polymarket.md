@@ -268,6 +268,9 @@ provider.close()  # Close when done
 
 ## Changelog
 
+See [Prediction-Market Data Sources](prediction_markets.md) for source and market-mechanism
+comparisons.
+
 ### 2025-12-07
 - Fixed token resolution for new API format (`clobTokenIds` JSON string)
 - Fixed `get_token_prices()` to use `outcomes`/`outcomePrices` arrays
