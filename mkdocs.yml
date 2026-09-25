@@ -131,7 +131,11 @@ nav:
     - Options Data Sources: providers/options.md
     - Foreign Exchange Data Sources: providers/fx.md
     - Cryptocurrency Data Sources: providers/crypto.md
+    - Fixed-Income Data Sources: providers/fixed_income.md
+    - Macroeconomic Data Sources: providers/macro.md
     - Alternative Data Sources: providers/alternative_data.md
+    - Research Factor Data Sources: providers/factors.md
+    - Prediction-Market Data Sources: providers/prediction_markets.md
     - Yahoo Finance: providers/yahoo.md
     - Alpaca: providers/alpaca.md
     - CoinGecko: providers/coingecko.md

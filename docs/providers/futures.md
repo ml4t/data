@@ -23,4 +23,5 @@ Keep dated reference data with prices and open interest.
 ## Related References
 
 - [Options data sources](options.md)
+- [Fixed-income data sources](fixed_income.md)
 - [Market data selection](market_data.md)

@@ -24,9 +24,9 @@ data = SyntheticProvider(seed=42).fetch_ohlcv(
 | Equity bars | Yahoo Finance, Alpaca, EODHD, Tiingo, Twelve Data, Massive, Finnhub | Some adapters require credentials, accounts, or paid history |
 | Foreign exchange | OANDA, Twelve Data, FXMacroData | OANDA and Twelve Data require credentials |
 | Futures and options | Databento, Binance, OKX | Historical or licensed data may be metered |
-| Macroeconomic series | FRED, FXMacroData | FRED requires an API key for normal use |
-| Research factors | Fama-French, AQR | Network access and source-specific terms |
-| Prediction markets | Kalshi, Polymarket | Network access and changing public endpoints |
+| [Macroeconomic series](../providers/macro.md) | FRED, FXMacroData | FRED requires an API key for normal use |
+| [Research factors](../providers/factors.md) | Fama-French, AQR | Network access and source-specific terms |
+| [Prediction markets](../providers/prediction_markets.md) | Kalshi, Polymarket | Network access and changing public endpoints |
 | Frozen equity history | Wiki Prices | Local historical dataset ending in 2018 |
 | CFTC positioning | COT | Install the `cot` extra |
 

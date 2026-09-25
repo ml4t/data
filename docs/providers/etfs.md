@@ -27,4 +27,5 @@ the current ticker.
 ## Related References
 
 - [Equity data sources](equities.md)
+- [Fixed-income data sources](fixed_income.md)
 - [Market data selection](market_data.md)

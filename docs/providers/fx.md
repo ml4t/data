@@ -21,5 +21,6 @@ Reported volume is source-specific.
 
 ## Related References
 
+- [Macroeconomic data sources](macro.md)
 - [Futures data sources](futures.md)
 - [Market data selection](market_data.md)
