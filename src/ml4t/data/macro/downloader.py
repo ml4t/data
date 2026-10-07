@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -269,10 +270,18 @@ class MacroDataManager:
 
             ticker = yf_mapping[series_id]
             try:
+                # yfinance treats end as exclusive. Config dates are inclusive.
+                end = self.config.end
+                try:
+                    end = (datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
+                except ValueError:
+                    pass
                 df = yf.download(
                     ticker,
                     start=self.config.start,
-                    end=self.config.end,
+                    end=end,
                     progress=False,
                     auto_adjust=True,
                     threads=False,

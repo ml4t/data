@@ -3,7 +3,7 @@
 These tests verify the Polymarket provider logic without making real API calls.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -391,6 +391,17 @@ class TestFetchOHLCV:
 
         assert mock_fetch_chunk.call_count == 2
         assert [point["t"] for point in history] == [1704067200, 1704153600, 1704240000]
+
+    @patch.object(PolymarketProvider, "_fetch_price_history_chunk")
+    def test_fetch_price_history_uses_utc_day_bounds(self, mock_fetch_chunk, provider):
+        """Price-history windows are inclusive UTC days."""
+        mock_fetch_chunk.return_value = []
+
+        provider._fetch_price_history("12345678901234567890", "2024-01-31", "2024-01-31", "1d")
+
+        _token_id, start_ts, end_ts, _interval = mock_fetch_chunk.call_args.args
+        assert start_ts == int(datetime(2024, 1, 31, tzinfo=UTC).timestamp())
+        assert end_ts == int(datetime(2024, 1, 31, 23, 59, 59, tzinfo=UTC).timestamp())
 
     @patch.object(PolymarketProvider, "_fetch_price_history_chunk")
     def test_fetch_price_history_normalizes_numeric_timestamps(self, mock_fetch_chunk, provider):

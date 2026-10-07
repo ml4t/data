@@ -14,7 +14,7 @@ Test Coverage:
     - List markets/series methods
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
@@ -408,6 +408,19 @@ class TestKalshiFetchWithMocks:
         provider = KalshiProvider()
         yield provider
         provider.close()
+
+    def test_fetch_raw_data_uses_utc_calendar_bounds(self, provider):
+        """Inclusive date bounds are converted in UTC, not the local timezone."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"candlesticks": []}
+
+        with patch.object(provider.session, "get", return_value=mock_response) as mock_get:
+            provider._fetch_raw_data("KXINFL-25JAN", "2024-01-31", "2024-01-31", "daily")
+
+        params = mock_get.call_args.kwargs["params"]
+        assert params["start_ts"] == int(datetime(2024, 1, 31, tzinfo=UTC).timestamp())
+        assert params["end_ts"] == int(datetime(2024, 1, 31, 23, 59, 59, tzinfo=UTC).timestamp())
 
     def test_fetch_ohlcv_success(self, provider):
         """Test successful fetch_ohlcv with mocked response."""

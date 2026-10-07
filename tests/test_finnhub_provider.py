@@ -1,5 +1,6 @@
 """Tests for Finnhub provider module."""
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -251,6 +252,20 @@ class TestFetchRawData:
         with patch.object(provider.session, "get", return_value=mock_response):
             with pytest.raises(ProviderError, match="API error"):
                 provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-02", "daily")
+
+    def test_fetch_raw_data_uses_inclusive_utc_day(self, provider):
+        """Date-only bounds are UTC days and include the end date."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"s": "no_data"}
+
+        with patch.object(provider.session, "get", return_value=mock_response) as mock_get:
+            with pytest.raises(SymbolNotFoundError):
+                provider._fetch_raw_data("AAPL", "2024-01-31", "2024-01-31", "1min")
+
+        params = mock_get.call_args.kwargs["params"]
+        assert params["from"] == int(datetime(2024, 1, 31, tzinfo=UTC).timestamp())
+        assert params["to"] == int(datetime(2024, 1, 31, 23, 59, 59, tzinfo=UTC).timestamp())
 
     def test_fetch_raw_data_missing_data_arrays(self, provider):
         """Test missing data arrays raise SymbolNotFoundError."""

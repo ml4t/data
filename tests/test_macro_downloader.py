@@ -222,11 +222,12 @@ macro:
         )
         mock_df.columns = pd.MultiIndex.from_tuples([("Close", "")])
 
-        with patch("yfinance.download", return_value=mock_df):
+        with patch("yfinance.download", return_value=mock_df) as mock_download:
             df = manager._download_from_yfinance(["DGS10"])
 
             assert not df.is_empty()
             assert "DGS10" in df.columns
+            assert mock_download.call_args.kwargs["end"] == "2025-01-01"
 
     def test_compute_derived_series(self, manager):
         """Test _compute_derived_series method."""

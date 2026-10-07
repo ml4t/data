@@ -35,7 +35,7 @@ Example:
 """
 
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import polars as pl
@@ -201,11 +201,11 @@ class KalshiProvider(BaseProvider):
                 value=frequency,
             )
 
-        # Convert dates to unix timestamps
-        start_dt = datetime.strptime(start, "%Y-%m-%d")
-        end_dt = datetime.strptime(end, "%Y-%m-%d")
-        # Set end to end of day
-        end_dt = end_dt.replace(hour=23, minute=59, second=59)
+        # Convert inclusive UTC calendar dates to unix timestamps.
+        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=UTC)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=UTC
+        )
 
         start_ts = int(start_dt.timestamp())
         end_ts = int(end_dt.timestamp())

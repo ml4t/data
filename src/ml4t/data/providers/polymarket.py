@@ -30,7 +30,7 @@ Example:
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any, ClassVar
 
@@ -378,8 +378,8 @@ class PolymarketProvider(BaseProvider):
             List of price points [{t: timestamp, p: price}, ...]
         """
         try:
-            start_dt = datetime.strptime(start, "%Y-%m-%d")
-            end_dt = datetime.strptime(end, "%Y-%m-%d")
+            start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=UTC)
+            end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=UTC)
 
             history: list[dict[str, Any]] = []
             chunk_days = self.HISTORY_CHUNK_DAYS if interval != "max" else self.MAX_MARKET_SCAN

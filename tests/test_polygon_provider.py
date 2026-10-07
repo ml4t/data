@@ -386,6 +386,30 @@ class TestIntegration:
             assert params.get("limit") == 50000
             assert params.get("apiKey") == "test_key"
 
+    def test_fetch_raw_data_follows_next_url(self):
+        """Aggregate responses continue through next_url instead of stopping at one page."""
+        provider = MassiveProvider(api_key="test_key")
+        first = MagicMock()
+        first.status_code = 200
+        first.json.return_value = {
+            "status": "OK",
+            "results": [{"t": 1, "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0, "v": 1.0}],
+            "next_url": "https://api.massive.com/v2/aggs/next?cursor=abc",
+        }
+        second = MagicMock()
+        second.status_code = 200
+        second.json.return_value = {
+            "status": "OK",
+            "results": [{"t": 2, "o": 2.0, "h": 2.0, "l": 2.0, "c": 2.0, "v": 2.0}],
+        }
+
+        with patch.object(provider.session, "get", side_effect=[first, second]) as mock_get:
+            data = provider._fetch_raw_data("AAPL", "2024-01-01", "2024-03-01", "daily")
+
+        assert [row["t"] for row in data["results"]] == [1, 2]
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[1].kwargs["params"]["apiKey"] == "test_key"
+
 
 class TestMassiveAssetClassRouting:
     """Tests for Massive endpoint routing across asset classes."""
