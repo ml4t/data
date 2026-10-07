@@ -320,6 +320,24 @@ class TestGapDetectorStorage:
         # Should detect gap at the end (Feb 1-15)
         assert len(gaps) >= 1
 
+    def test_detect_gaps_in_storage_keeps_bar_on_inclusive_end(self, storage: HiveStorage) -> None:
+        """A bar timestamped on the requested end date is inside the range."""
+        detector = GapDetector()
+        dates = [datetime(2024, 1, 1) + timedelta(days=i) for i in range(10)]
+        storage.write(
+            pl.DataFrame({"timestamp": dates, "close": [1.0] * len(dates)}),
+            "test_symbol",
+        )
+
+        gaps = detector.detect_gaps_in_storage(
+            storage,
+            "test_symbol",
+            datetime(2024, 1, 1),
+            datetime(2024, 1, 10),
+        )
+
+        assert gaps == []
+
 
 class TestIncrementalUpdater:
     """Test IncrementalUpdater for update strategies."""
