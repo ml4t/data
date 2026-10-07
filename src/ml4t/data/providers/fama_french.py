@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from calendar import monthrange
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -730,11 +731,11 @@ class FamaFrenchProvider(BaseProvider):
             )
             df = df.filter(pl.col("timestamp") >= start_date)
         if end:
-            end_date = (
-                datetime.strptime(end[:10], "%Y-%m-%d").date()
-                if len(end) >= 10
-                else datetime.strptime(end + "-28", "%Y-%m-%d").date()
-            )
+            if len(end) >= 10:
+                end_date = datetime.strptime(end[:10], "%Y-%m-%d").date()
+            else:
+                year, month = (int(part) for part in end.split("-", 1))
+                end_date = datetime(year, month, monthrange(year, month)[1]).date()
             df = df.filter(pl.col("timestamp") <= end_date)
 
         self.logger.info(
