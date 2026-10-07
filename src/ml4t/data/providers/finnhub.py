@@ -4,7 +4,7 @@ Endpoint availability, request quotas, and historical depth depend on the accoun
 """
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import polars as pl
@@ -32,6 +32,19 @@ from ml4t.data.providers.fundamentals import (
 )
 
 logger = structlog.get_logger()
+
+
+def _utc_unix_timestamp(value: str, *, inclusive_date: bool = False) -> int:
+    """Parse a date or datetime as a UTC unix timestamp.
+
+    A date-only end bound covers that UTC calendar day. An explicit datetime
+    is used as given, with naive values treated as UTC.
+    """
+    parsed = datetime.fromisoformat(value)
+    parsed = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    if inclusive_date and "T" not in value and len(value) == 10:
+        parsed = parsed.replace(hour=23, minute=59, second=59)
+    return int(parsed.timestamp())
 
 
 class FinnhubProvider(BaseProvider):
@@ -196,12 +209,11 @@ class FinnhubProvider(BaseProvider):
                 value=frequency,
             )
 
-        # Convert dates to unix timestamps
+        # Convert dates to unix timestamps. Date-only bounds are UTC calendar
+        # days, with the end date inclusive through 23:59:59.
         try:
-            start_dt = datetime.fromisoformat(start)
-            end_dt = datetime.fromisoformat(end)
-            start_ts = int(start_dt.timestamp())
-            end_ts = int(end_dt.timestamp())
+            start_ts = _utc_unix_timestamp(start)
+            end_ts = _utc_unix_timestamp(end, inclusive_date=True)
         except ValueError as err:
             raise DataValidationError(
                 provider="finnhub",
