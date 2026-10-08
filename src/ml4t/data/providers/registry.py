@@ -225,6 +225,22 @@ _SPECS = (
         "events",
     ),
     _spec(
+        "polymarket_us",
+        "polymarket_us",
+        "PolymarketUSProvider",
+        "Polymarket US regulated prediction markets",
+        "events",
+        manager_compatible=False,
+    ),
+    _spec(
+        "forecastex",
+        "forecastex",
+        "ForecastExProvider",
+        "ForecastEx event contracts",
+        "events",
+        manager_compatible=False,
+    ),
+    _spec(
         "coingecko",
         "coingecko",
         "CoinGeckoProvider",

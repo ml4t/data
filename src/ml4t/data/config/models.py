@@ -55,6 +55,8 @@ class ProviderType(StrEnum):
     FAMA_FRENCH = "fama_french"
     KALSHI = "kalshi"
     POLYMARKET = "polymarket"
+    POLYMARKET_US = "polymarket_us"
+    FORECASTEX = "forecastex"
     COINGECKO = "coingecko"
     BINANCE = "binance"
     BINANCE_PUBLIC = "binance_public"
