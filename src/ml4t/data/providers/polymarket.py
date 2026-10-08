@@ -29,8 +29,10 @@ Example:
     >>> provider.close()
 """
 
+import hashlib
 import json
-from datetime import datetime, timedelta
+from collections.abc import Iterator
+from datetime import UTC, date, datetime, timedelta
 from math import isfinite
 from typing import Any, ClassVar
 
@@ -45,8 +47,95 @@ from ml4t.data.core.exceptions import (
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.prediction_markets import (
+    RESOLUTION_SCHEMA,
+    RESULT_NO,
+    RESULT_OTHER,
+    RESULT_VOID,
+    RESULT_YES,
+    TRADE_SCHEMA,
+    UTC_DATETIME,
+    empty_frame,
+    parse_utc_timestamp,
+    to_unix_seconds,
+)
 
 logger = structlog.get_logger()
+
+TimestampArg = int | float | str | date | datetime | None
+
+# Normalized market columns returned by PolymarketProvider.fetch_markets.
+MARKET_SCHEMA: dict[str, pl.DataType] = {
+    "ticker": pl.Utf8(),
+    "market_id": pl.Utf8(),
+    "slug": pl.Utf8(),
+    "question": pl.Utf8(),
+    "event_slug": pl.Utf8(),
+    "event_title": pl.Utf8(),
+    "category": pl.Utf8(),
+    "tags": pl.List(pl.Utf8()),
+    "yes_outcome": pl.Utf8(),
+    "no_outcome": pl.Utf8(),
+    "yes_token_id": pl.Utf8(),
+    "no_token_id": pl.Utf8(),
+    "closed": pl.Boolean(),
+    "open_time": UTC_DATETIME,
+    "close_time": UTC_DATETIME,
+    **RESOLUTION_SCHEMA,
+    "uma_resolution_status": pl.Utf8(),
+    "outcome_prices": pl.List(pl.Float64()),
+    "volume": pl.Float64(),
+    "neg_risk": pl.Boolean(),
+    "neg_risk_market_id": pl.Utf8(),
+    "fees_enabled": pl.Boolean(),
+    "fee_type": pl.Utf8(),
+    "maker_base_fee": pl.Float64(),
+    "taker_base_fee": pl.Float64(),
+    "fee_schedule": pl.Utf8(),
+}
+
+# Price points returned by PolymarketProvider.fetch_candles.
+CANDLE_SCHEMA: dict[str, pl.DataType] = {
+    "timestamp": UTC_DATETIME,
+    "token_id": pl.Utf8(),
+    "price": pl.Float64(),
+}
+
+# Normalized trade columns returned by PolymarketProvider.fetch_trades.
+POLYMARKET_TRADE_SCHEMA: dict[str, pl.DataType] = {
+    **TRADE_SCHEMA,
+    "outcome": pl.Utf8(),
+    "outcome_index": pl.Int64(),
+    "side": pl.Utf8(),
+    "outcome_price": pl.Float64(),
+    "asset": pl.Utf8(),
+    "proxy_wallet": pl.Utf8(),
+    "transaction_hash": pl.Utf8(),
+}
+
+
+def _json_list(value: Any) -> list[Any] | None:
+    """Parse a Gamma list field, which arrives as a JSON-encoded string or a list."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, list):
+        return value
+    parsed = json.loads(value)
+    if not isinstance(parsed, list):
+        raise ValueError(f"expected a JSON list, got {value!r}")
+    return parsed
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"boolean where a number was expected: {value!r}")
+    return float(value)
+
+
+def _iso_utc(seconds: int) -> str:
+    return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class PolymarketProvider(BaseProvider):
@@ -75,6 +164,18 @@ class PolymarketProvider(BaseProvider):
     # API base URLs
     CLOB_URL: ClassVar[str] = "https://clob.polymarket.com"
     GAMMA_URL: ClassVar[str] = "https://gamma-api.polymarket.com"
+    DATA_API_URL: ClassVar[str] = "https://data-api.polymarket.com"
+
+    # GET /markets/keyset returns at most 100 markets per page whatever ``limit`` asks for.
+    KEYSET_PAGE_SIZE: ClassVar[int] = 100
+
+    # GET /prices-history rejects a startTs..endTs span longer than 15 days (HTTP 400).
+    PRICE_HISTORY_MAX_WINDOW_SECONDS: ClassVar[int] = 15 * 86_400
+
+    # GET /trades serves up to 10000 trades per request and rejects offset > 10000 (HTTP 400).
+    TRADES_MAX_LIMIT: ClassVar[int] = 10_000
+    TRADES_MAX_OFFSET: ClassVar[int] = 10_000
+    TRADES_PAGE_SIZE: ClassVar[int] = 1_000
 
     # Map common frequency names to Polymarket interval values
     INTERVAL_MAP: ClassVar[dict[str, str]] = {
@@ -967,6 +1068,633 @@ class PolymarketProvider(BaseProvider):
                     prices[outcome] = float(price)
 
         return prices
+
+    # ------------------------------------------------------------------
+    # Resolved-market history: market listing, price history, trades
+    # ------------------------------------------------------------------
+
+    def iter_markets(
+        self,
+        closed: bool = True,
+        min_volume: float | None = None,
+        end_date_min: TimestampArg = None,
+        end_date_max: TimestampArg = None,
+        page_size: int = KEYSET_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate over every Gamma market matching the filters.
+
+        Pages through ``GET /markets/keyset`` (``GET /markets`` refuses offsets beyond 2000),
+        passing ``next_cursor`` back as ``after_cursor``; markets come in ascending Gamma id
+        order. The server applies ``closed``, ``volume_num_min``, ``end_date_min`` and
+        ``end_date_max`` (verified 2026-10-08); the same filters are applied again on the
+        client, so a filter the server stopped honouring cannot leak rows. A cursor the
+        server repeats raises instead of looping forever.
+
+        Args:
+            closed: True for closed (resolved or awaiting resolution) markets, False for
+                markets still trading.
+            min_volume: Keep markets whose lifetime ``volumeNum`` (USDC) is at least this.
+            end_date_min: Keep markets whose scheduled ``endDate`` is at or after this time
+                (Unix seconds, ISO string, date or datetime; naive values are UTC).
+            end_date_max: Keep markets whose ``endDate`` is at or before this time.
+            page_size: Markets per request (1-100).
+            max_pages: Optional cap on the number of pages, for sampling.
+
+        Yields:
+            Raw Gamma market dictionaries, including the market's ``tags``.
+        """
+        limit = max(1, min(int(page_size), self.KEYSET_PAGE_SIZE))
+        min_end = to_unix_seconds(end_date_min)
+        max_end = to_unix_seconds(end_date_max)
+        params: dict[str, Any] = {
+            "limit": limit,
+            "closed": str(bool(closed)).lower(),
+            "include_tag": "true",
+        }
+        if min_volume is not None:
+            params["volume_num_min"] = float(min_volume)
+        if min_end is not None:
+            params["end_date_min"] = _iso_utc(min_end)
+        if max_end is not None:
+            params["end_date_max"] = _iso_utc(max_end)
+
+        def selected(market: dict[str, Any]) -> bool:
+            if market.get("closed") is not None and bool(market["closed"]) != bool(closed):
+                return False
+            if min_volume is not None:
+                volume = self._market_volume(market)
+                if volume is None or volume < float(min_volume):
+                    return False
+            if min_end is None and max_end is None:
+                return True
+            end = self._lenient_timestamp(market, "endDate")
+            if end is None:
+                return False
+            end_seconds = end.timestamp()
+            if min_end is not None and end_seconds < min_end:
+                return False
+            return not (max_end is not None and end_seconds > max_end)
+
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        pages = 0
+        while True:
+            page_params = dict(params)
+            if cursor:
+                page_params["after_cursor"] = cursor
+            payload = self._request_json(
+                f"{self.GAMMA_URL}/markets/keyset", resource="markets", params=page_params
+            )
+            markets = payload.get("markets")
+            if not isinstance(markets, list):
+                raise DataValidationError(
+                    provider="polymarket",
+                    message="Keyset response has no 'markets' list",
+                    field="markets",
+                )
+            for market in markets:
+                if not isinstance(market, dict):
+                    raise DataValidationError(
+                        provider="polymarket",
+                        message="Non-object entry in keyset 'markets'",
+                        field="markets",
+                    )
+                if selected(market):
+                    yield market
+            pages += 1
+            cursor = payload.get("next_cursor")
+            if not cursor or not markets or (max_pages is not None and pages >= max_pages):
+                return
+            if not isinstance(cursor, str):
+                raise DataValidationError(
+                    provider="polymarket", message="Non-string next_cursor", field="next_cursor"
+                )
+            if cursor in seen_cursors:
+                raise DataValidationError(
+                    provider="polymarket",
+                    message="Keyset cursor repeated; the server ignored after_cursor",
+                    field="next_cursor",
+                    value=cursor,
+                )
+            seen_cursors.add(cursor)
+
+    def fetch_markets(
+        self,
+        closed: bool = True,
+        min_volume: float | None = None,
+        end_date_min: TimestampArg = None,
+        end_date_max: TimestampArg = None,
+        page_size: int = KEYSET_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> pl.DataFrame:
+        """Return every matching market with its normalized resolution outcome.
+
+        Accepts the same filters as ``iter_markets``; see ``iter_market_frames`` for the
+        columns.
+
+        Example:
+            >>> provider = PolymarketProvider()
+            >>> big = provider.fetch_markets(min_volume=100_000, end_date_min="2026-01-01")
+            >>> big.select("ticker", "question", "result", "settlement_ts")
+        """
+        frames = list(
+            self.iter_market_frames(
+                closed=closed,
+                min_volume=min_volume,
+                end_date_min=end_date_min,
+                end_date_max=end_date_max,
+                page_size=page_size,
+                max_pages=max_pages,
+            )
+        )
+        if not frames:
+            return empty_frame(MARKET_SCHEMA)
+        return pl.concat(frames, how="vertical")
+
+    def iter_market_frames(
+        self,
+        chunk_size: int = 100_000,
+        closed: bool = True,
+        min_volume: float | None = None,
+        end_date_min: TimestampArg = None,
+        end_date_max: TimestampArg = None,
+        page_size: int = KEYSET_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> Iterator[pl.DataFrame]:
+        """Stream normalized markets in frames of at most ``chunk_size`` rows.
+
+        Takes the filters of ``iter_markets``. Each frame can be written out before the next
+        page is requested; the closed listing runs to hundreds of thousands of markets.
+
+        Gamma markets are binary: two outcomes, two CLOB tokens and two final prices, all
+        in the same order. The first outcome is treated as the YES side and the second as
+        NO, whatever their labels: in ``["Trump", "Boden"]`` "Trump" is ``yes_outcome``,
+        and ``result == "yes"`` means the first outcome won.
+
+        ``result`` comes from the final ``outcomePrices`` of a closed market: ``[1, 0]`` is
+        ``"yes"``, ``[0, 1]`` ``"no"`` and ``[0.5, 0.5]`` (a 50/50 resolution) ``"void"``. A
+        market whose ``umaResolutionStatus`` is ``"resolved"`` with any other prices is
+        ``"other"``; everything else (open markets, closed markets without final prices) is
+        null. Closed markets snap to final prices even while the UMA status is still
+        ``"proposed"``; filter on ``uma_resolution_status == "resolved"`` to exclude them.
+
+        Yields:
+            Non-empty DataFrames with ``MARKET_SCHEMA`` columns: ``ticker`` (condition id),
+            ``market_id`` (Gamma id), ``slug``, ``question``, ``event_slug``,
+            ``event_title``, ``category`` (the market's or event's category, mostly null
+            since 2024), ``tags`` (tag labels, the reliable topic field), ``yes_outcome``,
+            ``no_outcome``, ``yes_token_id``, ``no_token_id``, ``closed``, ``open_time``
+            (``startDate``), ``close_time`` (scheduled ``endDate``), ``result``,
+            ``settlement_value`` (payout of the first outcome token), ``settlement_ts``
+            (``closedTime``, else ``umaEndDate``; null while unresolved),
+            ``uma_resolution_status``, ``outcome_prices``, ``volume`` (lifetime USDC),
+            ``neg_risk``, ``neg_risk_market_id``, ``fees_enabled``, ``fee_type``,
+            ``maker_base_fee``, ``taker_base_fee`` (Gamma's raw base-fee fields) and
+            ``fee_schedule`` (Gamma's fee schedule as JSON text). Timestamps Gamma cannot
+            parse (``umaEndDate`` holds ``"NOW*()"`` on some 2024 markets) are null. Markets
+            without a condition id are skipped with a warning.
+        """
+        if chunk_size < 1:
+            raise DataValidationError(
+                provider="polymarket",
+                message=f"chunk_size must be positive, got {chunk_size}",
+                field="chunk_size",
+                value=chunk_size,
+            )
+        rows: list[tuple[Any, ...]] = []
+        for market in self.iter_markets(
+            closed=closed,
+            min_volume=min_volume,
+            end_date_min=end_date_min,
+            end_date_max=end_date_max,
+            page_size=page_size,
+            max_pages=max_pages,
+        ):
+            row = self._normalize_market(market)
+            if row is None:
+                continue
+            rows.append(row)
+            if len(rows) >= chunk_size:
+                yield pl.DataFrame(rows, schema=MARKET_SCHEMA, orient="row")
+                rows = []
+        if rows:
+            yield pl.DataFrame(rows, schema=MARKET_SCHEMA, orient="row")
+
+    @staticmethod
+    def _market_volume(market: dict[str, Any]) -> float | None:
+        volume = market.get("volumeNum")
+        if volume is None or volume == "":
+            volume = market.get("volume")
+        return _optional_float(volume)
+
+    def _lenient_timestamp(self, market: dict[str, Any], key: str) -> datetime | None:
+        """Parse a Gamma timestamp field; an unparseable value is logged and read as null."""
+        try:
+            return parse_utc_timestamp(market.get(key))
+        except (TypeError, ValueError):
+            self.logger.warning(
+                "Unparseable Polymarket timestamp",
+                field=key,
+                value=market.get(key),
+                market_id=market.get("id"),
+            )
+            return None
+
+    @staticmethod
+    def _market_result(
+        closed: bool, uma_status: str | None, prices: list[float] | None
+    ) -> str | None:
+        if closed and prices is not None and len(prices) == 2:
+            first, second = prices
+            if first == 1.0 and second == 0.0:
+                return RESULT_YES
+            if first == 0.0 and second == 1.0:
+                return RESULT_NO
+            if first == 0.5 and second == 0.5:
+                return RESULT_VOID
+        if uma_status == "resolved":
+            return RESULT_OTHER
+        return None
+
+    def _normalize_market(self, market: dict[str, Any]) -> tuple[Any, ...] | None:
+        condition_id = market.get("conditionId")
+        market_id = market.get("id")
+        if not condition_id:
+            self.logger.warning("Skipping Polymarket market without conditionId", id=market_id)
+            return None
+        try:
+            outcomes = _json_list(market.get("outcomes")) or []
+            raw_prices = _json_list(market.get("outcomePrices"))
+            prices = [float(price) for price in raw_prices] if raw_prices else None
+            token_ids = _json_list(market.get("clobTokenIds")) or []
+            closed = bool(market.get("closed"))
+            uma_status = market.get("umaResolutionStatus") or None
+            result = self._market_result(closed, uma_status, prices)
+            binary = len(outcomes) == 2
+            events = market.get("events") or []
+            event = events[0] if events and isinstance(events[0], dict) else {}
+            tags = [
+                str(tag["label"])
+                for tag in market.get("tags") or event.get("tags") or []
+                if isinstance(tag, dict) and tag.get("label")
+            ]
+            settlement_ts = None
+            if result is not None:
+                settlement_ts = self._lenient_timestamp(
+                    market, "closedTime"
+                ) or self._lenient_timestamp(market, "umaEndDate")
+            fee_schedule = market.get("feeSchedule")
+            fees_enabled = market.get("feesEnabled")
+            neg_risk = market.get("negRisk")
+            row = {
+                "ticker": str(condition_id),
+                "market_id": None if market_id is None else str(market_id),
+                "slug": market.get("slug"),
+                "question": market.get("question"),
+                "event_slug": event.get("slug"),
+                "event_title": event.get("title"),
+                "category": market.get("category") or event.get("category"),
+                "tags": tags,
+                "yes_outcome": str(outcomes[0]) if binary else None,
+                "no_outcome": str(outcomes[1]) if binary else None,
+                "yes_token_id": str(token_ids[0]) if len(token_ids) == 2 else None,
+                "no_token_id": str(token_ids[1]) if len(token_ids) == 2 else None,
+                "closed": closed,
+                "open_time": self._lenient_timestamp(market, "startDate")
+                or self._lenient_timestamp(market, "createdAt"),
+                "close_time": self._lenient_timestamp(market, "endDate"),
+                "result": result,
+                "settlement_value": prices[0] if result is not None and prices else None,
+                "settlement_ts": settlement_ts,
+                "uma_resolution_status": uma_status,
+                "outcome_prices": prices,
+                "volume": self._market_volume(market),
+                "neg_risk": None if neg_risk is None else bool(neg_risk),
+                "neg_risk_market_id": market.get("negRiskMarketID") or None,
+                "fees_enabled": None if fees_enabled is None else bool(fees_enabled),
+                "fee_type": market.get("feeType"),
+                "maker_base_fee": _optional_float(market.get("makerBaseFee")),
+                "taker_base_fee": _optional_float(market.get("takerBaseFee")),
+                "fee_schedule": None
+                if fee_schedule is None
+                else json.dumps(fee_schedule, sort_keys=True),
+            }
+        except (TypeError, ValueError, KeyError) as err:
+            raise DataValidationError(
+                provider="polymarket",
+                message=f"Malformed market record {market_id} ({condition_id}): {err}",
+                field="markets",
+                value=market_id,
+            ) from err
+        return tuple(row[column] for column in MARKET_SCHEMA)
+
+    def fetch_candles(
+        self,
+        token_id: str,
+        start: TimestampArg,
+        end: TimestampArg,
+        fidelity_minutes: int = 60,
+    ) -> pl.DataFrame:
+        """Return the CLOB price history of one outcome token between ``start`` and ``end``.
+
+        ``GET /prices-history`` with ``interval=max`` returns nothing for a resolved market
+        at fidelities finer than one day, and rejects a ``startTs``..``endTs`` span longer
+        than 15 days. This method therefore always sends explicit bounds and splits the
+        range into windows of at most 15 days, which serves resolved markets at any
+        fidelity down to one minute (verified 2026-10-08).
+
+        Args:
+            token_id: CLOB token id (``yes_token_id`` or ``no_token_id`` of
+                ``fetch_markets``).
+            start: Range start (Unix seconds, ISO string, date or datetime; naive is UTC).
+            end: Range end, inclusive.
+            fidelity_minutes: Sampling step in minutes (1 or more).
+
+        Returns:
+            DataFrame with ``CANDLE_SCHEMA`` columns: ``timestamp`` (UTC), ``token_id`` and
+            ``price`` (the token's price, 0-1), one row per sample, sorted. These are price
+            samples, not OHLC bars, and carry no volume. An unknown token or a range without
+            trading yields an empty frame (the CLOB answers an empty history, not 404).
+        """
+        start_seconds = to_unix_seconds(start)
+        end_seconds = to_unix_seconds(end)
+        if start_seconds is None or end_seconds is None or end_seconds < start_seconds:
+            raise DataValidationError(
+                provider="polymarket",
+                message="fetch_candles needs start and end, with end >= start",
+                field="start",
+            )
+        fidelity = int(fidelity_minutes)
+        if fidelity < 1:
+            raise DataValidationError(
+                provider="polymarket",
+                message=f"fidelity_minutes must be at least 1, got {fidelity_minutes}",
+                field="fidelity_minutes",
+                value=fidelity_minutes,
+            )
+        resource = f"price history for token {token_id}"
+        points: dict[int, float] = {}
+        chunk_start = start_seconds
+        while chunk_start <= end_seconds:
+            chunk_end = min(chunk_start + self.PRICE_HISTORY_MAX_WINDOW_SECONDS, end_seconds)
+            payload = self._request_json(
+                f"{self.CLOB_URL}/prices-history",
+                resource=resource,
+                params={
+                    "market": token_id,
+                    "startTs": chunk_start,
+                    "endTs": chunk_end,
+                    "fidelity": fidelity,
+                },
+            )
+            history = payload.get("history")
+            if not isinstance(history, list):
+                raise DataValidationError(
+                    provider="polymarket",
+                    message=f"Response for {resource} has no 'history' list",
+                    field="history",
+                )
+            for point in history:
+                try:
+                    timestamp = point["t"]
+                    price = point["p"]
+                    if isinstance(timestamp, bool) or isinstance(price, bool):
+                        raise ValueError("boolean field")
+                    seconds = int(timestamp)
+                    value = float(price)
+                    if seconds != timestamp or not isfinite(value):
+                        raise ValueError("non-integer timestamp or non-finite price")
+                except (KeyError, TypeError, ValueError) as err:
+                    raise DataValidationError(
+                        provider="polymarket",
+                        message=f"Malformed price point for {resource}: {point!r}",
+                        field="history",
+                    ) from err
+                if start_seconds <= seconds <= end_seconds:
+                    points[seconds] = value
+            chunk_start = chunk_end + 1
+        if not points:
+            return empty_frame(CANDLE_SCHEMA)
+        ordered = sorted(points)
+        return pl.DataFrame(
+            {
+                "timestamp": [datetime.fromtimestamp(t, UTC) for t in ordered],
+                "token_id": [str(token_id)] * len(ordered),
+                "price": [points[t] for t in ordered],
+            },
+            schema=CANDLE_SCHEMA,
+        )
+
+    @staticmethod
+    def _trade_key(trade: dict[str, Any]) -> str:
+        fields = ("transactionHash", "asset", "proxyWallet", "side", "size", "price", "timestamp")
+        return hashlib.sha1(
+            "|".join(str(trade.get(field)) for field in fields).encode(), usedforsecurity=False
+        ).hexdigest()
+
+    def iter_trades(
+        self,
+        condition_id: str,
+        start: TimestampArg = None,
+        end: TimestampArg = None,
+        page_size: int = TRADES_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate over the taker trades of one market, newest first.
+
+        ``GET https://data-api.polymarket.com/trades`` returns trades newest first, takes
+        inclusive ``start``/``end`` bounds in Unix seconds, serves up to 10000 trades per
+        request and rejects ``offset`` above 10000. To reach older trades this method pages
+        by offset until the cap, then moves ``end`` to the oldest second seen and starts
+        again at offset 0, dropping the trades of that boundary second it already yielded.
+        Records carry no trade id; a trade is identified by its transaction hash, token,
+        wallet, side, size, price and time, so two otherwise identical fills in one
+        transaction are yielded once.
+
+        Args:
+            condition_id: Market condition id (``ticker`` of ``fetch_markets``).
+            start: Keep trades at or after this time (Unix seconds, ISO string, date or
+                datetime; naive is UTC).
+            end: Keep trades at or before this time.
+            page_size: Trades per request (1-10000).
+            max_pages: Optional cap on the number of requests, for sampling.
+
+        Yields:
+            Raw data-api trade dictionaries.
+
+        Raises:
+            DataValidationError: The server repeated a page (offset ignored) or one second
+                holds more trades than one offset window can reach.
+        """
+        limit = max(1, min(int(page_size), self.TRADES_MAX_LIMIT))
+        start_seconds = to_unix_seconds(start)
+        window_end = to_unix_seconds(end)
+        resource = f"trades for {condition_id}"
+        boundary_keys: set[str] = set()
+        pages = 0
+        while True:
+            offset = 0
+            window_keys = set(boundary_keys)
+            oldest: int | None = None
+            oldest_keys: set[str] = set()
+            previous_page: list[str] | None = None
+            while True:
+                params: dict[str, Any] = {"market": condition_id, "limit": limit, "offset": offset}
+                if start_seconds is not None:
+                    params["start"] = start_seconds
+                if window_end is not None:
+                    params["end"] = window_end
+                response = self._request(
+                    f"{self.DATA_API_URL}/trades", resource=resource, params=params
+                )
+                try:
+                    trades = response.json()
+                except ValueError as err:
+                    raise DataValidationError(
+                        provider="polymarket", message=f"Malformed JSON response for {resource}"
+                    ) from err
+                if not isinstance(trades, list):
+                    raise DataValidationError(
+                        provider="polymarket",
+                        message=f"Expected a JSON list for {resource}, got {type(trades).__name__}",
+                    )
+                pages += 1
+                page_keys: list[str] = []
+                for trade in trades:
+                    if not isinstance(trade, dict) or isinstance(trade.get("timestamp"), bool):
+                        raise DataValidationError(
+                            provider="polymarket",
+                            message=f"Malformed trade entry for {resource}: {trade!r}",
+                            field="trades",
+                        )
+                    try:
+                        seconds = int(trade["timestamp"])
+                    except (KeyError, TypeError, ValueError) as err:
+                        raise DataValidationError(
+                            provider="polymarket",
+                            message=f"Trade without a timestamp for {resource}: {trade!r}",
+                            field="timestamp",
+                        ) from err
+                    key = self._trade_key(trade)
+                    page_keys.append(key)
+                    if oldest is None or seconds < oldest:
+                        oldest, oldest_keys = seconds, {key}
+                    elif seconds == oldest:
+                        oldest_keys.add(key)
+                    if key in window_keys:
+                        continue
+                    window_keys.add(key)
+                    if start_seconds is not None and seconds < start_seconds:
+                        continue
+                    if window_end is not None and seconds > window_end:
+                        continue
+                    yield trade
+                if len(trades) < limit or (max_pages is not None and pages >= max_pages):
+                    return
+                if offset > 0 and page_keys == previous_page:
+                    raise DataValidationError(
+                        provider="polymarket",
+                        message=f"Trade page repeated for {resource}; the server ignored offset",
+                        field="offset",
+                        value=offset,
+                    )
+                previous_page = page_keys
+                offset += len(trades)
+                if offset > self.TRADES_MAX_OFFSET:
+                    break
+            if oldest is None or (window_end is not None and oldest >= window_end):
+                raise DataValidationError(
+                    provider="polymarket",
+                    message=(
+                        f"More than {self.TRADES_MAX_OFFSET + limit} trades at second "
+                        f"{window_end} for {resource}; cannot page past it"
+                    ),
+                    field="end",
+                    value=window_end,
+                )
+            window_end = oldest
+            boundary_keys = oldest_keys
+
+    def fetch_trades(
+        self,
+        condition_id: str,
+        start: TimestampArg = None,
+        end: TimestampArg = None,
+        page_size: int = TRADES_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> pl.DataFrame:
+        """Return the taker trades of one market, sorted by time.
+
+        Accepts the arguments of ``iter_trades``. The data API's default ``takerOnly=true``
+        view is used: one record per taker fill, without the matching maker records.
+
+        Returns:
+            DataFrame with ``POLYMARKET_TRADE_SCHEMA`` columns: ``trade_id`` (hash of the
+            identifying fields), ``ticker`` (condition id), ``timestamp`` (UTC, whole
+            seconds), ``price`` (YES price: the traded token's price, or one minus it for
+            the second outcome), ``count`` (shares), ``taker_side`` (``"yes"`` when the
+            taker bought the first outcome or sold the second, else ``"no"``),
+            ``is_block_trade`` (always False), ``outcome`` (traded outcome label),
+            ``outcome_index`` (0 or 1), ``side`` (taker ``BUY``/``SELL`` of that outcome),
+            ``outcome_price`` (price of the traded token), ``asset`` (token id),
+            ``proxy_wallet`` (taker wallet) and ``transaction_hash``.
+
+        Example:
+            >>> provider = PolymarketProvider()
+            >>> trades = provider.fetch_trades(
+            ...     "0x8ee2f1640386310eb5e7ffa596ba9335f2d324e303d21b0dfea6998874445791",
+            ...     start="2025-12-31",
+            ... )
+        """
+        rows = [
+            self._normalize_trade(trade, condition_id)
+            for trade in self.iter_trades(
+                condition_id, start=start, end=end, page_size=page_size, max_pages=max_pages
+            )
+        ]
+        if not rows:
+            return empty_frame(POLYMARKET_TRADE_SCHEMA)
+        return pl.DataFrame(rows, schema=POLYMARKET_TRADE_SCHEMA, orient="row").sort(
+            ["timestamp", "trade_id"]
+        )
+
+    def _normalize_trade(self, trade: dict[str, Any], condition_id: str) -> tuple[Any, ...]:
+        try:
+            outcome_index = trade["outcomeIndex"]
+            outcome_price = float(trade["price"])
+            size = float(trade["size"])
+            side = str(trade["side"]).upper()
+            timestamp = datetime.fromtimestamp(int(trade["timestamp"]), UTC)
+            if isinstance(outcome_index, bool) or outcome_index not in (0, 1):
+                raise ValueError(f"outcomeIndex {outcome_index!r} is not 0 or 1")
+            if side not in ("BUY", "SELL"):
+                raise ValueError(f"side {side!r} is not BUY or SELL")
+        except (KeyError, TypeError, ValueError) as err:
+            raise DataValidationError(
+                provider="polymarket",
+                message=f"Malformed trade record for {condition_id}: {err}",
+                field="trades",
+            ) from err
+        first_outcome = outcome_index == 0
+        yes_price = outcome_price if first_outcome else round(1.0 - outcome_price, 10)
+        taker_yes = first_outcome == (side == "BUY")
+        return (
+            self._trade_key(trade),
+            trade.get("conditionId") or condition_id,
+            timestamp,
+            yes_price,
+            size,
+            RESULT_YES if taker_yes else RESULT_NO,
+            False,
+            trade.get("outcome"),
+            int(outcome_index),
+            side,
+            outcome_price,
+            None if trade.get("asset") is None else str(trade["asset"]),
+            trade.get("proxyWallet"),
+            trade.get("transactionHash"),
+        )
 
     def close(self) -> None:
         """Close HTTP client and clear caches."""
