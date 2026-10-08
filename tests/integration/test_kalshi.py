@@ -442,6 +442,72 @@ class TestKalshiRateLimiting:
         print(f"✅ 3 requests completed in {elapsed:.2f}s")
 
 
+class TestKalshiResolvedHistory:
+    """Live smoke checks for resolved-market enumeration and trades across both tiers.
+
+    API calls: about 8 (one series listing per tier, cutoff, two trade pages).
+    """
+
+    def test_resolved_markets_with_outcomes_from_live_and_archive(self, provider):
+        markets = provider.fetch_markets(status="settled", series_ticker="KXFEDDECISION")
+
+        resolved = markets.filter(pl.col("result").is_in(["yes", "no"]))
+        assert not resolved.is_empty()
+        assert set(resolved["source"].to_list()) == {"live", "historical"}
+        assert resolved["settlement_value"].is_in([0.0, 1.0]).all()
+        assert resolved["settlement_ts"].null_count() == 0
+        print(
+            resolved.select("ticker", "result", "settlement_value", "settlement_ts", "source")
+            .sort("settlement_ts")
+            .tail(5)
+        )
+
+    def test_hourly_candles_for_archived_and_live_markets(self, provider):
+        markets = provider.fetch_markets(status="settled", series_ticker="KXFEDDECISION")
+        # Markets that resolved yes trade well above a cent near their close.
+        traded = markets.filter((pl.col("volume") > 0) & (pl.col("result") == "yes"))
+        traded = traded.sort("close_time")
+        for source in ("historical", "live"):
+            tier_markets = traded.filter(pl.col("source") == source)
+            if source == "live" and tier_markets.is_empty():
+                pytest.skip("No settled KXFEDDECISION market is left in the live tier")
+            market = tier_markets.row(-1, named=True)
+            close = market["close_time"]
+            candles = provider.fetch_candles(
+                market["ticker"],
+                close.timestamp() - 3 * 86_400,
+                close.timestamp(),
+                period="1h",
+                series_ticker=market["series"],
+            )
+            assert not candles.is_empty()
+            assert set(candles["source"].to_list()) == {source}
+            prices = candles.drop_nulls("close")["close"]
+            assert prices.len() > 0
+            assert prices.is_between(0.0, 1.0).all()
+            assert prices.max() > 0.05  # dollars, not cents scaled down 100x
+            print(f"{source}: {market['ticker']} {len(candles)} hourly candles")
+
+    def test_resolved_combo_markets_are_reachable(self, provider):
+        combos = provider.fetch_markets(status="settled", mve_filter="only", max_pages=1)
+
+        assert not combos.is_empty()
+        assert combos["ticker"].str.starts_with("KXMVE").all()
+        assert combos["result"].is_in(["yes", "no"]).any()
+
+    def test_archived_market_outcome_and_trades(self, provider):
+        markets = provider.fetch_markets(event_ticker="FED-23DEC")
+        row = markets.filter(pl.col("ticker") == "FED-23DEC-T5.25").row(0, named=True)
+        assert row["result"] == "yes"
+        assert row["source"] == "historical"
+
+        trades = provider.fetch_trades("FED-22DEC-T4.00", max_pages=2)
+        assert not trades.is_empty()
+        assert trades["price"].is_between(0.0, 1.0).all()
+        assert set(trades["source"].to_list()) == {"historical"}
+        print(f"FED-23DEC-T5.25 result={row['result']}; {len(trades)} archived trades")
+
+
 # Test Summary:
 # ==============
 # Total API calls: ~12 calls

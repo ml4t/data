@@ -153,6 +153,90 @@ print(f"Volume: ${meta.get('volume', 0):,.2f}")
 print(f"End Date: {meta.get('endDate')}")
 ```
 
+## Resolved Markets and Outcomes
+
+`fetch_markets()` enumerates every market matching the filters through Gamma's
+`GET /markets/keyset`, which pages by cursor (`GET /markets` refuses offsets above 2000). Pages
+hold at most 100 markets, in ascending Gamma id order. The server applies `closed`, the minimum
+lifetime volume and the scheduled end-date window; the provider applies them again on the client.
+
+```python
+from ml4t.data.providers import PolymarketProvider
+
+provider = PolymarketProvider()
+
+resolved = provider.fetch_markets(
+    min_volume=100_000, end_date_min="2025-01-01", end_date_max="2025-12-31T23:59:59Z"
+)
+print(resolved.select("ticker", "question", "yes_outcome", "result", "settlement_ts"))
+
+for frame in provider.iter_market_frames(chunk_size=50_000, min_volume=10_000):
+    ...  # write each frame out before the next pages are requested
+provider.close()
+```
+
+Gamma markets are binary, and their outcome labels, CLOB token ids and final prices share one
+order. The first outcome is treated as the YES side whatever its label: in a "Trump vs. Boden"
+market `yes_outcome` is "Trump", and `result == "yes"` means the first outcome won.
+
+| Column | Meaning |
+|--------|---------|
+| `ticker` | Condition id (the identifier `fetch_trades` takes) |
+| `market_id`, `slug`, `question` | Gamma id, URL slug and question text |
+| `event_slug`, `event_title` | The market's event |
+| `category`, `tags` | Gamma category (mostly null on recent markets) and tag labels |
+| `yes_outcome`, `no_outcome`, `yes_token_id`, `no_token_id` | First and second outcome labels and their CLOB tokens (the identifiers `fetch_candles` takes) |
+| `closed`, `open_time`, `close_time` | Closed flag, `startDate` and scheduled `endDate` (UTC) |
+| `result` | `yes` for final prices `[1, 0]`, `no` for `[0, 1]`, `void` for a 50/50 resolution, `other` for a UMA-resolved market with other prices, null otherwise |
+| `settlement_value` | Final payout of the first outcome token |
+| `settlement_ts` | `closedTime`, else `umaEndDate` (UTC); null while unresolved |
+| `uma_resolution_status`, `outcome_prices` | Raw UMA status and final or current prices |
+| `volume` | Lifetime volume in USDC |
+| `neg_risk`, `neg_risk_market_id` | Negative-risk (mutually exclusive outcomes) grouping |
+| `fees_enabled`, `fee_type`, `maker_base_fee`, `taker_base_fee`, `fee_schedule` | Gamma's raw fee fields; `fee_schedule` as JSON text |
+
+Closed markets carry final prices even while their UMA status is still `proposed`; keep rows with
+`uma_resolution_status == "resolved"` to exclude resolutions that could still be disputed.
+`settlement_ts` often precedes `close_time`, because many markets resolve before their scheduled
+end. Gamma timestamps that cannot be parsed (`umaEndDate` is `"NOW*()"` on some 2024 markets) are
+null. `iter_markets()` yields the raw Gamma dictionaries instead.
+
+## Price History of Resolved Markets
+
+`fetch_candles(token_id, start, end, fidelity_minutes=60)` returns `timestamp` (UTC), `token_id`
+and `price`, one row per CLOB price sample; these are samples, not OHLC bars. The CLOB's
+`GET /prices-history` answers `interval=max` with an empty history for resolved markets at any
+fidelity finer than one day, and rejects explicit `startTs`/`endTs` spans longer than 15 days with
+HTTP 400. The provider sends explicit bounds in windows of at most 15 days, which serves resolved
+markets down to one-minute fidelity. An unknown token returns an empty frame, not an error.
+
+```python
+market = resolved.row(0, named=True)
+end = market["settlement_ts"]
+prices = provider.fetch_candles(
+    market["yes_token_id"], end.timestamp() - 30 * 86_400, end, fidelity_minutes=1
+)
+```
+
+## Trade History
+
+`fetch_trades(condition_id, start=None, end=None)` reads the data API's
+`GET /trades?market=<condition id>`, which returns taker trades newest first, takes inclusive
+`start`/`end` bounds in Unix seconds, serves at most 10,000 trades per request and rejects offsets
+above 10,000. Beyond that depth the provider moves `end` to the oldest second seen and continues,
+skipping the trades of that second it already returned.
+
+| Column | Meaning |
+|--------|---------|
+| `trade_id` | Hash of transaction, token, wallet, side, size, price and time (the API has no trade id) |
+| `ticker`, `timestamp` | Condition id and trade time (UTC, whole seconds) |
+| `price` | YES price: the traded token's price, or one minus it for the second outcome |
+| `count` | Shares |
+| `taker_side` | `yes` when the taker bought the first outcome or sold the second, else `no` |
+| `is_block_trade` | Always false |
+| `outcome`, `outcome_index`, `side`, `outcome_price` | Traded outcome label and index, taker `BUY`/`SELL`, and the traded token's price |
+| `asset`, `proxy_wallet`, `transaction_hash` | Token id, taker wallet and on-chain transaction |
+
 ## Supported Frequencies
 
 | Frequency | API Interval | Notes |
@@ -167,26 +251,14 @@ print(f"End Date: {meta.get('endDate')}")
 
 ### Date Range Limits
 
-The CLOB API has date range limits, especially for high-frequency data:
-- **7 days** is safe for all frequencies
-- Longer ranges may return `HTTP 400: interval is too long` error
-
-```python
-# Safe: 7-day range
-df = provider.fetch_ohlcv("market-slug", "2025-12-01", "2025-12-07")
-
-# May fail: 30-day range with hourly data
-df = provider.fetch_ohlcv("market-slug", "2025-11-01", "2025-12-01", frequency="hourly")
-```
+The CLOB rejects price-history spans longer than 15 days. `fetch_ohlcv()` requests 14-day chunks
+and `fetch_candles()` 15-day windows, so any range works; long ranges at fine frequencies take
+one request per chunk.
 
 ### Closed Markets
 
-Markets that have resolved (closed) may have limited or no recent price data:
-
-```python
-# Get only active, non-resolved markets
-markets = provider.list_markets(active=True, closed=False)
-```
+`list_markets()` returns one page of the offset listing, which stops at offset 2000. Use
+`fetch_markets()` or `iter_market_frames()` to enumerate closed markets.
 
 ## Example Use Cases
 
@@ -233,6 +305,7 @@ print(combined.group_by("symbol").agg(pl.col("close").last()))
 
 - **CLOB Timeseries**: https://docs.polymarket.com/developers/clob-api/price-history
 - **Gamma Markets API**: https://docs.polymarket.com/developers/gamma-markets-api/get-markets
+- **Data API Trades**: https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets
 - **py-clob-client**: https://github.com/Polymarket/py-clob-client
 
 ## Technical Notes
@@ -270,6 +343,11 @@ provider.close()  # Close when done
 
 See [Prediction-Market Data Sources](prediction_markets.md) for source and market-mechanism
 comparisons.
+
+### 2026-10-08
+- Added `fetch_markets()`, `iter_markets()` and `iter_market_frames()` for resolved markets with normalized outcomes
+- Added `fetch_candles()` for windowed price history of resolved markets and `fetch_trades()`
+- Fixed `fetch_ohlcv()` returning no rows for past ranges and reading dates in the local time zone
 
 ### 2025-12-07
 - Fixed token resolution for new API format (`clobTokenIds` JSON string)

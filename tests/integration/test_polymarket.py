@@ -484,6 +484,63 @@ class TestPolymarketRateLimiting:
         print(f"✅ 3 requests completed in {elapsed:.2f}s")
 
 
+class TestPolymarketResolvedHistory:
+    """Live smoke checks for resolved-market listing, windowed price history and trades.
+
+    Uses "Russia x Ukraine ceasefire in 2025?" (resolved No on 2026-01-01).
+    API calls: about 8 (one keyset page, two price windows, a few trade pages).
+    """
+
+    CONDITION_ID = "0x8ee2f1640386310eb5e7ffa596ba9335f2d324e303d21b0dfea6998874445791"
+
+    def _ceasefire(self, provider) -> dict:
+        markets = provider.fetch_markets(
+            min_volume=50_000_000,
+            end_date_min="2025-12-31",
+            end_date_max="2025-12-31T23:59:59Z",
+            max_pages=1,
+        )
+        assert not markets.is_empty()
+        assert (markets["volume"] >= 50_000_000).all()
+        assert markets["result"].is_in(["yes", "no", "void"]).all()
+        return markets.filter(pl.col("ticker") == self.CONDITION_ID).row(0, named=True)
+
+    def test_resolved_markets_with_outcomes(self, provider):
+        market = self._ceasefire(provider)
+
+        assert market["result"] == "no"
+        assert market["settlement_value"] == 0.0
+        assert market["settlement_ts"] is not None
+        assert market["yes_outcome"] == "Yes"
+        assert market["yes_token_id"] and market["no_token_id"]
+        assert market["tags"]
+        print({key: market[key] for key in ("question", "result", "settlement_ts", "tags")})
+
+    def test_hourly_prices_before_resolution_span_windows(self, provider):
+        market = self._ceasefire(provider)
+        end = market["settlement_ts"]
+
+        candles = provider.fetch_candles(
+            market["yes_token_id"], end - timedelta(days=20), end, fidelity_minutes=60
+        )
+
+        assert candles.height > 15 * 24  # more than one 15-day window of hourly samples
+        assert candles["price"].is_between(0.0, 1.0).all()
+        assert candles["timestamp"].is_sorted()
+        print(f"{candles.height} hourly prices, last {candles['price'][-1]}")
+
+    def test_trades_near_resolution(self, provider):
+        trades = provider.fetch_trades(
+            self.CONDITION_ID, start="2025-12-30", end="2025-12-31", page_size=500, max_pages=3
+        )
+
+        assert not trades.is_empty()
+        assert trades["price"].is_between(0.0, 1.0).all()
+        assert trades["taker_side"].is_in(["yes", "no"]).all()
+        assert trades["trade_id"].n_unique() == trades.height
+        print(f"{trades.height} trades, YES price {trades['price'].min()}-{trades['price'].max()}")
+
+
 # Test Summary:
 # ==============
 # Total API calls: ~15-20 calls

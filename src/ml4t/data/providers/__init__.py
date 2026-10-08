@@ -74,6 +74,16 @@ try:
 except ImportError:
     PolymarketProvider = None  # type: ignore
 
+try:
+    from ml4t.data.providers.polymarket_us import PolymarketUSProvider
+except ImportError:
+    PolymarketUSProvider = None  # type: ignore
+
+try:
+    from ml4t.data.providers.forecastex import ForecastExProvider
+except ImportError:
+    ForecastExProvider = None  # type: ignore
+
 # Crypto providers
 from ml4t.data.providers.coingecko import CoinGeckoProvider
 
@@ -151,6 +161,8 @@ __all__ = [
     # Prediction market providers
     "KalshiProvider",
     "PolymarketProvider",
+    "PolymarketUSProvider",
+    "ForecastExProvider",
     # Crypto providers
     "CoinGeckoProvider",
     "BinanceProvider",

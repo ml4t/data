@@ -26,7 +26,7 @@ data = SyntheticProvider(seed=42).fetch_ohlcv(
 | Futures and options | Databento, Binance, OKX | Historical or licensed data may be metered |
 | [Macroeconomic series](../providers/macro.md) | FRED, FXMacroData | FRED requires an API key for normal use |
 | [Research factors](../providers/factors.md) | Fama-French, AQR | Network access and source-specific terms |
-| [Prediction markets](../providers/prediction_markets.md) | Kalshi, Polymarket | Network access and changing public endpoints |
+| [Prediction markets](../providers/prediction_markets.md) | Kalshi, ForecastEx, Polymarket US, Polymarket | Network access and changing public endpoints |
 | Frozen equity history | Wiki Prices | Local historical dataset ending in 2018 |
 | CFTC positioning | COT | Install the `cot` extra |
 

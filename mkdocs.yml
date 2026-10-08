@@ -146,6 +146,8 @@ nav:
     - Wiki Prices: providers/wiki_prices.md
     - Kalshi: providers/kalshi.md
     - Polymarket: providers/polymarket.md
+    - Polymarket US: providers/polymarket_us.md
+    - ForecastEx: providers/forecastex.md
     - Binance Public: providers/binance_public.md
     - NASDAQ ITCH: providers/nasdaq_itch.md
     - EODHD: providers/eodhd.md

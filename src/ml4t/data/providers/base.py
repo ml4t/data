@@ -31,10 +31,12 @@ Example (composing mixins):
 
 from __future__ import annotations
 
+import math
 import os
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
+import httpx
 import polars as pl
 import structlog
 from tenacity import (
@@ -45,7 +47,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from ml4t.data.core.exceptions import NetworkError
+from ml4t.data.core.exceptions import (
+    DataValidationError,
+    NetworkError,
+    RateLimitError,
+    SymbolNotFoundError,
+)
 from ml4t.data.providers.mixins.circuit_breaker import CircuitBreaker, CircuitBreakerMixin
 from ml4t.data.providers.mixins.rate_limit import RateLimitMixin
 from ml4t.data.providers.mixins.session import SessionMixin
@@ -73,6 +80,29 @@ def _provider_error_is_retryable(error: BaseException) -> bool:
     return isinstance(error, NetworkError) and error.retryable
 
 
+# Shared retry policy: three attempts, exponential backoff, provider ``retry_after`` honored.
+provider_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=_provider_retry_wait,
+    retry=retry_if_exception(_provider_error_is_retryable),
+    reraise=True,
+)
+
+
+def retry_after_seconds(response: httpx.Response) -> float | None:
+    """Return a non-negative ``Retry-After`` delay in seconds, or None when absent or invalid."""
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        delay = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(delay):
+        return None
+    return max(delay, 0.0)
+
+
 # Re-export for backward compatibility
 __all__ = [
     "BaseProvider",
@@ -81,6 +111,8 @@ __all__ = [
     "circuit_breaker",
     "OHLCVProvider",
     "ProviderCapabilities",
+    "provider_retry",
+    "retry_after_seconds",
 ]
 
 
@@ -196,12 +228,7 @@ class BaseProvider(
             rate_limit=self.DEFAULT_RATE_LIMIT,
         )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=_provider_retry_wait,
-        retry=retry_if_exception(_provider_error_is_retryable),
-        reraise=True,
-    )
+    @provider_retry
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -270,6 +297,94 @@ class BaseProvider(
         )
 
         return validated_data
+
+    def _classify_error_response(self, response: httpx.Response) -> Exception | None:
+        """Return a provider-specific exception for an error response, or None for the default.
+
+        Override to mark a service-specific failure as transient (for example an edge-layer
+        rejection). The default classification in ``_request`` applies when this returns None.
+        """
+        return None
+
+    @provider_retry
+    def _request(
+        self,
+        url: str,
+        *,
+        resource: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Rate-limited GET that maps transport and HTTP failures to shared exceptions.
+
+        Transient failures (transport errors, HTTP 429 and 5xx) raise retryable errors and are
+        retried by the shared ``provider_retry`` policy, honoring ``Retry-After``.
+
+        Args:
+            url: Absolute request URL.
+            resource: Human-readable name of the requested resource, used in errors.
+            params: Query parameters.
+            headers: Request headers.
+
+        Returns:
+            The successful (2xx) response.
+
+        Raises:
+            RateLimitError: HTTP 429.
+            SymbolNotFoundError: HTTP 404; ``symbol`` is ``resource``.
+            NetworkError: Transport failure, HTTP 5xx (retryable) or other HTTP errors.
+        """
+        self._acquire_rate_limit()
+        try:
+            response = self.session.get(url, params=params, headers=headers)
+        except httpx.HTTPError as err:
+            raise NetworkError(
+                provider=self.name, message=f"Request failed for {resource}: {err}"
+            ) from err
+
+        if 200 <= response.status_code < 300:
+            return response
+        custom = self._classify_error_response(response)
+        if custom is not None:
+            raise custom
+        if response.status_code == 429:
+            raise RateLimitError(provider=self.name, retry_after=retry_after_seconds(response))
+        if response.status_code == 404:
+            raise SymbolNotFoundError(provider=self.name, symbol=resource)
+        message = f"HTTP {response.status_code} for {resource}: {response.text[:200]}"
+        raise NetworkError(
+            provider=self.name,
+            message=message,
+            retryable=response.status_code >= 500,
+        )
+
+    def _request_json(
+        self,
+        url: str,
+        *,
+        resource: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Run ``_request`` and parse a JSON object body.
+
+        Raises:
+            DataValidationError: The body is not valid JSON or not a JSON object.
+        """
+        response = self._request(url, resource=resource, params=params, headers=headers)
+        try:
+            payload = response.json()
+        except ValueError as err:
+            raise DataValidationError(
+                provider=self.name,
+                message=f"Malformed JSON response for {resource}",
+            ) from err
+        if not isinstance(payload, dict):
+            raise DataValidationError(
+                provider=self.name,
+                message=f"Expected a JSON object for {resource}, got {type(payload).__name__}",
+            )
+        return payload
 
     def _create_empty_dataframe(self) -> pl.DataFrame:
         """Create an empty DataFrame with canonical OHLCV schema.

@@ -1,0 +1,198 @@
+{
+ "_recorded": "2026-10-08 GET /markets/keyset?closed=false&include_tag=true",
+ "pages": [
+  {
+   "$schema": "https://gamma-api.polymarket.com/schemas/MarketsKeysetListResponse.json",
+   "markets": [
+    {
+     "id": "559651",
+     "question": "Xi Jinping out before 2027?",
+     "conditionId": "0xa467b14d51f01b957109d9cbb1d6c124fab2a089d52ed8f471d23c2812e743b7",
+     "slug": "xi-jinping-out-before-2027",
+     "endDate": "2027-01-01T04:59:00Z",
+     "liquidity": "597015.87223",
+     "startDate": "2025-07-03T20:37:00.228Z",
+     "outcomes": "[\"Yes\", \"No\"]",
+     "outcomePrices": "[\"0.0265\", \"0.9735\"]",
+     "volume": "14467978.535614997",
+     "active": true,
+     "closed": false,
+     "createdAt": "2025-07-03T20:25:56.889606Z",
+     "updatedAt": "2026-10-08T19:15:02.586684Z",
+     "new": false,
+     "featured": false,
+     "archived": false,
+     "resolvedBy": "0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49",
+     "restricted": true,
+     "groupItemTitle": "",
+     "groupItemThreshold": "0",
+     "questionID": "0x1d925c6933062c2e38031293612d8680ffa097c5d3ba2f87a8ecc565bd47183e",
+     "enableOrderBook": true,
+     "orderPriceMinTickSize": 0.001,
+     "orderMinSize": 5,
+     "volumeNum": 14467978.535614997,
+     "liquidityNum": 597015.87223,
+     "endDateIso": "2027-01-01",
+     "startDateIso": "2025-07-03",
+     "hasReviewedDates": true,
+     "volume24hr": 42625.55068400003,
+     "volume1wk": 202303.91317900023,
+     "volume1mo": 1383747.9125339987,
+     "volume1yr": 12864620.79898,
+     "clobTokenIds": "[\"32338220190071351435772801779725302244575775216413325951443816017994629993401\", \"25659310674993675562345759665114759892400026242514633218387667107987341231962\"]",
+     "positionIds": [
+      "895257453734540292493143124621755605615887197499956109032745153687078305792",
+      "895257453734540292493143124621755605615887197499956109032745153687078305793"
+     ],
+     "comboStatus": "enabled",
+     "umaBond": "500",
+     "umaReward": "5",
+     "volume24hrClob": 42625.55068400003,
+     "volume1wkClob": 202303.91317900023,
+     "volume1moClob": 1383747.9125339987,
+     "volume1yrClob": 12864620.79898,
+     "volumeClob": 14467978.535614997,
+     "liquidityClob": 597015.87223,
+     "makerBaseFee": 1000,
+     "takerBaseFee": 1000,
+     "customLiveness": 0,
+     "acceptingOrders": true,
+     "negRisk": false,
+     "negRiskRequestID": "",
+     "events": [
+      {
+       "id": "30828",
+       "ticker": "xi-jinping-out-before-2027",
+       "slug": "xi-jinping-out-before-2027",
+       "title": "Xi Jinping out before 2027?",
+       "startDate": "2025-07-03T20:37:00.228Z",
+       "creationDate": "2025-07-03T20:37:17.339044Z",
+       "endDate": "2027-01-01T04:59:00Z",
+       "active": true,
+       "closed": false,
+       "archived": false,
+       "new": false,
+       "featured": false,
+       "restricted": true,
+       "liquidity": 596808.08713,
+       "volume": 14467978.535614997,
+       "openInterest": 4083737.774491,
+       "createdAt": "2025-07-03T20:25:55.760196Z",
+       "updatedAt": "2026-10-08T19:15:11.075055Z",
+       "competitive": 0.8168584888648914,
+       "volume24hr": 42625.55068400003,
+       "volume1wk": 202303.91317900023,
+       "volume1mo": 1383747.9125339987,
+       "volume1yr": 12864620.79898,
+       "enableOrderBook": true,
+       "liquidityClob": 596808.08713,
+       "commentCount": 709,
+       "series": [
+        {
+         "id": "10150",
+         "ticker": "xi-jinping-out",
+         "slug": "xi-jinping-out",
+         "title": "Xi Jinping out",
+         "seriesType": "single",
+         "image": "",
+         "icon": "",
+         "active": true,
+         "closed": false,
+         "archived": false,
+         "featured": false,
+         "restricted": true,
+         "createdAt": "2025-07-03T20:26:34.992616Z",
+         "updatedAt": "2026-10-08T19:15:33.973549Z",
+         "volume24hr": 42625.55068400003,
+         "volume": 14467978.535614997,
+         "liquidity": 596808.08713,
+         "commentCount": 819
+        }
+       ],
+       "cyom": false,
+       "showAllOutcomes": true,
+       "showMarketImages": true,
+       "enableNegRisk": false,
+       "automaticallyActive": true,
+       "seriesSlug": "xi-jinping-out",
+       "negRiskAugmented": false,
+       "cumulativeMarkets": false,
+       "pendingDeployment": false,
+       "deploying": false,
+       "eventMetadata": {
+        "context_requires_regen": false
+       },
+       "version": "v1"
+      }
+     ],
+     "ready": false,
+     "funded": false,
+     "acceptingOrdersTimestamp": "2025-07-03T20:36:33Z",
+     "tags": [
+      {
+       "id": "103715",
+       "label": "HFC",
+       "slug": "hfc"
+      },
+      {
+       "id": "366",
+       "label": "world affairs",
+       "slug": "world-affairs"
+      },
+      {
+       "id": "100265",
+       "label": "Geopolitics",
+       "slug": "geopolitics"
+      },
+      {
+       "id": "101970",
+       "label": "World",
+       "slug": "world"
+      },
+      {
+       "id": "102458",
+       "label": "Earn 3.25%",
+       "slug": "earn-4"
+      },
+      {
+       "id": "101253",
+       "label": "Macro Geopolitics",
+       "slug": "macro-geopolitics"
+      }
+     ],
+     "cyom": false,
+     "competitive": 0.8168584888648914,
+     "approved": true,
+     "rewardsMinSize": 200,
+     "rewardsMaxSpread": 3.5,
+     "spread": 0.001,
+     "oneWeekPriceChange": -0.0015,
+     "oneMonthPriceChange": -0.012,
+     "oneYearPriceChange": -0.1285,
+     "lastTradePrice": 0.027,
+     "bestBid": 0.026,
+     "bestAsk": 0.027,
+     "automaticallyActive": true,
+     "clearBookOnStart": true,
+     "manualActivation": false,
+     "negRiskOther": false,
+     "umaResolutionStatuses": "[]",
+     "pendingDeployment": false,
+     "deploying": false,
+     "deployingTimestamp": "2025-07-03T20:35:48.270879Z",
+     "rfqEnabled": false,
+     "holdingRewardsEnabled": true,
+     "feesEnabled": true,
+     "feeType": "politics_fees",
+     "feeSchedule": {
+      "exponent": 1,
+      "rate": 0.04,
+      "takerOnly": true,
+      "rebateRate": 0.25
+     },
+     "version": "v1"
+    }
+   ]
+  }
+ ]
+}

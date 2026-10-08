@@ -24,7 +24,7 @@
 - [x] DataBento (institutional, trial)
 - [x] Wiki Prices (historical 1962-2018)
 - [x] Tiingo, Finnhub, Polygon, Twelve Data, CryptoCompare, Oanda
-- [x] FRED, AQR, Fama-French, Kalshi, Polymarket, OKX, Binance public bulk, ITCH sample
+- [x] FRED, AQR, Fama-French, Kalshi, Polymarket, Polymarket US, ForecastEx, OKX, Binance public bulk, ITCH sample
 - [x] Synthetic and mock providers for testing
 
 ### Storage (Complete)
