@@ -462,6 +462,32 @@ class TestKalshiResolvedHistory:
             .tail(5)
         )
 
+    def test_hourly_candles_for_archived_and_live_markets(self, provider):
+        markets = provider.fetch_markets(status="settled", series_ticker="KXFEDDECISION")
+        # Markets that resolved yes trade well above a cent near their close.
+        traded = markets.filter((pl.col("volume") > 0) & (pl.col("result") == "yes"))
+        traded = traded.sort("close_time")
+        for source in ("historical", "live"):
+            tier_markets = traded.filter(pl.col("source") == source)
+            if source == "live" and tier_markets.is_empty():
+                pytest.skip("No settled KXFEDDECISION market is left in the live tier")
+            market = tier_markets.row(-1, named=True)
+            close = market["close_time"]
+            candles = provider.fetch_candles(
+                market["ticker"],
+                close.timestamp() - 3 * 86_400,
+                close.timestamp(),
+                period="1h",
+                series_ticker=market["series"],
+            )
+            assert not candles.is_empty()
+            assert set(candles["source"].to_list()) == {source}
+            prices = candles.drop_nulls("close")["close"]
+            assert prices.len() > 0
+            assert prices.is_between(0.0, 1.0).all()
+            assert prices.max() > 0.05  # dollars, not cents scaled down 100x
+            print(f"{source}: {market['ticker']} {len(candles)} hourly candles")
+
     def test_resolved_combo_markets_are_reachable(self, provider):
         combos = provider.fetch_markets(status="settled", mve_filter="only", max_pages=1)
 

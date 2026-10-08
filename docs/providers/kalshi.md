@@ -93,8 +93,45 @@ provider.close()
 | `expiration_value`, `last_price`, `previous_price`, `volume`, `open_interest` | Settlement source value and last market statistics (prices in dollars, volume in contracts) |
 | `source` | `live` or `historical` tier |
 
-`iter_markets()` yields the raw market dictionaries instead. `list_markets()` keeps returning a
+`iter_market_frames(chunk_size=100_000, ...)` streams the same normalized rows as frames of at
+most `chunk_size` rows, for listings too large to hold in memory (the full settled listing runs to
+millions of markets). `iter_markets()` yields the raw market dictionaries instead. `list_markets()` keeps returning a
 single page of raw dictionaries.
+
+---
+
+## Price History Across Tiers
+
+`fetch_candles(ticker, start_ts, end_ts, period="1h", series_ticker=None, tier=None)` returns
+candlesticks for one market from whichever tier holds it. Markets settled before the historical
+cutoff are served only by `GET /historical/markets/{ticker}/candlesticks`; the others by
+`GET /series/{series}/markets/{ticker}/candlesticks`, which needs the market's series.
+
+- Pass `tier` (the `source` column of `fetch_markets()`) to go straight to the right endpoint.
+- Pass `series_ticker` (the `series` column, or the event's series) for live markets. Without
+  it, the ticker prefix is tried first; if both tiers answer 404, the series is looked up from
+  the market's event and the live endpoint is retried.
+- Without `tier`, the live endpoint is tried first and the archive on a 404.
+- Ranges longer than Kalshi's 5000-candle limit are split into several requests.
+
+```python
+candles = provider.fetch_candles(
+    "KXFEDDECISION-26JUL-H0", "2026-07-26", "2026-07-29", period="1h",
+    series_ticker="KXFEDDECISION", tier="historical",
+)
+```
+
+| Column | Meaning |
+|--------|---------|
+| `timestamp` | End of the candle period (UTC) |
+| `open`, `high`, `low`, `close`, `mean`, `previous` | Trade prices in dollars; null when nothing traded (except `previous`) |
+| `yes_bid_close`, `yes_ask_close` | Closing YES bid and ask in dollars |
+| `volume`, `open_interest` | Contracts |
+| `source` | `live` or `historical` tier |
+
+Live candles carry `*_dollars`/`*_fp` fields and archive candles unsuffixed dollar strings;
+both are returned in dollars (0-1). `fetch_ohlcv()` uses the same tier routing, so it also
+works for archived markets such as `FED-23DEC-T5.25`, and it keeps its OHLCV schema.
 
 ---
 

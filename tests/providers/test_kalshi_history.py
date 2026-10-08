@@ -15,8 +15,18 @@ import httpx
 import polars as pl
 import pytest
 
-from ml4t.data.core.exceptions import DataValidationError, NetworkError, RateLimitError
-from ml4t.data.providers.kalshi import KALSHI_TRADE_SCHEMA, MARKET_SCHEMA, KalshiProvider
+from ml4t.data.core.exceptions import (
+    DataValidationError,
+    NetworkError,
+    RateLimitError,
+    SymbolNotFoundError,
+)
+from ml4t.data.providers.kalshi import (
+    CANDLE_SCHEMA,
+    KALSHI_TRADE_SCHEMA,
+    MARKET_SCHEMA,
+    KalshiProvider,
+)
 
 CUTOFF = {
     "market_settled_ts": "2026-08-09T00:00:00Z",
@@ -76,6 +86,7 @@ class KalshiFake:
         self.cutoff: dict[str, Any] | None = CUTOFF
         self.overrides: dict[str, list[httpx.Response]] = {}
         self.requests: list[httpx.Request] = []
+        self.routes: dict[str, dict[str, Any]] = {}
 
     def add_pages(self, path: str, key: str, pages: list[list[dict[str, Any]]]) -> None:
         served: dict[str, dict[str, Any]] = {}
@@ -94,7 +105,11 @@ class KalshiFake:
             if self.cutoff is None:
                 return _json({"error": "not found"}, status=404)
             return _json(self.cutoff)
+        if path in self.routes:
+            return _json(self.routes[path])
         if path not in self.pages:
+            if path.startswith(("/series/", "/historical/markets/", "/markets/", "/events/")):
+                return _json({"error": {"code": "not_found"}}, status=404)
             return _json({"error": f"unexpected path {path}"}, status=500)
         cursor = request.url.params.get("cursor", "")
         return _json(self.pages[path][cursor])
@@ -604,3 +619,201 @@ def test_existing_list_markets_contract_is_unchanged(provider, fake):
 
     assert [m["ticker"] for m in markets] == ["KXA-1"]
     assert json.loads(json.dumps(markets))[0]["result"] == "yes"
+
+
+# Archive candle as served by /historical/markets/{ticker}/candlesticks (probed 2026-10-08):
+# unsuffixed dollar strings, null trade prices when nothing traded.
+ARCHIVE_CANDLE = {
+    "end_period_ts": 1702098000,
+    "open_interest": "7758.00",
+    "price": {
+        "close": "0.9900",
+        "high": "0.9900",
+        "low": "0.9800",
+        "mean": "0.9850",
+        "open": "0.9800",
+        "previous": "0.9800",
+    },
+    "volume": "114.00",
+    "yes_ask": {"close": "1.0000", "high": "1.0000", "low": "0.9900", "open": "1.0000"},
+    "yes_bid": {"close": "0.9900", "high": "0.9900", "low": "0.9800", "open": "0.9900"},
+}
+QUIET_ARCHIVE_CANDLE = {
+    **ARCHIVE_CANDLE,
+    "end_period_ts": 1702184400,
+    "price": {
+        "close": None,
+        "high": None,
+        "low": None,
+        "mean": None,
+        "open": None,
+        "previous": "0.9900",
+    },
+    "volume": "0.00",
+}
+# Live candle as served by /series/{series}/markets/{ticker}/candlesticks.
+LIVE_CANDLE = {
+    "end_period_ts": 1789581600,
+    "open_interest_fp": "10984000.31",
+    "price": {
+        "close_dollars": "0.8800",
+        "high_dollars": "0.8800",
+        "low_dollars": "0.8400",
+        "mean_dollars": "0.8610",
+        "open_dollars": "0.8800",
+        "previous_dollars": "0.8700",
+    },
+    "volume_fp": "577503.04",
+    "yes_ask": {"close_dollars": "1.0000", "open_dollars": "0.8800"},
+    "yes_bid": {"close_dollars": "0.0000", "open_dollars": "0.8700"},
+}
+ARCHIVE_PATH = "/historical/markets/FED-23DEC-T5.25/candlesticks"
+
+
+class TestCandles:
+    def test_archive_candles_are_dollars_not_cents(self, provider, fake):
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [ARCHIVE_CANDLE, QUIET_ARCHIVE_CANDLE]}
+
+        candles = provider.fetch_candles(
+            "FED-23DEC-T5.25", "2023-12-08", "2023-12-11", period="1h", tier="historical"
+        )
+
+        assert candles.schema == pl.Schema(CANDLE_SCHEMA)
+        first, quiet = candles.iter_rows(named=True)
+        assert (first["open"], first["close"], first["mean"]) == (0.98, 0.99, 0.985)
+        assert (first["yes_bid_close"], first["yes_ask_close"]) == (0.99, 1.0)
+        assert (first["volume"], first["open_interest"]) == (114.0, 7758.0)
+        assert first["timestamp"] == datetime(2023, 12, 9, 5, tzinfo=UTC)
+        assert quiet["close"] is None
+        assert quiet["previous"] == 0.99
+
+    def test_fetch_ohlcv_keeps_archive_candles_in_dollars(self, provider, fake):
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [ARCHIVE_CANDLE]}
+
+        bars = provider.fetch_ohlcv("FED-23DEC-T5.25", "2023-12-08", "2023-12-10", "hourly")
+
+        assert bars["close"].to_list() == [0.99]
+
+    def test_archived_market_is_served_by_the_archive_endpoint(self, provider, fake):
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [ARCHIVE_CANDLE]}
+
+        candles = provider.fetch_candles("FED-23DEC-T5.25", 1702000000, 1702600000)
+
+        assert candles["source"].to_list() == ["historical"]
+        assert [r.url.path.removeprefix("/trade-api/v2") for r in fake.requests] == [
+            "/series/FED/markets/FED-23DEC-T5.25/candlesticks",
+            ARCHIVE_PATH,
+        ]
+
+    def test_live_market_with_series_unlike_its_prefix_is_resolved(self, provider, fake):
+        live_path = "/series/KXFED/markets/FED-26DEC-T4.00/candlesticks"
+        fake.routes[live_path] = {"candlesticks": [LIVE_CANDLE]}
+        fake.routes["/markets/FED-26DEC-T4.00"] = {"market": {"event_ticker": "FED-26DEC"}}
+        fake.routes["/events/FED-26DEC"] = {"event": {"series_ticker": "KXFED"}}
+
+        candles = provider.fetch_candles("FED-26DEC-T4.00", 1789500000, 1789600000)
+
+        assert candles["source"].to_list() == ["live"]
+        assert candles["close"].to_list() == [0.88]
+        assert fake.requests[-1].url.path.endswith(live_path)
+
+    def test_explicit_series_goes_straight_to_the_live_endpoint(self, provider, fake):
+        live_path = "/series/KXFED/markets/FED-26DEC-T4.00/candlesticks"
+        fake.routes[live_path] = {"candlesticks": [LIVE_CANDLE]}
+
+        candles = provider.fetch_candles(
+            "FED-26DEC-T4.00", 1789500000, 1789600000, series_ticker="kxfed"
+        )
+
+        assert len(fake.requests) == 1
+        row = candles.row(0, named=True)
+        assert (row["close"], row["previous"], row["yes_bid_close"]) == (0.88, 0.87, 0.0)
+        assert (row["volume"], row["open_interest"]) == (577503.04, 10984000.31)
+
+    def test_legacy_integer_cents_are_scaled(self, provider, fake):
+        live_path = "/series/KXINFL/markets/KXINFL-25JAN/candlesticks"
+        fake.routes[live_path] = {
+            "candlesticks": [
+                {
+                    "end_period_ts": 1736000000,
+                    "price": {"open": 45, "high": 48, "low": 44, "close": 47},
+                    "volume": 10,
+                }
+            ]
+        }
+
+        candles = provider.fetch_candles("KXINFL-25JAN", 1735900000, 1736100000, period="1d")
+        bars = provider.fetch_ohlcv("KXINFL-25JAN", "2025-01-03", "2025-01-05", "daily")
+
+        assert candles["close"].to_list() == [0.47]
+        assert bars["close"].to_list() == [0.47]
+
+    def test_wrong_tier_is_not_masked(self, provider, fake):
+        with pytest.raises(SymbolNotFoundError):
+            provider.fetch_candles("FED-23DEC-T5.25", 1702000000, 1702600000, tier="live")
+        assert len(fake.requests) == 1
+
+    def test_unknown_market_raises(self, provider, fake):
+        with pytest.raises(SymbolNotFoundError):
+            provider.fetch_candles("NOPE-26DEC-X", 1702000000, 1702600000)
+
+    def test_long_ranges_are_split_under_the_candle_limit(self, provider, fake):
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [ARCHIVE_CANDLE]}
+        start = 1_700_000_000
+        end = start + 6000 * 3600
+
+        candles = provider.fetch_candles("FED-23DEC-T5.25", start, end, tier="historical")
+
+        windows = [
+            (int(r.url.params["start_ts"]), int(r.url.params["end_ts"])) for r in fake.requests
+        ]
+        assert windows == [(start, start + 4999 * 3600), (start + 4999 * 3600, end)]
+        assert all(r.url.params["period_interval"] == "60" for r in fake.requests)
+        assert len(candles) == 1
+
+    def test_empty_and_malformed_candles(self, provider, fake):
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": []}
+        empty = provider.fetch_candles("FED-23DEC-T5.25", 1, 2, tier="historical")
+        assert empty.is_empty()
+        assert empty.schema == pl.Schema(CANDLE_SCHEMA)
+
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [{"price": {"close": "0.5"}}]}
+        with pytest.raises(DataValidationError, match="Malformed candlestick"):
+            provider.fetch_candles("FED-23DEC-T5.25", 1, 2, tier="historical")
+
+    def test_invalid_period_and_tier(self, provider, fake):
+        with pytest.raises(DataValidationError, match="Unsupported frequency"):
+            provider.fetch_candles("FED-23DEC-T5.25", 1, 2, period=5)
+        with pytest.raises(DataValidationError, match="tier"):
+            provider.fetch_candles("FED-23DEC-T5.25", 1, 2, tier="archive")
+
+    def test_rate_limited_candles_are_retried(self, provider, fake, retry_sleeps):
+        fake.overrides[ARCHIVE_PATH] = [_json({}, status=429, headers={"Retry-After": "5"})]
+        fake.routes[ARCHIVE_PATH] = {"candlesticks": [ARCHIVE_CANDLE]}
+
+        candles = provider.fetch_candles("FED-23DEC-T5.25", 1, 2, tier="historical")
+
+        assert len(candles) == 1
+        retry_sleeps.assert_called_once_with(5.0)
+
+
+class TestMarketFrames:
+    def test_frames_stream_in_chunks(self, provider, fake):
+        fake.add_pages("/markets", "markets", [[_market("KXA-1"), _market("KXA-2")]])
+        fake.add_pages("/historical/markets", "markets", [[_market("OLD-1")]])
+
+        frames = list(provider.iter_market_frames(chunk_size=2))
+
+        assert [len(frame) for frame in frames] == [2, 1]
+        assert all(frame.schema == pl.Schema(MARKET_SCHEMA) for frame in frames)
+        assert pl.concat(frames)["ticker"].to_list() == ["KXA-1", "KXA-2", "OLD-1"]
+
+    def test_no_matches_yield_nothing(self, provider, fake):
+        fake.add_pages("/markets", "markets", [[]])
+        fake.add_pages("/historical/markets", "markets", [[]])
+
+        assert list(provider.iter_market_frames()) == []
+
+    def test_chunk_size_must_be_positive(self, provider, fake):
+        with pytest.raises(DataValidationError, match="chunk_size"):
+            list(provider.iter_market_frames(chunk_size=0))
