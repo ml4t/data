@@ -277,6 +277,8 @@ class TestFetchOhlcvPastRanges:
     @pytest.fixture
     def new_york_time(self, monkeypatch):
         """Run in a non-UTC local zone so naive-datetime conversions shift the range."""
+        if not hasattr(time, "tzset"):
+            pytest.skip("time.tzset is unavailable on Windows")
         monkeypatch.setenv("TZ", "America/New_York")
         time.tzset()
         yield
