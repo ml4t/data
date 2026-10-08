@@ -479,11 +479,11 @@ class PolymarketProvider(BaseProvider):
             List of price points [{t: timestamp, p: price}, ...]
         """
         try:
-            start_dt = datetime.strptime(start, "%Y-%m-%d")
-            end_dt = datetime.strptime(end, "%Y-%m-%d")
+            start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=UTC)
+            end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=UTC)
 
             history: list[dict[str, Any]] = []
-            chunk_days = self.HISTORY_CHUNK_DAYS if interval != "max" else self.MAX_MARKET_SCAN
+            chunk_days = self.HISTORY_CHUNK_DAYS
             chunk_start = start_dt
 
             while chunk_start <= end_dt:
@@ -537,13 +537,17 @@ class PolymarketProvider(BaseProvider):
         end_ts: int,
         interval: str,
     ) -> list[dict[str, Any]]:
-        """Fetch a single chunk of raw price history from the CLOB API."""
+        """Fetch a single chunk of raw price history from the CLOB API.
+
+        ``interval`` names a range ending now and overrides ``startTs``/``endTs``, so past
+        ranges are requested by their bounds and the interval's step as ``fidelity``.
+        """
         endpoint = f"{self.CLOB_URL}/prices-history"
         params = {
             "market": token_id,
             "startTs": start_ts,
             "endTs": end_ts,
-            "interval": interval,
+            "fidelity": self.FIDELITY_MAP.get(interval, self.FIDELITY_MAP["1d"]),
         }
 
         self._acquire_rate_limit()

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -270,6 +271,37 @@ class TestCandles:
 
         with pytest.raises(DataValidationError, match="Malformed price point"):
             provider.fetch_candles(TOKEN_ID, 0, 10)
+
+
+class TestFetchOhlcvPastRanges:
+    @pytest.fixture
+    def new_york_time(self, monkeypatch):
+        """Run in a non-UTC local zone so naive-datetime conversions shift the range."""
+        monkeypatch.setenv("TZ", "America/New_York")
+        time.tzset()
+        yield
+        monkeypatch.undo()
+        time.tzset()
+
+    def test_past_range_is_requested_by_bounds_and_fidelity(self, provider, use_transport):
+        """Prevents: sending interval with startTs/endTs, which returns no history for the past."""
+        requests = use_transport(provider, _prices_server(PRICES["response"]["history"]))
+
+        bars = provider.fetch_ohlcv(TOKEN_ID, "2025-06-01", "2025-06-01", frequency="hourly")
+
+        assert bars.height == 24
+        assert all("interval" not in request.url.params for request in requests)
+        assert {request.url.params["fidelity"] for request in requests} == {"60"}
+
+    @pytest.mark.usefixtures("new_york_time")
+    def test_dates_are_utc_days_whatever_the_local_zone(self, provider, use_transport):
+        """Prevents: YYYY-MM-DD bounds read in the machine's local zone, shifting the window."""
+        requests = use_transport(provider, _prices_server(PRICES["response"]["history"]))
+
+        bars = provider.fetch_ohlcv(TOKEN_ID, "2025-06-01", "2025-06-01", frequency="hourly")
+
+        assert bars.height == 24
+        assert int(requests[0].url.params["startTs"]) == 1748736000  # 2025-06-01T00:00Z
 
 
 def _trades_server(trades: list[dict[str, Any]], max_offset: int, ignore_offset: bool = False):
