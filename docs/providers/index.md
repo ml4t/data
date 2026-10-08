@@ -23,6 +23,8 @@ For the wider vendor landscape, including sources the library does not wrap, sta
 | [Wiki Prices](wiki_prices.md) | Historical | Static | Thread | No |
 | [Kalshi](kalshi.md) | Prediction Markets | Public data | Thread | No |
 | [Polymarket](polymarket.md) | Prediction Markets | Public data | Thread | No |
+| [Polymarket US](polymarket_us.md) | Prediction Markets | Public data | Thread | No |
+| [ForecastEx](forecastex.md) | Prediction Markets | Daily files | Thread | No |
 | [Binance Public](binance_public.md) | Crypto | Bulk downloads | Thread | No |
 | [NASDAQ ITCH](nasdaq_itch.md) | Tick Data | Sample data | Thread | No |
 | [EODHD](eodhd.md) | Global Stocks | 20 calls/day | Native | Yes |
@@ -80,7 +82,7 @@ provider's capabilities before passing it to `DataManager` or `async_batch_load(
 
 | Requirement | Providers to Evaluate |
 |-------------|-----------------------|
-| No credential | Yahoo Finance, CoinGecko, Fama-French, AQR, Kalshi, Polymarket, Binance Public, NASDAQ ITCH |
+| No credential | Yahoo Finance, CoinGecko, Fama-French, AQR, Kalshi, Polymarket, Polymarket US, ForecastEx, Binance Public, NASDAQ ITCH |
 | US equities | Yahoo Finance, Alpaca, Tiingo, Massive |
 | Global equities | EODHD, Finnhub, Twelve Data |
 | Futures and options | Databento, Massive |
@@ -88,7 +90,7 @@ provider's capabilities before passing it to `DataManager` or `async_batch_load(
 | Foreign exchange | Oanda, Twelve Data, FXMacroData |
 | Economic series | FRED, FXMacroData; external official sources are compared in [Macroeconomic Data Sources](macro.md) |
 | Academic factors | Fama-French, AQR; external libraries are compared in [Research Factor Data Sources](factors.md) |
-| Prediction markets | Kalshi, Polymarket; external markets are compared in [Prediction-Market Data Sources](prediction_markets.md) |
+| Prediction markets | Kalshi, ForecastEx, Polymarket US, Polymarket; external markets are compared in [Prediction-Market Data Sources](prediction_markets.md) |
 | Equity fundamentals | Yahoo Finance, EODHD, Finnhub, Massive; other vendors and the SEC routes are compared in [Fundamental Data Sources](fundamentals.md) |
 
 Provider access, coverage, retention, and redistribution terms can differ by account tier. Confirm
