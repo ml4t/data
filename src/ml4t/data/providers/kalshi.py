@@ -35,9 +35,11 @@ Example:
 """
 
 import time
-from datetime import datetime
+from collections.abc import Iterator
+from datetime import date, datetime
 from typing import Any, ClassVar
 
+import httpx
 import polars as pl
 import structlog
 
@@ -49,8 +51,43 @@ from ml4t.data.core.exceptions import (
     SymbolNotFoundError,
 )
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.prediction_markets import (
+    RESOLUTION_SCHEMA,
+    TRADE_SCHEMA,
+    UTC_DATETIME,
+    empty_frame,
+    parse_utc_timestamp,
+    result_from_label,
+    to_unix_seconds,
+)
 
 logger = structlog.get_logger()
+
+TimestampArg = int | float | str | date | datetime | None
+
+# Normalized market columns returned by KalshiProvider.fetch_markets.
+MARKET_SCHEMA: dict[str, pl.DataType] = {
+    "ticker": pl.Utf8(),
+    "event_ticker": pl.Utf8(),
+    "title": pl.Utf8(),
+    "status": pl.Utf8(),
+    "market_type": pl.Utf8(),
+    "open_time": UTC_DATETIME,
+    "close_time": UTC_DATETIME,
+    **RESOLUTION_SCHEMA,
+    "result_raw": pl.Utf8(),
+    "expiration_value": pl.Utf8(),
+    "last_price": pl.Float64(),
+    "volume": pl.Float64(),
+    "open_interest": pl.Float64(),
+    "source": pl.Utf8(),
+}
+
+# Normalized trade columns returned by KalshiProvider.fetch_trades.
+KALSHI_TRADE_SCHEMA: dict[str, pl.DataType] = {**TRADE_SCHEMA, "source": pl.Utf8()}
+
+_LIVE = "live"
+_HISTORICAL = "historical"
 
 
 class KalshiProvider(BaseProvider):
@@ -824,6 +861,494 @@ class KalshiProvider(BaseProvider):
             return self._create_empty_dataframe()
 
         return result.sort("timestamp")
+
+    # ------------------------------------------------------------------
+    # Full market enumeration, resolution outcomes and trade history
+    # ------------------------------------------------------------------
+
+    MAX_PAGE_SIZE: ClassVar[int] = 1000
+
+    def _classify_error_response(self, response: httpx.Response) -> Exception | None:
+        """Treat Kalshi's HTML 403 edge rejection of public requests as transient."""
+        if self._is_unauthenticated_edge_forbidden(response):
+            return NetworkError(
+                provider="kalshi",
+                message="Kalshi public endpoint returned an HTML 403 (edge layer)",
+                retry_after=self.EDGE_403_RETRY_DELAY,
+            )
+        return None
+
+    def get_historical_cutoff(self) -> dict[str, datetime] | None:
+        """Return the live/archive boundary timestamps from ``GET /historical/cutoff``.
+
+        Markets settled before ``market_settled_ts`` and trades created before
+        ``trades_created_ts`` are served only by the ``/historical/*`` endpoints.
+
+        Returns:
+            Mapping of cutoff name (e.g. ``"market_settled_ts"``, ``"trades_created_ts"``) to
+            an aware UTC datetime, or None when the endpoint does not exist (HTTP 404). The
+            value is fetched once per provider instance.
+        """
+        if not hasattr(self, "_historical_cutoff"):
+            try:
+                payload = self._request_json(
+                    f"{self.BASE_URL}/historical/cutoff",
+                    resource="historical cutoff",
+                    headers=self._get_headers(),
+                )
+            except SymbolNotFoundError:
+                self.logger.warning("Kalshi /historical/cutoff not found; querying both tiers")
+                self._historical_cutoff: dict[str, datetime] | None = None
+            else:
+                cutoff: dict[str, datetime] = {}
+                for key, value in payload.items():
+                    if not key.endswith("_ts"):
+                        continue
+                    try:
+                        parsed = parse_utc_timestamp(value)
+                    except ValueError as err:
+                        raise DataValidationError(
+                            provider="kalshi",
+                            message=f"Malformed historical cutoff {key}={value!r}",
+                            field=key,
+                            value=value,
+                        ) from err
+                    if parsed is not None:
+                        cutoff[key] = parsed
+                self._historical_cutoff = cutoff
+        return self._historical_cutoff
+
+    def _cutoff_seconds(self, key: str) -> int | None:
+        cutoff = self.get_historical_cutoff()
+        if not cutoff or key not in cutoff:
+            return None
+        return int(cutoff[key].timestamp())
+
+    def _paginate(
+        self,
+        path: str,
+        params: dict[str, Any],
+        *,
+        items_key: str,
+        resource: str,
+        max_pages: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield items from a cursor-paginated Kalshi endpoint until the cursor is empty."""
+        cursor = ""
+        seen_cursors: set[str] = set()
+        pages = 0
+        while True:
+            page_params = dict(params)
+            if cursor:
+                page_params["cursor"] = cursor
+            payload = self._request_json(
+                f"{self.BASE_URL}{path}",
+                resource=resource,
+                params=page_params,
+                headers=self._get_headers(),
+            )
+            items = payload.get(items_key)
+            if not isinstance(items, list):
+                raise DataValidationError(
+                    provider="kalshi",
+                    message=f"Response for {resource} has no '{items_key}' list",
+                    field=items_key,
+                )
+            for item in items:
+                if not isinstance(item, dict):
+                    raise DataValidationError(
+                        provider="kalshi",
+                        message=f"Non-object entry in '{items_key}' for {resource}",
+                        field=items_key,
+                    )
+                yield item
+            pages += 1
+            cursor = payload.get("cursor") or ""
+            if not isinstance(cursor, str):
+                raise DataValidationError(
+                    provider="kalshi", message=f"Non-string cursor for {resource}", field="cursor"
+                )
+            if not cursor or (max_pages is not None and pages >= max_pages):
+                return
+            if cursor in seen_cursors:
+                raise DataValidationError(
+                    provider="kalshi",
+                    message=f"Pagination cursor repeated for {resource}; aborting",
+                    field="cursor",
+                    value=cursor,
+                )
+            seen_cursors.add(cursor)
+
+    def iter_markets(
+        self,
+        status: str | None = None,
+        series_ticker: str | None = None,
+        event_ticker: str | None = None,
+        min_close_ts: TimestampArg = None,
+        max_close_ts: TimestampArg = None,
+        include_historical: bool = True,
+        exclude_multivariate: bool = False,
+        page_size: int = MAX_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate over every market matching the filters, across the live and archive tiers.
+
+        Kalshi serves markets settled before the historical cutoff (``get_historical_cutoff``)
+        only from ``GET /historical/markets``, which accepts a single ``event_ticker`` or
+        ``series_ticker`` filter and no status or time filters. This method pages through
+        ``GET /markets`` and, when the filters can match archived markets, through the
+        archive; it applies the filters the archive cannot take on the client and drops
+        archive duplicates of live tickers.
+
+        Args:
+            status: ``"unopened"``, ``"open"``, ``"paused"``, ``"closed"``, ``"settled"`` or
+                None for all. Archived markets are all settled, so the archive is only
+                queried for ``"settled"`` or None.
+            series_ticker: Series filter (e.g. ``"KXFED"``).
+            event_ticker: Event filter (e.g. ``"FED-23DEC"``).
+            min_close_ts: Keep markets closing at or after this time (Unix seconds, ISO
+                string, date or datetime; naive values are UTC).
+            max_close_ts: Keep markets closing at or before this time.
+            include_historical: Also page through the archive tier.
+            exclude_multivariate: Drop multivariate combo markets (``KXMVE...``).
+            page_size: Markets per request (1-1000).
+            max_pages: Optional cap on pages per tier, for sampling.
+
+        Yields:
+            Raw Kalshi market dictionaries with an added ``"_source"`` key
+            (``"live"`` or ``"historical"``).
+        """
+        min_close = to_unix_seconds(min_close_ts)
+        max_close = to_unix_seconds(max_close_ts)
+        limit = max(1, min(int(page_size), self.MAX_PAGE_SIZE))
+
+        def close_in_range(market: dict[str, Any]) -> bool:
+            if min_close is None and max_close is None:
+                return True
+            close_time = parse_utc_timestamp(market.get("close_time"))
+            if close_time is None:
+                return False
+            close_seconds = close_time.timestamp()
+            if min_close is not None and close_seconds < min_close:
+                return False
+            return not (max_close is not None and close_seconds > max_close)
+
+        def is_multivariate(market: dict[str, Any]) -> bool:
+            return bool(market.get("mve_collection_ticker")) or str(
+                market.get("ticker", "")
+            ).startswith("KXMVE")
+
+        live_params: dict[str, Any] = {"limit": limit}
+        if status:
+            live_params["status"] = status
+        if series_ticker:
+            live_params["series_ticker"] = series_ticker.upper()
+        if event_ticker:
+            live_params["event_ticker"] = event_ticker.upper()
+        if exclude_multivariate:
+            live_params["mve_filter"] = "exclude"
+        # Kalshi accepts close-time filters only without a status or with status=closed.
+        if status in (None, "closed"):
+            if min_close is not None:
+                live_params["min_close_ts"] = min_close
+            if max_close is not None:
+                live_params["max_close_ts"] = max_close
+
+        seen: set[str] = set()
+        for market in self._paginate(
+            "/markets",
+            live_params,
+            items_key="markets",
+            resource="markets",
+            max_pages=max_pages,
+        ):
+            if not close_in_range(market) or (exclude_multivariate and is_multivariate(market)):
+                continue
+            seen.add(str(market.get("ticker")))
+            yield {**market, "_source": _LIVE}
+
+        if not include_historical or status not in (None, "settled"):
+            return
+        settled_cutoff = self._cutoff_seconds("market_settled_ts")
+        if settled_cutoff is not None and min_close is not None and min_close >= settled_cutoff:
+            return  # archived markets settled, hence closed, before the cutoff
+
+        archive_params: dict[str, Any] = {"limit": limit}
+        # The archive takes exactly one of event_ticker, series_ticker, mve_filter.
+        if event_ticker:
+            archive_params["event_ticker"] = event_ticker.upper()
+        elif series_ticker:
+            archive_params["series_ticker"] = series_ticker.upper()
+        elif exclude_multivariate:
+            archive_params["mve_filter"] = "exclude"
+        event_prefix = event_ticker.upper() if event_ticker else None
+
+        for market in self._paginate(
+            "/historical/markets",
+            archive_params,
+            items_key="markets",
+            resource="historical markets",
+            max_pages=max_pages,
+        ):
+            ticker = str(market.get("ticker"))
+            if ticker in seen:
+                continue
+            if event_prefix and str(market.get("event_ticker", "")).upper() != event_prefix:
+                continue
+            if not close_in_range(market) or (exclude_multivariate and is_multivariate(market)):
+                continue
+            seen.add(ticker)
+            yield {**market, "_source": _HISTORICAL}
+
+    def fetch_markets(
+        self,
+        status: str | None = None,
+        series_ticker: str | None = None,
+        event_ticker: str | None = None,
+        min_close_ts: TimestampArg = None,
+        max_close_ts: TimestampArg = None,
+        include_historical: bool = True,
+        exclude_multivariate: bool = False,
+        page_size: int = MAX_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> pl.DataFrame:
+        """Return every matching market with its normalized resolution outcome.
+
+        Accepts the same filters as ``iter_markets``, which covers both the live and the
+        archive tier.
+
+        Returns:
+            DataFrame with ``MARKET_SCHEMA`` columns, one row per market. ``result`` is
+            ``"yes"``/``"no"`` for a binary market resolved to that side, ``"other"`` for a
+            scalar settlement, and null while unresolved; ``result_raw`` keeps Kalshi's
+            label. ``settlement_value`` is the YES payout in dollars and ``settlement_ts``
+            the UTC settlement time. ``source`` names the tier that served the row.
+
+        Example:
+            >>> provider = KalshiProvider()
+            >>> fed = provider.fetch_markets(status="settled", series_ticker="KXFEDDECISION")
+            >>> fed.select("ticker", "result", "settlement_value", "settlement_ts")
+        """
+        rows = [
+            self._normalize_market(market)
+            for market in self.iter_markets(
+                status=status,
+                series_ticker=series_ticker,
+                event_ticker=event_ticker,
+                min_close_ts=min_close_ts,
+                max_close_ts=max_close_ts,
+                include_historical=include_historical,
+                exclude_multivariate=exclude_multivariate,
+                page_size=page_size,
+                max_pages=max_pages,
+            )
+        ]
+        if not rows:
+            return empty_frame(MARKET_SCHEMA)
+        return pl.DataFrame(rows, schema=MARKET_SCHEMA, orient="row")
+
+    @staticmethod
+    def _dollars(record: dict[str, Any], key: str) -> float | None:
+        """Read a price in dollars from ``{key}_dollars`` or a legacy unsuffixed field.
+
+        Unsuffixed JSON integers follow Kalshi's legacy cent encoding; unsuffixed strings and
+        floats (archive candles) are already dollars.
+        """
+        value = record.get(f"{key}_dollars")
+        if value is not None and value != "":
+            return float(value)
+        value = record.get(key)
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"Boolean value for price field {key}")
+        if isinstance(value, int):
+            return value / 100.0
+        return float(value)
+
+    @staticmethod
+    def _fixed_point(record: dict[str, Any], key: str) -> float | None:
+        """Read a contract count from ``{key}_fp`` or the unsuffixed field."""
+        for name in (f"{key}_fp", key):
+            value = record.get(name)
+            if value is not None and value != "":
+                if isinstance(value, bool):
+                    raise ValueError(f"Boolean value for count field {name}")
+                return float(value)
+        return None
+
+    def _normalize_market(self, market: dict[str, Any]) -> tuple[Any, ...]:
+        ticker = market.get("ticker")
+        if not ticker:
+            raise DataValidationError(
+                provider="kalshi", message="Market entry without a ticker", field="ticker"
+            )
+        try:
+            row = {
+                "ticker": str(ticker),
+                "event_ticker": market.get("event_ticker"),
+                "title": market.get("title"),
+                "status": market.get("status"),
+                "market_type": market.get("market_type"),
+                "open_time": parse_utc_timestamp(market.get("open_time")),
+                "close_time": parse_utc_timestamp(market.get("close_time")),
+                "result": result_from_label(market.get("result")),
+                "settlement_value": self._dollars(market, "settlement_value"),
+                "settlement_ts": parse_utc_timestamp(market.get("settlement_ts")),
+                "result_raw": market.get("result"),
+                "expiration_value": market.get("expiration_value"),
+                "last_price": self._dollars(market, "last_price"),
+                "volume": self._fixed_point(market, "volume"),
+                "open_interest": self._fixed_point(market, "open_interest"),
+                "source": market.get("_source"),
+            }
+        except (TypeError, ValueError) as err:
+            raise DataValidationError(
+                provider="kalshi",
+                message=f"Malformed market record for {ticker}: {err}",
+                field="markets",
+                value=ticker,
+            ) from err
+        return tuple(row[column] for column in MARKET_SCHEMA)
+
+    def iter_trades(
+        self,
+        ticker: str,
+        min_ts: TimestampArg = None,
+        max_ts: TimestampArg = None,
+        include_historical: bool = True,
+        page_size: int = MAX_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Iterate over the trades of one market across the live and archive tiers.
+
+        Trades created before the ``trades_created_ts`` cutoff are served only by
+        ``GET /historical/trades``. The archive is skipped when ``min_ts`` is at or after
+        the cutoff; trades returned by both tiers are yielded once.
+
+        Args:
+            ticker: Market ticker.
+            min_ts: Keep trades after this time (Unix seconds, ISO string, date or datetime).
+            max_ts: Keep trades before this time.
+            include_historical: Also page through the archive tier.
+            page_size: Trades per request (1-1000).
+            max_pages: Optional cap on pages per tier.
+
+        Yields:
+            Raw Kalshi trade dictionaries with an added ``"_source"`` key.
+        """
+        market_ticker = ticker.upper()
+        params: dict[str, Any] = {
+            "ticker": market_ticker,
+            "limit": max(1, min(int(page_size), self.MAX_PAGE_SIZE)),
+        }
+        min_seconds = to_unix_seconds(min_ts)
+        max_seconds = to_unix_seconds(max_ts)
+        if min_seconds is not None:
+            params["min_ts"] = min_seconds
+        if max_seconds is not None:
+            params["max_ts"] = max_seconds
+
+        trades_cutoff = self._cutoff_seconds("trades_created_ts") if include_historical else None
+        seen: set[str] = set()
+        if trades_cutoff is None or max_seconds is None or max_seconds >= trades_cutoff:
+            for trade in self._paginate(
+                "/markets/trades",
+                params,
+                items_key="trades",
+                resource=f"trades for {market_ticker}",
+                max_pages=max_pages,
+            ):
+                seen.add(str(trade.get("trade_id")))
+                yield {**trade, "_source": _LIVE}
+
+        if not include_historical:
+            return
+        if trades_cutoff is not None and min_seconds is not None and min_seconds >= trades_cutoff:
+            return
+        for trade in self._paginate(
+            "/historical/trades",
+            params,
+            items_key="trades",
+            resource=f"historical trades for {market_ticker}",
+            max_pages=max_pages,
+        ):
+            trade_id = str(trade.get("trade_id"))
+            if trade_id in seen:
+                continue
+            seen.add(trade_id)
+            yield {**trade, "_source": _HISTORICAL}
+
+    def fetch_trades(
+        self,
+        ticker: str,
+        min_ts: TimestampArg = None,
+        max_ts: TimestampArg = None,
+        include_historical: bool = True,
+        page_size: int = MAX_PAGE_SIZE,
+        max_pages: int | None = None,
+    ) -> pl.DataFrame:
+        """Return the trade history of one market, sorted by time.
+
+        Accepts the same arguments as ``iter_trades``.
+
+        Returns:
+            DataFrame with ``KALSHI_TRADE_SCHEMA`` columns: ``trade_id``, ``ticker``,
+            ``timestamp`` (UTC), ``price`` (YES price in dollars, 0-1), ``count``
+            (contracts, fractional allowed), ``taker_side`` (``"yes"``/``"no"``),
+            ``is_block_trade`` and ``source``.
+
+        Example:
+            >>> provider = KalshiProvider()
+            >>> trades = provider.fetch_trades("KXFEDDECISION-26SEP-H25")
+        """
+        rows = [
+            self._normalize_trade(trade)
+            for trade in self.iter_trades(
+                ticker,
+                min_ts=min_ts,
+                max_ts=max_ts,
+                include_historical=include_historical,
+                page_size=page_size,
+                max_pages=max_pages,
+            )
+        ]
+        if not rows:
+            return empty_frame(KALSHI_TRADE_SCHEMA)
+        return pl.DataFrame(rows, schema=KALSHI_TRADE_SCHEMA, orient="row").sort(
+            ["timestamp", "trade_id"]
+        )
+
+    def _normalize_trade(self, trade: dict[str, Any]) -> tuple[Any, ...]:
+        trade_id = trade.get("trade_id")
+        try:
+            timestamp = parse_utc_timestamp(trade.get("created_time"))
+            price = self._dollars(trade, "yes_price")
+            count = self._fixed_point(trade, "count")
+        except (TypeError, ValueError) as err:
+            raise DataValidationError(
+                provider="kalshi",
+                message=f"Malformed trade record {trade_id}: {err}",
+                field="trades",
+                value=trade_id,
+            ) from err
+        if not trade_id or timestamp is None or price is None or count is None:
+            raise DataValidationError(
+                provider="kalshi",
+                message=f"Trade record missing trade_id, created_time, price or count: {trade}",
+                field="trades",
+            )
+        taker_side = trade.get("taker_side") or trade.get("taker_outcome_side")
+        return (
+            str(trade_id),
+            trade.get("ticker"),
+            timestamp,
+            price,
+            count,
+            taker_side,
+            bool(trade.get("is_block_trade", False)),
+            trade.get("_source"),
+        )
 
     def close(self) -> None:
         """Close HTTP client."""

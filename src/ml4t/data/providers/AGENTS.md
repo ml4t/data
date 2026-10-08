@@ -12,6 +12,7 @@ service limitations are documented in `docs/providers/`.
 | `protocols.py` | Structural contracts used by callers and type checking |
 | `registry.py` | Provider discovery, capabilities, aliases, and factory metadata |
 | `mixins/` | Shared HTTP-session and rate-limit behavior |
+| `prediction_markets.py` | Shared resolution-outcome vocabulary and trade schema for event-contract adapters |
 | `synthetic.py`, `mock.py` | Deterministic offline and testing providers |
 | Other top-level modules | One external or packaged data source per adapter |
 
