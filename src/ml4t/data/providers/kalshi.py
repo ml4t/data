@@ -69,6 +69,7 @@ TimestampArg = int | float | str | date | datetime | None
 MARKET_SCHEMA: dict[str, pl.DataType] = {
     "ticker": pl.Utf8(),
     "event_ticker": pl.Utf8(),
+    "series": pl.Utf8(),
     "title": pl.Utf8(),
     "status": pl.Utf8(),
     "market_type": pl.Utf8(),
@@ -78,13 +79,19 @@ MARKET_SCHEMA: dict[str, pl.DataType] = {
     "result_raw": pl.Utf8(),
     "expiration_value": pl.Utf8(),
     "last_price": pl.Float64(),
+    "previous_price": pl.Float64(),
     "volume": pl.Float64(),
     "open_interest": pl.Float64(),
     "source": pl.Utf8(),
 }
 
 # Normalized trade columns returned by KalshiProvider.fetch_trades.
-KALSHI_TRADE_SCHEMA: dict[str, pl.DataType] = {**TRADE_SCHEMA, "source": pl.Utf8()}
+KALSHI_TRADE_SCHEMA: dict[str, pl.DataType] = {
+    **TRADE_SCHEMA,
+    "taker_outcome_side": pl.Utf8(),
+    "taker_book_side": pl.Utf8(),
+    "source": pl.Utf8(),
+}
 
 _LIVE = "live"
 _HISTORICAL = "historical"
@@ -987,7 +994,7 @@ class KalshiProvider(BaseProvider):
         min_close_ts: TimestampArg = None,
         max_close_ts: TimestampArg = None,
         include_historical: bool = True,
-        exclude_multivariate: bool = False,
+        mve_filter: str | None = None,
         page_size: int = MAX_PAGE_SIZE,
         max_pages: int | None = None,
     ) -> Iterator[dict[str, Any]]:
@@ -1010,7 +1017,11 @@ class KalshiProvider(BaseProvider):
                 string, date or datetime; naive values are UTC).
             max_close_ts: Keep markets closing at or before this time.
             include_historical: Also page through the archive tier.
-            exclude_multivariate: Drop multivariate combo markets (``KXMVE...``).
+            mve_filter: Multivariate (combo/parlay, ``KXMVE...``) selection: None includes
+                them (Kalshi's default), ``"exclude"`` drops them, ``"only"`` keeps only them.
+                Sent to ``/markets`` as ``mve_filter``. The archive accepts only
+                ``"exclude"`` and only without a ticker filter, so the rest is applied on the
+                client there.
             page_size: Markets per request (1-1000).
             max_pages: Optional cap on pages per tier, for sampling.
 
@@ -1033,11 +1044,23 @@ class KalshiProvider(BaseProvider):
                 return False
             return not (max_close is not None and close_seconds > max_close)
 
-        def is_multivariate(market: dict[str, Any]) -> bool:
-            return bool(market.get("mve_collection_ticker")) or str(
+        if mve_filter not in (None, "exclude", "only"):
+            raise DataValidationError(
+                provider="kalshi",
+                message=f"mve_filter must be None, 'exclude' or 'only', got {mve_filter!r}",
+                field="mve_filter",
+                value=mve_filter,
+            )
+
+        def mve_selected(market: dict[str, Any]) -> bool:
+            if mve_filter is None:
+                return True
+            multivariate = bool(market.get("mve_collection_ticker")) or str(
                 market.get("ticker", "")
             ).startswith("KXMVE")
+            return multivariate == (mve_filter == "only")
 
+        series_filter = series_ticker.upper() if series_ticker else None
         live_params: dict[str, Any] = {"limit": limit}
         if status:
             live_params["status"] = status
@@ -1045,8 +1068,8 @@ class KalshiProvider(BaseProvider):
             live_params["series_ticker"] = series_ticker.upper()
         if event_ticker:
             live_params["event_ticker"] = event_ticker.upper()
-        if exclude_multivariate:
-            live_params["mve_filter"] = "exclude"
+        if mve_filter:
+            live_params["mve_filter"] = mve_filter
         # Kalshi accepts close-time filters only without a status or with status=closed.
         if status in (None, "closed"):
             if min_close is not None:
@@ -1062,10 +1085,10 @@ class KalshiProvider(BaseProvider):
             resource="markets",
             max_pages=max_pages,
         ):
-            if not close_in_range(market) or (exclude_multivariate and is_multivariate(market)):
+            if not close_in_range(market) or not mve_selected(market):
                 continue
             seen.add(str(market.get("ticker")))
-            yield {**market, "_source": _LIVE}
+            yield {**market, "_source": _LIVE, "_series": series_filter}
 
         if not include_historical or status not in (None, "settled"):
             return
@@ -1074,12 +1097,12 @@ class KalshiProvider(BaseProvider):
             return  # archived markets settled, hence closed, before the cutoff
 
         archive_params: dict[str, Any] = {"limit": limit}
-        # The archive takes exactly one of event_ticker, series_ticker, mve_filter.
+        # The archive takes exactly one of event_ticker, series_ticker, mve_filter=exclude.
         if event_ticker:
             archive_params["event_ticker"] = event_ticker.upper()
         elif series_ticker:
             archive_params["series_ticker"] = series_ticker.upper()
-        elif exclude_multivariate:
+        elif mve_filter == "exclude":
             archive_params["mve_filter"] = "exclude"
         event_prefix = event_ticker.upper() if event_ticker else None
 
@@ -1095,10 +1118,10 @@ class KalshiProvider(BaseProvider):
                 continue
             if event_prefix and str(market.get("event_ticker", "")).upper() != event_prefix:
                 continue
-            if not close_in_range(market) or (exclude_multivariate and is_multivariate(market)):
+            if not close_in_range(market) or not mve_selected(market):
                 continue
             seen.add(ticker)
-            yield {**market, "_source": _HISTORICAL}
+            yield {**market, "_source": _HISTORICAL, "_series": series_filter}
 
     def fetch_markets(
         self,
@@ -1108,7 +1131,7 @@ class KalshiProvider(BaseProvider):
         min_close_ts: TimestampArg = None,
         max_close_ts: TimestampArg = None,
         include_historical: bool = True,
-        exclude_multivariate: bool = False,
+        mve_filter: str | None = None,
         page_size: int = MAX_PAGE_SIZE,
         max_pages: int | None = None,
     ) -> pl.DataFrame:
@@ -1122,7 +1145,8 @@ class KalshiProvider(BaseProvider):
             ``"yes"``/``"no"`` for a binary market resolved to that side, ``"other"`` for a
             scalar settlement, and null while unresolved; ``result_raw`` keeps Kalshi's
             label. ``settlement_value`` is the YES payout in dollars and ``settlement_ts``
-            the UTC settlement time. ``source`` names the tier that served the row.
+            the UTC settlement time. ``series`` follows ``_series_of``; ``source`` names the
+            tier that served the row.
 
         Example:
             >>> provider = KalshiProvider()
@@ -1138,7 +1162,7 @@ class KalshiProvider(BaseProvider):
                 min_close_ts=min_close_ts,
                 max_close_ts=max_close_ts,
                 include_historical=include_historical,
-                exclude_multivariate=exclude_multivariate,
+                mve_filter=mve_filter,
                 page_size=page_size,
                 max_pages=max_pages,
             )
@@ -1177,6 +1201,21 @@ class KalshiProvider(BaseProvider):
                 return float(value)
         return None
 
+    @staticmethod
+    def _series_of(market: dict[str, Any]) -> str | None:
+        """Series of a market: the record's own field, the series filter, or the event prefix.
+
+        Market records carry no series field. The event-ticker prefix equals the series for
+        current tickers (``KXFEDDECISION-26SEP``) but not for some legacy events
+        (``FED-23DEC`` belongs to series ``KXFED``); filtering by ``series_ticker`` gives the
+        authoritative value.
+        """
+        explicit = market.get("series_ticker") or market.get("_series")
+        if explicit:
+            return str(explicit)
+        event = market.get("event_ticker")
+        return str(event).split("-", 1)[0] if event else None
+
     def _normalize_market(self, market: dict[str, Any]) -> tuple[Any, ...]:
         ticker = market.get("ticker")
         if not ticker:
@@ -1187,6 +1226,7 @@ class KalshiProvider(BaseProvider):
             row = {
                 "ticker": str(ticker),
                 "event_ticker": market.get("event_ticker"),
+                "series": self._series_of(market),
                 "title": market.get("title"),
                 "status": market.get("status"),
                 "market_type": market.get("market_type"),
@@ -1198,6 +1238,7 @@ class KalshiProvider(BaseProvider):
                 "result_raw": market.get("result"),
                 "expiration_value": market.get("expiration_value"),
                 "last_price": self._dollars(market, "last_price"),
+                "previous_price": self._dollars(market, "previous_price"),
                 "volume": self._fixed_point(market, "volume"),
                 "open_interest": self._fixed_point(market, "open_interest"),
                 "source": market.get("_source"),
@@ -1295,8 +1336,9 @@ class KalshiProvider(BaseProvider):
         Returns:
             DataFrame with ``KALSHI_TRADE_SCHEMA`` columns: ``trade_id``, ``ticker``,
             ``timestamp`` (UTC), ``price`` (YES price in dollars, 0-1), ``count``
-            (contracts, fractional allowed), ``taker_side`` (``"yes"``/``"no"``),
-            ``is_block_trade`` and ``source``.
+            (contracts, fractional allowed), ``taker_side`` (``"yes"``/``"no"``; falls back
+            to ``taker_outcome_side``), ``is_block_trade``, ``taker_outcome_side``,
+            ``taker_book_side`` (``"bid"``/``"ask"``, null when absent) and ``source``.
 
         Example:
             >>> provider = KalshiProvider()
@@ -1347,6 +1389,8 @@ class KalshiProvider(BaseProvider):
             count,
             taker_side,
             bool(trade.get("is_block_trade", False)),
+            trade.get("taker_outcome_side"),
+            trade.get("taker_book_side"),
             trade.get("_source"),
         )
 

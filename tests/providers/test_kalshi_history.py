@@ -320,7 +320,7 @@ class TestMarketPagination:
         )
 
         markets = provider.fetch_markets(
-            series_ticker="KXFED", event_ticker="FED-23DEC", exclude_multivariate=True
+            series_ticker="KXFED", event_ticker="FED-23DEC", mve_filter="exclude"
         )
 
         assert markets["ticker"].to_list() == ["FED-23DEC-T5.25"]
@@ -329,6 +329,66 @@ class TestMarketPagination:
         live = fake.requests[0].url.params
         assert live["mve_filter"] == "exclude"
         assert live["event_ticker"] == "FED-23DEC"
+
+    def test_mve_filter_only_selects_combo_markets_on_both_tiers(self, provider, fake):
+        combo = {"mve_collection_ticker": "KXMVECROSSCATEGORY"}
+        fake.add_pages(
+            "/markets",
+            "markets",
+            [[_market("KXMVECROSSCATEGORY-S2026B4-1", **combo), _market("KXA-1")]],
+        )
+        fake.add_pages(
+            "/historical/markets",
+            "markets",
+            [[_market("KXMVESPORTS-S2026-2"), _market("OLD-1")]],
+        )
+
+        markets = provider.fetch_markets(status="settled", mve_filter="only")
+
+        assert markets["ticker"].to_list() == [
+            "KXMVECROSSCATEGORY-S2026B4-1",
+            "KXMVESPORTS-S2026-2",
+        ]
+        assert fake.requests[0].url.params["mve_filter"] == "only"
+        archive = next(r for r in fake.requests if r.url.path.endswith("/historical/markets"))
+        # The archive rejects mve_filter=only (HTTP 400), so it is applied on the client.
+        assert "mve_filter" not in archive.url.params
+
+    def test_mve_filter_exclude_is_sent_to_archive_without_ticker_filter(self, provider, fake):
+        fake.add_pages("/markets", "markets", [[]])
+        fake.add_pages("/historical/markets", "markets", [[_market("OLD-1")]])
+
+        provider.fetch_markets(mve_filter="exclude")
+
+        archive = next(r for r in fake.requests if r.url.path.endswith("/historical/markets"))
+        assert archive.url.params["mve_filter"] == "exclude"
+
+    def test_invalid_mve_filter_is_rejected(self, provider, fake):
+        with pytest.raises(DataValidationError, match="mve_filter"):
+            provider.fetch_markets(mve_filter="include")
+        assert fake.requests == []
+
+    def test_series_previous_price_and_volume_columns(self, provider, fake):
+        fake.add_pages(
+            "/markets",
+            "markets",
+            [[_market("KXFEDDECISION-26SEP-H25", previous_price_dollars="0.8700")]],
+        )
+        fake.add_pages(
+            "/historical/markets",
+            "markets",
+            [[_market("FED-23DEC-T5.25", event_ticker="FED-23DEC")]],
+        )
+
+        derived = provider.fetch_markets(status="settled")
+        filtered = provider.fetch_markets(status="settled", series_ticker="kxfed")
+
+        rows = {row["ticker"]: row for row in derived.iter_rows(named=True)}
+        assert rows["KXFEDDECISION-26SEP-H25"]["series"] == "KXFEDDECISION"
+        assert rows["KXFEDDECISION-26SEP-H25"]["previous_price"] == 0.87
+        assert rows["KXFEDDECISION-26SEP-H25"]["volume"] == 18770408.08
+        assert rows["FED-23DEC-T5.25"]["series"] == "FED"
+        assert set(filtered["series"].to_list()) == {"KXFED"}
 
     def test_missing_cutoff_endpoint_queries_both_tiers(self, provider, fake):
         fake.cutoff = None
@@ -482,7 +542,10 @@ class TestTradeHistory:
         assert first["source"] == "historical"
         assert first["timestamp"] == datetime(2026, 8, 1, 9, 30, tzinfo=UTC)
         assert second["taker_side"] == "no"
+        assert second["taker_outcome_side"] == "no"
+        assert second["taker_book_side"] == "bid"
         assert second["is_block_trade"] is True
+        assert first["taker_book_side"] is None
         assert second["source"] == "live"
         assert third["price"] == 0.88
         assert third["count"] == 450.75

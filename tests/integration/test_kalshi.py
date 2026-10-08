@@ -462,6 +462,13 @@ class TestKalshiResolvedHistory:
             .tail(5)
         )
 
+    def test_resolved_combo_markets_are_reachable(self, provider):
+        combos = provider.fetch_markets(status="settled", mve_filter="only", max_pages=1)
+
+        assert not combos.is_empty()
+        assert combos["ticker"].str.starts_with("KXMVE").all()
+        assert combos["result"].is_in(["yes", "no"]).any()
+
     def test_archived_market_outcome_and_trades(self, provider):
         markets = provider.fetch_markets(event_ticker="FED-23DEC")
         row = markets.filter(pl.col("ticker") == "FED-23DEC-T5.25").row(0, named=True)
