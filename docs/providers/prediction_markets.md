@@ -18,10 +18,11 @@ an implied market probability only after accounting for spread, liquidity, and c
 
 `KalshiProvider` lists series and markets, converts native candlesticks to the package OHLCV
 schema, and enumerates resolved markets and trades across its live and archive tiers.
-`ForecastExProvider` and `PolymarketUSProvider` return markets with the same normalized
-resolution columns (`result`, `settlement_value`, `settlement_ts`), and the Kalshi and ForecastEx
-trade frames share their leading columns. `PolymarketProvider` resolves slugs or condition IDs to
-outcome tokens of the global venue and aggregates price history. Public data access does not
+`ForecastExProvider`, `PolymarketUSProvider` and `PolymarketProvider` return markets with the
+same normalized resolution columns (`result`, `settlement_value`, `settlement_ts`), and the
+Kalshi, ForecastEx and Polymarket trade frames share their leading columns. `PolymarketProvider`
+also resolves slugs or condition IDs to outcome tokens of the global venue and returns their
+price history. Public data access does not
 imply that trading is available in every jurisdiction.
 
 ## Selection Notes

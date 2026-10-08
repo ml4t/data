@@ -6,6 +6,7 @@ Their CLOB (Central Limit Order Book) API provides historical price data for all
 API Documentation:
 - CLOB Timeseries: https://docs.polymarket.com/developers/CLOB/timeseries
 - Gamma Markets: https://docs.polymarket.com/developers/gamma-markets-api/get-markets
+- Data API trades: https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets
 
 Rate Limits:
 - CLOB API: ~60 requests per minute (estimated)
@@ -26,6 +27,7 @@ Example:
     >>> provider = PolymarketProvider()  # No auth required
     >>> data = provider.fetch_ohlcv("will-bitcoin-exceed-100k-2025", "2024-01-01", "2024-12-31")
     >>> markets = provider.list_markets(active=True)
+    >>> resolved = provider.fetch_markets(min_volume=100_000, end_date_min="2025-01-01")
     >>> provider.close()
 """
 

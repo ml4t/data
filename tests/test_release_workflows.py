@@ -184,6 +184,7 @@ def test_public_provider_integrations_are_manually_reachable() -> None:
         "test_forecastex.py",
         "test_polymarket_us.py",
         "test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug",
+        "test_polymarket.py::TestPolymarketResolvedHistory",
         "test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily",
         "test_release_provider_contracts.py",
     ):

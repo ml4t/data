@@ -60,6 +60,7 @@ jobs:
           tests/integration/test_forecastex.py
           tests/integration/test_polymarket_us.py
           tests/integration/test_polymarket.py::TestPolymarketProvider::test_get_market_by_slug
+          tests/integration/test_polymarket.py::TestPolymarketResolvedHistory
           tests/integration/test_yahoo.py::TestYahooFinanceProvider::test_fetch_ohlcv_stock_daily
           tests/integration/test_release_provider_contracts.py
 
