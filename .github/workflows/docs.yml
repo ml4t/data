@@ -43,7 +43,9 @@ jobs:
           echo "ML4T_DOCS_VERSION=$(uv run python -c 'from ml4t.data import __version__; print(__version__)')" >> "$GITHUB_ENV"
           echo "ML4T_DOCS_COMMIT=${GITHUB_SHA}" >> "$GITHUB_ENV"
       - name: Build documentation strictly
-        run: uv run mkdocs build --strict
+        run: |
+          uv run python scripts/verify_readme_links.py
+          uv run mkdocs build --strict
       - name: Verify rendered identity
         run: >-
           uv run python scripts/verify_documentation_identity.py

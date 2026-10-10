@@ -38,7 +38,7 @@ theme:
     repo: fontawesome/brands/github
 
   logo: assets/logo.svg
-  favicon: assets/favicon.ico
+  favicon: assets/images/favicon.png
 
 # Custom CSS for Picasso palette
 extra_css:
