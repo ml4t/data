@@ -25,6 +25,8 @@ from scripts.release_candidate import (
 )
 from scripts.run_readme_quickstart import extract_quick_start
 from scripts.verify_documentation_identity import (
+    external_content_urls,
+    external_link_failures,
     identity_failures,
     page_reference_urls,
     site_link_failures,
@@ -216,6 +218,29 @@ def test_deployed_documentation_discovers_only_same_route_references() -> None:
         "https://www.ml4trading.io/docs/data/guide/",
         "https://www.ml4trading.io/docs/data/assets/logo.svg",
     ]
+
+
+def test_rendered_documentation_checks_external_content_links(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(
+        '<nav><a href="https://navigation.example/">Navigation</a></nav>'
+        '<article><a href="https://working.example/path#section">Working</a>'
+        '<a href="https://broken.example/">Broken</a>'
+        '<a href="/docs/data/guide/">Internal</a></article>',
+        encoding="utf-8",
+    )
+
+    urls = external_content_urls(site)
+
+    def probe(url: str) -> None:
+        if "broken.example" in url:
+            raise ValueError("unavailable")
+
+    failures = external_link_failures(site, probe_url=probe)
+
+    assert urls == ["https://broken.example/", "https://working.example/path"]
+    assert failures == ["https://broken.example/: unavailable"]
 
 
 def test_readme_link_check_rejects_missing_local_and_unavailable_remote_targets(
