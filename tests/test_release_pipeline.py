@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import re
 import tarfile
+import urllib.error
+import urllib.request
 import zipfile
 from copy import deepcopy
 from email.message import Message
@@ -24,8 +26,16 @@ from scripts.release_candidate import (
     metadata_failures,
 )
 from scripts.run_readme_quickstart import extract_quick_start
-from scripts.verify_documentation_identity import identity_failures
+from scripts.verify_documentation_identity import (
+    _probe_external_url,
+    external_content_urls,
+    external_link_failures,
+    identity_failures,
+    page_reference_urls,
+    site_link_failures,
+)
 from scripts.verify_published_release import published_release_failures
+from scripts.verify_readme_links import extract_markdown_targets, readme_link_failures
 
 COMMIT = "a" * 40
 TREE = "b" * 40
@@ -177,6 +187,102 @@ def test_documentation_identity_and_quickstart_are_executable_contracts() -> Non
         == []
     )
     assert extract_quick_start("## Quick start\n\n```python\nvalue = 1\n```\n") == "value = 1\n"
+
+
+def test_rendered_documentation_rejects_broken_links_assets_and_fragments(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    (site / "guide").mkdir(parents=True)
+    (site / "assets").mkdir()
+    (site / "assets/app.js").write_text("", encoding="utf-8")
+    (site / "guide/index.html").write_text('<h1 id="working">Guide</h1>', encoding="utf-8")
+    (site / "index.html").write_text(
+        '<a href="guide/#missing">Guide</a><script src="assets/app.js"></script>'
+        '<img src="assets/missing.png">',
+        encoding="utf-8",
+    )
+
+    failures = site_link_failures(site)
+
+    assert any("no matching anchor" in failure for failure in failures)
+    assert any("does not resolve" in failure for failure in failures)
+
+
+def test_deployed_documentation_discovers_only_same_route_references() -> None:
+    html = (
+        '<a href="guide/">Guide</a><img src="/docs/data/assets/logo.svg">'
+        '<a href="/docs/backtest/">Other library</a><a href="https://example.com/">External</a>'
+    )
+
+    assert page_reference_urls(
+        html,
+        page_url="https://www.ml4trading.io/docs/data/",
+        site_root="https://www.ml4trading.io/docs/data/",
+    ) == [
+        "https://www.ml4trading.io/docs/data/guide/",
+        "https://www.ml4trading.io/docs/data/assets/logo.svg",
+    ]
+
+
+def test_rendered_documentation_checks_external_content_links(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text(
+        '<nav><a href="https://navigation.example/">Navigation</a></nav>'
+        '<article><a href="https://working.example/path#section">Working</a>'
+        '<a href="https://broken.example/">Broken</a>'
+        '<a href="/docs/data/guide/">Internal</a></article>',
+        encoding="utf-8",
+    )
+
+    urls = external_content_urls(site)
+
+    def probe(url: str) -> None:
+        if "broken.example" in url:
+            raise ValueError("unavailable")
+
+    failures = external_link_failures(site, probe_url=probe)
+
+    assert urls == ["https://broken.example/", "https://working.example/path"]
+    assert failures == ["https://broken.example/: unavailable"]
+
+
+def test_external_link_probe_distinguishes_timeout_from_missing_route(monkeypatch) -> None:
+    def timeout(*args, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", timeout)
+    _probe_external_url("https://slow.example/", attempts=1, delay=0)
+
+    def missing(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", missing)
+    with pytest.raises(ValueError, match="404"):
+        _probe_external_url("https://missing.example/", attempts=1, delay=0)
+
+
+def test_readme_link_check_rejects_missing_local_and_unavailable_remote_targets(
+    tmp_path: Path,
+) -> None:
+    readme = tmp_path / "README.md"
+    (tmp_path / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    readme.write_text(
+        "[license](LICENSE) [missing](missing.md) [remote](https://example.invalid/)\n",
+        encoding="utf-8",
+    )
+
+    failures = readme_link_failures(
+        readme,
+        probe_url=lambda url: (_ for _ in ()).throw(ValueError(f"unavailable: {url}")),
+    )
+
+    assert extract_markdown_targets(readme.read_text(encoding="utf-8")) == [
+        "LICENSE",
+        "missing.md",
+        "https://example.invalid/",
+    ]
+    assert any("local target does not exist" in failure for failure in failures)
+    assert any("unavailable" in failure for failure in failures)
 
 
 def test_external_workflow_actions_use_full_commit_pins() -> None:
