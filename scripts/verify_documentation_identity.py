@@ -163,12 +163,21 @@ def page_reference_urls(html: str, *, page_url: str, site_root: str) -> list[str
     return references
 
 
-def _probe_url(url: str) -> None:
+def _probe_url(url: str, attempts: int = 3, delay: float = 1.0) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "ml4t-release-verifier"})
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
-        if response.status != 200:
-            raise ValueError(f"HTTP {response.status}")
-        response.read(1)
+    error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+                if response.status != 200:
+                    raise ValueError(f"HTTP {response.status}")
+                response.read(1)
+            return
+        except (OSError, urllib.error.URLError, ValueError) as caught:
+            error = caught
+            if attempt + 1 < attempts:
+                time.sleep(delay)
+    raise ValueError(str(error))
 
 
 def deployed_link_failures(urls: list[str]) -> list[str]:
