@@ -54,7 +54,8 @@ provider.close()
 | Hong Kong | .HK | 0700.HK, 9988.HK |
 | Australia | .AU | BHP.AU, CBA.AU |
 
-See [EODHD Exchange List](https://eodhd.com/financial-apis/exchanges-api-list-of-tickers-and-டexchange-codes) for all 60+ exchanges.
+See the [EODHD exchange list](https://eodhd.com/financial-apis/exchanges-api-list-of-tickers-and-trading-hours)
+for current coverage.
 
 ---
 

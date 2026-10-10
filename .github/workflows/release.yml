@@ -102,7 +102,7 @@ jobs:
           uv run ruff check src/ tests/ scripts/
           uv run ruff format --check src/ tests/ scripts/
           uv run ty check
-          uv run pytest tests/ -q -ra
+          uv run pytest tests/ -q -ra --cov=ml4t.data --cov-report=term-missing
           uv run pytest tests/ -q -ra -W error::ResourceWarning
       - name: Audit locked dependencies
         run: |
@@ -113,6 +113,7 @@ jobs:
           ML4T_DOCS_COMMIT: ${{ needs.preflight.outputs.commit }}
           ML4T_DOCS_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
+          uv run python scripts/verify_readme_links.py
           uv run mkdocs build --strict
           uv run python scripts/verify_documentation_identity.py \
             --site site \

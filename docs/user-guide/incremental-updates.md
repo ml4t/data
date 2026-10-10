@@ -1,336 +1,127 @@
-# Incremental Updates & Data Management
+# Incremental Updates
 
-This document describes the incremental update system implemented in Sprint 004, including gap detection, file locking, chunked storage, and metadata tracking.
+`ml4t-data update` creates a dataset when it is absent and refreshes it when it already exists. The
+stored key is `{asset_class}/{frequency}/{symbol}`.
 
-## Overview
+## Create or Update One Dataset
 
-The incremental update system allows efficient data updates without re-downloading entire datasets. Key features include:
-
-- **Incremental Updates**: Only fetch new data since last update
-- **Gap Detection**: Identify and fill missing data points
-- **File Locking**: Safe concurrent access to data files
-- **Chunked Storage**: Split large datasets into manageable time-based chunks
-- **Metadata Tracking**: Monitor dataset health and update history
-
-## CLI Commands
-
-### Initial Data Load
-
-First time loading data for a symbol:
+The first call can define an explicit initial range:
 
 ```bash
-# Load historical data
-ml4t-data load --provider yahoo --symbol AAPL --start 2023-01-01 --end 2024-01-01
-
-# Load with specific frequency
-ml4t-data load -p yahoo -s AAPL --start 2023-01-01 --end 2024-01-01 -f daily
+ml4t-data update \
+  --symbol AAPL \
+  --provider yahoo \
+  --asset-class equities \
+  --frequency daily \
+  --initial-start 2023-01-01 \
+  --initial-end 2024-01-01 \
+  --storage-path ./data
 ```
 
-### Incremental Updates
+When the key does not exist, `update` performs an initial load. Without `--initial-start`, it asks
+for `--initial-load-days` of history, subject to the provider's declared history limit.
 
-Update existing data with new data:
+Subsequent calls overlap the stored data by seven days by default:
 
 ```bash
-# Basic update (uses existing provider)
-ml4t-data update --symbol AAPL
-
-# Update with options
-ml4t-data update -s AAPL --lookback-days 10 --fill-gaps --show-status
-
-# Update without gap filling
-ml4t-data update -s AAPL --no-fill-gaps
-
-# Update with different provider
-ml4t-data update -s AAPL --provider yahoo
+ml4t-data update \
+  --symbol AAPL \
+  --asset-class equities \
+  --frequency daily \
+  --lookback-days 7 \
+  --storage-path ./data
 ```
 
-Options:
-- `--lookback-days/-l`: Days to look back for validation (default: 7)
-- `--fill-gaps/--no-fill-gaps`: Enable/disable gap filling (default: enabled)
-- `--show-status`: Display detailed update status and history
-- `--provider/-p`: Override provider (uses existing if not specified)
+The overlap lets revised observations replace their stored values. The update merges on timestamp,
+keeps the newest row for a duplicate timestamp, sorts the result, and publishes the replacement
+through the storage backend's atomic generation mechanism.
 
-### Health Monitoring
+If `--provider` is omitted for an existing dataset, the update reuses the provider recorded in its
+metadata. Supplying the option overrides that value.
 
-Check health status of all datasets:
+## Gap Handling
+
+Gap detection and forward filling are enabled by default. Disable them when missing periods must
+remain explicit:
 
 ```bash
-# Basic health check
-ml4t-data status
-
-# Detailed health check
-ml4t-data --verbose status
-
-# Custom staleness threshold
-ml4t-data --verbose status --stale-days 3
+ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
 ```
 
-Output shows:
-- Total datasets and their health status (✅ healthy, ⚠️ stale, ❌ error)
-- Total rows across all datasets
-- Breakdown by asset class
-- Individual dataset details (with --verbose)
+The detector uses the requested frequency and distinguishes crypto, which trades continuously, from
+other asset classes. It treats common overnight and weekend intervals as expected for non-crypto
+intraday data. This is a general interval check, not an exchange-calendar reconstruction. Use
+[trading-session completion](sessions.md) when exact exchange schedules are required.
 
-## Workflow Examples
+If a provider's history limit cannot reach the stored dataset, the updater records
+`provider_history_limited` and skips gap filling across the unavailable interval.
 
-### Example 1: Daily Stock Data Updates
+## Python API
 
-```bash
-# Initial load of AAPL data
-ml4t-data load -p yahoo -s AAPL --start 2023-01-01 --end 2024-01-01
-
-# Daily update (run via cron)
-ml4t-data update -s AAPL --show-status
-
-# Check health weekly
-ml4t-data --verbose status
-```
-
-### Example 2: Multiple Symbol Management
-
-```bash
-# Load multiple symbols
-for symbol in AAPL GOOGL MSFT NVDA; do
-    ml4t-data load -p yahoo -s $symbol --start 2023-01-01 --end 2024-01-01
-done
-
-# Update all symbols
-for symbol in AAPL GOOGL MSFT NVDA; do
-    ml4t-data update -s $symbol
-done
-
-# Check overall health
-ml4t-data status
-```
-
-### Example 3: Crypto Data (24/7 Trading)
-
-```bash
-# Load crypto data
-ml4t-data load -p yahoo -s BTC-USD --start 2023-01-01 --end 2024-01-01 -a crypto
-
-# Update with gap detection (important for 24/7 markets)
-ml4t-data update -s BTC-USD -a crypto --fill-gaps --show-status
-```
-
-## Technical Details
-
-### Gap Detection
-
-The system distinguishes between expected and unexpected gaps:
-
-- **Stock Markets**: Weekends and after-hours are expected gaps
-- **Crypto Markets**: 24/7 trading, all gaps are unexpected
-- **Configurable Tolerance**: 10% default tolerance for gap detection
-
-Gap filling methods:
-- `forward`: Use last known value (default)
-- `backward`: Use next known value
-- `interpolate`: Linear interpolation
-- `zero`: Fill with zeros
-
-### File Locking
-
-Thread-safe and process-safe file locking ensures data integrity:
-
-- Uses `filelock` library for cross-platform compatibility
-- Automatic lock acquisition and release
-- Configurable timeout (default: 30 seconds)
-- Prevents corruption during concurrent reads/writes
-
-### Chunked Storage
-
-Large datasets are split into time-based chunks:
-
-- **Monthly chunks** (default): 30-day periods
-- **Weekly chunks**: 7-day periods
-- **Quarterly chunks**: 90-day periods
-- **Yearly chunks**: 365-day periods
-
-Benefits:
-- Efficient incremental updates (only update relevant chunks)
-- Parallel processing capability
-- Reduced memory usage for large datasets
-- Fast time-range queries
-
-### Metadata Tracking
-
-Each dataset maintains metadata including:
-
-- Update history (last 100 updates)
-- Health status (healthy/stale/error)
-- Data range and row count
-- Provider information
-- Error tracking
-
-Health checks consider:
-- Days since last update
-- Data currency (how far behind current date)
-- Recent error frequency
-
-## Architecture
-
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Provider  │────▶│   Pipeline   │────▶│   Storage   │
-└─────────────┘     └──────────────┘     └─────────────┘
-                            │                     │
-                            ▼                     ▼
-                    ┌──────────────┐     ┌─────────────┐
-                    │ Gap Detector │     │ File Lock   │
-                    └──────────────┘     └─────────────┘
-                            │                     │
-                            ▼                     ▼
-                    ┌──────────────┐     ┌─────────────┐
-                    │   Metadata   │     │   Chunks    │
-                    │   Tracker    │     │   Storage   │
-                    └──────────────┘     └─────────────┘
-```
-
-### Components
-
-1. **Pipeline** (`src/ml4t-data/pipeline.py`)
-   - Orchestrates data flow
-   - `run_load()`: Full data load
-   - `run_update()`: Incremental update
-
-2. **Gap Detector** (`src/ml4t-data/utils/gaps.py`)
-   - Identifies missing data points
-   - Market hours awareness
-   - Multiple fill strategies
-
-3. **File Locking** (`src/ml4t-data/utils/locking.py`)
-   - Thread/process-safe access
-   - Automatic cleanup
-   - Timeout configuration
-
-4. **Chunked Storage** (`src/ml4t-data/storage/chunked.py`)
-   - Time-based data splitting
-   - Efficient updates
-   - Metadata indexing
-
-5. **Metadata Tracker** (`src/ml4t-data/storage/metadata_tracker.py`)
-   - Update history
-   - Health monitoring
-   - Summary statistics
-
-## Best Practices
-
-### Update Frequency
-
-- **Daily data**: Update once per day after market close
-- **Minute data**: Update every few hours during market hours
-- **Crypto**: Update more frequently (hourly or more)
-
-### Error Handling
-
-The system includes robust error handling:
+Configure a storage backend and pass it to `DataManager`:
 
 ```python
-# Automatic retries with exponential backoff
-@with_retry(max_attempts=3, min_wait=1.0, max_wait=30.0)
-def _fetch_data_with_retry(...)
+from ml4t.data import DataManager
+from ml4t.data.storage import create_storage
+
+storage = create_storage("./data", strategy="hive")
+manager = DataManager(storage=storage)
+
+key = manager.update(
+    symbol="AAPL",
+    provider="yahoo",
+    frequency="daily",
+    asset_class="equities",
+    lookback_days=7,
+    fill_gaps=True,
+    initial_start="2023-01-01",
+    initial_end="2024-01-01",
+)
 ```
 
-### Monitoring
+`DataManager.update()` returns the storage key. It raises when storage is not configured, stored data
+is empty, metadata is invalid, or the provider or storage operation fails.
 
-Set up monitoring using the status command:
+## Inspect Stored State
+
+List keys and inspect one dataset:
 
 ```bash
-# Cron job for daily health check
-0 9 * * * ml4t-data status --stale-days 2 >> /var/log/ml4t-data-status.log
+ml4t-data list --storage-path ./data
+ml4t-data info \
+  --symbol AAPL \
+  --asset-class equities \
+  --frequency daily \
+  --storage-path ./data
 ```
 
-### Storage Management
-
-Monitor disk usage as datasets grow:
+Show the overall metadata health classification:
 
 ```bash
-# Check data directory size
-du -sh ~/.ml4t-data/data/
-
-# List all datasets
-ml4t-data list
-
-# Remove old data if needed (manual process)
-rm -rf ~/.ml4t-data/data/equities/daily/OLD_SYMBOL
+ml4t-data status --detailed --stale-days 3 --storage-path ./data
 ```
 
-## Troubleshooting
+`status` classifies a dataset from its recorded end date, or its last update time when no end date
+is present. It reports an error when the timestamp or row count metadata is missing or invalid.
 
-### Common Issues
+## Update Configured Datasets
 
-1. **"No existing data found"**
-   - Run `ml4t-data load` first before using `update`
-   - Check the correct asset class and frequency
-
-2. **"Lock timeout"**
-   - Another process is accessing the file
-   - Check for stuck processes
-   - Increase timeout if needed
-
-3. **"Gaps detected"**
-   - Normal for some data sources
-   - Use `--fill-gaps` to automatically fill
-   - Check provider data quality
-
-4. **"Data is stale"**
-   - Run update more frequently
-   - Check provider connectivity
-   - Verify market hours settings
-
-### Debug Mode
-
-Enable debug logging for troubleshooting:
+Use a YAML configuration for repeatable multi-dataset updates:
 
 ```bash
-# Set log level in .env
-echo "ML4T Data_LOG_LEVEL=DEBUG" >> .env
-
-# Run with verbose output
-ml4t-data update -s AAPL --show-status
+ml4t-data update-all --config ml4t-data.yaml --dry-run
+ml4t-data update-all --config ml4t-data.yaml
 ```
 
-## Performance Considerations
+Pass `--dataset NAME` to select one configured dataset. The dry run reports the planned work without
+fetching or writing data.
 
-### Memory Usage
+## Operational Notes
 
-- Chunked storage keeps memory usage low
-- Each chunk is processed independently
-- Typical chunk size: 10-50 MB
-
-### Disk Usage
-
-- Parquet compression reduces storage by 50-80%
-- Monthly chunks balance size and performance
-- Metadata overhead: ~1KB per dataset
-
-### Update Speed
-
-- Incremental updates request only missing date ranges
-- Gap detection runs before provider requests
-- File locking prevents concurrent writers from replacing each other's data
-
-## Future Enhancements
-
-Potential improvements for future sprints:
-
-1. **Parallel Updates**: Update multiple symbols concurrently
-2. **Smart Scheduling**: Automatic update scheduling based on asset class
-3. **Data Validation**: Detect and flag suspicious data points
-4. **Compression Options**: Support for different compression algorithms
-5. **Archive Storage**: Move old data to compressed archives
-6. **Update Notifications**: Email/webhook alerts for failures
-7. **Data Reconciliation**: Compare and sync with multiple providers
-
-## Summary
-
-The incremental update system provides efficient, reliable data management with:
-
-- ✅ Minimal bandwidth usage (only fetch new data)
-- ✅ Data integrity (file locking, gap detection)
-- ✅ Scalability (chunked storage)
-- ✅ Observability (health monitoring, update history)
-- ✅ Flexibility (configurable options, multiple providers)
-
-This foundation enables building robust quantitative trading systems with reliable, up-to-date market data.
+- Run an update only after the provider is expected to have finalized the latest requested period.
+- Reuse one storage directory and the same asset-class and frequency values so updates address the
+  intended key.
+- Treat forward-filled rows as synthetic observations. For minute-session completion, the
+  `is_imputed` column identifies inserted rows; the general updater does not add that marker.
+- Use `ml4t-data validate` after an update when schema, OHLC relationships, duplicates, or anomaly
+  checks are part of the ingestion contract.
