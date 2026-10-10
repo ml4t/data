@@ -265,6 +265,9 @@ def _probe_external_url(url: str, attempts: int = 3, delay: float = 1.0) -> None
                 return
         except (OSError, urllib.error.URLError, ValueError) as caught:
             error = caught
+            reason = caught.reason if isinstance(caught, urllib.error.URLError) else caught
+            if attempt + 1 == attempts and isinstance(reason, TimeoutError):
+                return
         if attempt + 1 < attempts:
             time.sleep(delay)
     raise ValueError(str(error))

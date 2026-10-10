@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import re
 import tarfile
+import urllib.error
+import urllib.request
 import zipfile
 from copy import deepcopy
 from email.message import Message
@@ -25,6 +27,7 @@ from scripts.release_candidate import (
 )
 from scripts.run_readme_quickstart import extract_quick_start
 from scripts.verify_documentation_identity import (
+    _probe_external_url,
     external_content_urls,
     external_link_failures,
     identity_failures,
@@ -241,6 +244,21 @@ def test_rendered_documentation_checks_external_content_links(tmp_path: Path) ->
 
     assert urls == ["https://broken.example/", "https://working.example/path"]
     assert failures == ["https://broken.example/: unavailable"]
+
+
+def test_external_link_probe_distinguishes_timeout_from_missing_route(monkeypatch) -> None:
+    def timeout(*args, **kwargs):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", timeout)
+    _probe_external_url("https://slow.example/", attempts=1, delay=0)
+
+    def missing(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", missing)
+    with pytest.raises(ValueError, match="404"):
+        _probe_external_url("https://missing.example/", attempts=1, delay=0)
 
 
 def test_readme_link_check_rejects_missing_local_and_unavailable_remote_targets(
