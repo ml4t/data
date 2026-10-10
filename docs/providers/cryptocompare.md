@@ -3,15 +3,15 @@
 **Provider**: `CryptoCompareProvider`
 **Website**: [cryptocompare.com](https://www.cryptocompare.com)
 **API Key**: Required
-**0.1.0 status**: Included for evaluation; not release-qualified
+**0.2.0 status**: Adapter included; live contract unverified
 
 ---
 
 ## Overview
 
-CryptoCompare account registration was unavailable during the 0.1.0 release review. The adapter is
-included for evaluation, but it has no successful live contract evidence for this release. Do not
-treat it as a release-qualified provider until a later release records a successful contract run.
+The 0.2.0 package includes the adapter and its offline contract tests. Release validation did not
+have a configured `CRYPTOCOMPARE_API_KEY`, so no successful live provider contract was recorded.
+Verify access with your own account before relying on the adapter for a production dataset.
 
 **Best For**: Crypto historical data, alternative to Binance
 
@@ -62,7 +62,8 @@ Get your API key at [cryptocompare.com/cryptopian/api-keys](https://www.cryptoco
 
 ## Rate Limits
 
-Consult CryptoCompare's current terms before use. Access and limits were not verified for 0.1.0.
+Consult CryptoCompare's current terms before use. Account access and limits were not verified for
+the 0.2.0 release.
 
 ---
 

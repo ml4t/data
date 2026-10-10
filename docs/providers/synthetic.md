@@ -94,5 +94,4 @@ constructing the provider.
 
 ## See Also
 
-- [Mock Provider](mock.md)
 - [Provider reference](index.md)

@@ -303,7 +303,7 @@ print(combined.group_by("symbol").agg(pl.col("close").last()))
 
 ## API Documentation Links
 
-- **CLOB Timeseries**: https://docs.polymarket.com/developers/clob-api/price-history
+- **CLOB Timeseries**: https://docs.polymarket.com/api-reference/markets/get-a-tokens-price-history
 - **Gamma Markets API**: https://docs.polymarket.com/developers/gamma-markets-api/get-markets
 - **Data API Trades**: https://docs.polymarket.com/api-reference/core/get-trades-for-a-user-or-markets
 - **py-clob-client**: https://github.com/Polymarket/py-clob-client
