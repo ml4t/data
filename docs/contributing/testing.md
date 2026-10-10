@@ -1,146 +1,93 @@
-# Testing Guide
+# Testing
 
-## Quick Start
+The default pytest configuration runs the deterministic offline lane. Live API, paid-tier,
+credentialed, expensive, and slow tests require an explicit marker or a dedicated workflow.
 
-### Run Tests (Parallel by Default)
-```bash
-# Default: runs tests in parallel using all CPU cores (FAST!)
-pytest
+## Install the test environment
 
-# Verbose output
-pytest -v
-
-# Disable parallel execution (slower, but better for debugging)
-pytest -n 0
-
-# Use specific number of workers
-pytest -n 4
-```
-
-**Performance**: Tests run in parallel by default using `pytest-xdist`:
-- Parallel execution is optional and should be measured on the target machine
-- **Sequential** (`-n 0`): ~15 minutes for full suite
-
-### Run Integration Tests
-```bash
-# Run ALL tests including integration (if you have API keys)
-pytest -m ""
-
-# Run only integration tests
-pytest -m integration
-
-# Run specific provider integration tests
-pytest tests/integration/test_coingecko.py -m ""
-```
-
-## Test Categories
-
-### Unit Tests (Fast)
-- **Location**: Mostly in `tests/` root, some in `tests/unit/`
-- **Duration**: <1 minute for all unit tests
-- **Dependencies**: Core dependencies only
-- **Markers**: None (run by default)
-
-### Integration Tests (Slow)
-- **Location**: `tests/integration/`
-- **Duration**: ~15 minutes
-- **Dependencies**: Real APIs, may require API keys
-- **Markers**: `@pytest.mark.integration`
-
-## API Keys for Integration Tests
-
-Integration tests for provider APIs require API keys:
+Use the lock file and install all provider extras and development groups:
 
 ```bash
-# Free tier (no key required)
-export COINGECKO_API_KEY=""  # Optional
-
-# Requires API keys
-export MASSIVE_API_KEY="your_key_here"
-export TWELVE_DATA_API_KEY="your_key_here"
-export CRYPTOCOMPARE_API_KEY="your_key_here"
-export FINNHUB_API_KEY="your_key_here"
-export TIINGO_API_KEY="your_key_here"
-export EODHD_API_KEY="your_key_here"
-export ALPHA_VANTAGE_API_KEY="your_key_here"
-export OANDA_API_KEY="your_key_here"
-export DATABENTO_API_KEY="your_key_here"
+uv sync --locked --all-extras --all-groups
 ```
 
-## Test Markers
-
-| Marker | Description | Skip by Default? |
-|--------|-------------|------------------|
-| `integration` | Real API calls, slow tests | ✅ Yes |
-| `slow` | Tests taking >10 seconds | ✅ Yes |
-| `requires_api_key` | Needs specific API key | ⚠️ If key missing |
-| `expensive` | High API costs | ⚠️ In CI only |
-
-## Common Test Commands
+## Run the default lane
 
 ```bash
-# Run specific test file
-pytest tests/test_core_models.py
-
-# Run specific test
-pytest tests/test_core_models.py::test_function_name
-
-# Run tests matching pattern
-pytest -k "yahoo"
-
-# Stop after first failure
-pytest -x
-
-# Show print statements
-pytest -s
-
-# Generate coverage report
-pytest --cov=ml4t-data --cov-report=html
-open htmlcov/index.html
+uv run pytest tests -q -ra
 ```
 
-## CI/CD
+`pyproject.toml` excludes `slow`, `paid_tier`, `integration`, and `requires_api_key` tests from this
+command. It also enables strict marker validation, so an undeclared marker fails collection.
 
-GitHub Actions runs:
-- **PR checks**: Unit tests only (fast)
-- **Main branch**: Unit + integration tests (with API keys)
+Run the separate resource-leak lane before submitting a change that opens files, HTTP clients, or
+other managed resources:
 
-## Troubleshooting
-
-### "ModuleNotFoundError: No module named 'databento'"
 ```bash
-pip install -e ".[databento]"
+uv run pytest tests -q -ra -W error::ResourceWarning
 ```
 
-### Tests taking too long
+## Run focused tests
+
+Use a file, node ID, or expression while developing:
+
 ```bash
-# Make sure you're running unit tests only
-pytest -m "not integration and not slow"
+uv run pytest tests/test_storage_paths.py -q -ra
+uv run pytest tests/test_storage_paths.py::test_legacy_env_warns -q -ra
+uv run pytest tests -q -ra -k yahoo
+uv run pytest tests -q -ra -x
 ```
 
-### Integration tests skipped
+The suite runs sequentially by default. Add `-n auto` only when the focused tests are known to be
+safe under parallel execution.
+
+## Test categories
+
+| Marker | Contract | Default lane |
+|---|---|---:|
+| `integration` | Contacts an external service or exercises a cross-system boundary | Excluded |
+| `requires_api_key` | Requires one or more provider credentials | Excluded |
+| `paid_tier` | Can consume a metered or paid provider allowance | Excluded |
+| `slow` | Unsuitable for the routine offline lane | Excluded |
+| `expensive` | Has a material resource or provider cost | Not excluded automatically |
+| `network_guard_probe` | Verifies that the offline network guard blocks network access | Included |
+
+Mark a test according to what it does, not according to the directory containing it. A provider
+test using `httpx.MockTransport`, a fixture, or a local file belongs in the default lane.
+
+## Run live provider contracts
+
+The `Provider Contract` workflow runs one selected provider with only that provider's credentials.
+Use it for repository-level evidence. For local diagnosis, configure the named environment variable
+and run only the intended node:
+
 ```bash
-# Check if API keys are set
-env | grep API_KEY
-
-# Run with specific marker
-pytest -m integration
+uv run pytest tests/integration/test_coingecko.py::TestCoinGeckoProvider::test_fetch_ohlcv_btc \
+  -m integration -q -ra
 ```
 
-### Parallel execution issues (debugging)
+Do not run every integration test against a live account. Several providers impose quotas, require
+subscriptions, or charge for requests.
+
+## Optional dependencies
+
+The complete development environment includes every provider extra. To reproduce a minimal optional
+dependency boundary, create an isolated environment with the relevant extra, for example:
+
 ```bash
-# Disable parallel execution for clearer error messages
-pytest -n 0
-
-# Use less workers to reduce resource contention
-pytest -n 4
-
-# Run single test file
-pytest tests/test_specific_file.py -n 0
+uv sync --locked --extra databento --group test
 ```
 
-### Test output not showing (parallel mode)
+Import-time behavior must not require unrelated extras or credentials.
+
+## Coverage and failure diagnosis
+
+Generate a local report with the package import path:
+
 ```bash
-# Use -s with sequential execution to see print statements
-pytest -n 0 -s
+uv run pytest tests -q --cov=ml4t.data --cov-report=term-missing
 ```
+
+When a test fails only in the full suite, rerun it sequentially and preserve the order-dependent
+reproduction. Do not remove the resource-warning lane, weaken markers, or replace a live contract
+with a mock merely to obtain a green result.
