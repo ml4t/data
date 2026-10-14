@@ -26,8 +26,14 @@ bars = pl.DataFrame(
         "timestamp": [
             datetime(2024, 1, 2, 15, 0),
             datetime(2024, 1, 2, 16, 0),
+            datetime(2024, 1, 3, 15, 0),
+            datetime(2024, 1, 3, 16, 0),
         ],
-        "close": [100.0, 101.0],
+        "open": [100.0, 101.0, 102.0, 103.0],
+        "high": [101.0, 102.0, 103.0, 104.0],
+        "low": [99.0, 100.0, 101.0, 102.0],
+        "close": [100.0, 101.0, 102.0, 103.0],
+        "volume": [10.0, 20.0, 30.0, 40.0],
     }
 )
 
@@ -99,7 +105,8 @@ map to the exchange calendar.
 
 ## Use Session Dates in Validation
 
-Group observations by `session_date` when a split must not divide one trading session:
+With scikit-learn installed, group observations by `session_date` when a split must not divide one
+trading session. The example above contains two sessions, one for each fold:
 
 ```python
 from sklearn.model_selection import GroupKFold
