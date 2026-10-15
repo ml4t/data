@@ -7,21 +7,13 @@ labels:
   - "status: needs-triage"
   - "compatibility: affected"
 body:
-  - type: dropdown
-    id: library
+  - type: markdown
     attributes:
-      label: Owning library
-      options:
-        - data
-        - engineer
-        - backtest
-        - specs
-        - live
-        - diagnostic
-        - models
-        - ecosystem
-    validations:
-      required: true
+      value: |
+        Search existing issues first. Describe one coherent change per issue and separate unrelated
+        requests. Discuss the intended behavior here before opening a pull request. Read the
+        [shared contribution policy](https://github.com/ml4t/ecosystem/blob/main/CONTRIBUTING.md)
+        before submitting.
   - type: input
     id: version
     attributes:

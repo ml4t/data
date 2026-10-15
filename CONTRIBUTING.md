@@ -1,182 +1,89 @@
 # Contributing to ml4t-data
 
-Thank you for your interest in contributing to ml4t-data. This guide covers everything you need to get started.
+The [ML4T contribution policy](https://github.com/ml4t/ecosystem/blob/main/CONTRIBUTING.md)
+defines the issue, pull-request, regression-evidence, and accountability requirements for this
+repository. This guide adds the setup and verification steps specific to `ml4t-data`.
 
-## Development Setup
+## Before opening an issue
+
+Search the existing issues first. Each issue must describe one problem or coherent change. Open
+separate issues for unrelated work.
+
+A bug report must identify the affected package version and environment, state the observed and
+expected behavior, and include the smallest complete reproduction through a public API or user
+workflow. Report suspected vulnerabilities through
+[private vulnerability reporting](https://github.com/ml4t/data/security/advisories/new), not a
+public issue.
+
+Discuss substantial changes in their owning issue before implementing them. A change to an intended
+definition, numerical convention, default, or compatibility contract requires agreement on the
+expected behavior and migration impact.
+
+## Set up the repository
+
+`ml4t-data` supports Python 3.12 through 3.14 and uses
+[uv](https://docs.astral.sh/uv/) for environments and commands.
 
 ```bash
-# Clone the repository
 git clone https://github.com/ml4t/data.git ml4t-data
 cd ml4t-data
-
-# Install dependencies (requires uv)
-uv sync --dev
-
-# Install pre-commit hooks
+uv sync --locked --all-extras --all-groups
 uv run pre-commit install
-
-# Verify your setup
-uv run pytest tests/ -q
 ```
 
-**Requirements**: Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Create a focused branch from the current `main` branch. Keep provider-specific dependencies
+optional, do not require credentials or network access during import, and preserve the PEP 420
+namespace layout under `src/ml4t/`. Use the repository's conventional commit prefixes, such as
+`feat:`, `fix:`, `docs:`, `test:`, and `chore:`.
 
-## Quality Gates
+Use the test markers already declared in `pyproject.toml`. The default lane excludes live,
+credentialed, paid-tier, and slow tests. The
+[testing guide](https://www.ml4trading.io/docs/data/contributing/testing/) explains focused tests,
+markers, optional dependencies, and live provider contracts. The
+[provider guide](https://www.ml4trading.io/docs/data/contributing/creating-a-provider/) defines the
+provider interfaces and required contract coverage.
 
-All changes must pass these checks before merging:
+## Verify the change
+
+Run focused tests while editing, then run the repository checks before requesting review:
 
 ```bash
-# Lint and format
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
-
-# Type check
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 uv run ty check
-
-# Tests (core suite, excludes integration/slow/paid)
-uv run pytest tests/ -q
-
-# Resource leak check
-uv run pytest tests/ -q -W error::ResourceWarning
-
-# Run everything at once
-uv run pre-commit run --all-files
+uv run pytest tests -q -ra --cov=ml4t.data --cov-report=term-missing
+uv run pytest tests -q -ra -W error::ResourceWarning
+uv run mkdocs build --strict
+uv build
+actionlint .github/workflows/*.yml
+pre-commit run --all-files
 ```
 
-## Code Style
+Bug fixes require executed regression evidence. Run the same command against the relevant base
+revision and the proposed fix. Record the revisions, command, failing base result, and passing fix
+result in the pull request. The regression must exercise the affected public API or user workflow.
+Tests of copied logic or source text do not establish that behavior is corrected.
 
-- **Formatter/linter**: [ruff](https://docs.astral.sh/ruff/) (100 char line length)
-- **Type checker**: [ty](https://docs.astral.sh/ty/) (Astral) -- not mypy
-- **Type hints**: required on all public functions
-- **Docstrings**: Google style
-- **Imports**: sorted by ruff (stdlib, third-party, local)
-- **DataFrames**: Polars as primary, Pandas for compatibility
+Correct verified numerical defects. Do not preserve an incorrect result solely for compatibility.
+When a change intentionally alters a definition or convention, document the agreed behavior and
+migration impact in the owning issue and user documentation.
 
-All style rules are configured in `pyproject.toml` under `[tool.ruff]` and `[tool.ty]`. Ruff auto-fixes most issues via pre-commit.
+## Open a pull request
 
-## Testing
+Each pull request must address one issue and include a closing reference such as `Closes #123`.
+Automated dependency updates and administrative metadata changes do not require a separate issue.
 
-### Running Tests
+The pull request must describe the outcome and compatibility impact, report the commands and
+results used for verification, and state any documentation, release-note, or patch-release work.
+Disclose whether AI tools helped produce code or prose, identify the affected parts, and confirm
+that you reviewed and tested the submission and can explain its evidence.
 
-```bash
-# Default: core tests only (fast, no API keys needed)
-uv run pytest tests/ -q
+CI runs the repository and ecosystem qualification checks. Address review findings and failed
+checks before merge. Maintainers squash-merge accepted pull requests.
 
-# Verbose with full output
-uv run pytest tests/ -v
+## Get help
 
-# Run a specific file or test
-uv run pytest tests/test_core_models.py -q
-uv run pytest tests/test_core_models.py::test_function_name
-
-# Run tests matching a pattern
-uv run pytest -k "yahoo" -q
-
-# Stop on first failure
-uv run pytest tests/ -x
-```
-
-### Test Markers
-
-Tests are organized by marker. The default `pytest` invocation skips slow, integration, and paid-tier tests.
-
-| Marker | Description | Default |
-|--------|-------------|---------|
-| `slow` | Tests taking >10 seconds | Skipped |
-| `integration` | Real API calls to external services | Skipped |
-| `requires_api_key` | Needs a specific API key in env | Skipped |
-| `paid_tier` | Requires paid API subscription | Skipped |
-| `expensive` | High API cost | Skipped |
-
-To run a specific marker lane:
-
-```bash
-# Integration tests (requires API keys in environment)
-uv run pytest -m integration -q
-
-# All tests, ignoring marker filters
-uv run pytest -m "" -q
-```
-
-### Writing Tests
-
-- Place tests in `tests/` mirroring the source layout
-- Use `pytest` fixtures in `conftest.py` for shared setup
-- Mark integration tests with `@pytest.mark.integration`
-- Ensure OHLCV invariants hold: `high >= low`, `high >= open`, `high >= close`
-
-## Pull Request Workflow
-
-1. **Create a feature branch** from `main`:
-   ```bash
-   git checkout -b feat/my-feature
-   ```
-
-2. **Make your changes** with tests. Ensure all quality gates pass:
-   ```bash
-   uv run pre-commit run --all-files
-   uv run pytest tests/ -q
-   ```
-
-3. **Push and open a PR**:
-   ```bash
-   git push -u origin feat/my-feature
-   gh pr create --title "feat: description" --body "..."
-   ```
-
-4. **CI runs automatically** on the PR. All checks must pass before merge:
-   - Lint (ruff check + format)
-   - Type Check (ty)
-   - Test Core (Python 3.11, 3.12, 3.13)
-   - Package Build
-
-5. **Address review feedback**, then the PR is squash-merged into `main`.
-
-## Commit Message Format
-
-Use conventional commit prefixes:
-
-| Prefix | Use for |
-|--------|---------|
-| `feat:` | New feature or capability |
-| `fix:` | Bug fix |
-| `docs:` | Documentation changes |
-| `refactor:` | Code restructuring (no behavior change) |
-| `test:` | Adding or updating tests |
-| `chore:` | Maintenance, dependencies, CI |
-
-Examples:
-```
-feat: add Stooq provider for international equities
-fix: handle empty response in Yahoo provider
-test: add integration tests for Binance websocket
-refactor: extract common HTTP retry logic to base class
-```
-
-## Adding a New Provider
-
-Providers inherit from `BaseProvider` and implement three methods:
-
-1. `name()` -- lowercase provider identifier
-2. `_fetch_raw_data()` -- API call, returns raw response
-3. `_transform_data()` -- converts raw data to standard Polars DataFrame
-
-See `docs/contributing/creating-a-provider.md` for a full walkthrough and `src/ml4t/data/providers/` for existing implementations.
-
-## Project Structure
-
-```
-src/ml4t/data/
-├── providers/      # 20+ data source implementations
-├── storage/        # Hive-partitioned Parquet backends
-├── futures/        # CME/CBOE/ICE futures pipelines
-├── validation/     # OHLCV schema and quality checks
-├── config/         # Pydantic configuration models
-├── cli/            # Click CLI interface
-└── utils/          # Rate limiting, retry, formatting
-```
-
-## Getting Help
-
-- [GitHub Issues](https://github.com/ml4t/data/issues) -- bug reports and feature requests
-- [GitHub Discussions](https://github.com/ml4t/data/discussions) -- questions and ideas
+- Use [GitHub Issues](https://github.com/ml4t/data/issues) for reproducible defects and accepted
+  changes.
+- Read the [Data documentation](https://www.ml4trading.io/docs/data/) for supported workflows and
+  provider guidance. File a documentation issue when that guidance is missing or incorrect.
