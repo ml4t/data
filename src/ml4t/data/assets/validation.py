@@ -128,7 +128,7 @@ class AssetValidator:
 
         # Check for weekend data (should not exist for regular equities)
         if "timestamp" in df.columns:
-            weekend_data = df.filter(pl.col("timestamp").dt.weekday() >= 5)
+            weekend_data = df.filter(pl.col("timestamp").dt.weekday() >= 6)
             if len(weekend_data) > 0:
                 issues.append(f"Found {len(weekend_data)} weekend data points")
 
