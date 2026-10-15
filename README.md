@@ -70,7 +70,7 @@ uv run pre-commit install
 uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
 uv run ty check
-uv run pytest tests/ -q
+uv run pytest tests/ -q -ra --cov=ml4t.data --cov-report=term-missing
 uv run mkdocs build --strict
 uv build
 ```

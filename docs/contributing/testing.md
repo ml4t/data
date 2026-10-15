@@ -14,11 +14,11 @@ uv sync --locked --all-extras --all-groups
 ## Run the default lane
 
 ```bash
-uv run pytest tests -q -ra
+uv run pytest tests -q -ra --cov=ml4t.data --cov-report=term-missing
 ```
 
 `pyproject.toml` excludes `slow`, `paid_tier`, `integration`, and `requires_api_key` tests from this
-command. It also enables strict marker validation, so an undeclared marker fails collection.
+command. It also enables strict marker validation and fails if package coverage falls below 85%.
 
 Run the separate resource-leak lane before submitting a change that opens files, HTTP clients, or
 other managed resources:
@@ -82,11 +82,8 @@ Import-time behavior must not require unrelated extras or credentials.
 
 ## Coverage and failure diagnosis
 
-Generate a local report with the package import path:
-
-```bash
-uv run pytest tests -q --cov=ml4t.data --cov-report=term-missing
-```
+The default lane reports missing lines for the `ml4t.data` package and enforces the same 85%
+threshold as CI and the release workflow.
 
 When a test fails only in the full suite, rerun it sequentially and preserve the order-dependent
 reproduction. Do not remove the resource-warning lane, weaken markers, or replace a live contract
