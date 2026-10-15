@@ -60,7 +60,7 @@ Run focused tests while editing, then run the repository gates:
 uv run ruff check src tests scripts
 uv run ruff format --check src tests scripts
 uv run ty check
-uv run pytest tests -q -ra
+uv run pytest tests -q -ra --cov=ml4t.data --cov-report=term-missing
 uv run pytest tests -q -ra -W error::ResourceWarning
 uv run mkdocs build --strict
 uv build
