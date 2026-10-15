@@ -253,15 +253,46 @@ class TestValidateCommon:
 class TestValidateEquity:
     """Tests for equity-specific validation."""
 
-    def test_validate_weekend_data(self):
+    @pytest.mark.parametrize(
+        "timestamp",
+        [
+            pytest.param(datetime(2025, 7, 7, 10), id="monday"),
+            pytest.param(datetime(2025, 7, 8, 10), id="tuesday"),
+            pytest.param(datetime(2025, 7, 9, 10), id="wednesday"),
+            pytest.param(datetime(2025, 7, 10, 10), id="thursday"),
+            pytest.param(datetime(2025, 7, 11, 10), id="friday"),
+        ],
+    )
+    def test_validate_regular_weekdays_do_not_report_weekend(self, timestamp):
+        info = AssetInfo(symbol="SPY", asset_class=AssetClass.EQUITY, exchange="NYSE")
+        df = pl.DataFrame(
+            {
+                "timestamp": [timestamp],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [1000.0],
+            }
+        )
+
+        assert AssetValidator(info).validate(df) == {}
+
+    @pytest.mark.parametrize(
+        "timestamp",
+        [
+            pytest.param(datetime(2025, 7, 12, 10), id="saturday"),
+            pytest.param(datetime(2025, 7, 13, 10), id="sunday"),
+        ],
+    )
+    def test_validate_weekend_data(self, timestamp):
         """Test detecting weekend data for equities."""
         info = AssetInfo(symbol="AAPL", asset_class=AssetClass.EQUITY)
         validator = AssetValidator(info)
 
-        # January 7, 2023 is a Saturday
         df = pl.DataFrame(
             {
-                "timestamp": [datetime(2023, 1, 7)],
+                "timestamp": [timestamp],
                 "open": [100.0],
                 "high": [101.0],
                 "low": [99.0],
@@ -272,8 +303,7 @@ class TestValidateEquity:
 
         results = validator.validate(df)
 
-        assert "equity_specific" in results
-        assert any("weekend" in issue.lower() for issue in results["equity_specific"])
+        assert results == {"equity_specific": ["Found 1 weekend data points"]}
 
     def test_validate_negative_prices(self):
         """Test detecting non-positive prices."""
