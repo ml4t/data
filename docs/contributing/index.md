@@ -1,70 +1,47 @@
 # Contributing
 
-Welcome to ML4T Data! We appreciate your interest in contributing.
+Contributions should preserve the public provider, storage, and validation contracts while keeping
+the default test suite deterministic and offline.
 
-## Ways to Contribute
+## Set up the repository
 
-<div class="grid cards" markdown>
-
--   :material-source-pull:{ .lg .middle } __Create a Provider__
-
-    ---
-
-    Add support for a new data source.
-
-    [:octicons-arrow-right-24: Provider Guide](creating-a-provider.md)
-
--   :material-bug:{ .lg .middle } __Fix Bugs__
-
-    ---
-
-    Help improve reliability and fix issues.
-
-    [:octicons-arrow-right-24: Testing Guide](testing.md)
-
--   :material-file-document:{ .lg .middle } __Improve Docs__
-
-    ---
-
-    Enhance documentation and examples.
-
-    [:octicons-arrow-right-24: Architecture](architecture.md)
-
-</div>
-
-## Quick Start
+Install `uv`, clone the canonical repository, and create the complete locked environment:
 
 ```bash
-# Clone the repository
-git clone https://github.com/stefan-jansen/ml4t-data.git
-cd ml4t-data
-
-# Install with dev dependencies
-uv sync --all-extras
-
-# Install pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest
+git clone https://github.com/ml4t/data.git
+cd data
+uv sync --locked --all-extras --all-groups
+uv run pre-commit install
 ```
 
-## Code Style
+Run the offline test lane once to confirm the checkout:
 
-- **Formatter**: ruff (100 char line length)
-- **Type checking**: ty
-- **Docstrings**: Google style
-- **Tests**: pytest with 80%+ coverage
+```bash
+uv run pytest tests -q -ra
+```
 
-## Pull Request Process
+Provider tests that contact live services are excluded by default. See the
+[testing guide](testing.md) before running a credentialed or paid-tier test.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Run `pre-commit run --all-files`
-5. Submit a pull request
+## Choose the relevant guide
 
-## Getting Help
+- [Creating a provider](creating-a-provider.md) covers the provider contract, registry metadata,
+  deterministic tests, and documentation required for a new adapter.
+- [Architecture](architecture.md) explains the boundaries among providers, validation, storage,
+  configuration, and orchestration.
+- [Testing](testing.md) lists the offline, resource-warning, focused, and live-provider lanes.
 
-- [GitHub Issues](https://github.com/stefan-jansen/ml4t-data/issues)
-- [Discussions](https://github.com/stefan-jansen/ml4t-data/discussions)
+The root [`AGENTS.md`](https://github.com/ml4t/data/blob/main/AGENTS.md) records the repository map,
+change rules, and complete verification commands. More specific `AGENTS.md` files apply under the
+provider, storage, and futures source directories.
+
+## Pull requests
+
+1. Open or reference one issue that defines the problem and acceptance criteria.
+2. Make the smallest coherent change and add a test that fails for the behavior being corrected.
+3. Run focused checks while editing, then the repository gates from `AGENTS.md`.
+4. Complete the pull request template, including compatibility and release implications.
+
+Use [private vulnerability reporting](https://github.com/ml4t/data/security/advisories/new) for a
+suspected security issue. Use the [issue tracker](https://github.com/ml4t/data/issues) for other
+bugs, documentation problems, and feature requests.

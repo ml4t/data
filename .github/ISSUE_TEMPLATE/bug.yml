@@ -1,5 +1,5 @@
 name: Bug report
-description: Report reproducible incorrect behavior in ecosystem policy or tooling
+description: Report reproducible incorrect behavior in ml4t-data
 title: "[Bug]: "
 labels:
   - "type: bug"
@@ -10,22 +10,10 @@ body:
   - type: markdown
     attributes:
       value: |
-        Search existing issues first. Do not disclose suspected vulnerabilities here.
-  - type: dropdown
-    id: library
-    attributes:
-      label: Affected library
-      options:
-        - data
-        - engineer
-        - backtest
-        - specs
-        - live
-        - diagnostic
-        - models
-        - ecosystem
-    validations:
-      required: true
+        Search existing issues first. Report one problem per issue and use separate issues for
+        unrelated problems. Read the
+        [shared contribution policy](https://github.com/ml4t/ecosystem/blob/main/CONTRIBUTING.md)
+        before submitting. Do not disclose suspected vulnerabilities here.
   - type: input
     id: version
     attributes:
@@ -37,7 +25,8 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include Python version, operating system, installation method, and relevant extras.
+      description: >-
+        Include Python version, operating system, installation method, and relevant extras.
     validations:
       required: true
   - type: textarea
@@ -56,7 +45,17 @@ body:
     id: reproduction
     attributes:
       label: Minimal reproduction
-      description: Provide the smallest complete example and error output.
+      description: Provide the smallest complete public API or user workflow and its error output.
+    validations:
+      required: true
+  - type: dropdown
+    id: numerical
+    attributes:
+      label: Numerical impact
+      options:
+        - Produces an incorrect numerical result
+        - Changes a documented definition or convention
+        - No known numerical impact
     validations:
       required: true
   - type: dropdown

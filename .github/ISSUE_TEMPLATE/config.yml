@@ -3,6 +3,6 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/ml4t/data/security/advisories/new
     about: Report suspected vulnerabilities privately.
-  - name: Usage questions
-    url: https://github.com/orgs/ml4t/discussions
-    about: Ask questions that do not describe a defect or requested change.
+  - name: Documentation and usage guidance
+    url: https://www.ml4trading.io/docs/data/
+    about: Read the supported workflows and provider guidance before opening an issue.
