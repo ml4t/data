@@ -315,6 +315,29 @@ class TestFetch:
 
             assert len(df) == 2  # Only 2024 dates
 
+    def test_fetch_month_filter_includes_final_calendar_day(self):
+        """YYYY-MM end filters include observations after the 28th."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            provider = FamaFrenchProvider(cache_path=tmpdir, use_cache=True)
+            cached_df = pl.DataFrame(
+                {
+                    "timestamp": [
+                        datetime(2024, 2, 28),
+                        datetime(2024, 2, 29),
+                        datetime(2024, 3, 1),
+                    ],
+                    "Mkt-RF": [0.01, 0.02, 0.03],
+                }
+            )
+            cached_df.write_parquet(Path(tmpdir) / "ff3_daily.parquet")
+
+            filtered = provider.fetch("ff3", frequency="daily", start="2024-02", end="2024-02")
+
+            assert filtered["timestamp"].to_list() == [
+                datetime(2024, 2, 28),
+                datetime(2024, 2, 29),
+            ]
+
     def test_fetch_combined(self, provider):
         """Test fetch_combined merges datasets."""
         with tempfile.TemporaryDirectory() as tmpdir:

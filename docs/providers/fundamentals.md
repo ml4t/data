@@ -16,7 +16,7 @@ identifier with every observation.
 | [Yahoo Finance](https://finance.yahoo.com/) | Current statements, ratios, and analyst fields for listed securities | Web-backed API through the provider | No credential | Latest values lack reliable first-publication and revision history | `YahooFinanceProvider` |
 | [EODHD Fundamentals](https://eodhd.com/financial-apis/stock-etfs-fundamental-data-feeds) | Global company statements, estimates, and related fields with market-dependent history | REST API | API key; paid fundamentals entitlement | Filing dates are present, but the public documentation does not establish complete restatement versioning | `EODHDProvider` |
 | [Finnhub reported financials](https://finnhub.io/docs/api/financials-reported) | Global standardized data and SEC as-reported statements | REST API | API key; endpoint entitlement depends on plan | The as-reported endpoint carries filing dates; standardized statements do not provide the same point-in-time contract | `FinnhubProvider` |
-| [Massive stock financials](https://massive.com/docs/rest/stocks/fundamentals/income-statements) | US company statements and ratios from SEC-derived data | REST API | API key; plan-dependent | A filing date can identify the latest filing that contains a period rather than its first publication | `MassiveProvider` for company metrics only |
+| [Massive stock financials](https://massive.com/docs/rest/stocks/fundamentals/income-statements) | US company statements and ratios from SEC-derived data | REST API | API key; plan-dependent | A filing date can identify the latest filing that contains a period rather than its first publication | `MassiveProvider` |
 | [Sharadar Core US Fundamentals](https://sharadar.com/docs/fundamentals) | Active and delisted US companies from 1998 with as-reported and restated dimensions | API and bulk delivery | Paid subscription | Select AR dimensions for as-reported research and preserve `datekey`; MR dimensions are restated | No |
 | [SimFin fundamentals](https://www.simfin.com/en/fundamental-data-download/) | Standardized company statements with plan-dependent US and international history | API and bulk files | Free samples and paid tiers | Standard files can contain latest restatements; as-reported availability depends on product | No |
 | [roic.ai Financial Data API](https://www.roic.ai/api) | Global standardized statements, financial ratios, and earnings call transcripts; history depends on the plan | REST API and bulk fundamentals files | API key; free tier allows 5 requests per minute and 2 years of annual statement history | Period-end dates are documented, but filing timestamps and restatement version retention are not established by the statement schema; do not assume point-in-time data | No |
@@ -32,8 +32,9 @@ Yahoo, EODHD, Finnhub, and Massive expose fundamental or company-metric methods.
 use a long schema with `period_end` and an optional `filed_at`. An empty `filed_at` means the frame
 does not establish when the value became public and should not be used as point-in-time evidence.
 
-`MassiveProvider.fetch_financials()` still targets a retired vendor endpoint. The supported mapping
-above is limited to `fetch_company_metrics()` until that runtime contract changes.
+`MassiveProvider.fetch_financials()` reads the v1 income-statement, balance-sheet, and cash-flow
+endpoints. `fetch_company_metrics()` reads stock ratios. Statement filing dates do not by themselves
+establish a complete history of superseded filings.
 
 ## Selection Notes
 

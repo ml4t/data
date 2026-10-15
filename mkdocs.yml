@@ -38,7 +38,7 @@ theme:
     repo: fontawesome/brands/github
 
   logo: assets/logo.svg
-  favicon: assets/favicon.ico
+  favicon: assets/images/favicon.png
 
 # Custom CSS for Picasso palette
 extra_css:
@@ -120,6 +120,8 @@ nav:
     - Incremental Updates: user-guide/incremental-updates.md
     - Data Quality: user-guide/data-quality.md
     - Storage: user-guide/storage.md
+    - Trading Sessions: user-guide/sessions.md
+    - Exporting Data: user-guide/exporting.md
 
   - Providers:
     - providers/index.md
@@ -202,19 +204,6 @@ extra:
 
 # Copyright
 copyright: Copyright &copy; 2024-2026 Stefan Jansen
-
-# These pages remain searchable but are intentionally outside the primary navigation.
-not_in_nav: |
-  /ASYNC_STORAGE.md
-  /FEATURES.md
-  /INSTALLATION.md
-  /INTEGRATION_TESTING.md
-  /SESSION_MANAGEMENT.md
-  /crypto_providers.md
-  /export_guide.md
-  /yahoo_provider.md
-  /providers/databento_reference.md
-  /providers/mock.md
 
 validation:
   omitted_files: warn

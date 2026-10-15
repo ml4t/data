@@ -17,7 +17,7 @@ closures, wash trading, and differences between spot, futures, perpetuals, and o
 | [CryptoCompare API](https://developers.cryptocompare.com/documentation) | Aggregated and exchange-specific crypto market data | REST and streaming APIs | API key for supported usage | Release qualification depends on live credential validation; aggregation methodology matters | `CryptoCompareProvider` |
 | [Kaiko Market Data](https://www.kaiko.com/products/market-data) | Centralized and decentralized venues, spot and derivatives, trades and order books | API, streaming, and cloud delivery | Institutional license | Venue and instrument history depend on the contracted product | No |
 | [Tardis.dev historical data](https://docs.tardis.dev/historical-data-details/overview) | Raw and normalized messages for centralized crypto exchanges, including closed venues | API and downloadable files | Commercial plan; limited samples | Reconstruction requires exchange-specific message semantics and snapshot handling | No |
-| [CoinAPI Market Data](https://www.coinapi.io/products/market-data-api) | Multi-exchange spot and derivatives market data | REST, WebSocket, FIX, and files | API key; plan-dependent | Normalized symbols and aggregate feeds can hide exchange-specific contract details | No |
+| [CoinAPI Market Data](https://www.coinapi.io/products/market-data-api/docs) | Multi-exchange spot and derivatives market data | REST, WebSocket, FIX, and files | API key; plan-dependent | Normalized symbols and aggregate feeds can hide exchange-specific contract details | No |
 
 On-chain metrics, developer activity, and social signals belong in the
 [alternative-data reference](alternative_data.md). This page covers tradable market data.

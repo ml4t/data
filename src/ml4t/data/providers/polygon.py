@@ -338,7 +338,7 @@ class MassiveProvider(BaseProvider):
                     )
                 raise ProviderError(provider=self.name, message=f"API error: {error_msg}")
 
-            return data
+            return self._collect_aggregate_pages(data)
 
         except (
             AuthenticationError,
@@ -350,6 +350,27 @@ class MassiveProvider(BaseProvider):
             raise
         except Exception as err:
             raise NetworkError(provider=self.name, message=f"Request failed: {endpoint}") from err
+
+    def _collect_aggregate_pages(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Follow aggregate ``next_url`` cursors so a 50,000-row page is not the whole result."""
+        next_url = data.get("next_url")
+        if not isinstance(next_url, str) or not next_url:
+            return data
+        raw_results = data.get("results") or []
+        results = (
+            [item for item in raw_results if isinstance(item, dict)]
+            if isinstance(raw_results, list)
+            else []
+        )
+        seen: set[str] = set()
+        while isinstance(next_url, str) and next_url and next_url not in seen:
+            seen.add(next_url)
+            page = self._get_json(next_url, {})
+            results.extend(item for item in page.get("results", []) if isinstance(item, dict))
+            next_url = page.get("next_url")
+        if seen:
+            return {**data, "results": results}
+        return data
 
     def _transform_data(self, raw_data: dict[str, Any], symbol: str) -> pl.DataFrame:
         """Transform raw API response to Polars DataFrame."""

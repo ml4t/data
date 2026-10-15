@@ -195,8 +195,9 @@ class GapDetector:
         start_date = _ensure_datetime(start_date)
         end_date = _ensure_datetime(end_date)
         try:
-            # Read data from storage
-            df = storage.read(key, start_date, end_date).collect()
+            # Storage end bounds are exclusive. Open the inclusive end by one
+            # microsecond so a bar timestamped on end_date is part of the range.
+            df = storage.read(key, start_date, end_date + timedelta(microseconds=1)).collect()
 
             if df.is_empty():
                 # No data in range means entire range is a gap
