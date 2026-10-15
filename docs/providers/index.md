@@ -35,7 +35,7 @@ For the wider vendor landscape, including sources the library does not wrap, sta
 | [Finnhub](finnhub.md) | US quotes; premium OHLCV | 60 requests/minute | Thread | Yes |
 | [Binance](binance.md) | Crypto | Unlimited | Native | No |
 | [OKX](okx.md) | Crypto Perpetuals | No geo-limits | Native | No |
-| [CryptoCompare](cryptocompare.md) | Crypto | Unverified for 0.1.0 | Native | Required |
+| [CryptoCompare](cryptocompare.md) | Crypto | Live contract unverified for 0.2.0 | Native | Required |
 | [Oanda](oanda.md) | Forex | Demo only | Thread | Yes |
 
 ## Async Support
@@ -95,8 +95,8 @@ provider's capabilities before passing it to `DataManager` or `async_batch_load(
 
 Provider access, coverage, retention, and redistribution terms can differ by account tier. Confirm
 the provider page and the provider's current terms before selecting it for a production dataset.
-CryptoCompare is included for evaluation but is not release-qualified for 0.1.0 because account
-registration was unavailable during release validation and no live contract evidence was obtained.
+CryptoCompare is included in 0.2.0, but release validation had no configured API key and therefore
+recorded no successful live contract. Verify access with your account before production use.
 
 ## Authentication
 
