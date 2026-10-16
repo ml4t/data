@@ -48,10 +48,45 @@ remain explicit:
 ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
 ```
 
-The detector uses the requested frequency and distinguishes crypto, which trades continuously, from
-other asset classes. It treats common overnight and weekend intervals as expected for non-crypto
-intraday data. This is a general interval check, not an exchange-calendar reconstruction. Use
-[trading-session completion](sessions.md) when exact exchange schedules are required.
+Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
+The updater currently selects NYSE for non-crypto data and 24/7 for crypto. Intraday detection still
+uses approximate US overnight/weekend rules. It is not an exchange-calendar reconstruction. Use
+[trading-session completion](sessions.md) when exact intraday schedules are required.
+
+Detection does not itself fill or modify observations. The updater's separately enabled forward
+fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
+dates when a real gap is present. Disable filling when those synthetic rows are inappropriate.
+
+### Inspect Daily Gaps Without Filling
+
+```python
+from ml4t.data.utils.gaps import GapDetector
+from ml4t.specs import FeedSpec
+
+feed = FeedSpec(calendar="NYSE", time_contract_version=2)
+gaps = GapDetector().detect_gaps(df, frequency="daily", feed_spec=feed)
+```
+
+The canonical `calendar` keyword overrides the feed's declaration. Otherwise the declared calendar
+applies, then NYSE. `calendar="24/7"` expects a daily observation on weekends and holidays;
+`calendar=None` disables schedule-based gap classification, regardless of timestamp spacing.
+`is_crypto=True` remains a compatibility hint for 24/7 only when neither an explicit calendar nor a
+feed declaration selects a calendar. Version-1 feed metadata with `calendar=None` still means
+unspecified; version-2 metadata preserves an explicit null as disabled after serialization.
+
+Daily inputs are session labels (Polars Date, or the date component of Datetime values in their
+existing timezone). Non-midnight labels remain supported. Exchange holidays and weekends do not
+count as missing NYSE sessions; a shortened session still requires one daily observation. Gap bounds
+remain the two observed timestamps, while `missing_periods` counts only scheduled dates strictly
+between them. Inspect each asset separately; observed dates from other assets must not define the
+schedule. This operation does not validate off-session observations or discover gaps outside the
+observed range.
+
+Explicit event-time/bar-close metadata is rejected rather than reinterpreted as session labels.
+Named calendar/feed declarations for intraday detection are not supported yet; legacy intraday
+calls retain their existing behavior. Unknown calendars and malformed daily timestamps fail without
+modifying the input. `fill_gaps()` remains a separate elapsed-grid operation, not calendar-aware
+imputation.
 
 If a provider's history limit cannot reach the stored dataset, the updater records
 `provider_history_limited` and skips gap filling across the unavailable interval.

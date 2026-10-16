@@ -79,7 +79,7 @@ class TestGapDetector:
         )
 
         detector = GapDetector()
-        gaps = detector.detect_gaps(df, frequency="daily")
+        gaps = detector.detect_gaps(df, frequency="daily", calendar="24/7")
 
         assert len(gaps) == 2
         assert gaps[0].missing_periods == 2
@@ -150,10 +150,7 @@ class TestGapDetector:
         detector = GapDetector()
         gaps = detector.detect_gaps(df, frequency="daily", is_crypto=False)
 
-        # Weekend should not be a gap for stocks
-        # Note: Basic implementation might still detect it
-        # This test documents expected behavior
-        assert len(gaps) <= 1  # May detect as gap in simple implementation
+        assert gaps == []
 
     def test_gap_summary(self) -> None:
         """Test gap summarization."""
@@ -171,7 +168,7 @@ class TestGapDetector:
         )
 
         detector = GapDetector()
-        gaps = detector.detect_gaps(df, frequency="daily")
+        gaps = detector.detect_gaps(df, frequency="daily", calendar="24/7")
         summary = detector.summarize_gaps(gaps)
 
         assert summary["count"] == 2

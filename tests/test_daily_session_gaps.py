@@ -102,3 +102,57 @@ def test_bad_calendar_fails_without_mutating_provider_input() -> None:
     with pytest.raises(ValueError, match="Unknown calendar"):
         GapDetector().detect_gaps(frame, calendar="not-an-exchange")
     assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize(
+    "metadata, expected",
+    [({"calendar": None}, 1), ({"time_contract_version": 2, "calendar": None}, 0)],
+)
+def test_legacy_null_inherits_but_declared_null_disables_missing_session_checks(
+    metadata, expected
+) -> None:
+    from ml4t.specs import FeedSpec
+
+    frame = provider_frame("2025-07-15", "2025-07-17")
+    frame = frame.filter(pl.col("timestamp").dt.date() != date(2025, 7, 16))
+    feed = FeedSpec.from_mapping(FeedSpec.from_mapping(metadata).to_dict())
+    gaps = GapDetector().detect_gaps(frame, feed_spec=feed)
+    assert sum(g.missing_periods for g in gaps) == expected
+
+
+def test_missing_early_close_session_is_still_one_missing_observation() -> None:
+    frame = provider_frame("2025-07-02", "2025-07-07")
+    frame = frame.filter(~pl.col("timestamp").dt.date().is_in([date(2025, 7, 3), date(2025, 7, 4)]))
+    gaps = GapDetector().detect_gaps(frame)
+    assert len(gaps) == 1
+    assert gaps[0].missing_periods == 1
+
+
+def test_non_us_calendar_uses_its_own_holidays() -> None:
+    frame = provider_frame("2025-07-03", "2025-07-07")
+    frame = frame.filter(pl.col("timestamp").dt.date() != date(2025, 7, 4))
+    assert GapDetector().detect_gaps(frame, calendar="NYSE") == []
+    assert sum(g.missing_periods for g in GapDetector().detect_gaps(frame, calendar="LSE")) == 1
+
+
+def test_date_session_labels_have_the_same_schedule_as_datetime_labels() -> None:
+    frame = provider_frame("2025-07-11", "2025-07-14").with_columns(pl.col("timestamp").dt.date())
+    assert GapDetector().detect_gaps(frame) == []
+    assert sum(g.missing_periods for g in GapDetector().detect_gaps(frame, calendar="24/7")) == 2
+
+
+@pytest.mark.parametrize("semantics", ["event_time", "bar_close"])
+def test_event_semantics_are_not_silently_reinterpreted_as_daily_labels(semantics) -> None:
+    frame = provider_frame("2025-07-11", "2025-07-14")
+    with pytest.raises(NotImplementedError, match="session_label"):
+        GapDetector().detect_gaps(frame, feed_spec={"timestamp_semantics": semantics})
+
+
+def test_null_timestamps_fail_without_input_mutation() -> None:
+    frame = provider_frame("2025-07-11", "2025-07-14").with_columns(
+        pl.lit(None).cast(pl.Datetime("us", "UTC")).alias("timestamp")
+    )
+    original = frame.clone()
+    with pytest.raises(ValueError, match="null timestamps"):
+        GapDetector().detect_gaps(frame)
+    assert_frame_equal(frame, original)
