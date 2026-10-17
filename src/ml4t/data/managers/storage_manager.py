@@ -297,6 +297,8 @@ class StorageManager:
             logger.info(f"Fetched {len(df)} rows of data")
             self._report_progress(f"Fetched {len(df)} rows", 0.5)
 
+            min_ts, max_ts = timestamp_bounds(df)
+
             # Validate data if enabled
             if self.enable_validation:
                 validation_report = self._validate_data(
@@ -313,8 +315,6 @@ class StorageManager:
 
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
-
-            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":
@@ -423,6 +423,8 @@ class StorageManager:
             if missing:
                 raise ValueError(f"Missing required columns: {missing}")
 
+            min_ts, max_ts = timestamp_bounds(df)
+
             # Validate data if enabled
             if self.enable_validation:
                 validation_report = self._validate_data(
@@ -437,8 +439,6 @@ class StorageManager:
 
             # Create metadata
             from ml4t.data.core.models import DataObject, Metadata
-
-            min_ts, max_ts = timestamp_bounds(df)
 
             bar_params = {}
             if bar_type == "time":

@@ -230,3 +230,11 @@ def test_legacy_rule_null_calendar_still_inherits_default_instead_of_disabling()
     assert FeedSpec.from_any(config).resolve_calendar() == "NYSE"
     frame = minute_observation("2025-07-12", "18:00")
     assert temporal_issues(CrossValidator(feed_spec=config).validate(frame, frequency="minute"))
+
+
+@pytest.mark.parametrize("frequency", ["daily", "1d", "1day"])
+def test_crypto_continuity_preserves_supported_daily_frequency_aliases(frequency):
+    with SyntheticProvider(calendar_mode="continuous") as provider:
+        frame = provider.fetch_ohlcv("BTCUSD", "2025-07-11", "2025-07-14", "daily")
+    observed = frame.filter(pl.col("timestamp").dt.weekday() <= 5)
+    assert len(CryptoSessionValidator("24/7").validate_continuity(observed, frequency)) == 1

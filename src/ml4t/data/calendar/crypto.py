@@ -322,6 +322,8 @@ class CryptoSessionValidator:
         if selected is None:
             return issues
         frequency = frequency or feed.data_frequency or "daily"
+        if frequency.lower() in {"1d", "1day"}:
+            frequency = "daily"
 
         if df.is_empty():
             return ["No data to validate"]
