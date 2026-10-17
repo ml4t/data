@@ -339,7 +339,9 @@ class DataManager:
         bar_type: str = "time",
         bar_threshold: int | None = None,
         exchange: str = "UNKNOWN",
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        feed_spec: Any | None = None,
     ) -> str:
         """Load data from provider and store it."""
         if not self._storage_manager:
@@ -357,6 +359,7 @@ class DataManager:
             bar_threshold,
             exchange,
             calendar,
+            feed_spec=feed_spec,
         )
 
     def import_data(
@@ -369,7 +372,9 @@ class DataManager:
         bar_type: str = "time",
         bar_threshold: int | None = None,
         exchange: str = "UNKNOWN",
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        feed_spec: Any | None = None,
     ) -> str:
         """Import external data into storage with metadata."""
         if not self._storage_manager:
@@ -386,6 +391,7 @@ class DataManager:
             bar_threshold,
             exchange,
             calendar,
+            feed_spec=feed_spec,
         )
 
     def update(
@@ -399,6 +405,9 @@ class DataManager:
         initial_start: str | None = None,
         initial_end: str | None = None,
         initial_load_days: int = 365,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> str:
         """Update existing data with incremental fetch."""
         if not self._storage_manager:
@@ -415,6 +424,8 @@ class DataManager:
             initial_start,
             initial_end,
             initial_load_days,
+            calendar=calendar,
+            feed_spec=feed_spec,
         )
 
     # ========================================================================
