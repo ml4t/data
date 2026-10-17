@@ -93,7 +93,7 @@ def test_disabled_update_does_not_impute_an_old_provider_outage(manager):
     recent = provider_frame(str(recent_day - timedelta(days=3)), str(recent_day))
     frame = pl.concat([historic, recent]).unique("timestamp").sort("timestamp")
     key = instance.import_data(frame, "SPY", "synthetic", calendar=None)
-    instance.update("SPY", provider="synthetic", fill_gaps=True)
+    instance.update("SPY", provider="synthetic", check_gaps=True)
     stored = storage.read(key).collect()
     assert stored.filter(pl.col("timestamp").dt.date() == date(2025, 7, 16)).is_empty()
     assert FeedSpec.from_mapping(instance.get_metadata_for_key(key)).resolve_calendar() is None
@@ -165,7 +165,7 @@ def test_explicit_update_disable_overrides_stored_schedule_without_filling(manag
     recent = provider_frame(str(recent_day - timedelta(days=3)), str(recent_day))
     frame = pl.concat([historic, recent]).unique("timestamp").sort("timestamp")
     key = instance.import_data(frame, "SPY", "synthetic", calendar="24/7")
-    instance.update("SPY", provider="synthetic", calendar=None, fill_gaps=True)
+    instance.update("SPY", provider="synthetic", calendar=None, check_gaps=True)
     assert (
         storage.read(key)
         .collect()

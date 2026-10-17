@@ -596,8 +596,8 @@ class TestSessionCompleter:
         assert info["market_open"] is None
         assert info["market_close"] is None
 
-    def test_fill_missing_data_with_metadata_columns(self):
-        """Test that metadata columns are forward-filled."""
+    def test_null_placeholder_does_not_claim_observed_symbol_metadata(self):
+        """Only observed rows carry source symbol values in the expanded grid."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -615,8 +615,7 @@ class TestSessionCompleter:
         )
 
         result = completer.complete_sessions(df)
-        # Symbol should be forward-filled
-        assert "symbol" in result.columns
+        assert result["symbol"].to_list() == ["AAPL", None, "AAPL"]
 
 
 class TestSessionIntegration:
