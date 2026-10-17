@@ -77,7 +77,7 @@ requires-python = ">=3.12,<3.15"
 
 # Core dependencies
 dependencies = [
-    "ml4t-specs @ git+https://github.com/ml4t/specs.git@701bde68744035050ede386efce498234c661c21",
+    "ml4t-specs>=0.2.0",
     # Data processing
     "polars>=0.20.0",
     "pandas>=2.0.0",
