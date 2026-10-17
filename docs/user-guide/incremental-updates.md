@@ -49,9 +49,10 @@ ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
 ```
 
 Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
-The updater currently selects NYSE for non-crypto data and 24/7 for crypto. Intraday detection still
-uses approximate US overnight/weekend rules. It is not an exchange-calendar reconstruction. Use
-[trading-session completion](sessions.md) when exact intraday schedules are required.
+The updater currently selects NYSE for non-crypto data and 24/7 for crypto. Its legacy intraday
+path lacks the complete grid declaration required by the detector and now fails clearly; use
+`--no-fill-gaps` or `fill_gaps=False` for those updates. Direct detection with a complete declaration
+is described below. [Trading-session completion](sessions.md) is a separate one-minute operation.
 
 Detection does not itself fill or modify observations. The updater's separately enabled forward
 fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
