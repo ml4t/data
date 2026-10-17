@@ -78,7 +78,7 @@ class GapDetector:
     def detect_gaps(
         self,
         df: pl.DataFrame,
-        frequency: str = "daily",
+        frequency: str | None = None,
         timestamp_col: str = "timestamp",
         is_crypto: bool = False,
         *,
@@ -90,7 +90,7 @@ class GapDetector:
 
         Args:
             df: DataFrame with time series data
-            frequency: Data frequency (minute, hourly, daily, etc.)
+            frequency: Data frequency; inherit the feed declaration, otherwise daily.
             timestamp_col: Name of timestamp column
             is_crypto: If True, expect 24/7 data; if False, market hours only
             calendar: Schedule override; None disables schedule-based detection.
@@ -100,6 +100,8 @@ class GapDetector:
             List of detected gaps
         """
         feed = FeedSpec.from_any(feed_spec)
+        if frequency is None:
+            frequency = str(feed.data_frequency) if feed.data_frequency is not None else "daily"
         # Preserve the old crypto hint only when the feed has no declaration.
         if (
             frequency.lower() in {"daily", "1day"}
@@ -114,6 +116,16 @@ class GapDetector:
         selected_calendar = feed.resolve_calendar(calendar=calendar)
         if selected_calendar is None:
             return []
+        declared_interval = (
+            self._intraday_interval(str(feed.data_frequency))
+            if feed.data_frequency is not None
+            else None
+        )
+        if (
+            declared_interval is not None
+            and self._intraday_interval(frequency) != declared_interval
+        ):
+            raise ValueError("declared grid data_frequency must match the requested frequency")
         if frequency.lower() in {"daily", "1day"}:
             return self._detect_daily_gaps(df, timestamp_col, frequency, selected_calendar, feed)
         if self._intraday_interval(frequency) is not None:

@@ -106,7 +106,8 @@ Intraday classification requires the complete version-2 declaration above. `even
 does not choose a bar side. `bar_close` requires `bar_label="right"`. Naive timestamps also require
 `timezone`; ambiguous/nonexistent local clocks fail rather than selecting a DST interpretation.
 Supported fixed intervals use positive minute/hour counts, such as `5minute`, `15min` or `hourly`.
-The requested and declared frequencies must agree. Event-count bars and session-label timestamps
+Omitted `frequency` inherits the feed declaration, otherwise defaults to daily. An explicit
+frequency must agree with the declaration. Event-count bars and session-label timestamps
 cannot define an intraday grid.
 
 The grid starts at each authoritative tradable interval's open and restarts after lunch breaks.
