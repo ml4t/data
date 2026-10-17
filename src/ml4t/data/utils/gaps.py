@@ -246,20 +246,43 @@ class GapDetector:
         schedule = assigner.calendar.schedule(
             start_date=(start - timedelta(days=2)).date(),
             end_date=(end + timedelta(days=2)).date(),
+            interruptions=True,
         )
         import pandas as pd
 
         grid_intervals: list[tuple[datetime, datetime, int, int]] = []
         total_bars = 0
+        closure_columns = [("break_start", "break_end")] if "break_start" in schedule else []
+        closure_columns.extend(
+            (name, name.replace("interruption_start_", "interruption_end_"))
+            for name in schedule.columns
+            if name.startswith("interruption_start_")
+        )
         for _, row in schedule.iterrows():
             opening = row["market_open"].to_pydatetime().astimezone(UTC)
             closing = row["market_close"].to_pydatetime().astimezone(UTC)
             intervals = [(opening, closing)]
-            if "break_start" in schedule.columns and not pd.isna(row["break_start"]):
-                intervals = [
-                    (opening, row["break_start"].to_pydatetime().astimezone(UTC)),
-                    (row["break_end"].to_pydatetime().astimezone(UTC), closing),
-                ]
+            closures = []
+            for start_column, end_column in closure_columns:
+                left, right = row[start_column], row[end_column]
+                if pd.isna(left) and pd.isna(right):
+                    continue
+                if pd.isna(left) or pd.isna(right) or left >= right:
+                    raise ValueError("calendar returned invalid closure boundaries")
+                closures.append(
+                    (left.to_pydatetime().astimezone(UTC), right.to_pydatetime().astimezone(UTC))
+                )
+            for closure_start, closure_end in sorted(closures):
+                tradable = []
+                for left, right in intervals:
+                    if closure_end <= left or closure_start >= right:
+                        tradable.append((left, right))
+                    else:
+                        if left < closure_start:
+                            tradable.append((left, closure_start))
+                        if closure_end < right:
+                            tradable.append((closure_end, right))
+                intervals = tradable
             for opening, closing in intervals:
                 count, remainder = divmod(closing - opening, interval)
                 if remainder and feed.partial_bar_policy == PartialBarPolicy.INCLUDE:
