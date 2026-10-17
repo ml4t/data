@@ -83,10 +83,47 @@ schedule. This operation does not validate off-session observations or discover 
 observed range.
 
 Explicit event-time/bar-close metadata is rejected rather than reinterpreted as session labels.
-Named calendar/feed declarations for intraday detection are not supported yet; legacy intraday
-calls retain their existing behavior. Unknown calendars and malformed daily timestamps fail without
-modifying the input. `fill_gaps()` remains a separate elapsed-grid operation, not calendar-aware
-imputation.
+Unknown calendars and malformed daily timestamps fail without modifying the input. `fill_gaps()`
+remains a separate elapsed-grid operation, not calendar-aware imputation.
+
+### Inspect Intraday Gaps Against a Declared Grid
+
+```python
+feed = FeedSpec(
+    time_contract_version=2,
+    calendar="NYSE",
+    data_frequency="minute",
+    timestamp_semantics="event_time",
+    bar_grid_anchor="session_open",
+    bar_label="left",
+    partial_bar_policy="include",
+)
+gaps = GapDetector().detect_gaps(df, frequency="minute", feed_spec=feed)
+```
+
+Intraday classification requires the complete version-2 declaration above. `event_time` alone
+does not choose a bar side. `bar_close` requires `bar_label="right"`. Naive timestamps also require
+`timezone`; ambiguous/nonexistent local clocks fail rather than selecting a DST interpretation.
+Supported fixed intervals use positive minute/hour counts, such as `5minute`, `15min` or `hourly`.
+The requested and declared frequencies must agree. Event-count bars and session-label timestamps
+cannot define an intraday grid.
+
+The grid starts at each authoritative tradable interval's open and restarts after lunch breaks.
+`partial_bar_policy="include"` retains a shorter final bar; `"exclude"` omits it. Right labels name
+the bar's end, including the actual shortened close. Holidays, early closes, DST, overnight sessions
+and registered custom calendars use their selected schedule, not the observed rows. Off-grid
+observations fail clearly instead of changing the definition to fit the input.
+
+Run classification separately per asset. Missing bars strictly between the first and last observed
+timestamps are counted, including a completely missing session, even if every asset has that outage.
+Returned intraday bounds are UTC instants; `missing_periods` counts expected bars, while `duration`
+is elapsed time. Detection does not infer missing boundaries outside the observed range or fill rows.
+Explicit `calendar=None` disables classification, while `"24/7"` still expects continuous bars.
+
+This replaces the old fixed-US-clock approximation. Unqualified legacy intraday calls now require
+a complete feed declaration or explicit `calendar=None`; the detector does not invent an anchor,
+label side or partial-bar policy. Daily classification is unchanged. The separate intraday/weekly
+backfill range planner below still has its documented limitations.
 
 ### Plan Daily Backfill Acquisition
 

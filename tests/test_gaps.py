@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 
 from ml4t.data.utils.gaps import DataGap, GapDetector
+from ml4t.specs import FeedSpec
 
 
 class TestGapDetector:
@@ -87,7 +88,7 @@ class TestGapDetector:
 
     def test_minute_data_gaps(self) -> None:
         """Test gap detection in minute-level data."""
-        base = datetime(2024, 1, 1, 14, 30, tzinfo=UTC)  # 9:30 AM ET
+        base = datetime(2024, 1, 2, 14, 30, tzinfo=UTC)  # 9:30 AM ET, a NYSE session
         timestamps = [
             base,
             base + timedelta(minutes=1),
@@ -105,7 +106,18 @@ class TestGapDetector:
         )
 
         detector = GapDetector()
-        gaps = detector.detect_gaps(df, frequency="minute")
+        gaps = detector.detect_gaps(
+            df,
+            frequency="minute",
+            feed_spec=FeedSpec(
+                time_contract_version=2,
+                data_frequency="minute",
+                timestamp_semantics="event_time",
+                bar_grid_anchor="session_open",
+                bar_label="left",
+                partial_bar_policy="include",
+            ),
+        )
 
         assert len(gaps) == 1
         assert gaps[0].missing_periods == 3

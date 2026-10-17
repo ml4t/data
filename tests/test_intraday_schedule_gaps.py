@@ -197,6 +197,7 @@ def test_registered_custom_break_grid_restarts_and_honors_partial_bar_policy(pol
 
     class DataGridRegressionCalendar(MarketCalendar):
         name = "DataGridRegression"
+        aliases = ["DataGridRegression"]
         tz = ZoneInfo("UTC")
         regular_market_times = {
             "market_open": ((None, time(9)),),
@@ -217,3 +218,35 @@ def test_registered_custom_break_grid_restarts_and_honors_partial_bar_policy(pol
     )
     feed = declaration("DataGridRegression", "hourly", partial_bar_policy=policy)
     assert sum(g.missing_periods for g in gaps(frame, feed)) == expected
+
+
+def test_naive_ambiguous_local_clock_is_rejected_without_a_guessed_dst_fold():
+    frame = (
+        provider_frame("2025-11-02", "2025-11-02")
+        .filter(
+            (pl.col("timestamp").dt.hour() == 5) & pl.col("timestamp").dt.minute().is_in([30, 32])
+        )
+        .with_columns(
+            pl.col("timestamp").dt.convert_time_zone("America/New_York").dt.replace_time_zone(None)
+        )
+    )
+    with pytest.raises(pl.exceptions.ComputeError, match="ambiguous"):
+        gaps(frame, declaration("24/7", timezone="America/New_York"))
+
+
+def test_a_frequency_conflict_and_event_count_feed_cannot_define_a_time_grid():
+    frame = provider_frame().head(2)
+    with pytest.raises(ValueError, match="frequency"):
+        GapDetector().detect_gaps(frame, frequency="hourly", feed_spec=declaration("24/7"))
+    with pytest.raises(ValueError, match="fixed time bars"):
+        gaps(frame, declaration("24/7", bar_type="volume"))
+
+
+def test_right_labeled_break_start_is_the_last_valid_morning_bar():
+    frame = provider_frame().filter(
+        ((pl.col("timestamp").dt.hour() == 3) & (pl.col("timestamp").dt.minute() == 59))
+        | ((pl.col("timestamp").dt.hour() == 4) & (pl.col("timestamp").dt.minute() == 0))
+    )
+    assert (
+        gaps(frame, declaration("HKEX", timestamp_semantics="bar_close", bar_label="right")) == []
+    )
