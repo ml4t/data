@@ -3,11 +3,35 @@
 from datetime import datetime, timedelta
 
 import polars as pl
+import pytest
 
+from ml4t.data.providers import SyntheticProvider
 from ml4t.data.utils.gaps import (
     DataGap,
     GapDetector,
 )
+from ml4t.specs import FeedSpec
+
+
+def intraday_feed(frequency, calendar="24/7"):
+    return FeedSpec(
+        time_contract_version=2,
+        calendar=calendar,
+        timezone="UTC",
+        data_frequency=frequency,
+        timestamp_semantics="event_time",
+        bar_grid_anchor="session_open",
+        bar_label="left",
+        partial_bar_policy="include",
+    )
+
+
+def intraday_rows(timestamps):
+    with SyntheticProvider(calendar_mode="continuous") as provider:
+        frame = provider.fetch_ohlcv(
+            "SYNTH", timestamps[0].date().isoformat(), timestamps[-1].date().isoformat(), "minute"
+        )
+    return frame.filter(pl.col("timestamp").dt.replace_time_zone(None).is_in(timestamps))
 
 
 class TestDataGap:
@@ -161,48 +185,20 @@ class TestGapDetector:
         assert len(gaps) >= 1
 
     def test_detect_gaps_hourly_frequency(self):
-        """Test gap detection with hourly frequency."""
+        """A three-hour continuous interval must retain two missing hourly bars."""
         detector = GapDetector()
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 1, 10, 0),
-                    datetime(2024, 1, 1, 13, 0),  # Missing 3 hours
-                ],
-                "value": [10.0, 40.0],
-            }
-        )
-
-        gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-
-        # Should detect a gap (crypto = 24/7)
-        assert len(gaps) >= 1
+        df = intraday_rows([datetime(2024, 1, 1, 10), datetime(2024, 1, 1, 13)])
+        gaps = detector.detect_gaps(df, feed_spec=intraday_feed("hourly"))
+        assert [gap.missing_periods for gap in gaps] == [2]
 
     def test_detect_gaps_crypto_vs_traditional(self):
-        """Test difference between crypto (24/7) and traditional market hours."""
+        """An exchange weekend must not erase a continuous-feed outage."""
         detector = GapDetector()
-
-        # Weekend data (Saturday to Monday)
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 6, 15, 0),  # Saturday
-                    datetime(2024, 1, 8, 9, 0),  # Monday
-                ],
-                "value": [10.0, 20.0],
-            }
-        )
-
-        # For crypto (24/7), this should be a gap
-        crypto_gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-
-        # For traditional markets, weekend gap might be expected
-        traditional_gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=False)
-
-        # Results might differ (crypto should detect more gaps over weekends)
-        # This tests the logic even if implementation varies
-        assert isinstance(crypto_gaps, list)
-        assert isinstance(traditional_gaps, list)
+        df = intraday_rows([datetime(2024, 1, 5, 20, 59), datetime(2024, 1, 8, 14, 30)])
+        crypto_gaps = detector.detect_gaps(df, feed_spec=intraday_feed("minute"))
+        traditional_gaps = detector.detect_gaps(df, feed_spec=intraday_feed("minute", "NYSE"))
+        assert [gap.missing_periods for gap in crypto_gaps] == [3930]
+        assert traditional_gaps == []
 
     def test_detect_gaps_unsorted_data(self):
         """Test gap detection handles unsorted data."""
@@ -224,22 +220,11 @@ class TestGapDetector:
         assert isinstance(gaps, list)
 
     def test_detect_gaps_minute_frequency(self):
-        """Test gap detection with minute frequency."""
+        """A five-minute continuous interval must retain four missing minute bars."""
         detector = GapDetector()
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 1, 9, 30, 0),
-                    datetime(2024, 1, 1, 9, 35, 0),  # 5 minute gap
-                ],
-                "value": [100.0, 105.0],
-            }
-        )
-
-        gaps = detector.detect_gaps(df, frequency="minute", is_crypto=True)
-
-        # Should detect multiple 1-minute gaps
-        assert len(gaps) >= 1
+        df = intraday_rows([datetime(2024, 1, 1, 9, 30), datetime(2024, 1, 1, 9, 35)])
+        gaps = detector.detect_gaps(df, feed_spec=intraday_feed("minute"))
+        assert [gap.missing_periods for gap in gaps] == [4]
 
     def test_periods_per_day_constants(self):
         """Test PERIODS_PER_DAY constants are reasonable."""
@@ -313,107 +298,57 @@ class TestGapDetector:
         # Should detect gaps in monthly data
         assert isinstance(gaps, list)
 
-    def test_tolerance_effect(self):
-        """Test that tolerance affects gap detection."""
-        # High tolerance should detect fewer gaps
-        lenient_detector = GapDetector(tolerance=0.5)  # 50% tolerance
-        strict_detector = GapDetector(tolerance=0.01)  # 1% tolerance
-
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 1, 0, 0),
-                    datetime(2024, 1, 1, 1, 30),  # 1.5 hours (slight gap)
-                ],
-                "value": [10.0, 20.0],
-            }
-        )
-
-        lenient_gaps = lenient_detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-        strict_gaps = strict_detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-
-        # Strict detector should potentially detect more gaps than lenient
-        assert isinstance(lenient_gaps, list)
-        assert isinstance(strict_gaps, list)
+    @pytest.mark.parametrize("tolerance", [0.5, 0.01])
+    def test_tolerance_cannot_reclassify_off_grid_timestamps(self, tolerance):
+        """Elapsed-time tolerance must not admit half-hour labels to an hourly grid."""
+        df = intraday_rows([datetime(2024, 1, 1), datetime(2024, 1, 1, 1, 30)])
+        with pytest.raises(ValueError, match="off-grid"):
+            GapDetector(tolerance=tolerance).detect_gaps(df, feed_spec=intraday_feed("hourly"))
 
 
 class TestGapDetectorIntegration:
     """Integration tests for GapDetector."""
 
     def test_realistic_stock_data_gaps(self):
-        """Test gap detection on realistic stock market data."""
+        """An hourly NYSE grid excludes the weekend but retains Monday's missing bar."""
         detector = GapDetector()
-
-        # Simulate stock data with weekend gap
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 5, 15, 0),  # Friday market close
-                    datetime(2024, 1, 8, 9, 30),  # Monday market open
-                    datetime(2024, 1, 8, 10, 30),  # Monday 1 hour later
-                    datetime(2024, 1, 8, 12, 0),  # Monday with small gap
-                ],
-                "value": [100.0, 102.0, 103.0, 104.0],
-            }
+        df = intraday_rows(
+            [
+                datetime(2024, 1, 5, 20, 30),
+                datetime(2024, 1, 8, 14, 30),
+                datetime(2024, 1, 8, 15, 30),
+                datetime(2024, 1, 8, 17, 30),
+            ]
         )
-
-        gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=False)
-
-        # Should handle weekend gaps appropriately for traditional markets
-        assert isinstance(gaps, list)
+        gaps = detector.detect_gaps(df, feed_spec=intraday_feed("hourly", "NYSE"))
+        assert [gap.missing_periods for gap in gaps] == [1]
+        assert gaps[0].start.hour == 15
+        assert gaps[0].end.hour == 17
 
     def test_crypto_24_7_data_gaps(self):
-        """Test gap detection on 24/7 crypto data."""
+        """Separate outages on a continuous hourly grid must keep their exact sizes."""
         detector = GapDetector()
-
-        # Simulate crypto data with regular hourly gaps
         base_time = datetime(2024, 1, 1, 0, 0)
-        timestamps = []
-        values = []
-
-        # Add hourly data with some gaps
-        for hour in [0, 1, 2, 5, 6, 9]:  # Missing hours 3,4 and 7,8
-            timestamps.append(base_time + timedelta(hours=hour))
-            values.append(50000.0 + hour * 100)
-
-        df = pl.DataFrame(
-            {
-                "timestamp": timestamps,
-                "value": values,
-            }
-        )
-
-        gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-
-        # Should detect the missing hours in 24/7 crypto data
-        assert len(gaps) >= 1
+        df = intraday_rows([base_time + timedelta(hours=hour) for hour in [0, 1, 2, 5, 6, 9]])
+        gaps = detector.detect_gaps(df, feed_spec=intraday_feed("hourly"))
+        assert [gap.missing_periods for gap in gaps] == [2, 2]
 
     def test_mixed_frequency_analysis(self):
-        """Test gap detection across different frequencies on same data."""
+        """Observations valid on a minute grid need not belong to an hourly grid."""
         detector = GapDetector()
-
-        # Create data with gaps at different scales
-        df = pl.DataFrame(
-            {
-                "timestamp": [
-                    datetime(2024, 1, 1, 9, 0),
-                    datetime(2024, 1, 1, 9, 5),  # 5 minutes later
-                    datetime(2024, 1, 1, 11, 0),  # 2 hour gap
-                    datetime(2024, 1, 2, 9, 0),  # Next day
-                ],
-                "value": [100.0, 101.0, 103.0, 110.0],
-            }
+        df = intraday_rows(
+            [
+                datetime(2024, 1, 1, 9, 0),
+                datetime(2024, 1, 1, 9, 5),
+                datetime(2024, 1, 1, 11, 0),
+                datetime(2024, 1, 2, 9, 0),
+            ]
         )
-
-        # Test different frequencies
-        minute_gaps = detector.detect_gaps(df, frequency="minute", is_crypto=True)
-        hourly_gaps = detector.detect_gaps(df, frequency="hourly", is_crypto=True)
-        daily_gaps = detector.detect_gaps(df, frequency="daily", is_crypto=True)
-
-        # Different frequencies should detect different gap patterns
-        assert isinstance(minute_gaps, list)
-        assert isinstance(hourly_gaps, list)
-        assert isinstance(daily_gaps, list)
+        minute_gaps = detector.detect_gaps(df, feed_spec=intraday_feed("minute"))
+        assert [gap.missing_periods for gap in minute_gaps] == [4, 114, 1319]
+        with pytest.raises(ValueError, match="off-grid"):
+            detector.detect_gaps(df, feed_spec=intraday_feed("hourly"))
+        assert detector.detect_gaps(df, frequency="daily", calendar="24/7") == []
 
     def test_large_dataset_performance(self):
         """Test gap detection performance on larger dataset."""
