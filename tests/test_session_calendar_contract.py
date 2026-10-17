@@ -264,3 +264,27 @@ def test_invalid_declared_timezone_does_not_silently_become_utc(timezone, adapte
         else:
             instance.complete_sessions(frame)
     assert_frame_equal(frame, original)
+
+
+@pytest.mark.parametrize(
+    "declaration, message",
+    [({"bar_type": "volume"}, "time bars"), ({"data_frequency": "hourly"}, "minute")],
+)
+def test_minute_completion_rejects_a_declared_non_minute_or_event_count_feed(declaration, message):
+    frame = provider_frame("hourly", continuous=True).filter(pl.col("timestamp").dt.hour() == 14)
+    with pytest.raises((ValueError, NotImplementedError), match=message):
+        SessionCompleter(feed_spec=FeedSpec(**declaration)).complete_sessions(frame)
+
+
+def test_session_start_override_is_preserved_but_not_silently_applied_as_native_schedule():
+    metadata = Metadata(
+        provider="synthetic",
+        symbol="SPY",
+        asset_class="equities",
+        time_contract_version=2,
+        session_start_time="12:00",
+    )
+    restored = Metadata.model_validate_json(metadata.model_dump_json())
+    assert FeedSpec.from_any(restored).session_start_time == "12:00"
+    with pytest.raises(NotImplementedError, match="session_start_time"):
+        SessionAssigner(feed_spec=restored)
