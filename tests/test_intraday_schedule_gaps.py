@@ -42,6 +42,16 @@ def test_unqualified_summer_outage_cannot_silently_return_no_gap():
         GapDetector().detect_gaps(frame, frequency="minute")
 
 
+def test_declared_intraday_frequency_cannot_silently_fall_back_to_daily_labels():
+    frame = provider_frame().filter(
+        (pl.col("timestamp").dt.hour() == 13) & pl.col("timestamp").dt.minute().is_in([30, 32])
+    )
+    found = GapDetector().detect_gaps(frame, feed_spec=declaration())
+    assert sum(g.missing_periods for g in found) == 1
+    with pytest.raises(ValueError, match="frequency"):
+        GapDetector().detect_gaps(frame, frequency="daily", feed_spec=declaration())
+
+
 @pytest.mark.parametrize("day,hour,minute", [("2025-07-07", 13, 30), ("2025-01-07", 14, 30)])
 def test_declared_nyse_dst_and_winter_outage_each_count_one_bar(day, hour, minute):
     frame = provider_frame(day, day).filter(
