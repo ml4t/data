@@ -188,20 +188,20 @@ class MetadataManager:
         exchange: str | None = None,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         fill_gaps: bool = True,
-        fill_method: str = "forward",
-        zero_volume: bool = True,
+        fill_method: str = "none",
+        zero_volume: bool = False,
         *,
         feed_spec: Any | None = None,
     ) -> pl.DataFrame:
-        """Complete sessions by filling gaps.
+        """Expand the minute grid with null placeholders, never synthetic market values.
 
         Args:
             df: DataFrame with timestamp column
             exchange: Exchange code
             calendar: Calendar name override
-            fill_gaps: If True, fill gaps
-            fill_method: Fill method ("forward", "backward", "none")
-            zero_volume: If True, set volume=0 for filled rows
+            fill_gaps: Legacy name for grid expansion; False performs assignment only.
+            fill_method: Only "none" is supported; missing market values remain null.
+            zero_volume: Must be False; a missing observation has no known volume.
 
         Returns:
             DataFrame with complete minute sessions and an is_imputed column. Input must

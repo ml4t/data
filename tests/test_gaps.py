@@ -188,8 +188,8 @@ class TestGapDetector:
         assert summary["largest_gap"].missing_periods == 3
         assert summary["smallest_gap"].missing_periods == 1
 
-    def test_fill_gaps_forward(self) -> None:
-        """Test forward fill of gaps."""
+    def test_fill_gaps_rejects_synthetic_forward_values(self) -> None:
+        """A report of absence must not authorize invented market values."""
         timestamps = [
             datetime(2024, 1, 1, 14, 30, tzinfo=UTC),
             datetime(2024, 1, 2, 14, 30, tzinfo=UTC),
@@ -206,17 +206,9 @@ class TestGapDetector:
 
         detector = GapDetector()
         gaps = detector.detect_gaps(df, frequency="daily")
-        filled_df = detector.fill_gaps(df, gaps, method="forward")
-
-        # Should have 4 rows after filling
-        assert len(filled_df) == 4
-        # Check that gap was filled with forward value
-        assert (
-            filled_df.filter(pl.col("timestamp") == datetime(2024, 1, 3, 14, 30, tzinfo=UTC))[
-                "value"
-            ][0]
-            == 101.0
-        )
+        with pytest.raises(ValueError, match="imputation"):
+            detector.fill_gaps(df, gaps, method="forward")
+        assert df["value"].to_list() == [100.0, 101.0, 103.0]
 
     def test_fill_gaps_rejects_all_null_timestamps(self) -> None:
         df = pl.DataFrame(
@@ -233,10 +225,10 @@ class TestGapDetector:
             frequency="daily",
         )
 
-        with pytest.raises(TypeError, match="non-null Date or Datetime"):
+        with pytest.raises(ValueError, match="imputation"):
             GapDetector().fill_gaps(df, [gap])
 
-    def test_fill_daily_gaps_supports_date_columns(self) -> None:
+    def test_date_columns_do_not_enable_synthetic_gap_imputation(self) -> None:
         df = pl.DataFrame(
             {
                 "timestamp": [date(2024, 1, 1), date(2024, 1, 3)],
@@ -251,13 +243,9 @@ class TestGapDetector:
             frequency="daily",
         )
 
-        filled = GapDetector().fill_gaps(df, [gap], method="forward")
-
-        assert filled.get_column("timestamp").to_list() == [
-            date(2024, 1, 1),
-            date(2024, 1, 2),
-            date(2024, 1, 3),
-        ]
+        with pytest.raises(ValueError, match="imputation"):
+            GapDetector().fill_gaps(df, [gap], method="forward")
+        assert df["timestamp"].to_list() == [date(2024, 1, 1), date(2024, 1, 3)]
 
     def test_empty_dataframe(self) -> None:
         """Test gap detection on empty DataFrame."""

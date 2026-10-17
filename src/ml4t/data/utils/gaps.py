@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -453,74 +453,14 @@ class GapDetector:
         self,
         df: pl.DataFrame,
         gaps: list[DataGap],
-        method: str = "forward",
+        method: str = "none",
         timestamp_col: str = "timestamp",
     ) -> pl.DataFrame:
-        """
-        Fill detected gaps in data.
-
-        Args:
-            df: DataFrame with gaps
-            gaps: List of detected gaps
-            method: Fill method ('forward', 'backward', 'interpolate', 'zero')
-            timestamp_col: Name of timestamp column
-
-        Returns:
-            DataFrame with gaps filled
-        """
+        """Reject synthetic market values; an empty gap list remains a no-op."""
         if not gaps:
             return df
-
-        logger.info(
-            f"Filling {len(gaps)} gaps using {method} method",
-            total_periods=sum(g.missing_periods for g in gaps),
+        raise ValueError(
+            f"Synthetic gap imputation ({method!r}, {timestamp_col!r}) is unsupported; "
+            "inspect missing observations "
+            "and download available source data instead"
         )
-
-        # Create a complete time index
-        min_ts = df[timestamp_col].min()
-        max_ts = df[timestamp_col].max()
-        if not isinstance(min_ts, date) or not isinstance(max_ts, date):
-            raise TypeError(f"'{timestamp_col}' must contain non-null Date or Datetime values")
-
-        if gaps:
-            frequency = gaps[0].frequency
-            interval = self._get_expected_interval(frequency)
-
-            # Generate complete timestamp range
-            complete_timestamps = []
-            current = min_ts
-            while current <= max_ts:
-                complete_timestamps.append(current)
-                current = current + interval
-
-            # Create DataFrame with complete timestamps
-            complete_df = pl.DataFrame({timestamp_col: complete_timestamps})
-
-            # Cast to match original datetime precision to avoid join errors
-            original_dtype = df[timestamp_col].dtype
-            complete_df = complete_df.with_columns(pl.col(timestamp_col).cast(original_dtype))
-
-            # Join with original data
-            filled_df = complete_df.join(df, on=timestamp_col, how="left")
-
-            # Fill missing values based on method
-            if method == "forward":
-                filled_df = filled_df.fill_null(strategy="forward")
-            elif method == "backward":
-                filled_df = filled_df.fill_null(strategy="backward")
-            elif method == "interpolate":
-                # Interpolate numeric columns
-                numeric_cols = [
-                    col
-                    for col in filled_df.columns
-                    if col != timestamp_col
-                    and filled_df[col].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]
-                ]
-                for col in numeric_cols:
-                    filled_df = filled_df.with_columns(pl.col(col).interpolate())
-            elif method == "zero":
-                filled_df = filled_df.fill_null(0)
-
-            return filled_df
-
-        return df

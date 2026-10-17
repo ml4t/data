@@ -179,6 +179,7 @@ def update_all(ctx, config, dataset, dry_run):
                         provider=provider,
                         lookback_days=lookback_days,
                         fill_gaps=fill_gaps,
+                        check_gaps=ds_config.check_gaps,
                         initial_start=initial_start,
                         initial_end=initial_end,
                         initial_load_days=initial_load_days,

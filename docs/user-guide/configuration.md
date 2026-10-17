@@ -166,7 +166,8 @@ provider, frequency, asset class, and bootstrap range.
 | `frequency` | `daily` | Bar frequency passed to `DataManager.update()` |
 | `asset_class` | `equity` | Storage key prefix and validation context |
 | `lookback_days` | `7` | Overlap fetched for incremental updates |
-| `fill_gaps` | `true` | Enable gap detection and filling after merge |
+| `check_gaps` | `true` | Report calendar gaps without changing observations |
+| `fill_gaps` | unset | Legacy `false` disables checks; `true` is rejected |
 | `start` / `start_date` | unset | Explicit first-load start date when storage is empty |
 | `end` / `end_date` | today | Explicit first-load end date when storage is empty |
 | `initial_load_days` | `365` | First-load history length when no start date is set |

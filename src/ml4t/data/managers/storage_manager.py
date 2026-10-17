@@ -472,7 +472,7 @@ class StorageManager:
         frequency: str = "daily",
         asset_class: str = "equities",
         lookback_days: int = 7,
-        fill_gaps: bool = True,
+        fill_gaps: bool | None = None,
         provider: str | None = None,
         initial_start: str | None = None,
         initial_end: str | None = None,
@@ -480,6 +480,7 @@ class StorageManager:
         *,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         feed_spec: Any | None = None,
+        check_gaps: bool = True,
     ) -> str:
         """Update existing data with incremental fetch.
 
@@ -488,7 +489,8 @@ class StorageManager:
             frequency: Data frequency
             asset_class: Asset class
             lookback_days: Days to look back for updates
-            fill_gaps: If True, detect and fill gaps in data
+            fill_gaps: Legacy False disables checks; True is rejected, never imputed.
+            check_gaps: Report calendar gaps without changing observations.
             provider: Optional provider override
             initial_start: Optional start date for first load when no data exists
             initial_end: Optional end date for first load when no data exists
@@ -500,6 +502,12 @@ class StorageManager:
         Raises:
             ValueError: If storage not configured
         """
+        if fill_gaps is True:
+            raise ValueError(
+                "Synthetic gap imputation is unsupported; inspect gaps and download source observations"
+            )
+        if fill_gaps is False:
+            check_gaps = False
         if not self.storage:
             raise ValueError("Storage not configured")
 
@@ -638,16 +646,17 @@ class StorageManager:
                 added_rows=len(merged_df) - len(existing_df),
             )
 
-            # Detect and optionally fill gaps
+            # Gap checks never change observations, even outside provider history limits.
             gaps = []
-            if fill_gaps and not provider_history_limited:
+            gap_check_performed = check_gaps and effective_feed.resolve_calendar() is not None
+            if gap_check_performed:
                 self._report_progress(f"Checking for gaps in {symbol}", 0.6)
 
                 from ml4t.data.utils.gaps import GapDetector
 
                 selected_calendar = effective_feed.resolve_calendar()
                 if selected_calendar is not None and effective_bar_type != "time":
-                    raise NotImplementedError("calendar gap filling requires fixed time bars")
+                    raise NotImplementedError("calendar gap checks require fixed time bars")
                 gap_detector = GapDetector()
                 gaps = gap_detector.detect_gaps(
                     merged_df,
@@ -663,16 +672,6 @@ class StorageManager:
                         gap_count=gap_summary["count"],
                         total_missing=gap_summary["total_missing_periods"],
                     )
-
-                    merged_df = gap_detector.fill_gaps(merged_df, gaps, method="forward")
-                    logger.info("Filled gaps using forward fill", final_rows=len(merged_df))
-            elif fill_gaps and provider_history_limited:
-                logger.warning(
-                    "Gap filling skipped because provider history cannot cover the missing range",
-                    provider=provider,
-                    last_timestamp=last_timestamp,
-                    resumed_at=fetch_start,
-                )
 
             self._report_progress(f"Storing updated data for {symbol}", 0.8)
 
@@ -690,7 +689,12 @@ class StorageManager:
                     # BulkManager compares this legacy field with naive local cutoffs.
                     "last_update": updated_at.astimezone().replace(tzinfo=None).isoformat(),
                     "update_type": "incremental",
-                    "gaps_filled": fill_gaps and len(gaps) > 0,
+                    "gaps_filled": False,
+                    "gap_check_performed": gap_check_performed,
+                    "gap_count": len(gaps) if gap_check_performed else None,
+                    "missing_observations": (
+                        sum(gap.missing_periods for gap in gaps) if gap_check_performed else None
+                    ),
                     "provider_history_limited": provider_history_limited,
                 }
             )

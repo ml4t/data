@@ -287,7 +287,12 @@ def fetch(
     show_default=True,
 )
 @click.option("--lookback-days", type=click.IntRange(min=0), default=7, show_default=True)
-@click.option("--fill-gaps/--no-fill-gaps", default=True, show_default=True)
+@click.option(
+    "--fill-gaps/--no-fill-gaps",
+    default=None,
+    help="Legacy control: --no-fill-gaps disables checks; synthetic filling is unsupported",
+)
+@click.option("--check-gaps/--no-check-gaps", default=True, show_default=True)
 @click.option("--provider", "-p", help="Provider to use for fetching")
 @click.option(
     "--initial-start",
@@ -314,6 +319,7 @@ def update(
     asset_class,
     lookback_days,
     fill_gaps,
+    check_gaps,
     provider,
     initial_start,
     initial_end,
@@ -341,6 +347,7 @@ def update(
             asset_class=asset_class,
             lookback_days=lookback_days,
             fill_gaps=fill_gaps,
+            check_gaps=check_gaps,
             provider=provider,
             initial_start=initial_start,
             initial_end=initial_end,

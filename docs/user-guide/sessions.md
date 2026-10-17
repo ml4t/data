@@ -135,10 +135,14 @@ Ordinary spot crypto uses `calendar="24/7"`, with civil-day labels and no CME ma
 `calendar=None` disables session handling instead. Select the schedule from the feed's actual
 market, not from its symbol or asset-class name.
 
-## Complete Minute Sessions
+<a id="complete-minute-sessions"></a>
 
-`SessionCompleter` expands minute bars to the exchange schedule. It requires `timestamp`, `open`,
-`high`, `low`, `close`, and `volume`. The result adds `session_date` and `is_imputed`.
+## Inspect a Nullable Minute Grid
+
+`SessionCompleter` optionally expands a timestamped series to scheduled minutes for inspection.
+Missing positions have null market values; they are not recovered observations. It requires a
+Datetime `timestamp` column and retains supplied value columns. The result adds `session_date` and
+the legacy `is_imputed` marker, which identifies null placeholder rows.
 
 ```python
 from ml4t.data.sessions import SessionCompleter
@@ -146,13 +150,15 @@ from ml4t.data.sessions import SessionCompleter
 completer = SessionCompleter("NYSE")
 complete = completer.complete_sessions(
     bars,
-    fill_method="forward",
-    zero_volume=True,
+    fill_method="none",
+    zero_volume=False,
 )
 ```
 
-The supported fill methods are `"forward"`, `"backward"`, and `"none"`. Forward and backward
-filling apply only within a session. `zero_volume=True` sets volume to zero for inserted rows.
+Only `fill_method="none"` and `zero_volume=False` are supported. Requests to copy prices or invent
+zero volume fail clearly. Observed nulls and all other original values remain unchanged.
+Use the [disk gap report](incremental-updates.md#inspect-missing-observations-on-disk) when only a list
+of missing observations is needed; it does not expand the data.
 
 Session completion rejects duplicate or non-minute-aligned timestamps and observations outside the
 selected schedule. Lunch breaks and declared calendar interruptions are excluded from the template;

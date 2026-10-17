@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
 """Complete workflow: CME crypto futures with session management.
 
-This example demonstrates the full workflow for working with Wyden CME futures data:
+This historical example demonstrates a stored CME crypto futures workflow:
 1. Load data from ml4t.data storage (already migrated from crypto-data-pipeline)
 2. Assign CME session dates
-3. Complete sessions (fill gaps)
+3. Expose absent minutes as null placeholders, without inventing market values
 4. Session-level analysis
 5. Cross-validation with sessions
 
-This is production data stored at ~/clients/wyden/long-short/data/
-- BTC futures: 2.79M rows (Dec 2017 → present)
-- ETH futures: 1.68M rows (Feb 2021 → present)
+Select the existing storage root with ML4T_DATA_PATH; source observations remain unchanged.
 
 Usage:
     python wyden_cme_sessions_complete_workflow.py
 """
 
-from pathlib import Path
-
 import polars as pl
 
 from ml4t.data import DataManager
+from ml4t.data.core.config import resolve_data_root
 from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.hive import HiveStorage
 
-# Wyden data location
-DATA_PATH = Path.home() / "clients/wyden/long-short/data"
+DATA_PATH = resolve_data_root()
 
 # Symbols to process
 SYMBOLS = ["BTC", "ETH"]
@@ -34,10 +30,10 @@ SYMBOLS = ["BTC", "ETH"]
 def main():
     """Complete session management workflow for CME futures."""
     print("=" * 80)
-    print("Wyden CME Crypto Futures - Complete Session Workflow")
+    print("Stored CME Crypto Futures - Session Workflow")
     print("=" * 80)
 
-    # 1. Initialize DataManager with Wyden storage
+    # 1. Initialize DataManager with the configured storage.
     print(f"\n[1] Initializing DataManager with storage: {DATA_PATH}")
     storage = HiveStorage(config=StorageConfig(base_path=str(DATA_PATH)))
     manager = DataManager(storage=storage)
@@ -75,20 +71,20 @@ def main():
         n_sessions = df_with_sessions["session_date"].n_unique()
         print(f"    ✓ Assigned {n_sessions:,} unique sessions")
 
-        # 4. Complete sessions (fill gaps)
-        print("\n[4] Completing sessions (filling gaps)...")
-        print("    Strategy: Forward-fill OHLC, zero volume")
+        # 4. Expose absent minute positions without manufacturing observations.
+        print("\n[4] Inspecting the nullable minute grid...")
+        print("    Missing market values remain null")
 
         df_complete = manager.complete_sessions(
             df_with_sessions,
             exchange="CME",
-            fill_gaps=True,  # Fill missing minutes within sessions
-            zero_volume=True,  # Set volume=0 for filled bars
+            fill_gaps=True,  # Legacy name for null grid expansion, not price imputation
+            zero_volume=False,
         )
 
         n_filled = len(df_complete) - len(df_with_sessions)
         print(
-            f"    ✓ Filled {n_filled:,} missing bars ({n_filled / len(df_with_sessions) * 100:.2f}% of original)"
+            f"    ✓ Exposed {n_filled:,} null placeholders ({n_filled / len(df_with_sessions) * 100:.2f}% of original)"
         )
         print(f"    Total bars: {len(df_complete):,}")
 
@@ -173,7 +169,7 @@ def main():
     print(f"{'=' * 80}")
     print(f"✓ Processed {len(SYMBOLS)} symbols: {', '.join(SYMBOLS)}")
     print("✓ Assigned CME session dates")
-    print("✓ Filled gaps for complete sessions")
+    print("✓ Exposed absent minutes as null placeholders, not recovered observations")
     print("✓ Saved output with session_date column")
 
     print("\nNext steps:")

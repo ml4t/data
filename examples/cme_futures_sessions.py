@@ -3,25 +3,26 @@
 Demonstrates how to:
 1. Load minute-level CME futures data
 2. Assign session dates based on CME calendar
-3. Fill gaps with forward-filled OHLC and zero volume
+3. Inspect missing minute positions with null market values
 4. Prepare data for session-aware cross-validation
 
-CME Bitcoin futures trade Sunday 5pm CT → Friday 4pm CT (23 hours/day).
-Sessions span multiple calendar days, requiring special handling for:
+CME crypto sessions span multiple calendar days. The selected authoritative schedule
+preserves historical rules and the May2026 transition. Relevant operations include:
 - Cross-validation (split by session, not calendar date)
-- Gap filling (some providers skip zero-volume periods)
+- Missing-observation inspection (no-trade intervals may legitimately have no candle)
 - Session aggregation (daily/weekly session summaries)
 """
 
 import polars as pl
 
 from ml4t.data import DataManager
+from ml4t.data.storage import create_storage
 
 # Constants
 SYMBOL = "BTC"
 PROVIDER = "databento"  # Institutional futures data
 EXCHANGE = "CME"
-CALENDAR = "CME_Globex_Crypto"
+CALENDAR = "CME Globex Crypto"
 START_DATE = "2024-01-01"
 END_DATE = "2024-12-31"
 
@@ -30,7 +31,7 @@ def main():
     """Complete CME futures workflow with session management."""
 
     # Initialize data manager
-    manager = DataManager(storage_path="./data")
+    manager = DataManager(storage=create_storage("./data", strategy="hive"))
 
     print("=" * 80)
     print("CME Bitcoin Futures - Session Management Workflow")
@@ -47,7 +48,7 @@ def main():
         start=START_DATE,
         end=END_DATE,
         provider=PROVIDER,
-        frequency="1min",
+        frequency="minute",
         exchange=EXCHANGE,
         calendar=CALENDAR,
     )
@@ -93,22 +94,22 @@ def main():
     print("\n   Sample sessions:")
     print(sample_session)
 
-    # Step 4: Fill gaps for complete sessions
-    print("\n4. Filling gaps with forward-filled OHLC and zero volume...")
+    # Step 4: Expose absent minutes without inventing market values.
+    print("\n4. Inspecting the nullable minute grid...")
     print("   Strategy:")
-    print("   - Forward-fill OHLC prices from last close")
-    print("   - Set volume=0 for filled rows")
-    print("   - Ensures continuous minute-level data")
+    print("   - Preserve observed prices and volumes")
+    print("   - Leave absent market values null")
+    print("   - Mark placeholders, not recovered observations")
 
     df_complete = manager.complete_sessions(
         df_with_sessions,
         exchange=EXCHANGE,
         fill_gaps=True,
-        zero_volume=True,
+        zero_volume=False,
     )
 
     rows_added = len(df_complete) - len(df_with_sessions)
-    print(f"   ✓ Added {rows_added:,} rows to fill gaps")
+    print(f"   ✓ Exposed {rows_added:,} null placeholder rows")
     print(f"   Total rows: {len(df_complete):,}")
 
     # Verify completeness
@@ -163,7 +164,7 @@ def main():
     print(f"Symbol: {SYMBOL}")
     print(f"Exchange: {EXCHANGE}")
     print(f"Original rows: {len(df):,}")
-    print(f"Rows added (gap filling): {rows_added:,}")
+    print(f"Null placeholder rows: {rows_added:,}")
     print(f"Final rows: {len(df_complete):,}")
     print(f"Unique sessions: {unique_sessions}")
     print(f"Average bars per session: {len(df_complete) / unique_sessions:,.0f}")
@@ -172,12 +173,12 @@ def main():
 
 
 def demonstrate_without_session_filling():
-    """Show the problem when NOT using session filling."""
+    """Compare observed rows with an optional nullable minute grid."""
     print("\n" + "=" * 80)
     print("Why Session Filling Matters")
     print("=" * 80)
 
-    manager = DataManager(storage_path="./data")
+    manager = DataManager(storage=create_storage("./data", strategy="hive"))
 
     # Load data
     key = manager.load(
@@ -185,13 +186,13 @@ def demonstrate_without_session_filling():
         start=START_DATE,
         end=END_DATE,
         provider=PROVIDER,
-        frequency="1min",
+        frequency="minute",
         exchange=EXCHANGE,
     )
 
     df = manager.storage.read(key).collect()
 
-    print("\nWithout gap filling:")
+    print("\nObserved rows:")
     print(f"  Total rows: {len(df):,}")
 
     # Check for gaps
@@ -202,13 +203,8 @@ def demonstrate_without_session_filling():
     print(f"  Gaps > 1 minute: {len(gaps)}")
     print(f"  Largest gap: {gaps.max():.0f} minutes")
 
-    print("\nProblems without filling:")
-    print("  ✗ Missing bars distort technical indicators (e.g., moving averages)")
-    print("  ✗ Session aggregation incorrect (incomplete sessions)")
-    print("  ✗ Cross-validation splits may have imbalanced sessions")
-    print("  ✗ Backtest slippage calculations affected by gaps")
-
-    print("\nWith gap filling (forward-fill OHLC, zero volume):")
+    print("\nUse a calendar report to distinguish missing bars from scheduled closures.")
+    print("\nOptional nullable grid, with no synthetic prices or volumes:")
     df_complete = manager.complete_sessions(df, exchange=EXCHANGE)
     print(f"  Total rows: {len(df_complete):,}")
     print(f"  Rows added: {len(df_complete) - len(df):,}")
@@ -217,18 +213,15 @@ def demonstrate_without_session_filling():
     remaining_gaps = time_diffs_complete[time_diffs_complete > 1].drop_nulls()
     print(f"  Remaining gaps: {len(remaining_gaps)}")
 
-    print("\nBenefits:")
-    print("  ✓ Continuous time series for indicators")
-    print("  ✓ Complete sessions for aggregation")
-    print("  ✓ Balanced cross-validation splits")
-    print("  ✓ Realistic backtest execution")
+    print("\nNull placeholders do not establish complete market-data coverage.")
+    print("Download available source observations separately before treating a gap as repaired.")
 
 
 if __name__ == "__main__":
     # Run main workflow
     main()
 
-    # Demonstrate importance of gap filling
+    # Compare observations with null placeholders.
     demonstrate_without_session_filling()
 
     print("\n" + "=" * 80)

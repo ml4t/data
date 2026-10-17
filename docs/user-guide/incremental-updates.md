@@ -41,26 +41,27 @@ metadata. Supplying the option overrides that value.
 
 ## Gap Handling
 
-Gap detection and forward filling are enabled by default. Disable them when missing periods must
-remain explicit:
+Updates preserve absent observations and null market values. Calendar gap checks are enabled by
+default and never create rows or substitute prices or volumes. To skip those checks:
 
 ```bash
-ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
+ml4t-data update --symbol AAPL --no-check-gaps --storage-path ./data
 ```
 
 Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
 The Python updater resolves its explicit `calendar`, then supplied feed or stored metadata, then
 NYSE. Asset class and descriptive exchange metadata do not select a schedule. Continuous feeds
-must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection and filling.
+must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection.
 Intraday detection requires the complete version-2 grid declaration described below, supplied
 through `feed_spec` or retained in stored metadata. Undeclared intraday datasets must migrate their
-metadata or use `--no-fill-gaps` / `fill_gaps=False` for updates.
-[Trading-session completion](sessions.md) is a separate one-minute operation. The acquisition-range
-planner's intraday limitations are described separately below.
+metadata or use `--no-check-gaps` / `check_gaps=False` for updates.
+[Minute-grid expansion](sessions.md) is a separate operation that exposes absent positions as nulls.
 
-Detection does not itself fill or modify observations. The updater's separately enabled forward
-fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
-dates when a real gap is present. Disable filling when those synthetic rows are inappropriate.
+Synthetic imputation is unsupported. An explicit `fill_gaps=True` or `--fill-gaps` request fails
+before acquisition or a dataset write. The legacy `fill_gaps=False` / `--no-fill-gaps` controls remain
+compatible aliases for disabling checks. Configurations should use `check_gaps` instead.
+The updater records whether checking ran and the detected missing-observation count; disabled
+checks are not reported as proof of zero gaps. Source-history limits do not suppress detection.
 
 ### Inspect Daily Gaps Without Filling
 
@@ -94,8 +95,8 @@ mapping, even with daily frequency or midnight timestamps. Right-labeled continu
 to the preceding session; event time belongs to the new session. Out-of-session instants fail clearly.
 Gap classification does not add a new off-session rejection policy for legacy daily labels. The
 requested daily frequency cannot silently override a declared intraday frequency.
-Unknown calendars and malformed daily timestamps fail without modifying the input. `fill_gaps()`
-remains a separate elapsed-grid operation, not calendar-aware imputation.
+Unknown calendars and malformed daily timestamps fail without modifying the input.
+The retired `fill_gaps()` helper rejects nonempty gap lists rather than manufacturing observations.
 
 ### Inspect Intraday Gaps Against a Declared Grid
 
@@ -221,7 +222,7 @@ clearly; original provider timestamps are retained in storage. Declare the feed'
 non-UTC label must survive storage's canonical UTC reads.
 
 If a provider's history limit cannot reach the stored dataset, the updater records
-`provider_history_limited` and skips gap filling across the unavailable interval.
+`provider_history_limited`. Missing observations remain detectable even when they cannot be retrieved.
 
 ## Python API
 
@@ -240,7 +241,7 @@ key = manager.update(
     frequency="daily",
     asset_class="equities",
     lookback_days=7,
-    fill_gaps=True,
+    check_gaps=True,
     initial_start="2023-01-01",
     initial_end="2024-01-01",
 )
@@ -260,7 +261,7 @@ Feed timezone, timestamp semantics and bar-grid declarations survive ingestion. 
 `session_start_time` override is not supported by the native schedule adapter and is rejected.
 The requested frequency and bar type must agree with declared feed metadata. These declarations
 do not themselves validate OHLCV completeness or transform timestamps. Gap detection remains
-separate from the updater's optional elapsed-grid imputation described above.
+separate from acquisition; neither validation nor gap checking imputes missing market values.
 
 ## Inspect Stored State
 
@@ -301,7 +302,7 @@ fetching or writing data.
 - Run an update only after the provider is expected to have finalized the latest requested period.
 - Reuse one storage directory and the same asset-class and frequency values so updates address the
   intended key.
-- Treat forward-filled rows as synthetic observations. For minute-session completion, the
-  `is_imputed` column identifies inserted rows; the general updater does not add that marker.
+- Preserve missing market data. Optional minute-grid expansion marks null placeholder rows with
+  the legacy `is_imputed` column; those rows are not recovered source observations.
 - Use `ml4t-data validate` after an update when schema, OHLC relationships, duplicates, or anomaly
   checks are part of the ingestion contract.
