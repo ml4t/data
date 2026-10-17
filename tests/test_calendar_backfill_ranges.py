@@ -179,3 +179,27 @@ def test_timezone_annotated_session_labels_do_not_become_previous_utc_dates(stor
             }
         ]
     )
+
+
+@pytest.mark.parametrize("version, expected", [(1, 1), (2, 0)])
+def test_persisted_null_disables_a_real_missing_session_only_in_version_two(
+    storage, version, expected
+) -> None:
+    frame = provider_frame("2025-07-15", "2025-07-17")
+    frame = frame.filter(pl.col("timestamp").dt.date() != date(2025, 7, 16))
+    storage.write(
+        frame,
+        "equities/daily/SPY",
+        FeedSpec(calendar=None, time_contract_version=version).to_dict(),
+    )
+    gaps = GapDetector().detect_gaps_in_storage(
+        storage, "equities/daily/SPY", datetime(2025, 7, 15), datetime(2025, 7, 17)
+    )
+    assert sum(gap["size_days"] for gap in gaps) == expected
+
+
+def test_per_call_calendar_overrides_the_configured_selection() -> None:
+    frame = provider_frame("2025-07-11", "2025-07-14")
+    detector = GapDetector(calendar="24/7")
+    assert detector.detect_gaps(frame, calendar="NYSE") == []
+    assert detector.detect_gaps(frame, calendar=None) == []
