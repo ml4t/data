@@ -624,7 +624,11 @@ class StorageManager:
             existing_model_values = {
                 name: value
                 for name in Metadata.model_fields
-                if (value := existing_metadata.get(name)) is not None
+                if name in existing_metadata
+                and (
+                    (value := existing_metadata[name]) is not None
+                    or (name == "calendar" and existing_metadata.get("time_contract_version") == 2)
+                )
             }
             resolved_provider = (
                 provider
@@ -662,7 +666,18 @@ class StorageManager:
                     for detail in error.errors()
                     if (location := detail.get("loc")) and isinstance(location[0], str)
                 }
-                removable_fields = invalid_fields - {"provider", "symbol", "asset_class"}
+                removable_fields = invalid_fields - {
+                    "provider",
+                    "symbol",
+                    "asset_class",
+                    "calendar",
+                    "time_contract_version",
+                    "timezone",
+                    "timestamp_semantics",
+                    "bar_grid_anchor",
+                    "bar_label",
+                    "partial_bar_policy",
+                }
                 if not removable_fields:
                     raise
                 logger.warning(

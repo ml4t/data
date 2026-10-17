@@ -7,9 +7,18 @@ from enum import StrEnum
 from typing import Any
 
 import polars as pl
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
 
 from ml4t.data.assets.asset_class import AssetClass  # noqa: F401 — re-exported
+from ml4t.specs import (
+    UNSET_CALENDAR,
+    BarGridAnchor,
+    BarLabel,
+    CalendarUnset,
+    FeedSpec,
+    PartialBarPolicy,
+    TimestampSemantics,
+)
 
 
 class SchemaVersion(StrEnum):
@@ -73,7 +82,14 @@ class Metadata(BaseModel):
 
     # Exchange and calendar (for session-aware operations)
     exchange: str = "UNKNOWN"
-    calendar: str | None = None  # pandas_market_calendars name (e.g., "CME_Globex_Crypto")
+    calendar: str | None | CalendarUnset = UNSET_CALENDAR
+    time_contract_version: int = 1
+    timezone: str | None = None
+    timestamp_semantics: TimestampSemantics | str | None = None
+    session_start_time: str | None = None
+    bar_grid_anchor: BarGridAnchor | str | None = None
+    bar_label: BarLabel | str | None = None
+    partial_bar_policy: PartialBarPolicy | str | None = None
 
     # Tracking
     start_date: datetime | None = None
@@ -88,6 +104,50 @@ class Metadata(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"use_enum_values": True}
+
+    @field_validator("calendar", mode="wrap")
+    @classmethod
+    def preserve_calendar_presence(cls, value: Any, handler: Any) -> Any:
+        return value if value is UNSET_CALENDAR else handler(value)
+
+    @field_validator("time_contract_version", mode="before")
+    @classmethod
+    def validate_time_contract_version(cls, value: Any) -> int:
+        return FeedSpec(time_contract_version=value).time_contract_version
+
+    def _time_declaration(self) -> FeedSpec:
+        return FeedSpec(
+            calendar=self.calendar,
+            time_contract_version=self.time_contract_version,
+            timezone=self.timezone,
+            timestamp_semantics=self.timestamp_semantics,
+            session_start_time=self.session_start_time,
+            bar_grid_anchor=self.bar_grid_anchor,
+            bar_label=self.bar_label,
+            partial_bar_policy=self.partial_bar_policy,
+        )
+
+    @model_validator(mode="after")
+    def normalize_time_declaration(self) -> Metadata:
+        object.__setattr__(self, "calendar", self._time_declaration().calendar)
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_time_declaration(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        declaration = self._time_declaration().to_dict()
+        for name in (
+            "calendar",
+            "time_contract_version",
+            "bar_grid_anchor",
+            "bar_label",
+            "partial_bar_policy",
+        ):
+            if name in declaration and name in data:
+                data[name] = declaration[name]
+            elif name not in declaration:
+                data.pop(name, None)
+        return data
 
     @property
     def frequency(self) -> str:
