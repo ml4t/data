@@ -1,6 +1,7 @@
 """Real provider/session workflows preserve declared calendar and timestamp meaning."""
 
-from datetime import date
+from datetime import date, time
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
@@ -18,6 +19,87 @@ from ml4t.specs import FeedSpec
 def provider_frame(frequency="daily", *, continuous=False):
     with SyntheticProvider(calendar_mode="continuous" if continuous else "equity") as provider:
         return provider.fetch_ohlcv("SPY", "2025-07-07", "2025-07-07", frequency)
+
+
+@pytest.fixture
+def interrupted_calendar():
+    from pandas_market_calendars.market_calendar import MarketCalendar
+
+    class DataSessionHaltCalendar(MarketCalendar):
+        name = "DataSessionHalt"
+        aliases = ["DataSessionHalt"]
+        tz = ZoneInfo("UTC")
+        regular_market_times = {
+            "market_open": ((None, time(9)),),
+            "market_close": ((None, time(14)),),
+        }
+
+        @property
+        def interruptions(self):
+            return [("2025-07-07", time(10), time(10, 30), time(12), time(12, 15))]
+
+    return "DataSessionHalt"
+
+
+@pytest.mark.parametrize(
+    "semantics,expected",
+    [
+        ("event_time", [True, False, False, True, True, False, False, True]),
+        ("bar_close", [True, True, False, False, True, True, False, False]),
+    ],
+)
+def test_scheduled_interruptions_keep_declared_interval_sides(
+    interrupted_calendar, semantics, expected
+):
+    minutes = [
+        time(9, 59),
+        time(10),
+        time(10, 15),
+        time(10, 30),
+        time(11, 59),
+        time(12),
+        time(12, 10),
+        time(12, 15),
+    ]
+    frame = provider_frame("minute", continuous=True).filter(
+        pl.col("timestamp").dt.time().is_in(minutes)
+    )
+    feed = FeedSpec(calendar=interrupted_calendar, timestamp_semantics=semantics)
+    assigned = SessionAssigner(feed_spec=feed).assign_sessions(frame)
+    assert assigned["session_date"].is_not_null().to_list() == expected
+    assert_frame_equal(assigned.select(frame.columns), frame)
+
+
+def test_minute_completion_cannot_impute_a_scheduled_interruption(manager, interrupted_calendar):
+    frame = provider_frame("minute", continuous=True).filter(
+        pl.col("timestamp").dt.time().is_in([time(9, 59), time(10, 30)])
+    )
+    completed = manager.complete_sessions(frame, calendar=interrupted_calendar)
+    assert completed.height == 2
+    assert completed["is_imputed"].to_list() == [False, False]
+    assert_frame_equal(completed.select(frame.columns).cast(frame.schema), frame)
+
+
+def test_minute_completion_rejects_observed_rows_during_a_scheduled_halt(
+    manager, interrupted_calendar
+):
+    frame = provider_frame("minute", continuous=True).filter(
+        pl.col("timestamp").dt.time().is_in([time(9, 59), time(10, 15), time(10, 30)])
+    )
+    original = frame.clone()
+    with pytest.raises(ValueError, match="outside"):
+        manager.complete_sessions(frame, calendar=interrupted_calendar)
+    assert_frame_equal(frame, original)
+
+
+def test_interrupted_session_has_one_daily_label_not_one_per_tradable_interval(
+    interrupted_calendar,
+):
+    frame = provider_frame()
+    feed = FeedSpec(calendar=interrupted_calendar, timestamp_semantics="session_label")
+    assigned = SessionAssigner(feed_spec=feed).assign_sessions(frame)
+    assert assigned.height == 1
+    assert assigned["session_date"].to_list() == [date(2025, 7, 7)]
 
 
 @pytest.fixture(params=[False, True])

@@ -575,6 +575,8 @@ class StorageManager:
                     f"Stored metadata provider for '{key}' must be a string, "
                     f"got {type(existing_provider).__name__}"
                 )
+            if not provider and existing_provider not in (None, "", "auto"):
+                provider = existing_provider
 
             # Get the date range from existing data
             _, last_timestamp = timestamp_bounds(existing_df)
