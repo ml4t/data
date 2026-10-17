@@ -49,9 +49,12 @@ ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
 ```
 
 Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
-The updater currently selects NYSE for non-crypto data and 24/7 for crypto. Intraday detection still
-uses approximate US overnight/weekend rules. It is not an exchange-calendar reconstruction. Use
-[trading-session completion](sessions.md) when exact intraday schedules are required.
+The Python updater resolves its explicit `calendar`, then supplied feed or stored metadata, then
+NYSE. Asset class and descriptive exchange metadata do not select a schedule. Continuous feeds
+must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection and filling.
+Intraday detection through the updater requires a supported declared-grid consumer, which is not
+implemented yet. Use `fill_gaps=False` for intraday updates and inspect
+[trading-session completion](sessions.md) for the supported one-minute operation.
 
 Detection does not itself fill or modify observations. The updater's separately enabled forward
 fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
@@ -148,6 +151,19 @@ key = manager.update(
 
 `DataManager.update()` returns the storage key. It raises when storage is not configured, stored data
 is empty, metadata is invalid, or the provider or storage operation fails.
+
+`load()`, `import_data()` and `update()` accept `calendar` and a shared `feed_spec`. New ingestion
+without a feed writes version-2 temporal metadata: an omitted calendar remains omitted, while
+explicit `None` remains disabled after storage and model projection. An existing version-1 feed
+is not automatically reinterpreted; its null calendar still means inheritance. An explicit calendar
+override writes version 2. Calendar names and conflicting frequency/bar-type declarations fail
+before a replacement generation is published.
+
+Feed timezone, timestamp semantics and bar-grid declarations survive ingestion. A non-null
+`session_start_time` override is not supported by the native schedule adapter and is rejected.
+The requested frequency and bar type must agree with declared feed metadata. These declarations
+do not themselves validate OHLCV completeness or transform timestamps. Gap detection remains
+separate from the updater's optional elapsed-grid imputation described above.
 
 ## Inspect Stored State
 
