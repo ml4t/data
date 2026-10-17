@@ -114,6 +114,27 @@ assigner = SessionAssigner("CME Globex Crypto")
 Calendar names and schedules can change upstream. Check the installed calendar before assigning a
 large dataset.
 
+### CME Crypto and Spot Crypto
+
+`CME` selects CME Globex cryptocurrency futures and options, not all CME products and not
+spot-quoted futures. Data preserves the upstream historical schedule through May 29, 2026. After
+that day's 16:00-16:30 Chicago maintenance, trading includes weekends and holidays. Regular Globex
+maintenance is Monday-Friday 16:00-16:02 Chicago time and Saturday 02:00-04:00. Pre-open periods
+are not trading intervals. See the [CME crypto FAQ](https://www.cmegroup.com/articles/faqs/frequently-asked-questions-cryptocurrency-futures.html)
+and [launch notice](https://cmegroupclientsite.atlassian.net/wiki/spaces/EPICSANDBOX/pages/1283194884/Cryptocurrency+Futures+and+Options+Migration+to+24-7+Trading).
+
+CME observations retain the following business trade date across weekends and holidays, rather
+than acquiring a separate Saturday or Sunday label. Data uses the upstream `CME_TradeDate`
+business calendar, qualified against CME's
+[2026 reporting calendar](https://www.cmegroup.com/content/dam/cmegroup/notices/market-regulation/2026/01/msn01-09-2026revisedholidayprocessinglargetrader2026.pdf).
+Schedule queries include the next business date when needed; a Saturday observation can therefore
+map to Monday, or Tuesday after Labor Day. Assignment and completion share these intervals and
+exclude maintenance. The adapter does not change the upstream calendar registry or other products.
+
+Ordinary spot crypto uses `calendar="24/7"`, with civil-day labels and no CME maintenance. Explicit
+`calendar=None` disables session handling instead. Select the schedule from the feed's actual
+market, not from its symbol or asset-class name.
+
 ## Complete Minute Sessions
 
 `SessionCompleter` expands minute bars to the exchange schedule. It requires `timestamp`, `open`,
