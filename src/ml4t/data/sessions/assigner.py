@@ -19,6 +19,39 @@ def _datetime_scalar(value: object, name: str) -> datetime:
     return value
 
 
+def _session_intervals(row: Any) -> list[tuple[datetime, datetime]]:
+    import pandas as pd
+
+    intervals = [(row["market_open"].to_pydatetime(), row["market_close"].to_pydatetime())]
+    columns = [("break_start", "break_end")] if "break_start" in row.index else []
+    columns.extend(
+        (name, name.replace("interruption_start_", "interruption_end_"))
+        for name in row.index
+        if name.startswith("interruption_start_")
+    )
+    closures = []
+    for start_column, end_column in columns:
+        start, end = row[start_column], row[end_column]
+        if pd.isna(start) and pd.isna(end):
+            continue
+        if pd.isna(start) or pd.isna(end) or start > end:
+            raise ValueError("calendar returned invalid closure boundaries")
+        if start != end:
+            closures.append((start.to_pydatetime(), end.to_pydatetime()))
+    for start, end in sorted(closures):
+        remaining = []
+        for opening, closing in intervals:
+            if end <= opening or start >= closing:
+                remaining.append((opening, closing))
+            else:
+                if opening < start:
+                    remaining.append((opening, start))
+                if end < closing:
+                    remaining.append((end, closing))
+        intervals = remaining
+    return intervals
+
+
 # Exchange to calendar mapping
 EXCHANGE_CALENDARS = {
     "CME": "CME Globex Crypto",
@@ -234,26 +267,23 @@ class SessionAssigner:
                 raise ValueError("start_date and end_date must not be NaT")
             start_pd = start_timestamp.normalize() - pd.Timedelta(days=1)
             end_pd = end_timestamp.normalize() + pd.Timedelta(days=1)
-            schedule = self.calendar.schedule(start_date=start_pd, end_date=end_pd)
+            schedule = self.calendar.schedule(
+                start_date=start_pd, end_date=end_pd, interruptions=True
+            )
             logger.debug(f"Got {len(schedule)} sessions from calendar")
 
             session_map = []
             for session_date, row in schedule.iterrows():
                 if not isinstance(session_date, pd.Timestamp):
                     raise TypeError("calendar returned a non-datetime session label")
-                entry = {
-                    "_calendar_session_start": row["market_open"].to_pydatetime(),
-                    "_calendar_session_end": row["market_close"].to_pydatetime(),
-                    "_assigned_session_date": session_date.date(),
-                }
-                if "break_start" in schedule.columns:
-                    entry["_calendar_break_start"] = (
-                        None if pd.isna(row["break_start"]) else row["break_start"].to_pydatetime()
+                for opening, closing in _session_intervals(row):
+                    session_map.append(
+                        {
+                            "_calendar_session_start": opening,
+                            "_calendar_session_end": closing,
+                            "_assigned_session_date": session_date.date(),
+                        }
                     )
-                    entry["_calendar_break_end"] = (
-                        None if pd.isna(row["break_end"]) else row["break_end"].to_pydatetime()
-                    )
-                session_map.append(entry)
 
             if not session_map:
                 logger.warning("No trading sessions found in date range")
@@ -306,7 +336,7 @@ class SessionAssigner:
                         session_df.select(
                             pl.col("_assigned_session_date").alias("_calendar_session_date_label"),
                             "_assigned_session_date",
-                        ),
+                        ).unique(),
                         left_on="_session_date_label",
                         right_on="_calendar_session_date_label",
                         how="left",
@@ -358,21 +388,6 @@ class SessionAssigner:
                 in_session = (pl.col("_session_timestamp") >= pl.col("_calendar_session_start")) & (
                     pl.col("_session_timestamp") < pl.col("_calendar_session_end")
                 )
-            if "_calendar_break_start" in joined.columns:
-                in_break = (
-                    pl.col("_calendar_break_start").is_not_null()
-                    & (
-                        (pl.col("_session_timestamp") > pl.col("_calendar_break_start"))
-                        if close_labeled
-                        else (pl.col("_session_timestamp") >= pl.col("_calendar_break_start"))
-                    )
-                    & (
-                        (pl.col("_session_timestamp") <= pl.col("_calendar_break_end"))
-                        if close_labeled
-                        else (pl.col("_session_timestamp") < pl.col("_calendar_break_end"))
-                    )
-                )
-                in_session &= ~in_break
             result = joined.with_columns(
                 pl.when(in_session)
                 .then(pl.col("_assigned_session_date"))
@@ -395,8 +410,6 @@ class SessionAssigner:
                 "_calendar_session_start",
                 "_calendar_session_end",
                 "_assigned_session_date",
-                "_calendar_break_start",
-                "_calendar_break_end",
             ]
             df_with_sessions = result.sort("_session_row_index").drop(
                 *[column for column in helper_columns if column in result.columns]

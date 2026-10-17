@@ -11,7 +11,7 @@ from typing import Any
 import polars as pl
 import structlog
 
-from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.data.sessions.assigner import SessionAssigner, _session_intervals
 from ml4t.specs import UNSET_CALENDAR, BarLabel, CalendarUnset, TimestampSemantics
 
 logger = structlog.get_logger()
@@ -170,7 +170,9 @@ class SessionCompleter:
             end_pd = request_end.normalize() + pd.Timedelta(days=1)
 
             # Get trading schedule
-            schedule = self.calendar.schedule(start_date=start_pd, end_date=end_pd)
+            schedule = self.calendar.schedule(
+                start_date=start_pd, end_date=end_pd, interruptions=True
+            )
 
             if len(schedule) == 0:
                 logger.warning("No trading sessions found in date range")
@@ -185,15 +187,7 @@ class SessionCompleter:
             for session_date, row in schedule.iterrows():
                 if not isinstance(session_date, pd.Timestamp):
                     raise TypeError("calendar returned a non-datetime session label")
-                market_open = row["market_open"]
-                market_close = row["market_close"]
-                intervals = [(market_open, market_close)]
-                if "break_start" in schedule.columns and not pd.isna(row["break_start"]):
-                    intervals = [
-                        (market_open, row["break_start"]),
-                        (row["break_end"], market_close),
-                    ]
-                for interval_start, interval_end in intervals:
+                for interval_start, interval_end in _session_intervals(row):
                     clipped_start = max(interval_start, request_start)
                     clipped_end = min(interval_end, request_end)
                     if clipped_start >= clipped_end:
