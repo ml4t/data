@@ -74,15 +74,21 @@ applies, then NYSE. `calendar="24/7"` expects a daily observation on weekends an
 feed declaration selects a calendar. Version-1 feed metadata with `calendar=None` still means
 unspecified; version-2 metadata preserves an explicit null as disabled after serialization.
 
-Daily inputs are session labels (Polars Date, or the date component of Datetime values in their
-existing timezone). Non-midnight labels remain supported. Exchange holidays and weekends do not
+Undeclared daily timestamps and explicit `session_label` inputs are labels (Polars Date, or the
+date component of Datetime values). Aware labels restore a declared `timezone` before extracting
+dates, including after storage's canonical UTC read. Naive labels remain civil identifiers rather
+than localized event clocks. Non-midnight labels remain supported. Exchange holidays and weekends do not
 count as missing NYSE sessions; a shortened session still requires one daily observation. Gap bounds
 remain the two observed timestamps, while `missing_periods` counts only scheduled dates strictly
 between them. Inspect each asset separately; observed dates from other assets must not define the
 schedule. This operation does not validate off-session observations or discover gaps outside the
 observed range.
 
-Explicit event-time/bar-close metadata is rejected rather than reinterpreted as session labels.
+Explicit `event_time`, `bar_close` or bar-side metadata instead uses native authoritative session
+mapping, even with daily frequency or midnight timestamps. Right-labeled continuous midnight belongs
+to the preceding session; event time belongs to the new session. Out-of-session instants fail clearly.
+Gap classification does not add a new off-session rejection policy for legacy daily labels. The
+requested daily frequency cannot silently override a declared intraday frequency.
 Named calendar/feed declarations for intraday detection are not supported yet; legacy intraday
 calls retain their existing behavior. Unknown calendars and malformed daily timestamps fail without
 modifying the input. `fill_gaps()` remains a separate elapsed-grid operation, not calendar-aware
@@ -108,10 +114,11 @@ or feed declaration is present. `exclude_weekends=True` now follows NYSE holiday
 Omission follows NYSE, so callers requiring the old elapsed-day counts should pass `calendar="24/7"`.
 Intraday/weekly range planning retains its legacy elapsed-time behavior; named calendar/feed
 declarations for those frequencies are not supported by this planner yet. `calendar=None` disables
-classification. Session-label dates retain their existing timezone's civil date. Explicit event-time
-or bar-close declarations are rejected for daily planning rather than silently relabeled. Declare
-the feed's `timezone` when a non-UTC label must survive storage's canonical UTC reads; the planner
-restores that declared timezone before interpreting dates.
+classification. Session-label dates use their declared timezone, or their existing timezone when
+undeclared. Explicit event-time/bar-close/bar-side declarations map to authoritative session labels
+before planning, including for provider-row selection during backfill. Out-of-session instants fail
+clearly; original provider timestamps are retained in storage. Declare the feed's `timezone` when a
+non-UTC label must survive storage's canonical UTC reads.
 
 If a provider's history limit cannot reach the stored dataset, the updater records
 `provider_history_limited` and skips gap filling across the unavailable interval.

@@ -12,6 +12,7 @@ from ml4t.data.storage.config import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.update_manager import GapDetector as RangeDetector
+from ml4t.data.update_manager import IncrementalUpdater, UpdateStrategy
 from ml4t.data.utils.gaps import GapDetector
 from ml4t.specs import FeedSpec
 
@@ -105,3 +106,75 @@ def test_declared_instants_support_the_public_custom_timestamp_column():
     feed = FeedSpec(time_contract_version=2, calendar="NYSE", timestamp_semantics="event_time")
     found = GapDetector().detect_gaps(frame, timestamp_col="stamp", feed_spec=feed)
     assert sum(g.missing_periods for g in found) == 1
+
+
+@pytest.mark.parametrize("consumer", [GapDetector, RangeDetector])
+def test_declared_hourly_bars_cannot_silently_be_reinterpreted_as_daily_observations(consumer):
+    frame = provider_frame()
+    feed = FeedSpec(
+        time_contract_version=2, data_frequency="hourly", timestamp_semantics="event_time"
+    )
+    with pytest.raises(ValueError, match="frequency"):
+        consumer().detect_gaps(frame, frequency="daily", feed_spec=feed)
+
+
+@pytest.mark.parametrize("backend", [FlatStorage, HiveStorage])
+@pytest.mark.parametrize("semantics", ["event_time", "bar_close"])
+def test_actual_backfill_selects_provider_instants_by_their_missing_session(
+    tmp_path, backend, semantics
+):
+    storage = backend(StorageConfig(base_path=tmp_path))
+    complete = provider_frame()
+    metadata = Metadata(
+        provider="synthetic",
+        symbol="SPY",
+        asset_class="equities",
+        bar_params={"frequency": "daily"},
+        calendar="NYSE",
+        time_contract_version=2,
+        timestamp_semantics=semantics,
+    )
+    key = "equities/daily/SPY"
+    storage.write(
+        complete.filter(pl.col("timestamp").dt.date() != date(2025, 7, 16)),
+        key,
+        metadata.model_dump(),
+    )
+    result = IncrementalUpdater().apply_strategy(storage, key, complete, UpdateStrategy.BACKFILL)
+    assert result.success
+    assert result.rows_added == 1
+    assert storage.read(key).collect().equals(complete)
+
+
+@pytest.mark.parametrize("backend", [FlatStorage, HiveStorage])
+def test_actual_backfill_restores_tokyo_labels_without_retimestamping_provider_rows(
+    tmp_path, backend
+):
+    storage = backend(StorageConfig(base_path=tmp_path))
+    complete = provider_frame("2025-07-11", "2025-07-15").with_columns(
+        pl.col("timestamp").dt.date().cast(pl.Datetime("us")).dt.replace_time_zone("Asia/Tokyo")
+    )
+    metadata = Metadata(
+        provider="synthetic",
+        symbol="SPY",
+        asset_class="equities",
+        bar_params={"frequency": "daily"},
+        calendar="JPX",
+        time_contract_version=2,
+        timezone="Asia/Tokyo",
+        timestamp_semantics="session_label",
+    )
+    key = "equities/daily/SPY"
+    storage.write(
+        complete.filter(pl.col("timestamp").dt.date() != date(2025, 7, 14)),
+        key,
+        metadata.model_dump(),
+    )
+    result = IncrementalUpdater().apply_strategy(storage, key, complete, UpdateStrategy.BACKFILL)
+    assert result.success
+    assert result.rows_added == 1
+    assert (
+        storage.read(key)
+        .collect()
+        .equals(complete.with_columns(pl.col("timestamp").dt.convert_time_zone("UTC")))
+    )

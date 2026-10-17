@@ -142,10 +142,9 @@ def test_date_session_labels_have_the_same_schedule_as_datetime_labels() -> None
 
 
 @pytest.mark.parametrize("semantics", ["event_time", "bar_close"])
-def test_event_semantics_are_not_silently_reinterpreted_as_daily_labels(semantics) -> None:
+def test_explicit_daily_instants_are_mapped_without_creating_a_weekend_gap(semantics) -> None:
     frame = provider_frame("2025-07-11", "2025-07-14")
-    with pytest.raises(NotImplementedError, match="session_label"):
-        GapDetector().detect_gaps(frame, feed_spec={"timestamp_semantics": semantics})
+    assert GapDetector().detect_gaps(frame, feed_spec={"timestamp_semantics": semantics}) == []
 
 
 def test_null_timestamps_fail_without_input_mutation() -> None:

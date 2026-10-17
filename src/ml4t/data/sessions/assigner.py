@@ -33,6 +33,45 @@ EXCHANGE_CALENDARS = {
 }
 
 
+def _daily_session_labels(
+    df: pl.DataFrame, assigner: SessionAssigner, timestamp_col: str = "timestamp"
+) -> pl.Series:
+    if timestamp_col not in df.columns:
+        raise ValueError(f"DataFrame must have '{timestamp_col}' column")
+    feed = assigner.feed_spec
+    if feed.data_frequency is not None and str(feed.data_frequency).lower() not in {
+        "daily",
+        "1day",
+        "1d",
+    }:
+        raise ValueError("daily session projection requires a declared daily frequency")
+    if df.is_empty():
+        return pl.Series(timestamp_col, [], dtype=pl.Date)
+    dtype = df.schema[timestamp_col]
+    if dtype != pl.Date and not isinstance(dtype, pl.Datetime):
+        raise TypeError(f"'{timestamp_col}' must contain Date or Datetime values")
+    if df[timestamp_col].null_count():
+        raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
+    if feed.timestamp_semantics in (
+        TimestampSemantics.EVENT_TIME,
+        TimestampSemantics.BAR_CLOSE,
+    ) or (
+        feed.timestamp_semantics != TimestampSemantics.SESSION_LABEL and feed.bar_label is not None
+    ):
+        assigned = assigner.assign_sessions(
+            df.select(pl.col(timestamp_col).alias("timestamp")),
+            outside_session="raise",
+            bar_frequency="daily",
+        )
+        return assigned["session_date"].rename(timestamp_col)
+    labels = df[timestamp_col]
+    if isinstance(dtype, pl.Datetime):
+        if dtype.time_zone is not None and feed.timezone is not None:
+            labels = labels.dt.convert_time_zone(feed.timezone)
+        labels = labels.dt.date()
+    return labels
+
+
 class SessionAssigner:
     """Assigns session dates to trading data based on exchange calendars.
 
