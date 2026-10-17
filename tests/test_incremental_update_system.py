@@ -68,7 +68,7 @@ class TestGapDetector:
             }
         )
 
-        detector = GapDetector()
+        detector = GapDetector(calendar="24/7")
         gaps = detector.detect_gaps(df, frequency="daily")
 
         assert len(gaps) == 1

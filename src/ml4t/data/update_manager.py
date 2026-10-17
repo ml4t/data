@@ -13,8 +13,10 @@ import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.providers.base import BaseProvider
-from ml4t.data.storage.backend import StorageBackend
+from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.data.storage.backend import StorageBackend, normalize_storage_metadata
 from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec, TimestampSemantics
 
 logger = structlog.get_logger()
 
@@ -26,6 +28,14 @@ def _ensure_datetime(value: Any) -> datetime:
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time(), UTC)
     raise TypeError(f"Expected a date or datetime, got {type(value).__name__}")
+
+
+def _session_label(value: Any) -> datetime:
+    """Encode a civil session date as UTC midnight without converting an instant."""
+    if not isinstance(value, date):
+        raise TypeError("'timestamp' must contain non-null Date or Datetime values")
+    label = value.date() if isinstance(value, datetime) else value
+    return datetime.combine(label, datetime.min.time(), UTC)
 
 
 def _rewrite_preserving_metadata(
@@ -89,20 +99,109 @@ class UpdateResult:
 class GapDetector:
     """Detect gaps in time-series data."""
 
-    def __init__(self, exclude_weekends: bool = False) -> None:
+    def __init__(
+        self,
+        exclude_weekends: bool | None = None,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+    ) -> None:
         """
         Initialize gap detector.
 
         Args:
-            exclude_weekends: Whether to exclude weekends from gap detection
+            exclude_weekends: Legacy hint; explicit False selects 24/7 absent a declaration.
+            calendar: Explicit schedule selection; None disables schedule classification.
+            feed_spec: Shared feed declaration, resolved before the NYSE default.
         """
         self.exclude_weekends = exclude_weekends
+        self.calendar = calendar
+        self.feed_spec = feed_spec
+
+    def _feed_calendar(
+        self, calendar: str | None | CalendarUnset, feed_spec: Any | None
+    ) -> tuple[FeedSpec, str | None]:
+        feed = FeedSpec.from_any(self.feed_spec if feed_spec is None else feed_spec)
+        if calendar is UNSET_CALENDAR:
+            calendar = self.calendar
+        if (
+            calendar is UNSET_CALENDAR
+            and self.exclude_weekends is False
+            and (
+                feed.calendar is UNSET_CALENDAR
+                or (feed.time_contract_version == 1 and feed.calendar is None)
+            )
+        ):
+            calendar = "24/7"
+        return feed, feed.resolve_calendar(calendar=calendar)
+
+    @staticmethod
+    def _label_frame(df: pl.DataFrame, feed: FeedSpec) -> pl.DataFrame:
+        dtype = df.schema["timestamp"]
+        if dtype != pl.Date and not isinstance(dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Date or Datetime values")
+        if df["timestamp"].null_count():
+            raise ValueError("'timestamp' must not contain null timestamps")
+        if isinstance(dtype, pl.Datetime) and feed.timezone is not None:
+            timestamp = pl.col("timestamp")
+            if dtype.time_zone is None:
+                timestamp = timestamp.dt.replace_time_zone(feed.timezone)
+            else:
+                timestamp = timestamp.dt.convert_time_zone(feed.timezone)
+            return df.with_columns(timestamp)
+        return df
+
+    @staticmethod
+    def _daily_ranges(
+        df: pl.DataFrame,
+        start: datetime,
+        end: datetime,
+        feed: FeedSpec,
+        calendar: str,
+        tolerance_days: int = 0,
+    ) -> list[dict[str, Any]]:
+        if start.date() > end.date():
+            raise ValueError("start_date must not be after end_date")
+        if feed.timestamp_semantics not in (None, TimestampSemantics.SESSION_LABEL):
+            raise NotImplementedError("daily range planning requires session_label timestamps")
+        assigner = SessionAssigner(calendar)
+        observed = {
+            value.date() if isinstance(value, datetime) else value
+            for value in df["timestamp"].to_list()
+        }
+        schedule = assigner.calendar.schedule(start_date=start.date(), end_date=end.date())
+        gaps = []
+        missing: list[date] = []
+
+        def append_gap() -> None:
+            if len(missing) > tolerance_days:
+                gaps.append(
+                    {
+                        "start": datetime.combine(missing[0], datetime.min.time(), UTC),
+                        "end": datetime.combine(missing[-1], datetime.min.time(), UTC),
+                        "size_days": len(missing),
+                    }
+                )
+
+        for label in schedule.index:
+            session = label.date()
+            if session not in observed:
+                missing.append(session)
+            elif missing:
+                append_gap()
+                missing = []
+        if missing:
+            append_gap()
+        return gaps
 
     def detect_gaps(
         self,
         df: pl.DataFrame,
         frequency: str = "daily",
         tolerance_days: int = 0,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> list[dict[str, Any]]:
         """
         Detect gaps in a DataFrame's timestamp column.
@@ -110,13 +209,37 @@ class GapDetector:
         Args:
             df: DataFrame with timestamp column
             frequency: Data frequency (daily, hourly, etc.)
-            tolerance_days: Number of days to tolerate as non-gap
+            tolerance_days: Missing sessions tolerated for daily data; elapsed days otherwise.
+            calendar: Per-call override of configured calendar and feed metadata.
+            feed_spec: Per-call feed declaration.
 
         Returns:
             List of gap dictionaries with start, end, and size
         """
+        feed, selected = self._feed_calendar(calendar, feed_spec)
+        if selected is None:
+            return []
         if df.is_empty() or "timestamp" not in df.columns:
             return []
+        if frequency.lower() in {"daily", "1day"}:
+            df = self._label_frame(df, feed)
+            return self._daily_ranges(
+                df,
+                _session_label(df["timestamp"].min()),
+                _session_label(df["timestamp"].max()),
+                feed,
+                selected,
+                tolerance_days,
+            )
+        if (
+            calendar is not UNSET_CALENDAR
+            or self.calendar is not UNSET_CALENDAR
+            or feed_spec is not None
+            or self.feed_spec is not None
+        ):
+            raise NotImplementedError(
+                "calendar/feed declarations currently support daily ranges only"
+            )
 
         # Sort by timestamp
         df = df.sort("timestamp")
@@ -131,43 +254,16 @@ class GapDetector:
             next_ts = timestamps[i + 1]
             expected = current + expected_delta
 
-            # Check if there's a gap
-            if self.exclude_weekends and frequency == "daily":
-                # Skip weekend days
-                while expected.weekday() >= 5:  # Saturday = 5, Sunday = 6
-                    expected += timedelta(days=1)
-
             if next_ts > expected + timedelta(days=tolerance_days):
-                # Found a gap
                 gap_start = current + expected_delta
                 gap_end = next_ts - expected_delta
-
-                # Adjust for weekends if needed
-                if self.exclude_weekends and frequency == "daily":
-                    # Skip weekend at start
-                    while gap_start.weekday() >= 5:
-                        gap_start += timedelta(days=1)
-                    # Skip weekend at end
-                    while gap_end.weekday() >= 5:
-                        gap_end -= timedelta(days=1)
-
-                    # Only add gap if it's still valid after weekend adjustment
-                    if gap_start <= gap_end:
-                        gaps.append(
-                            {
-                                "start": gap_start,
-                                "end": gap_end,
-                                "size_days": (gap_end - gap_start).days + 1,
-                            }
-                        )
-                else:
-                    gaps.append(
-                        {
-                            "start": gap_start,
-                            "end": gap_end,
-                            "size_days": (gap_end - gap_start).days + 1,
-                        }
-                    )
+                gaps.append(
+                    {
+                        "start": gap_start,
+                        "end": gap_end,
+                        "size_days": (gap_end - gap_start).days + 1,
+                    }
+                )
 
         return gaps
 
@@ -178,6 +274,9 @@ class GapDetector:
         start_date: datetime,
         end_date: datetime,
         frequency: str = "daily",
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> list[dict[str, Any]]:
         """
         Detect gaps through a storage backend.
@@ -192,8 +291,43 @@ class GapDetector:
         Returns:
             List of gaps found in storage, with UTC-aware bounds
         """
+        if frequency.lower() in {"daily", "1day"}:
+            start_date = _session_label(start_date)
+            end_date = _session_label(end_date)
+            if feed_spec is None and self.feed_spec is None:
+                try:
+                    feed_spec = normalize_storage_metadata(storage.get_metadata(key), key)
+                except KeyError:
+                    pass
+            feed, selected = self._feed_calendar(calendar, feed_spec)
+            if selected is None:
+                return []
+            # Session labels retain their civil date even when stored with a timezone.
+            start_bound = start_date - timedelta(days=1)
+            end_bound = datetime.combine(end_date.date(), datetime.min.time(), UTC) + timedelta(
+                days=2
+            )
+            try:
+                df = storage.read(key, start_bound, end_bound).collect()
+            except KeyError:
+                df = pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC")})
+            return self._daily_ranges(
+                self._label_frame(df, feed), start_date, end_date, feed, selected
+            )
         start_date = _ensure_datetime(start_date)
         end_date = _ensure_datetime(end_date)
+        _, selected = self._feed_calendar(calendar, feed_spec)
+        if selected is None:
+            return []
+        if (
+            calendar is not UNSET_CALENDAR
+            or self.calendar is not UNSET_CALENDAR
+            or feed_spec is not None
+            or self.feed_spec is not None
+        ):
+            raise NotImplementedError(
+                "calendar/feed declarations currently support daily ranges only"
+            )
         try:
             # Storage end bounds are exclusive. Open the inclusive end by one
             # microsecond so a bar timestamped on end_date is part of the range.
@@ -529,14 +663,23 @@ class IncrementalUpdater:
                 existing_df, new_data = align_frames_for_concat(existing_df, new_data)
 
                 # Detect gaps
-                gaps = self.gap_detector.detect_gaps(existing_df)
+                feed_metadata = normalize_storage_metadata(storage.get_metadata(key), key)
+                gaps = self.gap_detector.detect_gaps(existing_df, feed_spec=feed_metadata)
+                feed, selected_calendar = self.gap_detector._feed_calendar(
+                    UNSET_CALENDAR, feed_metadata
+                )
                 gaps_filled = 0
 
                 # Filter new data to only gap periods
                 gap_data = pl.DataFrame()
                 for gap in gaps:
+                    expected = SessionAssigner(selected_calendar).calendar.schedule(
+                        start_date=gap["start"].date(), end_date=gap["end"].date()
+                    )
                     gap_rows = new_data.filter(
-                        (pl.col("timestamp") >= gap["start"]) & (pl.col("timestamp") <= gap["end"])
+                        self.gap_detector._label_frame(new_data, feed)["timestamp"]
+                        .dt.date()
+                        .is_in([label.date() for label in expected.index])
                     )
                     if not gap_rows.is_empty():
                         gap_data = (
@@ -688,7 +831,8 @@ class BackfillManager:
                     continue
 
                 # Detect gaps
-                gaps = self.gap_detector.detect_gaps(df)
+                feed_metadata = normalize_storage_metadata(self.storage.get_metadata(key), key)
+                gaps = self.gap_detector.detect_gaps(df, feed_spec=feed_metadata)
 
                 # Filter significant gaps
                 significant_gaps = [g for g in gaps if g["size_days"] >= min_gap_days]
