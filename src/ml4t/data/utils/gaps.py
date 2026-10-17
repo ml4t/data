@@ -14,6 +14,7 @@ import structlog
 from ml4t.data.sessions.assigner import (
     SessionAssigner,
     _daily_session_labels,
+    _schedule_for_instants,
     _session_intervals,
 )
 from ml4t.specs import (
@@ -247,11 +248,7 @@ class GapDetector:
             expr = expr.dt.replace_time_zone(feed.timezone)
         observed = df.select(expr.dt.convert_time_zone("UTC")).to_series().unique().sort().to_list()
         start, end = observed[0], observed[-1]
-        schedule = assigner.calendar.schedule(
-            start_date=(start - timedelta(days=2)).date(),
-            end_date=(end + timedelta(days=2)).date(),
-            interruptions=True,
-        )
+        schedule = _schedule_for_instants(assigner.calendar, start, end, padding_days=2)
         grid_intervals: list[tuple[datetime, datetime, int, int]] = []
         total_bars = 0
         for _, row in schedule.iterrows():

@@ -11,7 +11,11 @@ from typing import Any
 import polars as pl
 import structlog
 
-from ml4t.data.sessions.assigner import SessionAssigner, _session_intervals
+from ml4t.data.sessions.assigner import (
+    SessionAssigner,
+    _schedule_for_instants,
+    _session_intervals,
+)
 from ml4t.specs import UNSET_CALENDAR, BarLabel, CalendarUnset, TimestampSemantics
 
 logger = structlog.get_logger()
@@ -166,13 +170,7 @@ class SessionCompleter:
             ):
                 raise ValueError("start_date and end_date must be minute-aligned")
 
-            start_pd = request_start.normalize() - pd.Timedelta(days=1)
-            end_pd = request_end.normalize() + pd.Timedelta(days=1)
-
-            # Get trading schedule
-            schedule = self.calendar.schedule(
-                start_date=start_pd, end_date=end_pd, interruptions=True
-            )
+            schedule = _schedule_for_instants(self.calendar, request_start, request_end)
 
             if len(schedule) == 0:
                 logger.warning("No trading sessions found in date range")
