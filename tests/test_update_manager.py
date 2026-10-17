@@ -191,10 +191,10 @@ class TestGapDetector:
         assert len(gaps) == 0
 
     def test_detect_gaps_missing_timestamp(self, detector: GapDetector):
-        """Missing timestamp column returns no gaps."""
+        """A nonempty frame without timestamps cannot be certified as complete."""
         df = pl.DataFrame({"close": [100, 101, 102]})
-        gaps = detector.detect_gaps(df)
-        assert len(gaps) == 0
+        with pytest.raises(ValueError, match="timestamp"):
+            detector.detect_gaps(df)
 
     def test_detect_gaps_with_tolerance(self, detector: GapDetector, data_with_gaps: pl.DataFrame):
         """Tolerance days affects gap detection."""

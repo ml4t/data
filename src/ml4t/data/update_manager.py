@@ -190,7 +190,7 @@ class GapDetector:
         assigner = SessionAssigner(calendar)
         observed = {
             value.date() if isinstance(value, datetime) else value
-            for value in df["timestamp"].to_list()
+            for value in ObservationGapDetector._observed_rows(df)["timestamp"].to_list()
         }
         schedule = assigner.calendar.schedule(start_date=start.date(), end_date=end.date())
         gaps = []
@@ -226,6 +226,8 @@ class GapDetector:
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         feed_spec: Any | None = None,
         tolerance_bars: int = 0,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """
         Detect gaps in a DataFrame's timestamp column.
@@ -237,24 +239,44 @@ class GapDetector:
             calendar: Per-call override of configured calendar and feed metadata.
             feed_spec: Per-call feed declaration.
             tolerance_bars: Number of consecutive missing intraday bars to tolerate.
+            start_date: Inclusive requested coverage start; supply together with end_date.
+            end_date: Inclusive coverage end. Daily bounds are labels; intraday bounds are instants.
 
         Returns:
             List of gap dictionaries with start, end, and size
         """
+        if (start_date is None) != (end_date is None):
+            raise ValueError("start_date and end_date must be supplied together")
         feed, selected = self._feed_calendar(calendar, feed_spec)
         frequency = (feed.data_frequency or "daily") if frequency is None else frequency
         if selected is None:
             return []
-        if df.is_empty() or "timestamp" not in df.columns:
+        if df.is_empty() and start_date is None:
             return []
+        if feed.timestamp_col != "timestamp":
+            if feed.timestamp_col not in df.columns:
+                raise ValueError(f"declared timestamp column {feed.timestamp_col!r} is missing")
+            df = df.select(
+                pl.col(feed.timestamp_col).alias("timestamp"),
+                *[name for name in df.columns if name not in {"timestamp", feed.timestamp_col}],
+            )
+            feed = feed.with_overrides(timestamp_col="timestamp")
+        if "timestamp" not in df.columns:
+            if not df.is_empty():
+                raise ValueError("DataFrame must have 'timestamp' column")
+            df = df.with_columns(pl.Series("timestamp", [], dtype=pl.Datetime("us", "UTC")))
         if frequency.lower() in {"daily", "1day", "1d"}:
 
             def daily_ranges(part: pl.DataFrame) -> list[dict[str, Any]]:
                 labeled = self._label_frame(part, feed, selected)
                 return self._daily_ranges(
                     labeled,
-                    _session_label(labeled["timestamp"].min()),
-                    _session_label(labeled["timestamp"].max()),
+                    _session_label(
+                        start_date if start_date is not None else labeled["timestamp"].min()
+                    ),
+                    _session_label(
+                        end_date if end_date is not None else labeled["timestamp"].max()
+                    ),
                     selected,
                     tolerance_days,
                 )
@@ -267,7 +289,13 @@ class GapDetector:
                 df,
                 feed,
                 lambda part: self._intraday_ranges(
-                    part, frequency, selected, feed, tolerance_bars=tolerance_bars
+                    part,
+                    frequency,
+                    selected,
+                    feed,
+                    tolerance_bars=tolerance_bars,
+                    start=_ensure_datetime(start_date) if start_date is not None else None,
+                    end=_ensure_datetime(end_date) if end_date is not None else None,
                 ),
             )
         if (
@@ -329,8 +357,8 @@ class GapDetector:
         if grid is None:
             return []
         positions = sorted({grid.position(timestamp) for timestamp in observed})
-        first = grid.bound(start) if start is not None else positions[0]
-        stop = grid.bound(end, inclusive=True) if end is not None else positions[-1] + 1
+        first = grid.bound(grid.start)
+        stop = grid.bound(grid.end, inclusive=True)
         gaps = []
         cursor = first
         for position in [p for p in positions if first <= p < stop] + [stop]:
