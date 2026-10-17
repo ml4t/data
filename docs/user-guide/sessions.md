@@ -62,6 +62,10 @@ include the close. The corresponding boundaries apply to lunch breaks. An explic
 also selects the declared side; `event_time` alone does not infer a bar side. This assignment does
 not validate intraday grid completeness.
 
+`session_start_time` is retained in metadata, but these schedule adapters reject a non-null override.
+Register and select an authoritative calendar with the required intervals instead of silently
+replacing a named exchange's session boundaries.
+
 ```python
 from ml4t.specs import FeedSpec
 
@@ -134,6 +138,7 @@ map to the exchange calendar.
 
 Completion remains a one-minute, open-labeled operation, not a general bar-grid validator. Explicit
 close-labeled or session-label metadata is rejected. `calendar=None` returns the input unchanged.
+Declared event-count bar types and frequencies other than one minute are also rejected.
 `DataManager.complete_sessions(fill_gaps=False)` performs assignment only and never expands rows,
 whether or not storage is configured. Feed declarations are accepted through the facade's
 `feed_spec` keyword with the same precedence as the low-level classes.

@@ -91,6 +91,12 @@ class SessionCompleter:
         """
         if self.calendar is None:
             return df
+        if self.feed_spec.bar_type not in (None, "time"):
+            raise NotImplementedError("minute completion requires fixed time bars")
+        if self.feed_spec.data_frequency is not None and str(
+            self.feed_spec.data_frequency
+        ).lower() not in {"minute", "1minute", "1min", "1m"}:
+            raise ValueError("minute completion requires a declared one-minute frequency")
         if self.feed_spec.timestamp_semantics not in (
             None,
             TimestampSemantics.EVENT_TIME,

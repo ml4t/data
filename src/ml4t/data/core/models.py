@@ -86,6 +86,7 @@ class Metadata(BaseModel):
     time_contract_version: int = 1
     timezone: str | None = None
     timestamp_semantics: TimestampSemantics | str | None = None
+    session_start_time: str | None = None
     bar_grid_anchor: BarGridAnchor | str | None = None
     bar_label: BarLabel | str | None = None
     partial_bar_policy: PartialBarPolicy | str | None = None
@@ -120,6 +121,7 @@ class Metadata(BaseModel):
             time_contract_version=self.time_contract_version,
             timezone=self.timezone,
             timestamp_semantics=self.timestamp_semantics,
+            session_start_time=self.session_start_time,
             bar_grid_anchor=self.bar_grid_anchor,
             bar_label=self.bar_label,
             partial_bar_policy=self.partial_bar_policy,

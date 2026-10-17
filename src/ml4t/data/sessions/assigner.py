@@ -74,6 +74,10 @@ class SessionAssigner:
         self.calendar = None
         if self.calendar_name is None:
             return
+        if self.feed_spec.session_start_time is not None:
+            raise NotImplementedError(
+                "session_start_time overrides require a registered calendar with that schedule"
+            )
         timezone = self.feed_spec.timezone
         if timezone is not None:
             if not isinstance(timezone, str) or not timezone.strip():
