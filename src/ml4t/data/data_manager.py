@@ -29,6 +29,7 @@ from ml4t.data.managers.fetch_manager import FetchManager
 from ml4t.data.managers.metadata_manager import MetadataManager
 from ml4t.data.managers.provider_manager import ProviderManager, ProviderRouter
 from ml4t.data.managers.storage_manager import StorageManager
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset
 
 logger = structlog.get_logger()
 
@@ -453,51 +454,30 @@ class DataManager:
         self,
         df: pl.DataFrame,
         exchange: str | None = None,
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
+        *,
+        feed_spec: Any | None = None,
     ) -> pl.DataFrame:
         """Assign sessions to daily period labels or intraday timestamps."""
-        if not self._metadata_manager:
-            # Fall back to direct implementation
-            from ml4t.data.sessions import SessionAssigner
-
-            if calendar is None:
-                if exchange is None:
-                    raise ValueError("Must provide either exchange or calendar parameter")
-                assigner = SessionAssigner.from_exchange(exchange)
-            else:
-                assigner = SessionAssigner(calendar)
-            return assigner.assign_sessions(df, bar_frequency=bar_frequency)
-
-        return self._metadata_manager.assign_sessions(df, exchange, calendar, bar_frequency)
+        manager = self._metadata_manager or MetadataManager(None)
+        return manager.assign_sessions(df, exchange, calendar, bar_frequency, feed_spec=feed_spec)
 
     def complete_sessions(
         self,
         df: pl.DataFrame,
         exchange: str | None = None,
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         fill_gaps: bool = True,
         fill_method: str = "forward",
         zero_volume: bool = True,
+        *,
+        feed_spec: Any | None = None,
     ) -> pl.DataFrame:
         """Complete sessions by filling gaps."""
-        if not self._metadata_manager:
-            # Fall back to direct implementation
-            from ml4t.data.sessions import SessionCompleter
-            from ml4t.data.sessions.assigner import EXCHANGE_CALENDARS
-
-            if calendar is None:
-                if exchange is None:
-                    raise ValueError("Must provide either exchange or calendar parameter")
-                calendar = EXCHANGE_CALENDARS.get(exchange.upper())
-                if not calendar:
-                    raise ValueError(f"Unknown exchange '{exchange}'")
-
-            completer = SessionCompleter(calendar)
-            return completer.complete_sessions(df, fill_method=fill_method, zero_volume=zero_volume)
-
-        return self._metadata_manager.complete_sessions(
-            df, exchange, calendar, fill_gaps, fill_method, zero_volume
+        manager = self._metadata_manager or MetadataManager(None)
+        return manager.complete_sessions(
+            df, exchange, calendar, fill_gaps, fill_method, zero_volume, feed_spec=feed_spec
         )
 
     # ========================================================================
