@@ -285,3 +285,27 @@ def test_right_labels_count_the_partial_shortened_close_at_its_actual_end(policy
         partial_bar_policy=policy,
     )
     assert sum(g.missing_periods for g in gaps(frame, feed)) == expected
+
+
+def test_excluded_partial_close_is_not_accepted_as_the_last_full_bar_label():
+    frame = provider_frame("2025-07-03", "2025-07-03").filter(
+        ((pl.col("timestamp").dt.hour() == 16) & (pl.col("timestamp").dt.minute() == 30))
+        | ((pl.col("timestamp").dt.hour() == 17) & (pl.col("timestamp").dt.minute() == 0))
+    )
+    assert (
+        gaps(
+            frame,
+            declaration(frequency="hourly", timestamp_semantics="bar_close", bar_label="right"),
+        )
+        == []
+    )
+    with pytest.raises(ValueError, match="off.grid"):
+        gaps(
+            frame,
+            declaration(
+                frequency="hourly",
+                timestamp_semantics="bar_close",
+                bar_label="right",
+                partial_bar_policy="exclude",
+            ),
+        )

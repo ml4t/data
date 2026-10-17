@@ -192,6 +192,8 @@ class GapDetector:
         feed: FeedSpec,
     ) -> list[DataGap]:
         interval = self._intraday_interval(frequency)
+        if interval is None:
+            raise ValueError("unsupported intraday bar frequency")
         required = (
             "data_frequency",
             "timestamp_semantics",
@@ -215,6 +217,11 @@ class GapDetector:
             raise TypeError(f"'{timestamp_col}' must contain Datetime values for an intraday grid")
         if df[timestamp_col].null_count():
             raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
+        if (
+            dtype.time_unit == "ns"
+            and df.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
+        ):
+            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
         if dtype.time_zone is None and feed.timezone is None:
             raise ValueError("naive intraday timestamps require a declared timezone")
         if df.is_empty():
@@ -230,7 +237,8 @@ class GapDetector:
         )
         import pandas as pd
 
-        grids = []
+        grid_intervals: list[tuple[datetime, datetime, int, int]] = []
+        total_bars = 0
         for _, row in schedule.iterrows():
             opening = row["market_open"].to_pydatetime().astimezone(UTC)
             closing = row["market_close"].to_pydatetime().astimezone(UTC)
@@ -246,23 +254,46 @@ class GapDetector:
                     count += 1
                 if count <= 0:
                     continue
-                labels = pl.datetime_range(
-                    opening,
-                    opening + count * interval,
-                    interval=interval,
-                    closed="left",
-                    eager=True,
-                )
-                if feed.bar_label == BarLabel.RIGHT:
-                    labels = (labels + interval).clip(upper_bound=closing)
-                grids.append(labels)
-        expected = pl.concat(grids).unique().sort().to_list() if grids else []
-        expected_set = set(expected)
-        if any(value not in expected_set for value in observed):
-            raise ValueError("intraday observations contain off-grid timestamps")
+                if grid_intervals and opening < grid_intervals[-1][1]:
+                    raise ValueError("calendar returned overlapping tradable intervals")
+                grid_intervals.append((opening, closing, count, total_bars))
+                total_bars += count
+        right_labeled = feed.bar_label == BarLabel.RIGHT
+        boundaries = [row[1] if right_labeled else row[0] for row in grid_intervals]
+
+        def bar_index(timestamp: datetime) -> int:
+            index = (
+                bisect_left(boundaries, timestamp)
+                if right_labeled
+                else bisect_right(boundaries, timestamp) - 1
+            )
+            if index < 0 or index >= len(grid_intervals):
+                raise ValueError("intraday observations contain off-grid timestamps")
+            opening, closing, count, offset = grid_intervals[index]
+            if right_labeled and timestamp == closing:
+                if (closing - opening) % interval == timedelta(0) or (
+                    feed.partial_bar_policy == PartialBarPolicy.INCLUDE
+                ):
+                    return offset + count - 1
+                raise ValueError("intraday observations contain off-grid partial-close timestamps")
+            position, remainder = divmod(timestamp - opening, interval)
+            if right_labeled:
+                position -= 1
+            if (
+                remainder
+                or timestamp < opening
+                or timestamp >= closing
+                or not 0 <= position < count
+            ):
+                raise ValueError("intraday observations contain off-grid timestamps")
+            return offset + position
+
+        positions = [bar_index(timestamp) for timestamp in observed]
         gaps = []
-        for current, following in zip(observed, observed[1:]):
-            missing = bisect_left(expected, following) - bisect_right(expected, current)
+        for current, following, left_index, right_index in zip(
+            observed, observed[1:], positions, positions[1:]
+        ):
+            missing = right_index - left_index - 1
             if missing > 0:
                 gaps.append(DataGap(current, following, missing, following - current, frequency))
         return gaps
