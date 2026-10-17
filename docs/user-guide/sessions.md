@@ -58,8 +58,9 @@ series as daily when every non-null timestamp is midnight.
 Explicit `FeedSpec.timestamp_semantics` overrides these heuristics: `session_label` preserves the
 civil label date, `event_time` matches an instant, and `bar_close` matches the ending bar boundary.
 Event intervals include the open and exclude the close; close-labeled bars exclude the open and
-include the close. The corresponding boundaries apply to lunch breaks. An explicit `bar_label`
-also selects the declared side; `event_time` alone does not infer a bar side. This assignment does
+include the close. The corresponding boundaries apply to lunch breaks and declared calendar
+interruptions. An explicit `bar_label` also selects the declared side; `event_time` alone does not
+infer a bar side. This assignment does
 not validate intraday grid completeness.
 
 `session_start_time` is retained in metadata, but these schedule adapters reject a non-null override.
@@ -133,8 +134,9 @@ The supported fill methods are `"forward"`, `"backward"`, and `"none"`. Forward 
 filling apply only within a session. `zero_volume=True` sets volume to zero for inserted rows.
 
 Session completion rejects duplicate or non-minute-aligned timestamps and observations outside the
-selected schedule. Use session assignment first when you need to inspect how individual timestamps
-map to the exchange calendar.
+selected schedule. Lunch breaks and declared calendar interruptions are excluded from the template;
+completion never inserts rows for those closures. Use session assignment first to inspect how
+timestamps map to the exchange calendar.
 
 Completion remains a one-minute, open-labeled operation, not a general bar-grid validator. Explicit
 close-labeled or session-label metadata is rejected. `calendar=None` returns the input unchanged.
