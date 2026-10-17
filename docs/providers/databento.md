@@ -146,6 +146,37 @@ df = provider.fetch_continuous_futures(
 
 ---
 
+## Exact Timestamp Ranges
+
+`fetch_ohlcv_range()` requests one series between timezone-aware instants, including `start` and
+excluding `end`. Unlike the date-based API, it never rounds to dates or applies
+`adjust_session_dates`. The wrapper supports native minute, hourly and daily OHLCV schemas and
+rejects unsupported frequencies, parent expansion and `ALL_SYMBOLS` before a request.
+
+```python
+from datetime import UTC, datetime
+
+with DataBentoProvider(stype_in="continuous") as provider:
+    rows = provider.fetch_ohlcv_range(
+        "BTC.c.0",
+        datetime(2026, 9, 5, 12, 1, tzinfo=UTC),
+        datetime(2026, 9, 5, 12, 2, tzinfo=UTC),
+        "minute",
+    )
+```
+
+The returned `symbol` identifies the requested series; `contract` retains the resolved contract
+when the SDK supplies it. Select the same dataset, continuous roll rule and price convention used
+for the stored series. This method does not reconstruct adjusted continuous prices or select another
+contract to fill an absence. Databento timestamps identify interval starts, and no-trade intervals
+can have no OHLCV record. A download may therefore leave gaps unresolved.
+
+For a stored report, see [targeted source recovery](../user-guide/incremental-updates.md#download-real-observations-for-a-selected-report).
+For raw Parquet files, this method returns a frame for explicit review and merging; it does not
+rewrite those files. Requests are metered. Use the native client's cost estimate before broad
+requests. The endpoint and bar semantics follow the [historical range API](https://databento.com/docs/api-reference-historical/timeseries/timeseries-get-range)
+and [OHLCV specification](https://databento.com/docs/schemas-and-data-formats/ohlcv).
+
 ## API Key Setup
 
 ```bash

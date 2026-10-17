@@ -136,8 +136,8 @@ Explicit `calendar=None` disables classification, while `"24/7"` still expects c
 
 This replaces the old fixed-US-clock approximation. Unqualified legacy intraday calls now require
 a complete feed declaration or explicit `calendar=None`; the detector does not invent an anchor,
-label side or partial-bar policy. Daily classification is unchanged. The separate intraday/weekly
-backfill range planner below still has its documented limitations.
+label side or partial-bar policy. Daily classification is unchanged. Use the bounded range report
+below to inspect leading/trailing absences; weekly grids are not supported.
 
 ### Inspect Missing Observations on Disk
 
@@ -220,6 +220,51 @@ market candles can omit no-trade intervals. Keep these absences in the report; a
 row does not justify creating a replacement candle. Targeted source downloads are a separate step,
 not an effect of inspecting the dataset. Values inside present rows are checked by validation, not
 by this timestamp-completeness report.
+
+### Download Real Observations for a Selected Report
+
+This is an explicit, potentially billable operation. For an existing one-instrument CME minute
+dataset, first inspect the desired interval. The storage key and vendor symbol are separate:
+
+```python
+from ml4t.data.providers import DataBentoProvider
+from ml4t.data.storage.metadata_tracker import MetadataTracker
+from ml4t.data.update_manager import BackfillManager
+
+cme_feed = feed.with_overrides(calendar="CME Globex Crypto")
+key = "futures/minute/BTC"
+gaps = GapDetector(feed_spec=cme_feed).detect_gaps_in_storage(
+    storage,
+    key,
+    datetime(2026, 9, 5, 12, 0, tzinfo=UTC),
+    datetime(2026, 9, 5, 12, 2, tzinfo=UTC),
+)
+with DataBentoProvider(stype_in="continuous") as provider:
+    result = BackfillManager(storage, MetadataTracker(storage.base_path)).execute_backfill(
+        key, gaps, provider, source_symbol="BTC.c.0", feed_spec=cme_feed
+    )
+print(result.rows_added, result.remaining_gaps)
+```
+
+The consumer rechecks the selected ranges against disk before requesting data. It downloads only
+currently missing ranges, preserves real stored observations and identity/calendar metadata, and replaces a marked
+null placeholder only when an actual source observation is returned. Intraday requests use the
+optional `TimestampRangeProvider` capability; unsupported providers fail without falling back to a
+full-day download. `calendar=None` disables calendar-based recovery. The first supported adapter is
+Databento, with a left-labeled grid and one instrument per storage key. Multi-asset inspection is
+supported, but targeted recovery of a panel requires separate per-instrument datasets.
+
+`result.success` means processing completed without errors, not that every observation was recovered.
+Inspect `errors` and `remaining_gaps`. Empty no-trade responses do not change storage or trigger
+unbounded retries. Partial responses retain their residual gaps; `gaps_filled` counts only completely
+recovered ranges. Existing observed null values are a separate validation concern, not permission
+to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
+intraday data; its daily `min_gap_days` remains a session count.
+
+Coin Metrics is not currently a Data provider. Its candle and metric endpoints use different
+identities and schemas; this Databento workflow does not claim to download them. See the
+[Databento range contract](../providers/databento.md#exact-timestamp-ranges) before selecting a
+continuous symbol or price convention.
 
 ### Daily Range Compatibility
 

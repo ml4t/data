@@ -14,6 +14,7 @@ import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.protocols import TimestampRangeProvider
 from ml4t.data.sessions.assigner import SessionAssigner, _daily_session_labels
 from ml4t.data.storage.backend import StorageBackend, normalize_storage_metadata
 from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
@@ -78,6 +79,33 @@ class UpdateStrategy(Enum):
     BACKFILL = "backfill"  # Fill gaps in historical data
 
 
+def _merge_backfill_rows(
+    existing: pl.DataFrame, recovered: pl.DataFrame, feed: FeedSpec
+) -> tuple[pl.DataFrame, int, int]:
+    if recovered.is_empty():
+        return existing, 0, 0
+    identity = ["timestamp"]
+    if feed.entity_col is not None or "symbol" in existing.columns:
+        entity = feed.resolve(existing.columns, ("symbol",)).entity_col
+        stored_ids = existing[entity].drop_nulls().unique()
+        if len(stored_ids) and not recovered[entity].is_in(stored_ids.implode()).all():
+            raise ValueError("Backfill cannot introduce a different instrument identity")
+        if len(stored_ids) > 1:
+            identity.append(entity)
+    existing, recovered = align_frames_for_concat(
+        existing, recovered, right_fill_values={"is_imputed": False}
+    )
+    recovered = recovered.unique(subset=identity, keep="first", maintain_order=True)
+    observed = ObservationGapDetector._observed_rows(existing)
+    recovered = recovered.join(observed.select(identity), on=identity, how="anti")
+    if recovered.is_empty():
+        return existing, 0, 0
+    retained = existing.join(recovered.select(identity), on=identity, how="anti")
+    replaced = len(existing) - len(retained)
+    combined = pl.concat([retained, recovered]).sort(identity)
+    return combined, len(recovered) - replaced, replaced
+
+
 @dataclass
 class UpdateResult:
     """Result of an update operation."""
@@ -91,6 +119,7 @@ class UpdateResult:
     gaps_filled: int = 0
     duration_seconds: float = 0.0
     errors: list[str] | None = None
+    remaining_gaps: list[dict[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         """Initialize errors list if None."""
@@ -162,11 +191,13 @@ class GapDetector:
         )
         if not isinstance(entity, str):
             raise ValueError("a single entity column is required")
-        identifiers = (
-            storage.read(key).select(entity).unique().collect()[entity]
+        identity_columns = [entity] + (["is_imputed"] if "is_imputed" in df.columns else [])
+        identity_frame = (
+            storage.read(key).select(identity_columns).collect()
             if storage is not None and key is not None
-            else df[entity].unique()
+            else df.select(identity_columns)
         )
+        identifiers = ObservationGapDetector._observed_rows(identity_frame)[entity].unique()
         if identifiers.null_count():
             raise ValueError("entity identifiers must not be null")
         if len(identifiers) <= 1:
@@ -176,6 +207,39 @@ class GapDetector:
             for identifier in identifiers.sort().to_list()
             for gap in detect(df.filter(pl.col(entity) == identifier))
         ]
+
+    @staticmethod
+    def _select_gap_rows(
+        data: pl.DataFrame, gap: dict[str, Any], feed: FeedSpec, calendar: str
+    ) -> pl.DataFrame:
+        actual = ObservationGapDetector._observed_rows(data)
+        if "entity" in gap:
+            entity = feed.resolve(actual.columns, ("symbol",)).entity_col
+            actual = actual.filter(pl.col(entity) == gap["entity"])
+        frequency = feed.data_frequency or "daily"
+        if frequency.lower() in {"daily", "1d", "1day"}:
+            schedule = SessionAssigner(calendar).calendar.schedule(
+                start_date=gap["start"].date(), end_date=gap["end"].date()
+            )
+            labels = GapDetector._label_frame(actual, feed, calendar)["timestamp"].dt.date()
+            return actual.filter(labels.is_in([label.date() for label in schedule.index]))
+        actual = actual.filter(
+            (pl.col("timestamp") >= gap["start"]) & (pl.col("timestamp") <= gap["end"])
+        )
+        if not actual.is_empty():
+            grid, timestamps = ObservationGapDetector()._intraday_grid(
+                actual,
+                "timestamp",
+                frequency,
+                calendar,
+                feed,
+                start=gap["start"],
+                end=gap["end"],
+            )
+            if grid is not None:
+                for timestamp in timestamps:
+                    grid.position(timestamp)
+        return actual
 
     @staticmethod
     def _daily_ranges(
@@ -794,40 +858,36 @@ class IncrementalUpdater:
                 feed, selected_calendar = self.gap_detector._feed_calendar(
                     UNSET_CALENDAR, feed_metadata
                 )
-                gaps_filled = 0
-
-                # Filter new data to only gap periods
-                gap_data = pl.DataFrame()
-                for gap in gaps:
-                    expected = SessionAssigner(selected_calendar).calendar.schedule(
-                        start_date=gap["start"].date(), end_date=gap["end"].date()
-                    )
-                    gap_rows = new_data.filter(
-                        self.gap_detector._label_frame(new_data, feed, selected_calendar)[
-                            "timestamp"
-                        ]
-                        .dt.date()
-                        .is_in([label.date() for label in expected.index])
-                    )
-                    if not gap_rows.is_empty():
-                        gap_data = (
-                            pl.concat([gap_data, gap_rows]) if not gap_data.is_empty() else gap_rows
-                        )
-                        gaps_filled += 1
+                parts = [
+                    self.gap_detector._select_gap_rows(new_data, gap, feed, selected_calendar)
+                    for gap in gaps
+                    if selected_calendar is not None
+                ]
+                gap_data = pl.concat(parts) if parts else new_data.head(0)
 
                 if not gap_data.is_empty():
-                    # Merge with existing data
-                    combined = pl.concat([existing_df, gap_data]).sort("timestamp")
-                    _rewrite_preserving_metadata(storage, key, combined)
+                    combined, added, replaced = _merge_backfill_rows(existing_df, gap_data, feed)
+                    if added or replaced:
+                        _rewrite_preserving_metadata(storage, key, combined)
+                    remaining = self.gap_detector.detect_gaps(combined, feed_spec=feed_metadata)
 
                     return UpdateResult(
                         success=True,
                         update_type=strategy.value,
-                        rows_added=len(gap_data),
-                        rows_updated=0,
+                        rows_added=added,
+                        rows_updated=replaced,
                         rows_before=len(existing_df),
                         rows_after=len(combined),
-                        gaps_filled=gaps_filled,
+                        gaps_filled=sum(
+                            not any(
+                                missing.get("entity") == gap.get("entity")
+                                and missing["start"] <= gap["end"]
+                                and missing["end"] >= gap["start"]
+                                for missing in remaining
+                            )
+                            for gap in gaps
+                        ),
+                        remaining_gaps=remaining,
                     )
                 return UpdateResult(
                     success=True,
@@ -837,6 +897,7 @@ class IncrementalUpdater:
                     rows_before=len(existing_df),
                     rows_after=len(existing_df),
                     gaps_filled=0,
+                    remaining_gaps=gaps,
                 )
             storage.write(new_data, key)
             return UpdateResult(
@@ -928,6 +989,8 @@ class BackfillManager:
         self,
         min_gap_days: int = 5,
         max_age_days: int = 30,
+        *,
+        min_gap_bars: int = 1,
     ) -> list[dict[str, Any]]:
         """
         Identify datasets that need backfilling.
@@ -935,6 +998,7 @@ class BackfillManager:
         Args:
             min_gap_days: Minimum gap size to consider for backfill
             max_age_days: Maximum age of data to consider
+            min_gap_bars: Minimum expected-bar count for intraday datasets, not elapsed days.
 
         Returns:
             List of backfill candidates with gap information
@@ -963,16 +1027,23 @@ class BackfillManager:
                 gaps = self.gap_detector.detect_gaps(df, feed_spec=feed_metadata)
 
                 # Filter significant gaps
-                significant_gaps = [g for g in gaps if g["size_days"] >= min_gap_days]
+                significant_gaps = [
+                    gap
+                    for gap in gaps
+                    if gap.get("size_bars", gap.get("size_days", 0))
+                    >= (min_gap_bars if "size_bars" in gap else min_gap_days)
+                ]
 
                 if significant_gaps:
-                    total_gap_days = sum(g["size_days"] for g in significant_gaps)
+                    intraday = "size_bars" in significant_gaps[0]
+                    size_key = "size_bars" if intraday else "size_days"
+                    total_key = "total_gap_bars" if intraday else "total_gap_days"
 
                     candidates.append(
                         {
                             "symbol": key,
                             "gaps": significant_gaps,
-                            "total_gap_days": total_gap_days,
+                            total_key: sum(g[size_key] for g in significant_gaps),
                             "last_update": last_update,
                             "importance": "normal",  # Could be enhanced with business logic
                         }
@@ -1001,7 +1072,7 @@ class BackfillManager:
             score = 0
 
             # Factor 1: Gap size (larger gaps = higher priority)
-            score += candidate["total_gap_days"] * 2
+            score += candidate.get("total_gap_days", candidate.get("total_gap_bars", 0)) * 2
 
             # Factor 2: Data staleness (older last update = higher priority)
             if "last_update" in candidate:
@@ -1028,97 +1099,172 @@ class BackfillManager:
         symbol: str,
         gaps: list[dict[str, Any]],
         provider: BaseProvider,
+        *,
+        source_symbol: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> UpdateResult:
+        """Download real observations for selected missing ranges in one stored series.
+
+        The symbol argument is the storage key. Supply source_symbol separately for a
+        path-like key or a vendor alias. Intraday recovery requires the provider's
+        optional timestamp-range capability and a matching left-labeled feed grid.
+        Success describes processing, not completeness; inspect remaining_gaps.
         """
-        Execute backfill operation for identified gaps.
-
-        Args:
-            symbol: Symbol to backfill
-            gaps: List of gaps to fill
-            provider: Data provider to fetch from
-
-        Returns:
-            UpdateResult with backfill details
-        """
-        total_rows_added = 0
-        gaps_filled = 0
-        errors = []
-        start_time = time.time()
-
+        started = time.time()
+        errors: list[str] = []
+        rows_before = rows_after = added = replaced = filled = 0
+        remaining = list(gaps)
         try:
-            # Fetch data for each gap
-            all_gap_data = pl.DataFrame()
-
-            for gap in gaps:
-                try:
-                    logger.info(
-                        f"Backfilling gap for {symbol}",
-                        start=gap["start"],
-                        end=gap["end"],
-                        size_days=gap["size_days"],
-                    )
-
-                    # Fetch data from provider
-                    gap_data = provider.fetch_ohlcv(
-                        symbol,
-                        gap["start"].strftime("%Y-%m-%d"),
-                        gap["end"].strftime("%Y-%m-%d"),
-                        "daily",
-                    )
-
-                    if not gap_data.is_empty():
-                        all_gap_data = (
-                            pl.concat([all_gap_data, gap_data])
-                            if not all_gap_data.is_empty()
-                            else gap_data
-                        )
-                        gaps_filled += 1
-                        total_rows_added += len(gap_data)
-
-                except Exception as e:
-                    error_msg = f"Failed to fetch gap {gap['start']} - {gap['end']}: {e}"
-                    errors.append(error_msg)
-                    logger.warning(error_msg)
-
-            # Apply backfill update if we got any data
-            if not all_gap_data.is_empty() and self.storage and self.tracker:
-                updater = IncrementalUpdater(strategy=UpdateStrategy.BACKFILL)
-                result = updater.update_incremental(
-                    self.storage,
-                    self.tracker,
-                    symbol,
-                    all_gap_data,
-                    provider=provider.__class__.__name__,
-                    strategy=UpdateStrategy.BACKFILL,
+            if self.storage is None:
+                raise ValueError("Backfill requires a storage backend")
+            existing = (
+                self.storage.read(symbol).collect()
+                if self.storage.exists(symbol)
+                else pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC")})
+            )
+            rows_before = rows_after = len(existing)
+            if not gaps:
+                return UpdateResult(
+                    False, "backfill", 0, 0, rows_before, rows_after, remaining_gaps=[]
                 )
-
-                result.gaps_filled = gaps_filled
-                return result
-
-            return UpdateResult(
-                success=gaps_filled > 0,
-                update_type="backfill",
-                rows_added=total_rows_added,
-                rows_updated=0,
-                rows_before=0,
-                rows_after=0,
-                gaps_filled=gaps_filled,
-                duration_seconds=time.time() - start_time,
-                errors=errors if errors else None,
+            metadata = (
+                normalize_storage_metadata(self.storage.get_metadata(symbol), symbol) or {}
+                if self.storage.exists(symbol)
+                else {}
             )
-
-        except Exception as e:
-            error_msg = f"Backfill failed for {symbol}: {e}"
-            errors.append(error_msg)
-            logger.error(error_msg)
-
-            return UpdateResult(
-                success=False,
-                update_type="backfill",
-                rows_added=0,
-                rows_updated=0,
-                rows_before=0,
-                rows_after=0,
-                duration_seconds=time.time() - start_time,
-                errors=errors,
+            feed, selected = self.gap_detector._feed_calendar(
+                calendar, metadata if feed_spec is None else feed_spec
             )
+            if selected is None:
+                raise ValueError("calendar=None disables calendar-based recovery")
+            frequency = feed.data_frequency or "daily"
+            interval = ObservationGapDetector._intraday_interval(frequency)
+            if interval is not None:
+                if not isinstance(provider, TimestampRangeProvider):
+                    raise NotImplementedError(
+                        f"{provider.name} does not support exact timestamp-range downloads"
+                    )
+                if feed.bar_label != "left":
+                    raise NotImplementedError("Targeted OHLCV recovery requires left-labeled bars")
+            stored_provider = metadata.get("provider")
+            if stored_provider and str(stored_provider).lower() not in {
+                provider.name.lower(),
+                provider.__class__.__name__.lower(),
+            }:
+                raise ValueError("Selected provider does not match the stored dataset provider")
+            source_symbol = source_symbol or metadata.get("source_symbol")
+            if source_symbol is None:
+                if "/" in symbol:
+                    raise ValueError("source_symbol is required separately from the storage key")
+                source_symbol = symbol
+            if not isinstance(source_symbol, str) or not source_symbol.strip():
+                raise ValueError("source_symbol must identify one vendor instrument")
+            entity = None
+            entity_value = None
+            if feed.entity_col is not None or "symbol" in existing.columns:
+                entity = feed.resolve(existing.columns, ("symbol",)).entity_col
+                if not isinstance(entity, str):
+                    raise ValueError("Targeted recovery requires one entity column")
+                source_rows = ObservationGapDetector._observed_rows(existing)
+                identifiers = existing[entity].drop_nulls().unique()
+                if source_rows[entity].null_count() or len(identifiers) > 1:
+                    raise ValueError("Targeted recovery requires one instrument per storage key")
+                entity_value = identifiers[0] if len(identifiers) else source_symbol.upper()
+
+            def inspect(ranges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                report: list[dict[str, Any]] = []
+                for gap in ranges:
+                    for missing in self.gap_detector.detect_gaps_in_storage(
+                        self.storage,
+                        symbol,
+                        gap["start"],
+                        gap["end"],
+                        frequency,
+                        calendar=selected,
+                        feed_spec=feed,
+                    ):
+                        if missing not in report:
+                            report.append(missing)
+                return report
+
+            fresh = inspect(gaps)
+            remaining = fresh
+            parts: list[pl.DataFrame] = []
+            for gap in fresh:
+                try:
+                    if interval is not None and isinstance(provider, TimestampRangeProvider):
+                        data = provider.fetch_ohlcv_range(
+                            source_symbol, gap["start"], gap["end"] + interval, frequency
+                        )
+                    else:
+                        data = provider.fetch_ohlcv(
+                            source_symbol,
+                            gap["start"].date().isoformat(),
+                            gap["end"].date().isoformat(),
+                            frequency,
+                        )
+                    if not isinstance(data, pl.DataFrame):
+                        raise TypeError("Provider must return a DataFrame")
+                    if data.is_empty():
+                        continue
+                    if "symbol" in data.columns:
+                        identities = data["symbol"].unique().to_list()
+                        if identities != [source_symbol.upper()]:
+                            raise ValueError("Provider returned a different source instrument")
+                        if "symbol" in existing.columns and not existing.is_empty():
+                            symbols = existing["symbol"].drop_nulls().unique()
+                            target_symbol = (
+                                symbols[0] if len(symbols) == 1 else source_symbol.upper()
+                            )
+                            data = data.with_columns(pl.lit(target_symbol).alias("symbol"))
+                    if entity is not None and not existing.is_empty():
+                        data = data.with_columns(pl.lit(entity_value).alias(entity))
+                    recovered = self.gap_detector._select_gap_rows(data, gap, feed, selected)
+                    if not recovered.is_empty():
+                        parts.append(recovered)
+                except Exception as error:
+                    errors.append(f"Failed to fetch gap {gap['start']} - {gap['end']}: {error}")
+
+            if parts:
+                recovered = pl.concat(parts, how="diagonal_relaxed")
+                combined, added, replaced = _merge_backfill_rows(existing, recovered, feed)
+                if added or replaced:
+                    _rewrite_preserving_metadata(self.storage, symbol, combined)
+                    rows_after = len(combined)
+                    if self.tracker is not None:
+                        self.tracker.update_metadata(
+                            symbol,
+                            UpdateRecord(
+                                timestamp=datetime.now(),
+                                update_type="backfill",
+                                rows_before=rows_before,
+                                rows_after=rows_after,
+                                rows_added=added,
+                                rows_updated=replaced,
+                                start_date=_ensure_datetime(recovered["timestamp"].min()),
+                                end_date=_ensure_datetime(recovered["timestamp"].max()),
+                                provider=provider.name,
+                                duration_seconds=time.time() - started,
+                                errors=errors,
+                            ),
+                            rows_after,
+                            _ensure_datetime(combined["timestamp"].min()),
+                            _ensure_datetime(combined["timestamp"].max()),
+                        )
+            remaining = inspect(gaps)
+            filled = sum(not inspect([gap]) for gap in fresh)
+        except Exception as error:
+            errors.append(f"Backfill failed for {symbol}: {error}")
+        return UpdateResult(
+            success=not errors,
+            update_type="backfill",
+            rows_added=added,
+            rows_updated=replaced,
+            rows_before=rows_before,
+            rows_after=rows_after,
+            gaps_filled=filled,
+            duration_seconds=time.time() - started,
+            errors=errors,
+            remaining_gaps=remaining,
+        )
