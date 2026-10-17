@@ -319,3 +319,26 @@ def test_excluded_partial_close_is_not_accepted_as_the_last_full_bar_label():
                 partial_bar_policy="exclude",
             ),
         )
+
+
+def test_registered_calendar_halt_is_not_missing_observations():
+    from pandas_market_calendars.market_calendar import MarketCalendar
+
+    class DataGridHaltCalendar(MarketCalendar):
+        name = "DataGridHalt"
+        aliases = ["DataGridHalt"]
+        tz = ZoneInfo("UTC")
+        regular_market_times = {
+            "market_open": ((None, time(9)),),
+            "market_close": ((None, time(14)),),
+        }
+
+        @property
+        def interruptions(self):
+            return [("2025-07-07", time(10), time(10, 30))]
+
+    frame = provider_frame().filter(
+        ((pl.col("timestamp").dt.hour() == 9) & (pl.col("timestamp").dt.minute() == 59))
+        | ((pl.col("timestamp").dt.hour() == 10) & (pl.col("timestamp").dt.minute() == 30))
+    )
+    assert gaps(frame, declaration("DataGridHalt")) == []
