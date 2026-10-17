@@ -316,17 +316,6 @@ class CryptoSessionValidator:
                 f"({duration.total_seconds() / 3600:.1f} hours)"
             )
 
-        # Check for weekend data (crypto should have it)
-        timestamps = df["timestamp"].to_list()
-        weekend_dates = [
-            ts
-            for ts in timestamps
-            if ts.weekday() in [5, 6]  # Saturday, Sunday
-        ]
-
-        if not weekend_dates and len(timestamps) >= 7:
-            issues.append("Missing weekend data (crypto trades 24/7)")
-
         return issues
 
     def validate_volume_profile(

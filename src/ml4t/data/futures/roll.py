@@ -6,10 +6,13 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 import polars as pl
 
 from ml4t.data.futures.schema import ContractSpec
+from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 
 @dataclass(frozen=True)
@@ -99,17 +102,34 @@ class OpenInterestBasedRoll(RollStrategy):
 
 
 class TimeBasedRoll(RollStrategy):
-    """Select the nearest contract until its configured pre-expiry roll date."""
+    """Select the nearest contract until its configured pre-expiry roll date.
+
+    ``use_business_days=True`` counts authoritative sessions strictly before expiration.
+    Explicit ``calendar`` overrides ``feed_spec``, then NYSE; an exchange identity does not
+    select a calendar. A missing target session never moves the trigger to an earlier observation.
+    ``use_business_days=False`` selects elapsed civil days, not an observation count.
+    Calendar-free row-based expiry offsets are unsupported in session-count mode.
+    """
 
     def __init__(
         self,
         days_before_expiration: int = 5,
         use_business_days: bool = True,
-    ):
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+    ) -> None:
         if days_before_expiration < 0:
             raise ValueError("days_before_expiration cannot be negative")
         self.days_before_expiration = days_before_expiration
         self.use_business_days = use_business_days
+        self.feed_spec = FeedSpec.from_any(feed_spec)
+        self.calendar = self.feed_spec.resolve_calendar(calendar=calendar)
+        if self.calendar is None and use_business_days:
+            raise ValueError("calendar-free row-based expiry rolls are not supported")
+        self._schedule_calendar = (
+            SessionAssigner(self.calendar).calendar if self.calendar is not None else None
+        )
 
     def select_contracts(
         self,
@@ -122,7 +142,7 @@ class TimeBasedRoll(RollStrategy):
             return _empty_selections()
         contracts = dict(_contract_expirations(data))
         roll_dates = {
-            symbol: self._calculate_roll_date(expiration, dates)
+            symbol: self._calculate_roll_date(expiration)
             for symbol, expiration in contracts.items()
         }
         available_by_date = _available_symbols_by_date(data)
@@ -139,38 +159,54 @@ class TimeBasedRoll(RollStrategy):
                 )
         return _selection_frame(records)
 
-    def _calculate_roll_date(self, expiration: date, trading_dates: list[date]) -> date:
-        """Calculate the last configured roll date on the observed calendar."""
-        target = expiration
-        if self.use_business_days:
-            days_counted = 0
-            while days_counted < self.days_before_expiration:
-                target -= timedelta(days=1)
-                if target.weekday() < 5:
-                    days_counted += 1
-        else:
-            target -= timedelta(days=self.days_before_expiration)
-        if target >= trading_dates[-1] or target < trading_dates[0]:
-            return target
-        observed = [trading_date for trading_date in trading_dates if trading_date <= target]
-        return max(observed) if observed else target
+    def _calculate_roll_date(self, expiration: date) -> date:
+        """Calculate a schedule or explicit elapsed-day trigger independently of observations."""
+        if not self.use_business_days:
+            return expiration - timedelta(days=self.days_before_expiration)
+        if self.days_before_expiration == 0:
+            return expiration
+        span = max(14, self.days_before_expiration * 2)
+        while True:
+            try:
+                start = expiration - timedelta(days=span)
+            except OverflowError as error:
+                raise ValueError(
+                    "not enough calendar history for the requested expiry offset"
+                ) from error
+            schedule = self._schedule_calendar.schedule(
+                start_date=start, end_date=expiration - timedelta(days=1)
+            )
+            if len(schedule) >= self.days_before_expiration:
+                return schedule.index[-self.days_before_expiration].date()
+            span *= 2
 
 
 class FirstNoticeDateRoll(RollStrategy):
     """Select physical contracts before the configured first-notice interval."""
 
-    def __init__(self, days_before_first_notice: int = 1):
+    def __init__(
+        self,
+        days_before_first_notice: int = 1,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+    ) -> None:
         if days_before_first_notice < 0:
             raise ValueError("days_before_first_notice cannot be negative")
         self.days_before_first_notice = days_before_first_notice
+        self._time_roll = TimeBasedRoll(calendar=calendar, feed_spec=feed_spec)
 
     def select_contracts(
         self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
     ) -> pl.DataFrame:
         if contract_spec is None or contract_spec.is_cash_settled:
-            return TimeBasedRoll(days_before_expiration=5).select_contracts(data, contract_spec)
+            return self._time_roll.select_contracts(data, contract_spec)
         days = (contract_spec.first_notice_days or 25) + self.days_before_first_notice
-        return TimeBasedRoll(days_before_expiration=days).select_contracts(data, contract_spec)
+        return TimeBasedRoll(
+            days_before_expiration=days,
+            calendar=self._time_roll.calendar,
+            feed_spec=self._time_roll.feed_spec,
+        ).select_contracts(data, contract_spec)
 
 
 class CalendarRoll(RollStrategy):
