@@ -1,6 +1,6 @@
 # API Reference
 
-Complete API documentation for the `ml4t-data` library, auto-generated from
+API documentation for the `ml4t-data` library, generated from
 source docstrings via [mkdocstrings](https://mkdocstrings.github.io/).
 
 ---
@@ -420,3 +420,42 @@ ML4TDataError
     options:
       show_source: false
       heading_level: 4
+
+## Futures Expiry Rolls
+
+`TimeBasedRoll` selects the nearest available contract until its configured pre-expiry trigger.
+`FirstNoticeDateRoll` delegates the same calendar selection while retaining its existing
+first-notice offset convention and five-session cash-settled fallback.
+
+| Mode | Offset units | Calendar behavior |
+|------|--------------|-------------------|
+| `use_business_days=True` (default) | Authoritative sessions strictly before expiration | Explicit `calendar`, then `feed_spec`, then NYSE |
+| `use_business_days=False` | Elapsed civil days | No session counting; an explicitly disabled calendar is allowed |
+| Session-count mode with `calendar=None` | Unsupported observation-based expiry offset | Raises clearly; does not substitute NYSE or 24/7 |
+
+The legacy `use_business_days` name now counts the selected exchange's sessions rather than
+weekdays. `calendar="24/7"` counts a real continuous schedule. Contract exchange identity does not
+select a calendar. Pass the feed declaration explicitly when constructing a roll strategy from
+stored metadata. Named calendars are validated before selection.
+
+An offset of zero uses expiration itself. A missing scheduled trigger does not move the trigger
+backward to an observed date: selection switches at the first eligible later observation, subject
+to the existing contract availability and paired-price checks. Explicit elapsed-day mode also
+stops snapping its target backward. Neither mode reinterprets missing data as a closure or changes
+elapsed days into row counts.
+
+::: ml4t.data.futures.roll.TimeBasedRoll
+    options:
+      show_source: false
+      heading_level: 3
+      members:
+        - __init__
+        - select_contracts
+
+::: ml4t.data.futures.roll.FirstNoticeDateRoll
+    options:
+      show_source: false
+      heading_level: 3
+      members:
+        - __init__
+        - select_contracts

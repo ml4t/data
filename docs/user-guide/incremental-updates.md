@@ -49,10 +49,14 @@ ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
 ```
 
 Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
-The updater currently selects NYSE for non-crypto data and 24/7 for crypto. Its legacy intraday
-path lacks the complete grid declaration required by the detector and now fails clearly; use
-`--no-fill-gaps` or `fill_gaps=False` for those updates. Direct detection with a complete declaration
-is described below. [Trading-session completion](sessions.md) is a separate one-minute operation.
+The Python updater resolves its explicit `calendar`, then supplied feed or stored metadata, then
+NYSE. Asset class and descriptive exchange metadata do not select a schedule. Continuous feeds
+must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection and filling.
+Intraday detection requires the complete version-2 grid declaration described below, supplied
+through `feed_spec` or retained in stored metadata. Undeclared intraday datasets must migrate their
+metadata or use `--no-fill-gaps` / `fill_gaps=False` for updates.
+[Trading-session completion](sessions.md) is a separate one-minute operation. The acquisition-range
+planner's intraday limitations are described separately below.
 
 Detection does not itself fill or modify observations. The updater's separately enabled forward
 fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
@@ -75,15 +79,21 @@ applies, then NYSE. `calendar="24/7"` expects a daily observation on weekends an
 feed declaration selects a calendar. Version-1 feed metadata with `calendar=None` still means
 unspecified; version-2 metadata preserves an explicit null as disabled after serialization.
 
-Daily inputs are session labels (Polars Date, or the date component of Datetime values in their
-existing timezone). Non-midnight labels remain supported. Exchange holidays and weekends do not
+Undeclared daily timestamps and explicit `session_label` inputs are labels (Polars Date, or the
+date component of Datetime values). Aware labels restore a declared `timezone` before extracting
+dates, including after storage's canonical UTC read. Naive labels remain civil identifiers rather
+than localized event clocks. Non-midnight labels remain supported. Exchange holidays and weekends do not
 count as missing NYSE sessions; a shortened session still requires one daily observation. Gap bounds
 remain the two observed timestamps, while `missing_periods` counts only scheduled dates strictly
 between them. Inspect each asset separately; observed dates from other assets must not define the
 schedule. This operation does not validate off-session observations or discover gaps outside the
 observed range.
 
-Explicit event-time/bar-close metadata is rejected rather than reinterpreted as session labels.
+Explicit `event_time`, `bar_close` or bar-side metadata instead uses native authoritative session
+mapping, even with daily frequency or midnight timestamps. Right-labeled continuous midnight belongs
+to the preceding session; event time belongs to the new session. Out-of-session instants fail clearly.
+Gap classification does not add a new off-session rejection policy for legacy daily labels. The
+requested daily frequency cannot silently override a declared intraday frequency.
 Unknown calendars and malformed daily timestamps fail without modifying the input. `fill_gaps()`
 remains a separate elapsed-grid operation, not calendar-aware imputation.
 
@@ -148,10 +158,11 @@ or feed declaration is present. `exclude_weekends=True` now follows NYSE holiday
 Omission follows NYSE, so callers requiring the old elapsed-day counts should pass `calendar="24/7"`.
 Intraday/weekly range planning retains its legacy elapsed-time behavior; named calendar/feed
 declarations for those frequencies are not supported by this planner yet. `calendar=None` disables
-classification. Session-label dates retain their existing timezone's civil date. Explicit event-time
-or bar-close declarations are rejected for daily planning rather than silently relabeled. Declare
-the feed's `timezone` when a non-UTC label must survive storage's canonical UTC reads; the planner
-restores that declared timezone before interpreting dates.
+classification. Session-label dates use their declared timezone, or their existing timezone when
+undeclared. Explicit event-time/bar-close/bar-side declarations map to authoritative session labels
+before planning, including for provider-row selection during backfill. Out-of-session instants fail
+clearly; original provider timestamps are retained in storage. Declare the feed's `timezone` when a
+non-UTC label must survive storage's canonical UTC reads.
 
 If a provider's history limit cannot reach the stored dataset, the updater records
 `provider_history_limited` and skips gap filling across the unavailable interval.
@@ -181,6 +192,19 @@ key = manager.update(
 
 `DataManager.update()` returns the storage key. It raises when storage is not configured, stored data
 is empty, metadata is invalid, or the provider or storage operation fails.
+
+`load()`, `import_data()` and `update()` accept `calendar` and a shared `feed_spec`. New ingestion
+without a feed writes version-2 temporal metadata: an omitted calendar remains omitted, while
+explicit `None` remains disabled after storage and model projection. An existing version-1 feed
+is not automatically reinterpreted; its null calendar still means inheritance. An explicit calendar
+override writes version 2. Calendar names and conflicting frequency/bar-type declarations fail
+before a replacement generation is published.
+
+Feed timezone, timestamp semantics and bar-grid declarations survive ingestion. A non-null
+`session_start_time` override is not supported by the native schedule adapter and is rejected.
+The requested frequency and bar type must agree with declared feed metadata. These declarations
+do not themselves validate OHLCV completeness or transform timestamps. Gap detection remains
+separate from the updater's optional elapsed-grid imputation described above.
 
 ## Inspect Stored State
 

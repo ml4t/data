@@ -1,13 +1,17 @@
 """Real provider outages must not be hidden by fixed US clocks or observed-session inference."""
 
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+from ml4t.data import DataManager
 from ml4t.data.providers.synthetic import SyntheticProvider
+from ml4t.data.storage.config import StorageConfig
+from ml4t.data.storage.flat import FlatStorage
+from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.utils.gaps import GapDetector
 from ml4t.specs import FeedSpec
 
@@ -32,6 +36,39 @@ def declaration(calendar="NYSE", frequency="minute", **overrides):
 
 def gaps(frame, feed, **kwargs):
     return GapDetector().detect_gaps(frame, frequency=feed.data_frequency, feed_spec=feed, **kwargs)
+
+
+@pytest.mark.parametrize("backend", [FlatStorage, HiveStorage])
+@pytest.mark.parametrize("disabled", [False, True])
+def test_stored_intraday_grid_reaches_real_provider_updates(
+    tmp_path, monkeypatch, backend, disabled
+):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=UTC):
+            return cls(2025, 7, 7, 23, tzinfo=tz)
+
+    monkeypatch.setattr("ml4t.data.managers.storage_manager.datetime", Clock)
+    with SyntheticProvider(seed=42, calendar_mode="continuous") as provider:
+        complete = provider.fetch_ohlcv("SPY", "2025-07-07", "2025-07-07", "hourly")
+    storage = backend(StorageConfig(base_path=tmp_path))
+    with DataManager(
+        storage=storage,
+        providers={"synthetic": {"extra": {"seed": 42, "calendar_mode": "continuous"}}},
+    ) as manager:
+        key = manager.import_data(
+            complete.head(3),
+            "SPY",
+            "synthetic",
+            frequency="hourly",
+            feed_spec=declaration("24/7", "hourly"),
+        )
+        overrides = {"calendar": None} if disabled else {}
+        assert manager.update("SPY", frequency="hourly", lookback_days=0, **overrides) == key
+        assert_frame_equal(storage.read(key).collect(), complete)
+        feed = FeedSpec.from_any(manager.get_metadata_for_key(key))
+        assert feed.resolve_calendar() == (None if disabled else "24/7")
+        assert GapDetector().detect_gaps(storage.read(key).collect(), feed_spec=feed) == []
 
 
 def test_unqualified_summer_outage_cannot_silently_return_no_gap():

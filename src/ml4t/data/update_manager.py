@@ -13,10 +13,10 @@ import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.providers.base import BaseProvider
-from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.data.sessions.assigner import SessionAssigner, _daily_session_labels
 from ml4t.data.storage.backend import StorageBackend, normalize_storage_metadata
 from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
-from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec, TimestampSemantics
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -136,34 +136,20 @@ class GapDetector:
         return feed, feed.resolve_calendar(calendar=calendar)
 
     @staticmethod
-    def _label_frame(df: pl.DataFrame, feed: FeedSpec) -> pl.DataFrame:
-        dtype = df.schema["timestamp"]
-        if dtype != pl.Date and not isinstance(dtype, pl.Datetime):
-            raise TypeError("'timestamp' must contain Date or Datetime values")
-        if df["timestamp"].null_count():
-            raise ValueError("'timestamp' must not contain null timestamps")
-        if isinstance(dtype, pl.Datetime) and feed.timezone is not None:
-            timestamp = pl.col("timestamp")
-            if dtype.time_zone is None:
-                timestamp = timestamp.dt.replace_time_zone(feed.timezone)
-            else:
-                timestamp = timestamp.dt.convert_time_zone(feed.timezone)
-            return df.with_columns(timestamp)
-        return df
+    def _label_frame(df: pl.DataFrame, feed: FeedSpec, calendar: str | None) -> pl.DataFrame:
+        labels = _daily_session_labels(df, SessionAssigner(calendar, feed_spec=feed))
+        return df.with_columns(labels.cast(pl.Datetime("us")).dt.replace_time_zone("UTC"))
 
     @staticmethod
     def _daily_ranges(
         df: pl.DataFrame,
         start: datetime,
         end: datetime,
-        feed: FeedSpec,
         calendar: str,
         tolerance_days: int = 0,
     ) -> list[dict[str, Any]]:
         if start.date() > end.date():
             raise ValueError("start_date must not be after end_date")
-        if feed.timestamp_semantics not in (None, TimestampSemantics.SESSION_LABEL):
-            raise NotImplementedError("daily range planning requires session_label timestamps")
         assigner = SessionAssigner(calendar)
         observed = {
             value.date() if isinstance(value, datetime) else value
@@ -222,12 +208,11 @@ class GapDetector:
         if df.is_empty() or "timestamp" not in df.columns:
             return []
         if frequency.lower() in {"daily", "1day"}:
-            df = self._label_frame(df, feed)
+            df = self._label_frame(df, feed, selected)
             return self._daily_ranges(
                 df,
                 _session_label(df["timestamp"].min()),
                 _session_label(df["timestamp"].max()),
-                feed,
                 selected,
                 tolerance_days,
             )
@@ -312,7 +297,7 @@ class GapDetector:
             except KeyError:
                 df = pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC")})
             return self._daily_ranges(
-                self._label_frame(df, feed), start_date, end_date, feed, selected
+                self._label_frame(df, feed, selected), start_date, end_date, selected
             )
         start_date = _ensure_datetime(start_date)
         end_date = _ensure_datetime(end_date)
@@ -677,7 +662,9 @@ class IncrementalUpdater:
                         start_date=gap["start"].date(), end_date=gap["end"].date()
                     )
                     gap_rows = new_data.filter(
-                        self.gap_detector._label_frame(new_data, feed)["timestamp"]
+                        self.gap_detector._label_frame(new_data, feed, selected_calendar)[
+                            "timestamp"
+                        ]
                         .dt.date()
                         .is_in([label.date() for label in expected.index])
                     )

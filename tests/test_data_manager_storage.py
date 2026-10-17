@@ -15,6 +15,7 @@ from ml4t.data.storage.backend import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.storage.keys import storage_key_path
+from ml4t.specs import UNSET_CALENDAR
 
 
 class TestDataManagerLoad:
@@ -258,6 +259,8 @@ class TestDataManagerUpdate:
             frequency="daily",
             asset_class="equities",
             provider="mock",
+            calendar=UNSET_CALENDAR,
+            feed_spec=None,
         )
 
     def test_update_limits_default_initial_load_to_provider_history(self, manager):
