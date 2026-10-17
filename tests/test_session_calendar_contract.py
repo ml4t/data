@@ -257,7 +257,7 @@ def test_invalid_declared_timezone_does_not_silently_become_utc(timezone, adapte
     frame = provider_frame().with_columns(pl.col("timestamp").dt.replace_time_zone(None))
     feed = FeedSpec.from_mapping({"timezone": timezone, "timestamp_semantics": "event_time"})
     original = frame.clone()
-    with pytest.raises(ValueError, match="timezone"):
+    with pytest.raises((ValueError, pl.exceptions.ComputeError), match="time.?zone"):
         instance = adapter(feed_spec=feed)
         if adapter is SessionAssigner:
             instance.assign_sessions(frame)

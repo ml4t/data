@@ -74,6 +74,14 @@ class SessionAssigner:
         self.calendar = None
         if self.calendar_name is None:
             return
+        timezone = self.feed_spec.timezone
+        if timezone is not None:
+            if not isinstance(timezone, str) or not timezone.strip():
+                raise ValueError("timezone must be a non-empty name or None")
+            try:
+                pl.Series([], dtype=pl.Datetime("us", "UTC")).dt.convert_time_zone(timezone)
+            except (pl.exceptions.PolarsError, TypeError) as error:
+                raise ValueError(f"Unknown timezone '{timezone}'") from error
         try:
             import pandas_market_calendars as mcal
         except ImportError:
