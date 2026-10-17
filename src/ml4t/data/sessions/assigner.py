@@ -52,7 +52,7 @@ def _session_intervals(row: Any) -> list[tuple[datetime, datetime]]:
     return intervals
 
 
-def _schedule_for_instants(calendar: Any, start: Any, end: Any) -> Any:
+def _schedule_for_instants(calendar: Any, start: Any, end: Any, *, padding_days: int = 1) -> Any:
     import pandas as pd
 
     from ml4t.data.sessions._cme_crypto import CMEGlobexCryptoSchedule
@@ -60,8 +60,8 @@ def _schedule_for_instants(calendar: Any, start: Any, end: Any) -> Any:
     if isinstance(calendar, CMEGlobexCryptoSchedule):
         return calendar.schedule_for_instants(start, end)
     return calendar.schedule(
-        start_date=pd.Timestamp(start).normalize() - pd.Timedelta(days=1),
-        end_date=pd.Timestamp(end).normalize() + pd.Timedelta(days=1),
+        start_date=pd.Timestamp(start).normalize() - pd.Timedelta(days=padding_days),
+        end_date=pd.Timestamp(end).normalize() + pd.Timedelta(days=padding_days),
         interruptions=True,
     )
 

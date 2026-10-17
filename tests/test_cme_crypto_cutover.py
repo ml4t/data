@@ -9,6 +9,7 @@ from polars.testing import assert_frame_equal
 from ml4t.data import DataManager
 from ml4t.data.providers import SyntheticProvider
 from ml4t.data.sessions import SessionAssigner, SessionCompleter
+from ml4t.data.utils.gaps import GapDetector
 from ml4t.specs import FeedSpec
 
 
@@ -135,3 +136,33 @@ def test_cme_daily_labels_are_business_dates_not_each_open_weekend_civil_date():
     info = SessionCompleter("CME Globex Crypto").get_session_info(datetime(2026, 10, 19))
     assert info["market_open"].isoformat() == "2026-10-16T21:02:00+00:00"
     assert info["market_close"].isoformat() == "2026-10-19T21:00:00+00:00"
+
+
+@pytest.mark.parametrize(
+    "day,clocks,missing",
+    [
+        ("2026-09-05", ["12:00", "12:02"], 1),
+        ("2026-10-17", ["06:59", "09:00"], 0),
+        ("2026-09-07", ["20:59", "21:02"], 0),
+        ("2026-05-29", ["20:59", "21:30"], 0),
+    ],
+)
+def test_intraday_grid_uses_business_date_coverage_and_excludes_cme_maintenance(
+    day, clocks, missing
+):
+    frame = provider_rows(day, clocks)
+    feed = FeedSpec(
+        time_contract_version=2,
+        calendar="CME Globex Crypto",
+        data_frequency="minute",
+        timestamp_semantics="event_time",
+        bar_grid_anchor="session_open",
+        bar_label="left",
+        partial_bar_policy="exclude",
+    )
+    gaps = GapDetector().detect_gaps(frame, feed_spec=feed)
+    assert sum(gap.missing_periods for gap in gaps) == missing
+    if day == "2026-10-17":
+        spot = GapDetector().detect_gaps(frame, calendar="24/7", feed_spec=feed)
+        assert sum(gap.missing_periods for gap in spot) == 120
+    assert GapDetector().detect_gaps(frame, calendar=None, feed_spec=feed) == []
