@@ -10,8 +10,8 @@ from typing import Any, ClassVar
 import polars as pl
 import structlog
 
-from ml4t.data.sessions.assigner import SessionAssigner
-from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec, TimestampSemantics
+from ml4t.data.sessions.assigner import SessionAssigner, _daily_session_labels
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -185,21 +185,12 @@ class GapDetector:
         calendar: str,
         feed: FeedSpec,
     ) -> list[DataGap]:
-        assigner = SessionAssigner(calendar)
-        if timestamp_col not in df.columns:
-            raise ValueError(f"DataFrame must have '{timestamp_col}' column")
+        assigner = SessionAssigner(calendar, feed_spec=feed)
+        ordered = df.sort(timestamp_col) if timestamp_col in df.columns else df
+        labels = _daily_session_labels(ordered, assigner, timestamp_col).to_list()
         if df.is_empty():
             return []
-        dtype = df.schema[timestamp_col]
-        if dtype != pl.Date and not isinstance(dtype, pl.Datetime):
-            raise TypeError(f"'{timestamp_col}' must contain Date or Datetime values")
-        if df[timestamp_col].null_count():
-            raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
-        if feed.timestamp_semantics not in (None, TimestampSemantics.SESSION_LABEL):
-            raise NotImplementedError("daily gap detection requires session_label timestamps")
-
-        timestamps = df.sort(timestamp_col)[timestamp_col].to_list()
-        labels = [value.date() if isinstance(value, datetime) else value for value in timestamps]
+        timestamps = ordered[timestamp_col].to_list()
         sessions = [
             label.date()
             for label in assigner.calendar.schedule(start_date=labels[0], end_date=labels[-1]).index
