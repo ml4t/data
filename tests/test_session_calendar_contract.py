@@ -249,3 +249,18 @@ def test_real_provider_update_does_not_silently_drop_invalid_temporal_metadata(t
         manager.update("SPY", fill_gaps=False, provider="synthetic")
     assert storage.get_metadata("equities/daily/SPY") == before
     assert_frame_equal(storage.read("equities/daily/SPY").collect(), frame)
+
+
+@pytest.mark.parametrize("timezone", ["", "Not/A_Zone"])
+@pytest.mark.parametrize("adapter", [SessionAssigner, SessionCompleter])
+def test_invalid_declared_timezone_does_not_silently_become_utc(timezone, adapter):
+    frame = provider_frame().with_columns(pl.col("timestamp").dt.replace_time_zone(None))
+    feed = FeedSpec.from_mapping({"timezone": timezone, "timestamp_semantics": "event_time"})
+    original = frame.clone()
+    with pytest.raises(ValueError, match="timezone"):
+        instance = adapter(feed_spec=feed)
+        if adapter is SessionAssigner:
+            instance.assign_sessions(frame)
+        else:
+            instance.complete_sessions(frame)
+    assert_frame_equal(frame, original)
