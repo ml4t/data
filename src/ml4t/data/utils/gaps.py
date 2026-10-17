@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -10,8 +11,19 @@ from typing import Any, ClassVar
 import polars as pl
 import structlog
 
-from ml4t.data.sessions.assigner import SessionAssigner, _daily_session_labels
-from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
+from ml4t.data.sessions.assigner import (
+    SessionAssigner,
+    _daily_session_labels,
+    _session_intervals,
+)
+from ml4t.specs import (
+    UNSET_CALENDAR,
+    BarLabel,
+    CalendarUnset,
+    FeedSpec,
+    PartialBarPolicy,
+    TimestampSemantics,
+)
 
 logger = structlog.get_logger()
 
@@ -70,7 +82,7 @@ class GapDetector:
     def detect_gaps(
         self,
         df: pl.DataFrame,
-        frequency: str = "daily",
+        frequency: str | None = None,
         timestamp_col: str = "timestamp",
         is_crypto: bool = False,
         *,
@@ -82,16 +94,18 @@ class GapDetector:
 
         Args:
             df: DataFrame with time series data
-            frequency: Data frequency (minute, hourly, daily, etc.)
+            frequency: Data frequency; inherit the feed declaration, otherwise daily.
             timestamp_col: Name of timestamp column
             is_crypto: If True, expect 24/7 data; if False, market hours only
-            calendar: Daily schedule override; None disables schedule-based detection.
+            calendar: Schedule override; None disables schedule-based detection.
             feed_spec: Shared feed declaration, resolved before the NYSE default.
 
         Returns:
             List of detected gaps
         """
         feed = FeedSpec.from_any(feed_spec)
+        if frequency is None:
+            frequency = str(feed.data_frequency) if feed.data_frequency is not None else "daily"
         # Preserve the old crypto hint only when the feed has no declaration.
         if (
             frequency.lower() in {"daily", "1day"}
@@ -106,8 +120,20 @@ class GapDetector:
         selected_calendar = feed.resolve_calendar(calendar=calendar)
         if selected_calendar is None:
             return []
+        declared_interval = (
+            self._intraday_interval(str(feed.data_frequency))
+            if feed.data_frequency is not None
+            else None
+        )
+        if (
+            declared_interval is not None
+            and self._intraday_interval(frequency) != declared_interval
+        ):
+            raise ValueError("declared grid data_frequency must match the requested frequency")
         if frequency.lower() in {"daily", "1day"}:
             return self._detect_daily_gaps(df, timestamp_col, frequency, selected_calendar, feed)
+        if self._intraday_interval(frequency) is not None:
+            return self._detect_intraday_gaps(df, timestamp_col, frequency, selected_calendar, feed)
         if calendar is not UNSET_CALENDAR or feed_spec is not None:
             raise NotImplementedError(
                 "calendar/feed declarations currently support daily gaps only"
@@ -139,21 +165,6 @@ class GapDetector:
             actual_seconds = actual_interval.total_seconds()
             expected_seconds = expected_interval.total_seconds()
 
-            # Check if this is a gap (considering market hours for non-crypto)
-            if (
-                not is_crypto
-                and frequency
-                in [
-                    "minute",
-                    "5minute",
-                    "15minute",
-                    "30minute",
-                    "hourly",
-                ]
-                and self._spans_non_trading_hours(current, next_ts, frequency)
-            ):
-                continue
-
             # Detect gap if interval exceeds expected + tolerance
             if actual_seconds > expected_seconds + tolerance_seconds:
                 missing_periods = int(actual_seconds / expected_seconds) - 1
@@ -175,6 +186,124 @@ class GapDetector:
                 frequency=frequency,
             )
 
+        return gaps
+
+    @staticmethod
+    def _intraday_interval(frequency: str) -> timedelta | None:
+        value = frequency.lower().strip().replace("hourly", "hour")
+        match = re.fullmatch(r"(\d+)?(minutes?|min|m|hours?|h)", value)
+        if match is None:
+            return None
+        count = int(match[1] or 1)
+        if count <= 0:
+            raise ValueError("bar frequency must be positive")
+        return timedelta(hours=count) if match[2].startswith("h") else timedelta(minutes=count)
+
+    def _detect_intraday_gaps(
+        self,
+        df: pl.DataFrame,
+        timestamp_col: str,
+        frequency: str,
+        calendar: str,
+        feed: FeedSpec,
+    ) -> list[DataGap]:
+        interval = self._intraday_interval(frequency)
+        if interval is None:
+            raise ValueError("unsupported intraday bar frequency")
+        required = (
+            "data_frequency",
+            "timestamp_semantics",
+            "bar_grid_anchor",
+            "bar_label",
+            "partial_bar_policy",
+        )
+        if feed.time_contract_version != 2 or any(getattr(feed, name) is None for name in required):
+            raise ValueError("intraday detection requires a complete declared version-2 bar grid")
+        if feed.timestamp_semantics == TimestampSemantics.SESSION_LABEL:
+            raise ValueError("intraday detection requires a declared event/close bar grid")
+        if feed.bar_type not in (None, "time"):
+            raise ValueError("intraday grid detection requires fixed time bars")
+        if interval != self._intraday_interval(str(feed.data_frequency)):
+            raise ValueError("declared grid data_frequency must match the requested frequency")
+        assigner = SessionAssigner(calendar, feed_spec=feed)
+        if timestamp_col not in df.columns:
+            raise ValueError(f"DataFrame must have '{timestamp_col}' column")
+        dtype = df.schema[timestamp_col]
+        if not isinstance(dtype, pl.Datetime):
+            raise TypeError(f"'{timestamp_col}' must contain Datetime values for an intraday grid")
+        if df[timestamp_col].null_count():
+            raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
+        if (
+            dtype.time_unit == "ns"
+            and df.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
+        ):
+            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
+        if dtype.time_zone is None and feed.timezone is None:
+            raise ValueError("naive intraday timestamps require a declared timezone")
+        if df.is_empty():
+            return []
+        expr = pl.col(timestamp_col)
+        if dtype.time_zone is None:
+            expr = expr.dt.replace_time_zone(feed.timezone)
+        observed = df.select(expr.dt.convert_time_zone("UTC")).to_series().unique().sort().to_list()
+        start, end = observed[0], observed[-1]
+        schedule = assigner.calendar.schedule(
+            start_date=(start - timedelta(days=2)).date(),
+            end_date=(end + timedelta(days=2)).date(),
+            interruptions=True,
+        )
+        grid_intervals: list[tuple[datetime, datetime, int, int]] = []
+        total_bars = 0
+        for _, row in schedule.iterrows():
+            for opening, closing in _session_intervals(row):
+                opening, closing = opening.astimezone(UTC), closing.astimezone(UTC)
+                count, remainder = divmod(closing - opening, interval)
+                if remainder and feed.partial_bar_policy == PartialBarPolicy.INCLUDE:
+                    count += 1
+                if count <= 0:
+                    continue
+                if grid_intervals and opening < grid_intervals[-1][1]:
+                    raise ValueError("calendar returned overlapping tradable intervals")
+                grid_intervals.append((opening, closing, count, total_bars))
+                total_bars += count
+        right_labeled = feed.bar_label == BarLabel.RIGHT
+        boundaries = [row[1] if right_labeled else row[0] for row in grid_intervals]
+
+        def bar_index(timestamp: datetime) -> int:
+            index = (
+                bisect_left(boundaries, timestamp)
+                if right_labeled
+                else bisect_right(boundaries, timestamp) - 1
+            )
+            if index < 0 or index >= len(grid_intervals):
+                raise ValueError("intraday observations contain off-grid timestamps")
+            opening, closing, count, offset = grid_intervals[index]
+            if right_labeled and timestamp == closing:
+                if (closing - opening) % interval == timedelta(0) or (
+                    feed.partial_bar_policy == PartialBarPolicy.INCLUDE
+                ):
+                    return offset + count - 1
+                raise ValueError("intraday observations contain off-grid partial-close timestamps")
+            position, remainder = divmod(timestamp - opening, interval)
+            if right_labeled:
+                position -= 1
+            if (
+                remainder
+                or timestamp < opening
+                or timestamp >= closing
+                or not 0 <= position < count
+            ):
+                raise ValueError("intraday observations contain off-grid timestamps")
+            return offset + position
+
+        positions = [bar_index(timestamp) for timestamp in observed]
+        gaps = []
+        for current, following, left_index, right_index in zip(
+            observed, observed[1:], positions, positions[1:]
+        ):
+            missing = right_index - left_index - 1
+            if missing > 0:
+                gaps.append(DataGap(current, following, missing, following - current, frequency))
         return gaps
 
     def _detect_daily_gaps(
@@ -224,22 +353,11 @@ class GapDetector:
             Expected timedelta between consecutive points
         """
         freq_lower = frequency.lower()
+        interval = self._intraday_interval(frequency)
+        if interval is not None:
+            return interval
 
-        # Handle minute-based frequencies
-        if "minute" in freq_lower:
-            if freq_lower == "minute" or freq_lower == "1minute":
-                return timedelta(minutes=1)
-            if freq_lower == "5minute":
-                return timedelta(minutes=5)
-            if freq_lower == "15minute":
-                return timedelta(minutes=15)
-            if freq_lower == "30minute":
-                return timedelta(minutes=30)
-
-        # Handle other frequencies
-        elif freq_lower == "hourly" or freq_lower == "1hour":
-            return timedelta(hours=1)
-        elif freq_lower == "daily" or freq_lower == "1day":
+        if freq_lower == "daily" or freq_lower == "1day":
             if is_crypto:
                 return timedelta(days=1)
             # For stocks, next trading day could be 1-3 days away
@@ -251,41 +369,6 @@ class GapDetector:
 
         # Default to daily
         return timedelta(days=1)
-
-    def _spans_non_trading_hours(
-        self,
-        start: datetime,
-        end: datetime,
-        frequency: str,  # noqa: ARG002
-    ) -> bool:
-        """
-        Check if gap spans non-trading hours (nights/weekends).
-
-        Args:
-            start: Start of gap
-            end: End of gap
-            frequency: Data frequency
-
-        Returns:
-            True if gap is expected (non-trading hours)
-        """
-        # Convert to UTC if needed
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=UTC)
-        if end.tzinfo is None:
-            end = end.replace(tzinfo=UTC)
-
-        # Check for weekend
-        if start.weekday() == 4 and end.weekday() == 0:  # Friday to Monday
-            return True
-
-        # Check for overnight gap (4pm to 9:30am ET)
-        # Convert to ET (UTC-5 or UTC-4 for DST)
-        market_close_hour = 21  # 4pm ET in UTC (during standard time)
-        market_open_hour = 14  # 9:30am ET in UTC (during standard time)
-
-        # Simplified check: if gap starts after market close and ends at/after market open
-        return start.hour >= market_close_hour or end.hour < market_open_hour
 
     def summarize_gaps(self, gaps: list[DataGap]) -> dict[str, Any]:
         """
