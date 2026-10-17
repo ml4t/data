@@ -227,7 +227,7 @@ def test_real_provider_update_preserves_a_stored_explicit_calendar_disable(tmp_p
             ).resolve_calendar()
             is None
         )
-        manager.update("SPY", fill_gaps=False)
+        manager.update("SPY", fill_gaps=False, provider="synthetic")
         assert (
             FeedSpec.from_mapping(
                 manager.get_metadata_for_key("equities/daily/SPY")
@@ -242,7 +242,10 @@ def test_real_provider_update_does_not_silently_drop_invalid_temporal_metadata(t
     storage = HiveStorage(StorageConfig(base_path=tmp_path))
     storage.write(frame, "equities/daily/SPY", {"provider": "synthetic", **invalid})
     before = storage.get_metadata("equities/daily/SPY")
-    with DataManager(storage=storage) as manager, pytest.raises(ValueError):
-        manager.update("SPY", fill_gaps=False)
+    with (
+        DataManager(storage=storage) as manager,
+        pytest.raises(ValueError, match="calendar|time_contract_version"),
+    ):
+        manager.update("SPY", fill_gaps=False, provider="synthetic")
     assert storage.get_metadata("equities/daily/SPY") == before
     assert_frame_equal(storage.read("equities/daily/SPY").collect(), frame)
