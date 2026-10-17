@@ -238,8 +238,8 @@ class TestValidationRulePresets:
         rules = ValidationRulePresets.crypto_rules()
 
         assert rules.asset_class == AssetClass.CRYPTO
-        assert rules.check_weekend_trading is False  # Crypto trades 24/7
-        assert rules.check_market_hours is False
+        assert rules.check_weekend_trading is True
+        assert rules.check_market_hours is True
         assert rules.max_return_threshold == 0.5  # More volatile
         assert rules.staleness_threshold == 3
         assert rules.volume_spike_threshold == 20.0
@@ -251,7 +251,7 @@ class TestValidationRulePresets:
 
         assert rules.asset_class == AssetClass.FOREX
         assert rules.check_weekend_trading is True
-        assert rules.check_market_hours is False  # 24/5 market
+        assert rules.check_market_hours is True
         assert rules.max_return_threshold == 0.1
         assert rules.staleness_threshold == 10
         assert rules.volume_spike_threshold == 5.0
@@ -376,7 +376,7 @@ class TestIntegration:
         # Test getting rules for different symbols
         btc_rules = rule_set.get_rules("BTCUSD")
         assert btc_rules.asset_class == AssetClass.CRYPTO
-        assert btc_rules.check_weekend_trading is False
+        assert btc_rules.check_weekend_trading is True
 
         eur_rules = rule_set.get_rules("EURUSD")
         assert eur_rules.asset_class == AssetClass.FOREX
@@ -401,4 +401,4 @@ class TestIntegration:
             # Test that loaded rule set works the same
             loaded_btc_rules = loaded_rule_set.get_rules("BTCUSD")
             assert loaded_btc_rules.asset_class == AssetClass.CRYPTO
-            assert loaded_btc_rules.check_weekend_trading is False
+            assert loaded_btc_rules.check_weekend_trading is True

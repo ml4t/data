@@ -66,7 +66,7 @@ class TestAssetValidatorInit:
 
         assert validator.asset_info == info
         assert validator.asset_class == AssetClass.EQUITY
-        assert validator.calendar is None
+        assert validator.calendar == "NYSE"
         assert validator.session_validator is None
 
     def test_init_crypto_creates_calendar(self):
@@ -370,7 +370,7 @@ class TestValidateForex:
         results = validator.validate(df)
 
         assert "forex_specific" in results
-        assert any("saturday" in issue.lower() for issue in results["forex_specific"])
+        assert any("weekend" in issue.lower() for issue in results["forex_specific"])
 
     def test_validate_low_exchange_rate(self):
         """Test detecting unusually low exchange rates."""

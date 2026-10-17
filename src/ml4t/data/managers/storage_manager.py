@@ -95,6 +95,10 @@ class StorageManager:
         df: pl.DataFrame,
         symbol: str,
         asset_class: str = "equity",
+        *,
+        frequency: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> Any:
         """Validate data using OHLCV and cross-validation.
 
@@ -106,7 +110,6 @@ class StorageManager:
         Returns:
             ValidationReport with results
         """
-        from ml4t.data.assets.asset_class import AssetClass
         from ml4t.data.validation import OHLCVValidator, ValidationReport
         from ml4t.data.validation.cross_validation import CrossValidator
         from ml4t.data.validation.rules import ValidationRulePresets
@@ -114,7 +117,10 @@ class StorageManager:
         report = ValidationReport(symbol=symbol, provider="unknown")
 
         rules = ValidationRulePresets.for_asset_class(asset_class)
-        is_crypto = rules.asset_class == AssetClass.CRYPTO
+        if calendar is UNSET_CALENDAR:
+            calendar = rules.calendar
+        if feed_spec is None:
+            feed_spec = rules
 
         # Run OHLCV validation
         ohlcv_validator = OHLCVValidator(
@@ -141,10 +147,11 @@ class StorageManager:
             check_market_hours=rules.check_market_hours,
             volume_spike_threshold=rules.volume_spike_threshold,
             price_gap_threshold=rules.price_gap_threshold,
-            is_crypto=is_crypto,
+            calendar=calendar,
+            feed_spec=feed_spec,
         )
 
-        result = cross_validator.validate(df)
+        result = cross_validator.validate(df, frequency=frequency)
         report.add_result(result, "CrossValidator")
 
         return report
@@ -265,7 +272,7 @@ class StorageManager:
         if not self.storage:
             raise ValueError("Storage not configured")
 
-        _, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
+        feed, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
 
         logger.info(
             "Starting data load",
@@ -292,7 +299,9 @@ class StorageManager:
 
             # Validate data if enabled
             if self.enable_validation:
-                validation_report = self._validate_data(df, symbol, asset_class)
+                validation_report = self._validate_data(
+                    df, symbol, asset_class, frequency=frequency, feed_spec=feed
+                )
                 if not validation_report.passed:
                     logger.warning(
                         "Data validation issues found",
@@ -393,7 +402,7 @@ class StorageManager:
         if not self.storage:
             raise ValueError("Storage not configured")
 
-        _, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
+        feed, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
 
         logger.info(
             "Importing external data",
@@ -416,7 +425,9 @@ class StorageManager:
 
             # Validate data if enabled
             if self.enable_validation:
-                validation_report = self._validate_data(df, symbol, asset_class)
+                validation_report = self._validate_data(
+                    df, symbol, asset_class, frequency=frequency, feed_spec=feed
+                )
                 if not validation_report.passed:
                     logger.warning(
                         "Imported data has validation issues",
