@@ -10,9 +10,9 @@ dependency is included with the package.
 
 ## Assign Session Dates
 
-`SessionAssigner` requires a Polars `Datetime` column named `timestamp`. Naive timestamps are
-interpreted as UTC; timezone-aware timestamps are converted to UTC before they are matched to a
-schedule.
+`SessionAssigner` accepts Polars `Datetime` instants or `Date` session labels in `timestamp`.
+Naive instants use UTC unless the feed declares a timezone; timezone-aware instants are matched in
+UTC. Ambiguous or nonexistent local times fail rather than being guessed.
 
 ```python
 from datetime import datetime
@@ -54,6 +54,40 @@ fall within an open interval:
 
 Set `bar_frequency="daily"` when timestamps are daily labels. The default, `"auto"`, treats a
 series as daily when every non-null timestamp is midnight.
+
+Explicit `FeedSpec.timestamp_semantics` overrides these heuristics: `session_label` preserves the
+civil label date, `event_time` matches an instant, and `bar_close` matches the ending bar boundary.
+Event intervals include the open and exclude the close; close-labeled bars exclude the open and
+include the close. The corresponding boundaries apply to lunch breaks and declared calendar
+interruptions. An explicit `bar_label` also selects the declared side; `event_time` alone does not
+infer a bar side. This assignment does
+not validate intraday grid completeness.
+
+`session_start_time` is retained in metadata, but these schedule adapters reject a non-null override.
+Register and select an authoritative calendar with the required intervals instead of silently
+replacing a named exchange's session boundaries.
+
+```python
+from ml4t.specs import FeedSpec
+
+feed = FeedSpec(calendar="24/7", timestamp_semantics="event_time", time_contract_version=2)
+assigned = SessionAssigner(feed_spec=feed).assign_sessions(bars)
+unchanged = SessionAssigner(calendar=None).assign_sessions(bars)
+```
+
+Use the canonical `calendar` keyword on constructors and facade methods. Explicit selection wins
+over feed metadata, then NYSE applies. Explicit `None` returns observations unchanged, without
+adding a session column or reconstructing a continuous grid. `calendar="24/7"` remains a real
+schedule, including an event exactly at midnight in the new day's session. Unknown names fail.
+The positional calendar argument, `calendar_name` constructor keyword and explicit `exchange`
+selector remain compatibility forms; contradictory explicit selectors raise an error. Descriptive
+exchange identity in feed metadata does not select a calendar.
+
+Data's `Metadata` supports the same versioned temporal declaration. Version 1 retains legacy null
+inheritance; version 2 preserves omitted calendar versus explicit null through JSON, copying and
+shared FeedSpec projection. Use `model_dump(mode="json")` before a YAML writer, and ordinary
+`model_dump_json()` for JSON; do not deliberately exclude null fields when preserving a disable
+declaration. Declared timezone, timestamp semantics and fixed-grid fields survive these bridges.
 
 ## Select an Exchange Calendar
 
@@ -100,8 +134,18 @@ The supported fill methods are `"forward"`, `"backward"`, and `"none"`. Forward 
 filling apply only within a session. `zero_volume=True` sets volume to zero for inserted rows.
 
 Session completion rejects duplicate or non-minute-aligned timestamps and observations outside the
-selected schedule. Use session assignment first when you need to inspect how individual timestamps
-map to the exchange calendar.
+selected schedule. Lunch breaks and declared calendar interruptions are excluded from the template;
+completion never inserts rows for those closures. Use session assignment first to inspect how
+timestamps map to the exchange calendar.
+
+Completion remains a one-minute, open-labeled operation, not a general bar-grid validator. Explicit
+close-labeled or session-label metadata is rejected. `calendar=None` returns the input unchanged.
+Declared event-count bar types and frequencies other than one minute are also rejected.
+General bar-grid anchor/partial-bar policies are preserved as metadata but explicitly rejected by
+this native minute completer; they are not silently approximated by its legacy minute template.
+`DataManager.complete_sessions(fill_gaps=False)` performs assignment only and never expands rows,
+whether or not storage is configured. Feed declarations are accepted through the facade's
+`feed_spec` keyword with the same precedence as the low-level classes.
 
 ## Use Session Dates in Validation
 

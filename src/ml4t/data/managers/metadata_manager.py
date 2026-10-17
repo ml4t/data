@@ -16,6 +16,7 @@ import structlog
 
 from ml4t.data.storage.backend import normalize_storage_metadata
 from ml4t.data.storage.keys import storage_key_path
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset
 
 logger = structlog.get_logger()
 
@@ -156,8 +157,10 @@ class MetadataManager:
         self,
         df: pl.DataFrame,
         exchange: str | None = None,
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         bar_frequency: Literal["auto", "daily", "intraday"] = "auto",
+        *,
+        feed_spec: Any | None = None,
     ) -> pl.DataFrame:
         """Assign session_date column to DataFrame based on exchange calendar.
 
@@ -175,12 +178,7 @@ class MetadataManager:
         """
         from ml4t.data.sessions import SessionAssigner
 
-        if calendar is None:
-            if exchange is None:
-                raise ValueError("Must provide either exchange or calendar parameter")
-            assigner = SessionAssigner.from_exchange(exchange)
-        else:
-            assigner = SessionAssigner(calendar)
+        assigner = SessionAssigner(calendar, exchange=exchange, feed_spec=feed_spec)
 
         return assigner.assign_sessions(df, bar_frequency=bar_frequency)
 
@@ -188,10 +186,12 @@ class MetadataManager:
         self,
         df: pl.DataFrame,
         exchange: str | None = None,
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         fill_gaps: bool = True,
         fill_method: str = "forward",
         zero_volume: bool = True,
+        *,
+        feed_spec: Any | None = None,
     ) -> pl.DataFrame:
         """Complete sessions by filling gaps.
 
@@ -213,24 +213,13 @@ class MetadataManager:
         """
         from ml4t.data.sessions import SessionCompleter
 
-        if calendar is None:
-            if exchange is None:
-                raise ValueError("Must provide either exchange or calendar parameter")
-
-            from ml4t.data.sessions.assigner import EXCHANGE_CALENDARS
-
-            calendar = EXCHANGE_CALENDARS.get(exchange.upper())
-            if not calendar:
-                raise ValueError(f"Unknown exchange '{exchange}'")
-
-        completer = SessionCompleter(calendar)
-
         if not fill_gaps:
             from ml4t.data.sessions import SessionAssigner
 
-            assigner = SessionAssigner(calendar)
+            assigner = SessionAssigner(calendar, exchange=exchange, feed_spec=feed_spec)
             return assigner.assign_sessions(df)
 
+        completer = SessionCompleter(calendar, exchange=exchange, feed_spec=feed_spec)
         return completer.complete_sessions(
             df,
             fill_method=fill_method,
