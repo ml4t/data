@@ -292,7 +292,7 @@ class TestGapDetectorStorage:
 
     def test_detect_gaps_in_storage_no_data(self, storage: HiveStorage, tmp_path: Path):
         """No data in storage returns full range as gap."""
-        detector = GapDetector()
+        detector = GapDetector(calendar="24/7")
 
         start = datetime(2024, 1, 1)
         end = datetime(2024, 1, 31)

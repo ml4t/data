@@ -88,6 +88,31 @@ calls retain their existing behavior. Unknown calendars and malformed daily time
 modifying the input. `fill_gaps()` remains a separate elapsed-grid operation, not calendar-aware
 imputation.
 
+### Plan Daily Backfill Acquisition
+
+`ml4t.data.update_manager.GapDetector` is a separate acquisition-range planner. Its constructor and
+`detect_gaps()` / `detect_gaps_in_storage()` accept the canonical `calendar` and shared `feed_spec`
+declaration. Explicit selection overrides the declaration, then NYSE applies. Storage reads use the
+dataset's persisted declaration unless a feed is supplied. Explicit `None` disables schedule-based
+planning, including for absent datasets; 24/7 still expects weekend observations.
+
+Daily plans include missing sessions at either boundary and within the inclusive requested date
+range. Closed dates never become missing sessions. Returned `start` and `end` are inclusive session
+labels encoded at UTC midnight, not event instants. The legacy `size_days` field and `tolerance_days`
+argument count expected sessions in daily mode, not elapsed civil days. A range can span closures
+between missing sessions. Backfill selects only scheduled labels from the provider's actual rows;
+it does not manufacture observations or insert closed-date bars.
+
+The legacy `exclude_weekends=False` argument selects continuous days only when no canonical calendar
+or feed declaration is present. `exclude_weekends=True` now follows NYSE holidays as well as weekends.
+Omission follows NYSE, so callers requiring the old elapsed-day counts should pass `calendar="24/7"`.
+Intraday/weekly range planning retains its legacy elapsed-time behavior; named calendar/feed
+declarations for those frequencies are not supported by this planner yet. `calendar=None` disables
+classification. Session-label dates retain their existing timezone's civil date. Explicit event-time
+or bar-close declarations are rejected for daily planning rather than silently relabeled. Declare
+the feed's `timezone` when a non-UTC label must survive storage's canonical UTC reads; the planner
+restores that declared timezone before interpreting dates.
+
 If a provider's history limit cannot reach the stored dataset, the updater records
 `provider_history_limited` and skips gap filling across the unavailable interval.
 
