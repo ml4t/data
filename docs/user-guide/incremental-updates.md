@@ -138,13 +138,69 @@ a complete feed declaration or explicit `calendar=None`; the detector does not i
 label side or partial-bar policy. Daily classification is unchanged. The separate intraday/weekly
 backfill range planner below still has its documented limitations.
 
-### Plan Daily Backfill Acquisition
+### Inspect Missing Observations on Disk
 
-`ml4t.data.update_manager.GapDetector` is a separate acquisition-range planner. Its constructor and
+`ml4t.data.update_manager.GapDetector` compares a stored dataset with its expected calendar grid.
+It reads timestamps, not prices, and neither contacts a provider nor changes stored rows or metadata.
+The report works with timestamped measurements as well as OHLCV data. Its constructor and
 `detect_gaps()` / `detect_gaps_in_storage()` accept the canonical `calendar` and shared `feed_spec`
 declaration. Explicit selection overrides the declaration, then NYSE applies. Storage reads use the
-dataset's persisted declaration unless a feed is supplied. Explicit `None` disables schedule-based
-planning, including for absent datasets; 24/7 still expects weekend observations.
+dataset's persisted declaration and frequency unless supplied explicitly. Explicit `None` disables
+schedule-based detection, including for absent datasets; 24/7 still expects weekend observations.
+
+For an existing spot-crypto minute dataset, supply or retain its complete grid declaration:
+
+```python
+from datetime import UTC, datetime
+
+from ml4t.data.storage import create_storage
+from ml4t.data.update_manager import GapDetector
+from ml4t.specs import FeedSpec
+
+storage = create_storage("./data", strategy="hive")
+feed = FeedSpec(
+    time_contract_version=2,
+    calendar="24/7",
+    data_frequency="minute",
+    timestamp_semantics="event_time",
+    bar_grid_anchor="session_open",
+    bar_label="left",
+    partial_bar_policy="include",
+)
+report = GapDetector(feed_spec=feed).detect_gaps_in_storage(
+    storage,
+    "crypto/minute/coinbase-btc-usd-spot",
+    datetime(2026, 10, 16, 0, 0, tzinfo=UTC),
+    datetime(2026, 10, 16, 23, 59, tzinfo=UTC),
+)
+for gap in report:
+    print(gap["start"], gap["end"], gap["size_bars"])
+```
+
+Intraday bounds are inclusive UTC instants. Each returned range starts at its first absent bar
+timestamp, ends at its last, and reports `size_bars`, an exact count of scheduled bars. Bounds need
+not land on a bar: only expected timestamps inside them count. The report includes missing boundary
+bars, wholly absent sessions and absent datasets. Breaks, maintenance, holidays, DST, shortened
+sessions and partial-bar policy follow the selected schedule. It shares the arithmetic expected grid
+with in-memory detection rather than constructing a second calendar or every absent row.
+
+An intraday calendar alone is insufficient. Frequency, timestamp side, anchor and partial-bar policy
+must be declared, as in the example; contradictory or missing declarations fail clearly. Multi-asset
+datasets are compared separately by the declared `entity_col`, or `symbol` when present; their gap
+ranges include an `entity` value. The stored entity column is inspected across the dataset so an
+instrument absent throughout the requested interval is not overlooked. Instruments that have never
+been stored cannot be inferred: inspect an explicit absent dataset key and supply its declaration.
+For CME futures select the product's actual calendar, such as `CME_Equity`, rather than assuming
+every CME product uses the crypto schedule. CME cryptocurrency futures use `CME Globex Crypto`;
+spot crypto normally uses `24/7`. See [CME and spot session conventions](sessions.md#cme-crypto-and-spot-crypto).
+
+A missing scheduled observation is not proof of a provider outage. Databento OHLCV and Coin Metrics
+market candles can omit no-trade intervals. Keep these absences in the report; a source returning no
+row does not justify creating a replacement candle. Targeted source downloads are a separate step,
+not an effect of inspecting the dataset. Values inside present rows are checked by validation, not
+by this timestamp-completeness report.
+
+### Daily Range Compatibility
 
 Daily plans include missing sessions at either boundary and within the inclusive requested date
 range. Closed dates never become missing sessions. Returned `start` and `end` are inclusive session
@@ -156,9 +212,9 @@ it does not manufacture observations or insert closed-date bars.
 The legacy `exclude_weekends=False` argument selects continuous days only when no canonical calendar
 or feed declaration is present. `exclude_weekends=True` now follows NYSE holidays as well as weekends.
 Omission follows NYSE, so callers requiring the old elapsed-day counts should pass `calendar="24/7"`.
-Intraday/weekly range planning retains its legacy elapsed-time behavior; named calendar/feed
-declarations for those frequencies are not supported by this planner yet. `calendar=None` disables
-classification. Session-label dates use their declared timezone, or their existing timezone when
+The legacy undeclared weekly path is elapsed-time based, not an exchange-grid completeness report;
+declared weekly grids are not supported. `calendar=None` disables classification.
+Session-label dates use their declared timezone, or their existing timezone when
 undeclared. Explicit event-time/bar-close/bar-side declarations map to authoritative session labels
 before planning, including for provider-row selection during backfill. Out-of-session instants fail
 clearly; original provider timestamps are retained in storage. Declare the feed's `timezone` when a

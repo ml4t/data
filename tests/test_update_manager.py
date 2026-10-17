@@ -30,6 +30,7 @@ from ml4t.data.update_manager import (
     UpdateStrategy,
     _ensure_datetime,
 )
+from ml4t.specs import FeedSpec
 
 
 class TestUpdateStrategy:
@@ -216,8 +217,21 @@ class TestGapDetector:
             }
         )
 
-        gaps = detector.detect_gaps(df, frequency="hourly")
-        assert len(gaps) >= 1
+        gaps = detector.detect_gaps(
+            df,
+            frequency="hourly",
+            feed_spec=FeedSpec(
+                time_contract_version=2,
+                calendar="24/7",
+                timezone="UTC",
+                data_frequency="hourly",
+                timestamp_semantics="event_time",
+                bar_grid_anchor="session_open",
+                bar_label="left",
+                partial_bar_policy="include",
+            ),
+        )
+        assert [gap["size_bars"] for gap in gaps] == [5]
 
     def test_ensure_datetime_with_date(self):
         """Ensure date objects are converted to datetime."""
@@ -260,10 +274,10 @@ class TestGapDetector:
         delta = detector._get_expected_delta("weekly")
         assert delta == timedelta(weeks=1)
 
-    def test_expected_delta_default(self, detector: GapDetector):
-        """Unknown frequency defaults to daily."""
-        delta = detector._get_expected_delta("unknown")
-        assert delta == timedelta(days=1)
+    def test_expected_delta_rejects_unknown_frequency(self, detector: GapDetector):
+        """An unsupported frequency must not silently change the observation unit."""
+        with pytest.raises(ValueError, match="frequency"):
+            detector._get_expected_delta("unknown")
 
 
 class TestGapDetectorStorage:

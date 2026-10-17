@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum
@@ -16,6 +17,7 @@ from ml4t.data.providers.base import BaseProvider
 from ml4t.data.sessions.assigner import SessionAssigner, _daily_session_labels
 from ml4t.data.storage.backend import StorageBackend, normalize_storage_metadata
 from ml4t.data.storage.metadata_tracker import MetadataTracker, UpdateRecord
+from ml4t.data.utils.gaps import GapDetector as ObservationGapDetector
 from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
@@ -141,6 +143,41 @@ class GapDetector:
         return df.with_columns(labels.cast(pl.Datetime("us")).dt.replace_time_zone("UTC"))
 
     @staticmethod
+    def _by_entity(
+        df: pl.DataFrame,
+        feed: FeedSpec,
+        detect: Callable[[pl.DataFrame], list[dict[str, Any]]],
+        *,
+        storage: StorageBackend | None = None,
+        key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if feed.entity_col is None and "symbol" not in df.columns:
+            return detect(df)
+        if storage is not None and key is not None and not storage.exists(key):
+            return detect(df)
+        entity = (
+            feed.with_overrides(timestamp_col="timestamp")
+            .resolve(df.columns, ("symbol",))
+            .entity_col
+        )
+        if not isinstance(entity, str):
+            raise ValueError("a single entity column is required")
+        identifiers = (
+            storage.read(key).select(entity).unique().collect()[entity]
+            if storage is not None and key is not None
+            else df[entity].unique()
+        )
+        if identifiers.null_count():
+            raise ValueError("entity identifiers must not be null")
+        if len(identifiers) <= 1:
+            return detect(df)
+        return [
+            {**gap, "entity": identifier}
+            for identifier in identifiers.sort().to_list()
+            for gap in detect(df.filter(pl.col(entity) == identifier))
+        ]
+
+    @staticmethod
     def _daily_ranges(
         df: pl.DataFrame,
         start: datetime,
@@ -183,38 +220,55 @@ class GapDetector:
     def detect_gaps(
         self,
         df: pl.DataFrame,
-        frequency: str = "daily",
+        frequency: str | None = None,
         tolerance_days: int = 0,
         *,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         feed_spec: Any | None = None,
+        tolerance_bars: int = 0,
     ) -> list[dict[str, Any]]:
         """
         Detect gaps in a DataFrame's timestamp column.
 
         Args:
             df: DataFrame with timestamp column
-            frequency: Data frequency (daily, hourly, etc.)
+            frequency: Inherit the feed frequency when omitted, otherwise daily.
             tolerance_days: Missing sessions tolerated for daily data; elapsed days otherwise.
             calendar: Per-call override of configured calendar and feed metadata.
             feed_spec: Per-call feed declaration.
+            tolerance_bars: Number of consecutive missing intraday bars to tolerate.
 
         Returns:
             List of gap dictionaries with start, end, and size
         """
         feed, selected = self._feed_calendar(calendar, feed_spec)
+        frequency = (feed.data_frequency or "daily") if frequency is None else frequency
         if selected is None:
             return []
         if df.is_empty() or "timestamp" not in df.columns:
             return []
-        if frequency.lower() in {"daily", "1day"}:
-            df = self._label_frame(df, feed, selected)
-            return self._daily_ranges(
+        if frequency.lower() in {"daily", "1day", "1d"}:
+
+            def daily_ranges(part: pl.DataFrame) -> list[dict[str, Any]]:
+                labeled = self._label_frame(part, feed, selected)
+                return self._daily_ranges(
+                    labeled,
+                    _session_label(labeled["timestamp"].min()),
+                    _session_label(labeled["timestamp"].max()),
+                    selected,
+                    tolerance_days,
+                )
+
+            return self._by_entity(df, feed, daily_ranges)
+        if ObservationGapDetector._intraday_interval(frequency) is not None:
+            if tolerance_days:
+                raise ValueError("use tolerance_bars, not tolerance_days, for intraday data")
+            return self._by_entity(
                 df,
-                _session_label(df["timestamp"].min()),
-                _session_label(df["timestamp"].max()),
-                selected,
-                tolerance_days,
+                feed,
+                lambda part: self._intraday_ranges(
+                    part, frequency, selected, feed, tolerance_bars=tolerance_bars
+                ),
             )
         if (
             calendar is not UNSET_CALENDAR
@@ -252,13 +306,52 @@ class GapDetector:
 
         return gaps
 
+    @staticmethod
+    def _intraday_ranges(
+        df: pl.DataFrame,
+        frequency: str,
+        calendar: str,
+        feed: FeedSpec,
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        tolerance_bars: int = 0,
+    ) -> list[dict[str, Any]]:
+        if (
+            isinstance(tolerance_bars, bool)
+            or not isinstance(tolerance_bars, int)
+            or tolerance_bars < 0
+        ):
+            raise ValueError("tolerance_bars must be a nonnegative integer")
+        grid, observed = ObservationGapDetector()._intraday_grid(
+            df, "timestamp", frequency, calendar, feed, start=start, end=end
+        )
+        if grid is None:
+            return []
+        positions = sorted({grid.position(timestamp) for timestamp in observed})
+        first = grid.bound(start) if start is not None else positions[0]
+        stop = grid.bound(end, inclusive=True) if end is not None else positions[-1] + 1
+        gaps = []
+        cursor = first
+        for position in [p for p in positions if first <= p < stop] + [stop]:
+            if position - cursor > tolerance_bars:
+                gaps.append(
+                    {
+                        "start": grid.timestamp(cursor),
+                        "end": grid.timestamp(position - 1),
+                        "size_bars": position - cursor,
+                    }
+                )
+            cursor = position + 1
+        return gaps
+
     def detect_gaps_in_storage(
         self,
         storage: StorageBackend,
         key: str,
         start_date: datetime,
         end_date: datetime,
-        frequency: str = "daily",
+        frequency: str | None = None,
         *,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         feed_spec: Any | None = None,
@@ -271,22 +364,24 @@ class GapDetector:
             key: Storage key for the dataset
             start_date: Start of range to check
             end_date: End of range to check
-            frequency: Data frequency
+            frequency: Inherit the stored/feed frequency when omitted, otherwise daily.
 
         Returns:
-            List of gaps found in storage, with UTC-aware bounds
+            Read-only gap report with inclusive UTC-aware bounds. Daily size_days counts
+            sessions; intraday size_bars counts expected bars, including boundary absences.
         """
-        if frequency.lower() in {"daily", "1day"}:
+        if feed_spec is None and self.feed_spec is None:
+            try:
+                feed_spec = normalize_storage_metadata(storage.get_metadata(key), key)
+            except KeyError:
+                pass
+        feed, selected = self._feed_calendar(calendar, feed_spec)
+        frequency = (feed.data_frequency or "daily") if frequency is None else frequency
+        if selected is None:
+            return []
+        if frequency.lower() in {"daily", "1day", "1d"}:
             start_date = _session_label(start_date)
             end_date = _session_label(end_date)
-            if feed_spec is None and self.feed_spec is None:
-                try:
-                    feed_spec = normalize_storage_metadata(storage.get_metadata(key), key)
-                except KeyError:
-                    pass
-            feed, selected = self._feed_calendar(calendar, feed_spec)
-            if selected is None:
-                return []
             # Session labels retain their civil date even when stored with a timezone.
             start_bound = start_date - timedelta(days=1)
             end_bound = datetime.combine(end_date.date(), datetime.min.time(), UTC) + timedelta(
@@ -296,14 +391,33 @@ class GapDetector:
                 df = storage.read(key, start_bound, end_bound).collect()
             except KeyError:
                 df = pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC")})
-            return self._daily_ranges(
-                self._label_frame(df, feed, selected), start_date, end_date, selected
+            return self._by_entity(
+                df,
+                feed,
+                lambda part: self._daily_ranges(
+                    self._label_frame(part, feed, selected), start_date, end_date, selected
+                ),
+                storage=storage,
+                key=key,
             )
         start_date = _ensure_datetime(start_date)
         end_date = _ensure_datetime(end_date)
-        _, selected = self._feed_calendar(calendar, feed_spec)
-        if selected is None:
-            return []
+        if start_date > end_date:
+            raise ValueError("start_date must not be after end_date")
+        if ObservationGapDetector._intraday_interval(frequency) is not None:
+            try:
+                df = storage.read(key, start_date, end_date + timedelta(microseconds=1)).collect()
+            except KeyError:
+                df = pl.DataFrame(schema={"timestamp": pl.Datetime("us", "UTC")})
+            return self._by_entity(
+                df,
+                feed,
+                lambda part: self._intraday_ranges(
+                    part, frequency, selected, feed, start=start_date, end=end_date
+                ),
+                storage=storage,
+                key=key,
+            )
         if (
             calendar is not UNSET_CALENDAR
             or self.calendar is not UNSET_CALENDAR
@@ -374,8 +488,7 @@ class GapDetector:
             return timedelta(hours=1)
         if frequency == "weekly":
             return timedelta(weeks=1)
-        # Default to daily
-        return timedelta(days=1)
+        raise ValueError(f"unsupported frequency: {frequency!r}")
 
 
 class IncrementalUpdater:
