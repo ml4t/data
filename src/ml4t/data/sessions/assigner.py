@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 import polars as pl
 import structlog
+
+from ml4t.specs import UNSET_CALENDAR, BarLabel, CalendarUnset, FeedSpec, TimestampSemantics
 
 logger = structlog.get_logger()
 
@@ -41,13 +43,37 @@ class SessionAssigner:
     The session_date is the date when the session ENDS (4pm date).
     """
 
-    def __init__(self, calendar_name: str):
+    def __init__(
+        self,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        calendar_name: str | None | CalendarUnset = UNSET_CALENDAR,
+        exchange: str | None = None,
+        feed_spec: Any | None = None,
+    ) -> None:
         """Initialize session assigner.
 
         Args:
-            calendar_name: Name of calendar from pandas_market_calendars
-                          (e.g., "CME_Globex_Crypto", "NYSE", "NASDAQ")
+            calendar: Explicit name; None disables session handling.
+            calendar_name: Compatibility alias for calendar.
+            exchange: Compatibility selector, not inferred from descriptive metadata.
+            feed_spec: Shared calendar, timezone and timestamp declarations.
         """
+        selectors = [calendar_name]
+        if exchange is not None:
+            if exchange.upper() not in EXCHANGE_CALENDARS:
+                raise ValueError(f"Unknown exchange '{exchange}'")
+            selectors.append(EXCHANGE_CALENDARS[exchange.upper()])
+        for alias in selectors:
+            if alias is not UNSET_CALENDAR:
+                if calendar is not UNSET_CALENDAR and calendar != alias:
+                    raise ValueError("conflicting calendar selectors")
+                calendar = alias
+        self.feed_spec = FeedSpec.from_any(feed_spec)
+        self.calendar_name = self.feed_spec.resolve_calendar(calendar=calendar)
+        self.calendar = None
+        if self.calendar_name is None:
+            return
         try:
             import pandas_market_calendars as mcal
         except ImportError:
@@ -56,13 +82,12 @@ class SessionAssigner:
                 "Install with: pip install pandas-market-calendars"
             )
 
-        self.calendar_name = calendar_name
         try:
-            self.calendar = mcal.get_calendar(calendar_name)
+            self.calendar = mcal.get_calendar(self.calendar_name)
         except Exception as e:
-            raise ValueError(f"Unknown calendar '{calendar_name}': {e}")
+            raise ValueError(f"Unknown calendar '{self.calendar_name}': {e}")
 
-        logger.info(f"Initialized SessionAssigner with calendar: {calendar_name}")
+        logger.info(f"Initialized SessionAssigner with calendar: {self.calendar_name}")
 
     @classmethod
     def from_exchange(cls, exchange: str) -> SessionAssigner:
@@ -109,6 +134,8 @@ class SessionAssigner:
         Raises:
             ValueError: If timestamp column missing
         """
+        if self.calendar is None:
+            return df
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
         if outside_session not in {"null", "raise", "drop"}:
@@ -121,14 +148,22 @@ class SessionAssigner:
             return df.with_columns(pl.lit(None).cast(pl.Date).alias("session_date"))
 
         timestamp_dtype = df.schema["timestamp"]
-        if not isinstance(timestamp_dtype, pl.Datetime):
-            raise TypeError("'timestamp' must contain Datetime values")
+        if timestamp_dtype != pl.Date and not isinstance(timestamp_dtype, pl.Datetime):
+            raise TypeError("'timestamp' must contain Date or Datetime values")
+        semantics = self.feed_spec.timestamp_semantics
+        if timestamp_dtype == pl.Date and (
+            semantics in (TimestampSemantics.EVENT_TIME, TimestampSemantics.BAR_CLOSE)
+            or self.feed_spec.bar_label is not None
+        ):
+            raise ValueError("event_time/bar_close timestamps must contain Datetime values")
 
         # Auto-detect date range from data
         if start_date is None:
-            start_date = _datetime_scalar(df["timestamp"].min(), "timestamp")
+            start_date = df["timestamp"].min()
         if end_date is None:
-            end_date = _datetime_scalar(df["timestamp"].max(), "timestamp")
+            end_date = df["timestamp"].max()
+        if start_date is None or end_date is None:
+            raise TypeError("'timestamp' must contain non-null Datetime or Date values")
 
         logger.info(
             f"Assigning sessions for {len(df)} rows",
@@ -179,8 +214,12 @@ class SessionAssigner:
                 return result
 
             timestamp_expr = pl.col("timestamp")
-            if timestamp_dtype.time_zone is None:
-                timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
+            if timestamp_dtype == pl.Date:
+                timestamp_expr = timestamp_expr.cast(pl.Datetime("us"))
+            if timestamp_dtype == pl.Date or timestamp_dtype.time_zone is None:
+                timestamp_expr = timestamp_expr.dt.replace_time_zone(
+                    self.feed_spec.timezone or "UTC"
+                )
             timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
                 pl.Datetime("us", "UTC")
             )
@@ -193,10 +232,25 @@ class SessionAssigner:
                 if isinstance(value, datetime)
             )
             daily_labels = bar_frequency == "daily" or (bar_frequency == "auto" and inferred_daily)
+            if semantics is not None:
+                daily_labels = semantics == TimestampSemantics.SESSION_LABEL
+            elif self.feed_spec.bar_label is not None:
+                daily_labels = False
+            elif timestamp_dtype == pl.Date:
+                daily_labels = True
             if daily_labels:
+                label_expr = pl.col("timestamp")
+                if (
+                    isinstance(timestamp_dtype, pl.Datetime)
+                    and timestamp_dtype.time_zone is not None
+                    and self.feed_spec.timezone is not None
+                ):
+                    label_expr = label_expr.dt.convert_time_zone(self.feed_spec.timezone)
+                if isinstance(timestamp_dtype, pl.Datetime):
+                    label_expr = label_expr.dt.date()
                 result = (
                     df.with_row_index("_session_row_index")
-                    .with_columns(timestamp_expr.dt.date().alias("_session_date_label"))
+                    .with_columns(label_expr.alias("_session_date_label"))
                     .join(
                         session_df.select(
                             pl.col("_assigned_session_date").alias("_calendar_session_date_label"),
@@ -234,20 +288,38 @@ class SessionAssigner:
                 )
                 .sort("_session_join_timestamp")
             )
+            close_labeled = (
+                semantics == TimestampSemantics.BAR_CLOSE
+                or self.feed_spec.bar_label == BarLabel.RIGHT
+            )
+            join_boundary = "_calendar_session_end" if close_labeled else "_calendar_session_start"
             joined = observations.join_asof(
-                session_df,
+                session_df.sort(join_boundary),
                 left_on="_session_join_timestamp",
-                right_on="_calendar_session_end",
-                strategy="forward",
+                right_on=join_boundary,
+                strategy="forward" if close_labeled else "backward",
             )
-            in_session = (pl.col("_session_timestamp") >= pl.col("_calendar_session_start")) & (
-                pl.col("_session_timestamp") < pl.col("_calendar_session_end")
-            )
+            if close_labeled:
+                in_session = (pl.col("_session_timestamp") > pl.col("_calendar_session_start")) & (
+                    pl.col("_session_timestamp") <= pl.col("_calendar_session_end")
+                )
+            else:
+                in_session = (pl.col("_session_timestamp") >= pl.col("_calendar_session_start")) & (
+                    pl.col("_session_timestamp") < pl.col("_calendar_session_end")
+                )
             if "_calendar_break_start" in joined.columns:
                 in_break = (
                     pl.col("_calendar_break_start").is_not_null()
-                    & (pl.col("_session_timestamp") >= pl.col("_calendar_break_start"))
-                    & (pl.col("_session_timestamp") < pl.col("_calendar_break_end"))
+                    & (
+                        (pl.col("_session_timestamp") > pl.col("_calendar_break_start"))
+                        if close_labeled
+                        else (pl.col("_session_timestamp") >= pl.col("_calendar_break_start"))
+                    )
+                    & (
+                        (pl.col("_session_timestamp") <= pl.col("_calendar_break_end"))
+                        if close_labeled
+                        else (pl.col("_session_timestamp") < pl.col("_calendar_break_end"))
+                    )
                 )
                 in_session &= ~in_break
             result = joined.with_columns(

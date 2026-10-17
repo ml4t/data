@@ -135,3 +135,78 @@ def test_calendar_name_alias_is_compatible_but_conflicts_are_not_silently_ignore
 def test_calendar_free_low_level_completion_is_not_a_continuous_grid():
     frame = provider_frame()
     assert_frame_equal(SessionCompleter(calendar=None).complete_sessions(frame), frame)
+
+
+def test_declared_bar_side_is_not_inferred_from_event_time():
+    frame = provider_frame("hourly", continuous=True).head(1)
+    feed = FeedSpec(
+        calendar="24/7",
+        time_contract_version=2,
+        timestamp_semantics="event_time",
+        bar_label="right",
+    )
+    assert SessionAssigner(feed_spec=feed).assign_sessions(frame)["session_date"].to_list() == [
+        date(2025, 7, 6)
+    ]
+
+
+def test_persisted_data_metadata_retains_calendar_disable_and_bar_grid(tmp_path):
+    import yaml
+
+    metadata = Metadata(
+        provider="synthetic",
+        symbol="SPY",
+        asset_class="equities",
+        calendar=None,
+        time_contract_version=2,
+        timezone="UTC",
+        timestamp_semantics="event_time",
+        bar_grid_anchor="session_open",
+        bar_label="right",
+        partial_bar_policy="include",
+    )
+    restored = Metadata.model_validate(
+        yaml.safe_load(yaml.safe_dump(metadata.model_dump(mode="json")))
+    )
+    feed = FeedSpec.from_any(restored)
+    assert feed.resolve_calendar() is None
+    assert feed.bar_label == "right"
+    assert feed.bar_grid_anchor == "session_open"
+    assert feed.partial_bar_policy == "include"
+    frame = provider_frame("hourly", continuous=True).head(1)
+    storage = HiveStorage(StorageConfig(base_path=tmp_path))
+    storage.write(frame, "equities/hourly/SPY", restored.model_dump())
+    with DataManager(storage=storage) as manager:
+        declared = manager.get_metadata_for_key("equities/hourly/SPY")
+        assert_frame_equal(manager.assign_sessions(frame, feed_spec=declared), frame)
+
+
+def test_explicit_session_labels_keep_civil_dates_in_non_utc_timezone():
+    frame = provider_frame().with_columns(
+        pl.col("timestamp")
+        .dt.replace_time_zone(None)
+        .dt.truncate("1d")
+        .dt.replace_time_zone("Asia/Tokyo")
+    )
+    feed = FeedSpec(calendar="NYSE", timestamp_semantics="session_label", timezone="Asia/Tokyo")
+    result = SessionAssigner(feed_spec=feed).assign_sessions(frame, bar_frequency="intraday")
+    assert result["session_date"].to_list() == [date(2025, 7, 7)]
+
+
+def test_naive_event_time_uses_declared_timezone_and_rejects_ambiguous_clock():
+    frame = provider_frame("hourly", continuous=True).filter(pl.col("timestamp").dt.hour() == 14)
+    local = frame.with_columns(
+        pl.col("timestamp").dt.convert_time_zone("America/New_York").dt.replace_time_zone(None)
+    )
+    feed = FeedSpec(calendar="NYSE", timestamp_semantics="event_time", timezone="America/New_York")
+    assert SessionAssigner(feed_spec=feed).assign_sessions(local)["session_date"].to_list() == [
+        date(2025, 7, 7)
+    ]
+    with SyntheticProvider(calendar_mode="continuous") as provider:
+        ambiguous = (
+            provider.fetch_ohlcv("SPY", "2025-11-02", "2025-11-02", "hourly")
+            .filter(pl.col("timestamp").dt.hour() == 1)
+            .with_columns(pl.col("timestamp").dt.replace_time_zone(None))
+        )
+    with pytest.raises(pl.exceptions.ComputeError, match="ambiguous"):
+        SessionAssigner(feed_spec=feed).assign_sessions(ambiguous)

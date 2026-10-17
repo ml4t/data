@@ -6,9 +6,13 @@ Ported from crypto-data-pipeline with enhancements for ml4t.data.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import polars as pl
 import structlog
+
+from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.specs import UNSET_CALENDAR, BarLabel, CalendarUnset, TimestampSemantics
 
 logger = structlog.get_logger()
 
@@ -37,28 +41,28 @@ class SessionCompleter:
         ```
     """
 
-    def __init__(self, calendar_name: str):
+    def __init__(
+        self,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        calendar_name: str | None | CalendarUnset = UNSET_CALENDAR,
+        exchange: str | None = None,
+        feed_spec: Any | None = None,
+    ) -> None:
         """Initialize with exchange calendar.
 
         Args:
-            calendar_name: Name of pandas_market_calendars calendar
-                          (e.g., "CME_Globex_Crypto", "NYSE", "NASDAQ")
+            calendar: Explicit schedule; None disables completion.
+            calendar_name: Compatibility alias.
+            exchange: Compatibility selector.
+            feed_spec: Shared temporal declaration.
         """
-        try:
-            import pandas_market_calendars as mcal
-        except ImportError:
-            raise ImportError(
-                "pandas_market_calendars is required for session completion. "
-                "Install with: pip install pandas-market-calendars"
-            )
-
-        self.calendar_name = calendar_name
-        try:
-            self.calendar = mcal.get_calendar(calendar_name)
-        except Exception as e:
-            raise ValueError(f"Unknown calendar '{calendar_name}': {e}")
-
-        logger.info(f"Initialized SessionCompleter with calendar: {calendar_name}")
+        assigner = SessionAssigner(
+            calendar, calendar_name=calendar_name, exchange=exchange, feed_spec=feed_spec
+        )
+        self.calendar_name = assigner.calendar_name
+        self.calendar = assigner.calendar
+        self.feed_spec = assigner.feed_spec
 
     def complete_sessions(
         self,
@@ -85,6 +89,15 @@ class SessionCompleter:
                 not minute-aligned, multiple symbols share a timestamp, or an observation
                 falls outside a scheduled session or the requested half-open range
         """
+        if self.calendar is None:
+            return df
+        if self.feed_spec.timestamp_semantics not in (
+            None,
+            TimestampSemantics.EVENT_TIME,
+        ) or self.feed_spec.bar_label not in (None, BarLabel.LEFT):
+            raise NotImplementedError(
+                "minute completion currently requires open-labeled event_time bars"
+            )
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
         if fill_method not in {"forward", "backward", "none"}:
@@ -121,11 +134,15 @@ class SessionCompleter:
             ):
                 raise ValueError("start_date and end_date must not be NaT")
             if request_start.tzinfo is None:
-                request_start = request_start.tz_localize("UTC")
+                request_start = request_start.tz_localize(
+                    self.feed_spec.timezone or "UTC"
+                ).tz_convert("UTC")
             else:
                 request_start = request_start.tz_convert("UTC")
             if request_end.tzinfo is None:
-                request_end = request_end.tz_localize("UTC")
+                request_end = request_end.tz_localize(self.feed_spec.timezone or "UTC").tz_convert(
+                    "UTC"
+                )
             else:
                 request_end = request_end.tz_convert("UTC")
             if request_start >= request_end:
@@ -192,7 +209,9 @@ class SessionCompleter:
             # Ensure input data has matching timestamp type
             timestamp_expr = pl.col("timestamp")
             if timestamp_dtype.time_zone is None:
-                timestamp_expr = timestamp_expr.dt.replace_time_zone("UTC")
+                timestamp_expr = timestamp_expr.dt.replace_time_zone(
+                    self.feed_spec.timezone or "UTC"
+                )
             timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
                 pl.Datetime("ns", "UTC")
             )
