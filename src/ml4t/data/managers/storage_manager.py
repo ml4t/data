@@ -19,13 +19,26 @@ from pydantic import ValidationError
 from tenacity import RetryError
 
 from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
+from ml4t.data.sessions.assigner import SessionAssigner
 from ml4t.data.storage.backend import normalize_storage_metadata
 from ml4t.data.utils.conversion import pandas_to_polars
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 if TYPE_CHECKING:
     from ml4t.data.managers.fetch_manager import FetchManager
 
 logger = structlog.get_logger()
+
+_TEMPORAL_FIELDS = (
+    "calendar",
+    "time_contract_version",
+    "timezone",
+    "timestamp_semantics",
+    "session_start_time",
+    "bar_grid_anchor",
+    "bar_label",
+    "partial_bar_policy",
+)
 
 
 class StorageManager:
@@ -181,6 +194,39 @@ class StorageManager:
             return pandas_to_polars(df)
         return df
 
+    @staticmethod
+    def _ingestion_feed(
+        calendar: str | None | CalendarUnset,
+        feed_spec: Any | None,
+        frequency: str,
+        bar_type: str,
+    ) -> tuple[FeedSpec, dict[str, Any]]:
+        source = normalize_storage_metadata(feed_spec) if isinstance(feed_spec, dict) else feed_spec
+        feed = (
+            FeedSpec.from_any(source) if source is not None else FeedSpec(time_contract_version=2)
+        )
+        aliases = {
+            "hour": "hourly",
+            "1h": "hourly",
+            "1hour": "hourly",
+            "1d": "daily",
+            "1day": "daily",
+            "1m": "minute",
+            "1min": "minute",
+            "1minute": "minute",
+        }
+        requested = aliases.get(frequency.lower(), frequency.lower())
+        declared = str(feed.data_frequency).lower()
+        if feed.data_frequency is not None and aliases.get(declared, declared) != requested:
+            raise ValueError("feed data_frequency must match the requested frequency")
+        if feed.bar_type not in (None, bar_type):
+            raise ValueError("feed bar_type must match the requested bar_type")
+        if calendar is not UNSET_CALENDAR:
+            feed = feed.with_overrides(calendar=calendar, time_contract_version=2)
+        SessionAssigner(feed_spec=feed)
+        wire = feed.to_dict()
+        return feed, {name: wire[name] for name in _TEMPORAL_FIELDS if name in wire}
+
     def load(
         self,
         symbol: str,
@@ -192,7 +238,9 @@ class StorageManager:
         bar_type: str = "time",
         bar_threshold: int | None = None,
         exchange: str = "UNKNOWN",
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        feed_spec: Any | None = None,
     ) -> str:
         """Load data from provider and store it.
 
@@ -216,6 +264,8 @@ class StorageManager:
         """
         if not self.storage:
             raise ValueError("Storage not configured")
+
+        _, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
 
         logger.info(
             "Starting data load",
@@ -270,7 +320,7 @@ class StorageManager:
                 bar_type=bar_type,
                 bar_params=bar_params,
                 exchange=exchange,
-                calendar=calendar,
+                **temporal_values,
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
@@ -317,7 +367,9 @@ class StorageManager:
         bar_type: str = "time",
         bar_threshold: int | None = None,
         exchange: str = "UNKNOWN",
-        calendar: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        feed_spec: Any | None = None,
     ) -> str:
         """Import external data into storage with metadata.
 
@@ -340,6 +392,8 @@ class StorageManager:
         """
         if not self.storage:
             raise ValueError("Storage not configured")
+
+        _, temporal_values = self._ingestion_feed(calendar, feed_spec, frequency, bar_type)
 
         logger.info(
             "Importing external data",
@@ -388,7 +442,7 @@ class StorageManager:
                 bar_type=bar_type,
                 bar_params=bar_params,
                 exchange=exchange,
-                calendar=calendar,
+                **temporal_values,
                 start_date=min_ts,
                 end_date=max_ts,
                 last_updated=datetime.now(UTC),
@@ -423,6 +477,9 @@ class StorageManager:
         initial_start: str | None = None,
         initial_end: str | None = None,
         initial_load_days: int = 365,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> str:
         """Update existing data with incremental fetch.
 
@@ -483,6 +540,8 @@ class StorageManager:
                     frequency=frequency,
                     asset_class=asset_class,
                     provider=provider,
+                    calendar=calendar,
+                    feed_spec=feed_spec,
                 )
 
             # Read existing data
@@ -497,6 +556,14 @@ class StorageManager:
 
             existing_metadata = (
                 normalize_storage_metadata(self.storage.get_metadata(key), key) or {}
+            )
+            stored_bar_type = existing_metadata.get("bar_type")
+            effective_bar_type = stored_bar_type if isinstance(stored_bar_type, str) else "time"
+            effective_feed, temporal_values = self._ingestion_feed(
+                calendar,
+                existing_metadata if feed_spec is None else feed_spec,
+                frequency,
+                effective_bar_type,
             )
             existing_provider = existing_metadata.get("provider")
             if (
@@ -578,9 +645,16 @@ class StorageManager:
 
                 from ml4t.data.utils.gaps import GapDetector
 
-                is_crypto = asset_class.lower() == "crypto"
+                selected_calendar = effective_feed.resolve_calendar()
+                if selected_calendar is not None and effective_bar_type != "time":
+                    raise NotImplementedError("calendar gap filling requires fixed time bars")
                 gap_detector = GapDetector()
-                gaps = gap_detector.detect_gaps(merged_df, frequency=frequency, is_crypto=is_crypto)
+                gaps = gap_detector.detect_gaps(
+                    merged_df,
+                    frequency=frequency,
+                    calendar=selected_calendar,
+                    feed_spec=effective_feed,
+                )
 
                 if gaps:
                     gap_summary = gap_detector.summarize_gaps(gaps)
@@ -658,6 +732,10 @@ class StorageManager:
                 "attributes": updated_attributes,
             }
 
+            for name in _TEMPORAL_FIELDS:
+                metadata_values.pop(name, None)
+            metadata_values.update(temporal_values)
+
             try:
                 updated_metadata = Metadata.model_validate(metadata_values)
             except ValidationError as error:
@@ -670,13 +748,7 @@ class StorageManager:
                     "provider",
                     "symbol",
                     "asset_class",
-                    "calendar",
-                    "time_contract_version",
-                    "timezone",
-                    "timestamp_semantics",
-                    "bar_grid_anchor",
-                    "bar_label",
-                    "partial_bar_policy",
+                    *_TEMPORAL_FIELDS,
                 }
                 if not removable_fields:
                     raise

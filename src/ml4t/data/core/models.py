@@ -150,6 +150,11 @@ class Metadata(BaseModel):
         return data
 
     @property
+    def data_frequency(self) -> str | None:
+        """Project a physical frequency without the legacy unknown or event-count label."""
+        return self.bar_params.get("frequency") if self.bar_type == "time" else None
+
+    @property
     def frequency(self) -> str:
         """Get frequency string for backward compatibility.
 
