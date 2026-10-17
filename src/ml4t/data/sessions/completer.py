@@ -91,6 +91,13 @@ class SessionCompleter:
         """
         if self.calendar is None:
             return df
+        if (
+            self.feed_spec.bar_grid_anchor is not None
+            or self.feed_spec.partial_bar_policy is not None
+        ):
+            raise NotImplementedError(
+                "native minute completion does not support explicit general bar-grid policies"
+            )
         if self.feed_spec.bar_type not in (None, "time"):
             raise NotImplementedError("minute completion requires fixed time bars")
         if self.feed_spec.data_frequency is not None and str(

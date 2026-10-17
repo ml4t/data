@@ -139,6 +139,8 @@ map to the exchange calendar.
 Completion remains a one-minute, open-labeled operation, not a general bar-grid validator. Explicit
 close-labeled or session-label metadata is rejected. `calendar=None` returns the input unchanged.
 Declared event-count bar types and frequencies other than one minute are also rejected.
+General bar-grid anchor/partial-bar policies are preserved as metadata but explicitly rejected by
+this native minute completer; they are not silently approximated by its legacy minute template.
 `DataManager.complete_sessions(fill_gaps=False)` performs assignment only and never expands rows,
 whether or not storage is configured. Feed declarations are accepted through the facade's
 `feed_spec` keyword with the same precedence as the low-level classes.

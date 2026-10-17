@@ -288,3 +288,12 @@ def test_session_start_override_is_preserved_but_not_silently_applied_as_native_
     assert FeedSpec.from_any(restored).session_start_time == "12:00"
     with pytest.raises(NotImplementedError, match="session_start_time"):
         SessionAssigner(feed_spec=restored)
+
+
+def test_native_minute_completion_does_not_silently_ignore_general_grid_policies():
+    frame = provider_frame("hourly", continuous=True).filter(pl.col("timestamp").dt.hour() == 14)
+    feed = FeedSpec(
+        time_contract_version=2, bar_grid_anchor="session_open", partial_bar_policy="exclude"
+    )
+    with pytest.raises(NotImplementedError, match="bar-grid"):
+        SessionCompleter(feed_spec=feed).complete_sessions(frame)
