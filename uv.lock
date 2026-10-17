@@ -1375,6 +1375,7 @@ dependencies = [
     { name = "click" },
     { name = "filelock" },
     { name = "httpx" },
+    { name = "ml4t-specs" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -1519,6 +1520,7 @@ requires-dist = [
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'all'", specifier = ">=0.24.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
+    { name = "ml4t-specs", git = "https://github.com/ml4t/specs.git?rev=701bde68744035050ede386efce498234c661c21" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "oandapyv20", marker = "extra == 'all'", specifier = ">=0.7.0" },
     { name = "oandapyv20", marker = "extra == 'all-providers'", specifier = ">=0.7.0" },
@@ -1597,6 +1599,14 @@ test = [
     { name = "requests", specifier = ">=2.32.0" },
     { name = "ty" },
     { name = "xlsxwriter", specifier = ">=3.1.0" },
+]
+
+[[package]]
+name = "ml4t-specs"
+version = "0.1.5"
+source = { git = "https://github.com/ml4t/specs.git?rev=701bde68744035050ede386efce498234c661c21#701bde68744035050ede386efce498234c661c21" }
+dependencies = [
+    { name = "pyyaml" },
 ]
 
 [[package]]

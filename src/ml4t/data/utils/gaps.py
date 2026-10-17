@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
 import structlog
+
+from ml4t.data.sessions.assigner import SessionAssigner
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec, TimestampSemantics
 
 logger = structlog.get_logger()
 
@@ -69,6 +73,9 @@ class GapDetector:
         frequency: str = "daily",
         timestamp_col: str = "timestamp",
         is_crypto: bool = False,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> list[DataGap]:
         """
         Detect gaps in time series data.
@@ -78,10 +85,33 @@ class GapDetector:
             frequency: Data frequency (minute, hourly, daily, etc.)
             timestamp_col: Name of timestamp column
             is_crypto: If True, expect 24/7 data; if False, market hours only
+            calendar: Daily schedule override; None disables schedule-based detection.
+            feed_spec: Shared feed declaration, resolved before the NYSE default.
 
         Returns:
             List of detected gaps
         """
+        feed = FeedSpec.from_any(feed_spec)
+        # Preserve the old crypto hint only when the feed has no declaration.
+        if (
+            frequency.lower() in {"daily", "1day"}
+            and calendar is UNSET_CALENDAR
+            and is_crypto
+            and (
+                feed.calendar is UNSET_CALENDAR
+                or (feed.time_contract_version == 1 and feed.calendar is None)
+            )
+        ):
+            calendar = "24/7"
+        selected_calendar = feed.resolve_calendar(calendar=calendar)
+        if selected_calendar is None:
+            return []
+        if frequency.lower() in {"daily", "1day"}:
+            return self._detect_daily_gaps(df, timestamp_col, frequency, selected_calendar, feed)
+        if calendar is not UNSET_CALENDAR or feed_spec is not None:
+            raise NotImplementedError(
+                "calendar/feed declarations currently support daily gaps only"
+            )
         if df.is_empty() or len(df) < 2:
             return []
 
@@ -145,6 +175,50 @@ class GapDetector:
                 frequency=frequency,
             )
 
+        return gaps
+
+    def _detect_daily_gaps(
+        self,
+        df: pl.DataFrame,
+        timestamp_col: str,
+        frequency: str,
+        calendar: str,
+        feed: FeedSpec,
+    ) -> list[DataGap]:
+        assigner = SessionAssigner(calendar)
+        if timestamp_col not in df.columns:
+            raise ValueError(f"DataFrame must have '{timestamp_col}' column")
+        if df.is_empty():
+            return []
+        dtype = df.schema[timestamp_col]
+        if dtype != pl.Date and not isinstance(dtype, pl.Datetime):
+            raise TypeError(f"'{timestamp_col}' must contain Date or Datetime values")
+        if df[timestamp_col].null_count():
+            raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
+        if feed.timestamp_semantics not in (None, TimestampSemantics.SESSION_LABEL):
+            raise NotImplementedError("daily gap detection requires session_label timestamps")
+
+        timestamps = df.sort(timestamp_col)[timestamp_col].to_list()
+        labels = [value.date() if isinstance(value, datetime) else value for value in timestamps]
+        sessions = [
+            label.date()
+            for label in assigner.calendar.schedule(start_date=labels[0], end_date=labels[-1]).index
+        ]
+        gaps = []
+        for current, following, start, end in zip(timestamps, timestamps[1:], labels, labels[1:]):
+            missing = bisect_left(sessions, end) - bisect_right(sessions, start)
+            if missing > 0:
+                current = (
+                    current
+                    if isinstance(current, datetime)
+                    else datetime.combine(current, datetime.min.time())
+                )
+                following = (
+                    following
+                    if isinstance(following, datetime)
+                    else datetime.combine(following, datetime.min.time())
+                )
+                gaps.append(DataGap(current, following, missing, following - current, frequency))
         return gaps
 
     def _get_expected_interval(self, frequency: str, is_crypto: bool = False) -> timedelta:
