@@ -110,7 +110,8 @@ Omitted `frequency` inherits the feed declaration, otherwise defaults to daily. 
 frequency must agree with the declaration. Event-count bars and session-label timestamps
 cannot define an intraday grid.
 
-The grid starts at each authoritative tradable interval's open and restarts after lunch breaks.
+The grid starts at each authoritative tradable interval's open and restarts after lunch breaks
+and declared calendar interruptions. Zero-length breaks on shortened sessions remove no bars.
 `partial_bar_policy="include"` retains a shorter final bar; `"exclude"` omits it. Right labels name
 the bar's end, including the actual shortened close. Holidays, early closes, DST, overnight sessions
 and registered custom calendars use their selected schedule, not the observed rows. Off-grid

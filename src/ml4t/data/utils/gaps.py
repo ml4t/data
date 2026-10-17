@@ -267,8 +267,10 @@ class GapDetector:
                 left, right = row[start_column], row[end_column]
                 if pd.isna(left) and pd.isna(right):
                     continue
-                if pd.isna(left) or pd.isna(right) or left >= right:
+                if pd.isna(left) or pd.isna(right) or left > right:
                     raise ValueError("calendar returned invalid closure boundaries")
+                if left == right:
+                    continue
                 closures.append(
                     (left.to_pydatetime().astimezone(UTC), right.to_pydatetime().astimezone(UTC))
                 )
