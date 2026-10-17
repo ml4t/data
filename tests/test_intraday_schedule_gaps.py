@@ -250,3 +250,38 @@ def test_right_labeled_break_start_is_the_last_valid_morning_bar():
     assert (
         gaps(frame, declaration("HKEX", timestamp_semantics="bar_close", bar_label="right")) == []
     )
+
+
+def test_sub_microsecond_offset_cannot_be_truncated_into_a_valid_grid_label():
+    frame = (
+        provider_frame()
+        .head(2)
+        .with_columns(
+            pl.col("timestamp").cast(pl.Datetime("ns", "UTC")) + pl.duration(nanoseconds=1)
+        )
+    )
+    with pytest.raises(ValueError, match="off.grid"):
+        gaps(frame, declaration("24/7"))
+
+
+@pytest.mark.parametrize("policy,expected", [("include", 1), ("exclude", 0)])
+def test_right_labels_count_the_partial_shortened_close_at_its_actual_end(policy, expected):
+    frame = provider_frame("2025-07-03", "2025-07-07").filter(
+        (
+            (pl.col("timestamp").dt.date() == date(2025, 7, 3))
+            & (pl.col("timestamp").dt.hour() == 16)
+            & (pl.col("timestamp").dt.minute() == 30)
+        )
+        | (
+            (pl.col("timestamp").dt.date() == date(2025, 7, 7))
+            & (pl.col("timestamp").dt.hour() == 14)
+            & (pl.col("timestamp").dt.minute() == 30)
+        )
+    )
+    feed = declaration(
+        frequency="hourly",
+        timestamp_semantics="bar_close",
+        bar_label="right",
+        partial_bar_policy=policy,
+    )
+    assert sum(g.missing_periods for g in gaps(frame, feed)) == expected
