@@ -326,3 +326,9 @@ def test_documented_disk_inspection_reports_absences_without_changing_observatio
     assert sum(gap["size_bars"] for gap in namespace["report"]) == 1437
     assert storage.get_metadata(key) == before
     assert_frame_equal(storage.read(key).collect(), frame)
+    frame.write_parquet("./prices.parquet")
+    original_file = Path("./prices.parquet").read_bytes()
+    raw_code = section.split("```python\n", 2)[2].split("```", 1)[0]
+    exec(compile(raw_code, str(guide), "exec"), namespace)
+    assert sum(gap["size_bars"] for gap in namespace["report"]) == 1437
+    assert Path("./prices.parquet").read_bytes() == original_file

@@ -185,6 +185,26 @@ bars, wholly absent sessions and absent datasets. Breaks, maintenance, holidays,
 sessions and partial-bar policy follow the selected schedule. It shares the arithmetic expected grid
 with in-memory detection rather than constructing a second calendar or every absent row.
 
+Existing Parquet files do not need to be imported into a Data storage backend. Read the file with
+Polars and supply the same declaration and explicit coverage bounds:
+
+```python
+import polars as pl
+
+report = GapDetector(feed_spec=feed).detect_gaps(
+    pl.read_parquet("./prices.parquet"),
+    start_date=datetime(2026, 10, 16, 0, 0, tzinfo=UTC),
+    end_date=datetime(2026, 10, 16, 23, 59, tzinfo=UTC),
+)
+```
+
+Without explicit bounds, frame detection checks between the first and last stored timestamps.
+Explicit bounds also reveal missing boundary bars and wholly empty intervals. Use `timestamp_col`
+in the feed declaration when the file names its time column differently. A Boolean `is_imputed=True`
+marker identifies a known placeholder, which does not satisfy an expected observation. Zero volume
+alone does not identify a placeholder. Previously fabricated rows without a marker cannot be
+distinguished from real observations by timestamps alone.
+
 An intraday calendar alone is insufficient. Frequency, timestamp side, anchor and partial-bar policy
 must be declared, as in the example; contradictory or missing declarations fail clearly. Multi-asset
 datasets are compared separately by the declared `entity_col`, or `symbol` when present; their gap

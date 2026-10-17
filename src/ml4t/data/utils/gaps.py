@@ -60,11 +60,16 @@ class _IntradayGrid:
         interval: timedelta,
         right_labeled: bool,
         include_partial: bool,
+        *,
+        start: datetime,
+        end: datetime,
     ) -> None:
         self.intervals = intervals
         self.interval = interval
         self.right_labeled = right_labeled
         self.include_partial = include_partial
+        self.start = start
+        self.end = end
         self.boundaries = [row[1] if right_labeled else row[0] for row in intervals]
         self.offsets = [row[3] for row in intervals]
         self.size = intervals[-1][3] + intervals[-1][2] if intervals else 0
@@ -176,6 +181,7 @@ class GapDetector:
         selected_calendar = feed.resolve_calendar(calendar=calendar)
         if selected_calendar is None:
             return []
+        df = self._observed_rows(df)
         declared_interval = (
             self._intraday_interval(str(feed.data_frequency))
             if feed.data_frequency is not None
@@ -245,6 +251,14 @@ class GapDetector:
         return gaps
 
     @staticmethod
+    def _observed_rows(df: pl.DataFrame) -> pl.DataFrame:
+        if "is_imputed" not in df.columns:
+            return df
+        if df.schema["is_imputed"] != pl.Boolean:
+            raise TypeError("is_imputed must be a Boolean placeholder marker")
+        return df.filter(~pl.col("is_imputed").fill_null(False))
+
+    @staticmethod
     def _intraday_interval(frequency: str) -> timedelta | None:
         value = frequency.lower().strip().replace("hourly", "hour")
         match = re.fullmatch(r"(\d+)?(minutes?|min|m|hours?|h)", value)
@@ -292,23 +306,33 @@ class GapDetector:
             raise TypeError(f"'{timestamp_col}' must contain Datetime values for an intraday grid")
         if df[timestamp_col].null_count():
             raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
-        if (
-            dtype.time_unit == "ns"
-            and df.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
-        ):
-            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
         if dtype.time_zone is None and feed.timezone is None:
             raise ValueError("naive intraday timestamps require a declared timezone")
         expr = pl.col(timestamp_col)
         if dtype.time_zone is None:
             expr = expr.dt.replace_time_zone(feed.timezone)
-        observed = df.select(expr.dt.convert_time_zone("UTC")).to_series().unique().sort().to_list()
-        if not observed and (start is None or end is None):
+        columns = [expr.dt.convert_time_zone("UTC").alias(timestamp_col)]
+        if "is_imputed" in df.columns:
+            columns.append(pl.col("is_imputed"))
+        scoped = df.select(columns)
+        if start is not None:
+            scoped = scoped.filter(pl.col(timestamp_col) >= start)
+        if end is not None:
+            scoped = scoped.filter(pl.col(timestamp_col) <= end)
+        timestamps = scoped[timestamp_col].unique().sort().to_list()
+        if not timestamps and (start is None or end is None):
             return None, []
-        start = start if start is not None else observed[0]
-        end = end if end is not None else observed[-1]
+        start = start if start is not None else timestamps[0]
+        end = end if end is not None else timestamps[-1]
         if start > end:
             raise ValueError("start_date must not be after end_date")
+        actual = self._observed_rows(scoped)
+        if (
+            dtype.time_unit == "ns"
+            and actual.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
+        ):
+            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
+        observed = actual[timestamp_col].unique().sort().to_list()
         schedule = _schedule_for_instants(assigner.calendar, start, end, padding_days=2)
         grid_intervals: list[tuple[datetime, datetime, int, int]] = []
         total_bars = 0
@@ -330,6 +354,8 @@ class GapDetector:
                 interval,
                 feed.bar_label == BarLabel.RIGHT,
                 feed.partial_bar_policy == PartialBarPolicy.INCLUDE,
+                start=start,
+                end=end,
             ),
             observed,
         )
