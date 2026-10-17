@@ -100,7 +100,8 @@ row_only = CrossValidator(calendar=None).validate(spot)
 ```
 
 Calendar membership uses the same assignment as [native sessions](sessions.md), including DST,
-holidays, early closes, overnight dates, breaks and registered custom schedules. Daily session
+holidays, early closes, overnight dates, breaks and registered custom schedules. Nanosecond instants
+retain their precision in membership comparisons. Daily session
 labels are not wall-clock observations; explicit event or close semantics override the daily-label
 heuristic. Invalid calendars and incompatible temporal declarations fail clearly. Reported sample
 indices refer to the original input positions. `calendar=None` disables temporal checks without

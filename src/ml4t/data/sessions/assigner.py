@@ -317,11 +317,23 @@ class SessionAssigner:
                 timestamp_expr = timestamp_expr.dt.replace_time_zone(
                     self.feed_spec.timezone or "UTC"
                 )
-            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
-                pl.Datetime("us", "UTC")
+            comparison_unit = (
+                "ns"
+                if isinstance(timestamp_dtype, pl.Datetime) and timestamp_dtype.time_unit == "ns"
+                else "us"
             )
+            comparison_dtype = pl.Datetime(comparison_unit, "UTC")
+            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(comparison_dtype)
 
-            session_df = pl.DataFrame(session_map).sort("_calendar_session_end")
+            session_df = (
+                pl.DataFrame(session_map)
+                .with_columns(
+                    pl.col("_calendar_session_start", "_calendar_session_end").cast(
+                        comparison_dtype
+                    )
+                )
+                .sort("_calendar_session_end")
+            )
             daily_labels = _uses_session_labels(df, self.feed_spec, bar_frequency)
             if daily_labels:
                 label_expr = pl.col("timestamp")
@@ -368,7 +380,7 @@ class SessionAssigner:
                 .with_columns(timestamp_expr.alias("_session_timestamp"))
                 .with_columns(
                     pl.col("_session_timestamp")
-                    .fill_null(pl.lit(after_last_session))
+                    .fill_null(pl.lit(after_last_session, dtype=comparison_dtype))
                     .alias("_session_join_timestamp")
                 )
                 .sort("_session_join_timestamp")

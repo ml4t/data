@@ -10,6 +10,7 @@ from ml4t.data import DataManager
 from ml4t.data.assets import AssetClass, AssetInfo, AssetValidator
 from ml4t.data.calendar.crypto import CryptoCalendar, CryptoSessionValidator
 from ml4t.data.providers import SyntheticProvider
+from ml4t.data.sessions import SessionAssigner
 from ml4t.data.storage.config import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
@@ -238,3 +239,42 @@ def test_crypto_continuity_preserves_supported_daily_frequency_aliases(frequency
         frame = provider.fetch_ohlcv("BTCUSD", "2025-07-11", "2025-07-14", "daily")
     observed = frame.filter(pl.col("timestamp").dt.weekday() <= 5)
     assert len(CryptoSessionValidator("24/7").validate_continuity(observed, frequency)) == 1
+
+
+@pytest.mark.parametrize("calendar,last_minute", [("NYSE", "19:59"), ("HKEX", "03:59")])
+@pytest.mark.parametrize("offset_ns", [-1, 0, 1])
+def test_nanosecond_close_labels_respect_exact_session_and_break_boundaries(
+    calendar, last_minute, offset_ns
+):
+    frame = minute_observation("2025-07-07", last_minute).with_columns(
+        pl.col("timestamp").cast(pl.Datetime("ns", "UTC"))
+        + pl.duration(minutes=1, nanoseconds=offset_ns)
+    )
+    before = frame.clone()
+    feed = FeedSpec(calendar=calendar, timestamp_semantics="bar_close")
+    assigner = SessionAssigner(feed_spec=feed)
+    assigned = assigner.assign_sessions(frame, bar_frequency="intraday")
+    assert assigned["session_date"].to_list() == ([None] if offset_ns > 0 else [date(2025, 7, 7)])
+    report = CrossValidator(feed_spec=feed).validate(frame, frequency="minute")
+    assert bool(temporal_issues(report)) == (offset_ns > 0)
+    if offset_ns > 0:
+        with pytest.raises(ValueError, match="outside a trading session"):
+            assigner.assign_sessions(frame, bar_frequency="intraday", outside_session="raise")
+        assert assigner.assign_sessions(
+            frame, bar_frequency="intraday", outside_session="drop"
+        ).is_empty()
+    assert_frame_equal(frame, before)
+
+
+def test_nullable_nanosecond_instants_keep_original_precision_and_null_policy():
+    frame = minute_observation("2025-07-07", "13:30").with_columns(
+        pl.col("timestamp").cast(pl.Datetime("ns", "UTC")) + pl.duration(nanoseconds=1)
+    )
+    missing = frame.with_columns(pl.lit(None, dtype=pl.Datetime("ns", "UTC")).alias("timestamp"))
+    observed = pl.concat([frame, missing])
+    before = observed.clone()
+    assigned = SessionAssigner(
+        feed_spec=FeedSpec(timestamp_semantics="event_time")
+    ).assign_sessions(observed)
+    assert assigned["session_date"].to_list() == [date(2025, 7, 7), None]
+    assert_frame_equal(assigned.select(observed.columns), before)
