@@ -52,6 +52,20 @@ def _session_intervals(row: Any) -> list[tuple[datetime, datetime]]:
     return intervals
 
 
+def _schedule_for_instants(calendar: Any, start: Any, end: Any, *, padding_days: int = 1) -> Any:
+    import pandas as pd
+
+    from ml4t.data.sessions._cme_crypto import CMEGlobexCryptoSchedule
+
+    if isinstance(calendar, CMEGlobexCryptoSchedule):
+        return calendar.schedule_for_instants(start, end)
+    return calendar.schedule(
+        start_date=pd.Timestamp(start).normalize() - pd.Timedelta(days=padding_days),
+        end_date=pd.Timestamp(end).normalize() + pd.Timedelta(days=padding_days),
+        interruptions=True,
+    )
+
+
 # Exchange to calendar mapping
 EXCHANGE_CALENDARS = {
     "CME": "CME Globex Crypto",
@@ -127,8 +141,7 @@ class SessionAssigner:
     Uses pandas_market_calendars to determine trading sessions and assigns
     a session_date column to each timestamp.
 
-    For CME futures, sessions start at 5pm CT Sunday and end at 4pm CT Friday.
-    The session_date is the date when the session ENDS (4pm date).
+    CME crypto uses business trade dates across overnight and weekend trading.
     """
 
     def __init__(
@@ -184,6 +197,16 @@ class SessionAssigner:
 
         try:
             self.calendar = mcal.get_calendar(self.calendar_name)
+            from pandas_market_calendars.calendars.cme_globex_crypto import (
+                CMEGlobexCryptoExchangeCalendar,
+            )
+
+            if type(self.calendar) is CMEGlobexCryptoExchangeCalendar:
+                from ml4t.data.sessions._cme_crypto import CMEGlobexCryptoSchedule
+
+                self.calendar = CMEGlobexCryptoSchedule(
+                    self.calendar, mcal.get_calendar("CME_TradeDate")
+                )
         except Exception as e:
             raise ValueError(f"Unknown calendar '{self.calendar_name}': {e}")
 
@@ -281,11 +304,7 @@ class SessionAssigner:
                 end_timestamp, pd.Timestamp
             ):
                 raise ValueError("start_date and end_date must not be NaT")
-            start_pd = start_timestamp.normalize() - pd.Timedelta(days=1)
-            end_pd = end_timestamp.normalize() + pd.Timedelta(days=1)
-            schedule = self.calendar.schedule(
-                start_date=start_pd, end_date=end_pd, interruptions=True
-            )
+            schedule = _schedule_for_instants(self.calendar, start_timestamp, end_timestamp)
             logger.debug(f"Got {len(schedule)} sessions from calendar")
 
             session_map = []
