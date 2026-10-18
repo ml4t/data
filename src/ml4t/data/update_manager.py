@@ -605,6 +605,9 @@ class IncrementalUpdater:
         key: str,
         requested_start: datetime,
         requested_end: datetime,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> tuple[datetime, datetime, str]:
         """
         Determine the actual range to update based on existing data.
@@ -620,42 +623,42 @@ class IncrementalUpdater:
         """
         requested_start = _ensure_datetime(requested_start)
         requested_end = _ensure_datetime(requested_end)
+        if requested_start > requested_end:
+            raise ValueError("requested_start must not be after requested_end")
         try:
             # Check if data exists
             if not storage.exists(key):
                 return requested_start, requested_end, "full"
 
             # Get existing data range
-            df = storage.read(key).select("timestamp").collect()
-
-            if df.is_empty():
-                return requested_start, requested_end, "full"
-
-            last_timestamp = _ensure_datetime(df["timestamp"].max())
-            # If requested end is before last data, no update needed
-            if requested_end <= last_timestamp:
-                logger.info(
-                    f"Data for {key} already up to date",
-                    last_timestamp=last_timestamp,
-                    requested_end=requested_end,
-                )
-                return requested_end, requested_end, "none"
-
-            # Incremental update from day after last data
-            actual_start = last_timestamp + timedelta(days=1)
-
-            logger.info(
-                f"Incremental update for {key}",
-                last_data=last_timestamp,
-                update_from=actual_start,
-                update_to=requested_end,
-            )
-
-            return actual_start, requested_end, "incremental"
-
+            df = storage.read(key).collect()
+            metadata = normalize_storage_metadata(storage.get_metadata(key), key)
         except Exception as e:
             logger.warning(f"Error checking existing data: {e}")
             return requested_start, requested_end, "full"
+
+        observed = ObservationGapDetector._observed_rows(df)
+        if observed.is_empty():
+            return requested_start, requested_end, "full"
+        feed, selected = self.gap_detector._feed_calendar(
+            calendar, metadata if feed_spec is None else feed_spec
+        )
+        frequency = feed.data_frequency or "daily"
+        if selected is not None and frequency.lower() in {"daily", "1d", "1day"}:
+            observed = self.gap_detector._label_frame(observed, feed, selected)
+        last_timestamp = _ensure_datetime(observed["timestamp"].max())
+        if requested_end <= last_timestamp:
+            return requested_end, requested_end, "none"
+        lower = max(last_timestamp, requested_start)
+        if selected is None:
+            # Without a schedule, overlap the last real row rather than invent a next bar.
+            return lower, requested_end, "incremental"
+        gaps = self.gap_detector.detect_gaps_in_storage(
+            storage, key, lower, requested_end, calendar=selected, feed_spec=feed
+        )
+        if not gaps:
+            return requested_end, requested_end, "none"
+        return min(gap["start"] for gap in gaps), requested_end, "incremental"
 
     def update_incremental(
         self,

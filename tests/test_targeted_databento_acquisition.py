@@ -445,7 +445,10 @@ def test_history_write_failure_still_reports_the_observations_actually_published
     tracker._get_metadata_path("BTC.c.0").mkdir()
     result = BackfillManager(storage, tracker).execute_backfill("BTC.c.0", report, provider)
     assert not result.success
-    assert any("directory" in error.lower() for error in result.errors)
+    assert any(
+        error.startswith("Observations stored but update history failed:")
+        for error in result.errors
+    )
     assert result.rows_added == 1
     assert result.rows_after == 3
     assert result.remaining_gaps == []

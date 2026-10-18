@@ -63,6 +63,13 @@ compatible aliases for disabling checks. Configurations should use `check_gaps` 
 The updater records whether checking ran and the detected missing-observation count; disabled
 checks are not reported as proof of zero gaps. Source-history limits do not suppress detection.
 
+For an incremental tail, `IncrementalUpdater.determine_update_range()` uses the stored feed and
+the same bounded calendar report to select the first missing scheduled observation after the
+latest real row. It does not advance minute data by a day or request an exchange closure. Its
+keyword-only `calendar` and `feed_spec` arguments override stored declarations. With an explicitly
+disabled calendar, it overlaps the latest real row rather than guessing the next timestamp.
+Use the bounded report below for older interior gaps, not the incremental tail planner.
+
 ### Inspect Daily Gaps Without Filling
 
 ```python

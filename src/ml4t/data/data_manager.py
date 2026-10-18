@@ -547,10 +547,21 @@ class DataManager:
         if self._storage_manager:
             self._storage_manager._report_progress(message, progress)
 
-    def _validate_data(self, df: pl.DataFrame, symbol: str, asset_class: str = "equity") -> Any:
+    def _validate_data(
+        self,
+        df: pl.DataFrame,
+        symbol: str,
+        asset_class: str = "equity",
+        *,
+        frequency: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+    ) -> Any:
         """Validate data (backward compatibility)."""
         if self._storage_manager:
-            return self._storage_manager._validate_data(df, symbol, asset_class)
+            return self._storage_manager._validate_data(
+                df, symbol, asset_class, frequency=frequency, calendar=calendar, feed_spec=feed_spec
+            )
         return None
 
     def _merge_data(self, existing: pl.DataFrame, new: pl.DataFrame) -> pl.DataFrame:

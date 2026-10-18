@@ -80,6 +80,22 @@ EXCHANGE_CALENDARS = {
 }
 
 
+def _uses_session_labels(df: pl.DataFrame, feed: FeedSpec, bar_frequency: str) -> bool:
+    if feed.timestamp_semantics is not None:
+        return feed.timestamp_semantics == TimestampSemantics.SESSION_LABEL
+    if feed.bar_label is not None:
+        return False
+    if df.schema["timestamp"] == pl.Date:
+        return True
+    timestamps = df["timestamp"].drop_nulls().to_list()
+    inferred_daily = bool(timestamps) and all(
+        value.hour == value.minute == value.second == value.microsecond == 0
+        for value in timestamps
+        if isinstance(value, datetime)
+    )
+    return bar_frequency == "daily" or (bar_frequency == "auto" and inferred_daily)
+
+
 def _daily_session_labels(
     df: pl.DataFrame, assigner: SessionAssigner, timestamp_col: str = "timestamp"
 ) -> pl.Series:
@@ -320,24 +336,24 @@ class SessionAssigner:
                 timestamp_expr = timestamp_expr.dt.replace_time_zone(
                     self.feed_spec.timezone or "UTC"
                 )
-            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(
-                pl.Datetime("us", "UTC")
+            comparison_unit = (
+                "ns"
+                if isinstance(timestamp_dtype, pl.Datetime) and timestamp_dtype.time_unit == "ns"
+                else "us"
             )
+            comparison_dtype = pl.Datetime(comparison_unit, "UTC")
+            timestamp_expr = timestamp_expr.dt.convert_time_zone("UTC").cast(comparison_dtype)
 
-            session_df = pl.DataFrame(session_map).sort("_calendar_session_end")
-            non_null_timestamps = df.get_column("timestamp").drop_nulls().to_list()
-            inferred_daily = bool(non_null_timestamps) and all(
-                value.hour == value.minute == value.second == value.microsecond == 0
-                for value in non_null_timestamps
-                if isinstance(value, datetime)
+            session_df = (
+                pl.DataFrame(session_map)
+                .with_columns(
+                    pl.col("_calendar_session_start", "_calendar_session_end").cast(
+                        comparison_dtype
+                    )
+                )
+                .sort("_calendar_session_end")
             )
-            daily_labels = bar_frequency == "daily" or (bar_frequency == "auto" and inferred_daily)
-            if semantics is not None:
-                daily_labels = semantics == TimestampSemantics.SESSION_LABEL
-            elif self.feed_spec.bar_label is not None:
-                daily_labels = False
-            elif timestamp_dtype == pl.Date:
-                daily_labels = True
+            daily_labels = _uses_session_labels(df, self.feed_spec, bar_frequency)
             if daily_labels:
                 label_expr = pl.col("timestamp")
                 if (
@@ -383,7 +399,7 @@ class SessionAssigner:
                 .with_columns(timestamp_expr.alias("_session_timestamp"))
                 .with_columns(
                     pl.col("_session_timestamp")
-                    .fill_null(pl.lit(after_last_session))
+                    .fill_null(pl.lit(after_last_session, dtype=comparison_dtype))
                     .alias("_session_join_timestamp")
                 )
                 .sort("_session_join_timestamp")

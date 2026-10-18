@@ -4,13 +4,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import structlog
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from ml4t.data.assets.asset_class import AssetClass
 from ml4t.data.validation.ohlcv import NegativePricePolicy
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -47,11 +56,43 @@ class ValidationRuleConfig(BaseModel):
     check_volume_spikes: bool = Field(default=True, description="Check for volume spikes")
     check_weekend_trading: bool = Field(default=True, description="Check for weekend trading")
     check_market_hours: bool = Field(default=True, description="Check market hours")
+    calendar: str | None | CalendarUnset = UNSET_CALENDAR
+    time_contract_version: int = 2
 
     # Asset class specific
     asset_class: AssetClass = Field(default=AssetClass.EQUITY, description="Asset class")
 
     model_config = ConfigDict(use_enum_values=True, extra="forbid")
+
+    @field_validator("calendar", mode="wrap")
+    @classmethod
+    def preserve_calendar_presence(cls, value: Any, handler: Any) -> Any:
+        return value if value is UNSET_CALENDAR else handler(value)
+
+    @field_validator("time_contract_version", mode="before")
+    @classmethod
+    def validate_time_contract_version(cls, value: Any) -> int:
+        return FeedSpec(time_contract_version=value).time_contract_version
+
+    @model_validator(mode="after")
+    def normalize_calendar(self) -> ValidationRuleConfig:
+        declaration = FeedSpec(
+            calendar=self.calendar, time_contract_version=self.time_contract_version
+        )
+        object.__setattr__(self, "calendar", declaration.calendar)
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_calendar(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        declaration = FeedSpec(
+            calendar=self.calendar, time_contract_version=self.time_contract_version
+        ).to_dict()
+        if "calendar" in declaration and "calendar" in data:
+            data["calendar"] = declaration["calendar"]
+        else:
+            data.pop("calendar", None)
+        return data
 
 
 @dataclass
@@ -152,8 +193,8 @@ class ValidationRulePresets:
         """Cryptocurrency validation rules."""
         return ValidationRuleConfig(
             asset_class=AssetClass.CRYPTO,
-            check_weekend_trading=False,  # Crypto trades 24/7
-            check_market_hours=False,  # No market hours for crypto
+            check_weekend_trading=True,
+            check_market_hours=True,
             max_return_threshold=0.5,  # 50% - crypto is volatile
             staleness_threshold=3,  # Less staleness tolerance
             volume_spike_threshold=20.0,  # Higher spike threshold
@@ -166,7 +207,7 @@ class ValidationRulePresets:
         return ValidationRuleConfig(
             asset_class=AssetClass.FOREX,
             check_weekend_trading=True,  # Limited weekend trading
-            check_market_hours=False,  # 24/5 market
+            check_market_hours=True,
             max_return_threshold=0.1,  # 10% - forex is less volatile
             staleness_threshold=10,
             volume_spike_threshold=5.0,

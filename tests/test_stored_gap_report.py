@@ -11,7 +11,7 @@ from ml4t.data.providers import SyntheticProvider
 from ml4t.data.storage.config import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
-from ml4t.data.update_manager import GapDetector
+from ml4t.data.update_manager import GapDetector, IncrementalUpdater
 from ml4t.specs import FeedSpec
 
 
@@ -332,3 +332,78 @@ def test_documented_disk_inspection_reports_absences_without_changing_observatio
     exec(compile(raw_code, str(guide), "exec"), namespace)
     assert sum(gap["size_bars"] for gap in namespace["report"]) == 1437
     assert Path("./prices.parquet").read_bytes() == original_file
+
+
+@pytest.mark.parametrize(
+    "calendar,day,clock,end,expected",
+    [
+        ("24/7", "2026-09-05", "12:00", "2026-09-05T12:02", "2026-09-05T12:01"),
+        ("CME Globex Crypto", "2026-09-05", "12:00", "2026-09-05T12:02", "2026-09-05T12:01"),
+        ("NYSE", "2025-07-11", "19:59", "2025-07-14T13:31", "2025-07-14T13:30"),
+        ("NYSE", "2025-07-03", "16:59", "2025-07-07T13:31", "2025-07-07T13:30"),
+        ("NYSE", "2025-07-11", "19:59", "2025-07-13T20:00", None),
+    ],
+)
+def test_incremental_range_starts_at_next_scheduled_bar_not_a_day_later(
+    storage, calendar, day, clock, end, expected
+):
+    frame = rows(day, day, [clock])
+    storage.write(frame, "SPY", declaration(calendar).to_dict())
+    before = storage.get_metadata("SPY")
+    end = datetime.fromisoformat(end + ":00+00:00")
+    expected = datetime.fromisoformat(expected + ":00+00:00") if expected else end
+    actual = IncrementalUpdater().determine_update_range(storage, "SPY", instant(day, clock), end)
+    assert actual == (expected, end, "none" if expected == end else "incremental")
+    assert storage.get_metadata("SPY") == before
+    assert_frame_equal(storage.read("SPY").collect(), frame)
+
+
+def test_incremental_disabled_calendar_keeps_row_mode_without_skipping_a_day(storage):
+    frame = rows("2026-09-05", "2026-09-05", ["12:00"])
+    storage.write(frame, "SPY", declaration(None).to_dict())
+    start = instant("2026-09-05", "12:00")
+    end = instant("2026-09-05", "12:02")
+    assert IncrementalUpdater().determine_update_range(storage, "SPY", start, end) == (
+        start,
+        end,
+        "incremental",
+    )
+
+
+@pytest.mark.parametrize("calendar,expected_day", [("NYSE", "2025-07-14"), ("24/7", "2025-07-12")])
+def test_incremental_daily_labels_inherit_the_stored_calendar(storage, calendar, expected_day):
+    frame = rows("2025-07-11", "2025-07-11", ["00:00"], "daily")
+    storage.write(
+        frame,
+        "SPY",
+        FeedSpec(
+            time_contract_version=2,
+            calendar=calendar,
+            data_frequency="daily",
+            timestamp_semantics="session_label",
+        ).to_dict(),
+    )
+    end = instant("2025-07-14", "00:00")
+    assert IncrementalUpdater().determine_update_range(
+        storage, "SPY", instant("2025-07-11", "00:00"), end
+    ) == (instant(expected_day, "00:00"), end, "incremental")
+
+
+def test_incremental_explicit_calendar_overrides_stored_schedule(storage):
+    frame = rows("2026-09-05", "2026-09-05", ["12:00"])
+    storage.write(frame, "SPY", declaration("NYSE").to_dict())
+    start = instant("2026-09-05", "12:00")
+    end = instant("2026-09-05", "12:02")
+    updater = IncrementalUpdater()
+    assert updater.determine_update_range(storage, "SPY", start, end, calendar="24/7") == (
+        instant("2026-09-05", "12:01"),
+        end,
+        "incremental",
+    )
+    assert updater.determine_update_range(storage, "SPY", start, end, calendar=None) == (
+        start,
+        end,
+        "incremental",
+    )
+    with pytest.raises(ValueError, match="requested_start"):
+        updater.determine_update_range(storage, "SPY", end, start)
