@@ -729,7 +729,16 @@ class TestUpdateStrategyBehavior:
                     "value": range(existing_days),
                 }
             )
-            storage.write(df_existing, "test")
+            storage.write(
+                df_existing,
+                "test",
+                {
+                    "calendar": "24/7",
+                    "time_contract_version": 2,
+                    "data_frequency": "daily",
+                    "timestamp_semantics": "session_label",
+                },
+            )
 
             # Determine update range for full year request
             start, end, update_type = updater.determine_update_range(
