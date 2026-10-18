@@ -410,7 +410,7 @@ class TestValidationRules:
         assert equity_rules.max_return_threshold == 0.2
 
         crypto_rules = ValidationRulePresets.crypto_rules()
-        assert not crypto_rules.check_weekend_trading
+        assert crypto_rules.check_weekend_trading
         assert crypto_rules.max_return_threshold == 0.5
 
         strict_rules = ValidationRulePresets.strict_rules()

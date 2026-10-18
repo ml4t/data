@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -51,6 +51,66 @@ class DataGap:
             f"Gap: {self.start.isoformat()} to {self.end.isoformat()} "
             f"({self.missing_periods} periods, {duration_str})"
         )
+
+
+class _IntradayGrid:
+    def __init__(
+        self,
+        intervals: list[tuple[datetime, datetime, int, int]],
+        interval: timedelta,
+        right_labeled: bool,
+        include_partial: bool,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> None:
+        self.intervals = intervals
+        self.interval = interval
+        self.right_labeled = right_labeled
+        self.include_partial = include_partial
+        self.start = start
+        self.end = end
+        self.boundaries = [row[1] if right_labeled else row[0] for row in intervals]
+        self.offsets = [row[3] for row in intervals]
+        self.size = intervals[-1][3] + intervals[-1][2] if intervals else 0
+
+    def position(self, timestamp: datetime) -> int:
+        index = (
+            bisect_left(self.boundaries, timestamp)
+            if self.right_labeled
+            else bisect_right(self.boundaries, timestamp) - 1
+        )
+        if index < 0 or index >= len(self.intervals):
+            raise ValueError("intraday observations contain off-grid timestamps")
+        opening, closing, count, offset = self.intervals[index]
+        if self.right_labeled and timestamp == closing:
+            if (closing - opening) % self.interval == timedelta(0) or self.include_partial:
+                return offset + count - 1
+            raise ValueError("intraday observations contain off-grid partial-close timestamps")
+        position, remainder = divmod(timestamp - opening, self.interval)
+        if self.right_labeled:
+            position -= 1
+        if remainder or timestamp < opening or timestamp >= closing or not 0 <= position < count:
+            raise ValueError("intraday observations contain off-grid timestamps")
+        return offset + position
+
+    def timestamp(self, position: int) -> datetime:
+        if not 0 <= position < self.size:
+            raise IndexError("bar position outside the expected grid")
+        opening, closing, _, offset = self.intervals[bisect_right(self.offsets, position) - 1]
+        timestamp = opening + (position - offset + int(self.right_labeled)) * self.interval
+        return min(timestamp, closing) if self.right_labeled else timestamp
+
+    def bound(self, timestamp: datetime, *, inclusive: bool = False) -> int:
+        left, right = 0, self.size
+        while left < right:
+            middle = (left + right) // 2
+            candidate = self.timestamp(middle)
+            if candidate < timestamp or (inclusive and candidate == timestamp):
+                left = middle + 1
+            else:
+                right = middle
+        return left
 
 
 class GapDetector:
@@ -121,6 +181,7 @@ class GapDetector:
         selected_calendar = feed.resolve_calendar(calendar=calendar)
         if selected_calendar is None:
             return []
+        df = self._observed_rows(df)
         declared_interval = (
             self._intraday_interval(str(feed.data_frequency))
             if feed.data_frequency is not None
@@ -190,6 +251,14 @@ class GapDetector:
         return gaps
 
     @staticmethod
+    def _observed_rows(df: pl.DataFrame) -> pl.DataFrame:
+        if "is_imputed" not in df.columns:
+            return df
+        if df.schema["is_imputed"] != pl.Boolean:
+            raise TypeError("is_imputed must be a Boolean placeholder marker")
+        return df.filter(~pl.col("is_imputed").fill_null(False))
+
+    @staticmethod
     def _intraday_interval(frequency: str) -> timedelta | None:
         value = frequency.lower().strip().replace("hourly", "hour")
         match = re.fullmatch(r"(\d+)?(minutes?|min|m|hours?|h)", value)
@@ -200,14 +269,17 @@ class GapDetector:
             raise ValueError("bar frequency must be positive")
         return timedelta(hours=count) if match[2].startswith("h") else timedelta(minutes=count)
 
-    def _detect_intraday_gaps(
+    def _intraday_grid(
         self,
         df: pl.DataFrame,
         timestamp_col: str,
         frequency: str,
         calendar: str,
         feed: FeedSpec,
-    ) -> list[DataGap]:
+        *,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> tuple[_IntradayGrid | None, list[datetime]]:
         interval = self._intraday_interval(frequency)
         if interval is None:
             raise ValueError("unsupported intraday bar frequency")
@@ -234,20 +306,33 @@ class GapDetector:
             raise TypeError(f"'{timestamp_col}' must contain Datetime values for an intraday grid")
         if df[timestamp_col].null_count():
             raise ValueError(f"'{timestamp_col}' must not contain null timestamps")
-        if (
-            dtype.time_unit == "ns"
-            and df.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
-        ):
-            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
         if dtype.time_zone is None and feed.timezone is None:
             raise ValueError("naive intraday timestamps require a declared timezone")
-        if df.is_empty():
-            return []
         expr = pl.col(timestamp_col)
         if dtype.time_zone is None:
             expr = expr.dt.replace_time_zone(feed.timezone)
-        observed = df.select(expr.dt.convert_time_zone("UTC")).to_series().unique().sort().to_list()
-        start, end = observed[0], observed[-1]
+        columns = [expr.dt.convert_time_zone("UTC").alias(timestamp_col)]
+        if "is_imputed" in df.columns:
+            columns.append(pl.col("is_imputed"))
+        scoped = df.select(columns)
+        if start is not None:
+            scoped = scoped.filter(pl.col(timestamp_col) >= start)
+        if end is not None:
+            scoped = scoped.filter(pl.col(timestamp_col) <= end)
+        timestamps = scoped[timestamp_col].unique().sort().to_list()
+        if not timestamps and (start is None or end is None):
+            return None, []
+        start = start if start is not None else timestamps[0]
+        end = end if end is not None else timestamps[-1]
+        if start > end:
+            raise ValueError("start_date must not be after end_date")
+        actual = self._observed_rows(scoped)
+        if (
+            dtype.time_unit == "ns"
+            and actual.select((pl.col(timestamp_col).dt.nanosecond() % 1000 != 0).any()).item()
+        ):
+            raise ValueError("intraday observations contain off-grid sub-microsecond timestamps")
+        observed = actual[timestamp_col].unique().sort().to_list()
         schedule = _schedule_for_instants(assigner.calendar, start, end, padding_days=2)
         grid_intervals: list[tuple[datetime, datetime, int, int]] = []
         total_bars = 0
@@ -263,37 +348,30 @@ class GapDetector:
                     raise ValueError("calendar returned overlapping tradable intervals")
                 grid_intervals.append((opening, closing, count, total_bars))
                 total_bars += count
-        right_labeled = feed.bar_label == BarLabel.RIGHT
-        boundaries = [row[1] if right_labeled else row[0] for row in grid_intervals]
+        return (
+            _IntradayGrid(
+                grid_intervals,
+                interval,
+                feed.bar_label == BarLabel.RIGHT,
+                feed.partial_bar_policy == PartialBarPolicy.INCLUDE,
+                start=start,
+                end=end,
+            ),
+            observed,
+        )
 
-        def bar_index(timestamp: datetime) -> int:
-            index = (
-                bisect_left(boundaries, timestamp)
-                if right_labeled
-                else bisect_right(boundaries, timestamp) - 1
-            )
-            if index < 0 or index >= len(grid_intervals):
-                raise ValueError("intraday observations contain off-grid timestamps")
-            opening, closing, count, offset = grid_intervals[index]
-            if right_labeled and timestamp == closing:
-                if (closing - opening) % interval == timedelta(0) or (
-                    feed.partial_bar_policy == PartialBarPolicy.INCLUDE
-                ):
-                    return offset + count - 1
-                raise ValueError("intraday observations contain off-grid partial-close timestamps")
-            position, remainder = divmod(timestamp - opening, interval)
-            if right_labeled:
-                position -= 1
-            if (
-                remainder
-                or timestamp < opening
-                or timestamp >= closing
-                or not 0 <= position < count
-            ):
-                raise ValueError("intraday observations contain off-grid timestamps")
-            return offset + position
-
-        positions = [bar_index(timestamp) for timestamp in observed]
+    def _detect_intraday_gaps(
+        self,
+        df: pl.DataFrame,
+        timestamp_col: str,
+        frequency: str,
+        calendar: str,
+        feed: FeedSpec,
+    ) -> list[DataGap]:
+        grid, observed = self._intraday_grid(df, timestamp_col, frequency, calendar, feed)
+        if grid is None:
+            return []
+        positions = [grid.position(timestamp) for timestamp in observed]
         gaps = []
         for current, following, left_index, right_index in zip(
             observed, observed[1:], positions, positions[1:]
@@ -401,74 +479,14 @@ class GapDetector:
         self,
         df: pl.DataFrame,
         gaps: list[DataGap],
-        method: str = "forward",
+        method: str = "none",
         timestamp_col: str = "timestamp",
     ) -> pl.DataFrame:
-        """
-        Fill detected gaps in data.
-
-        Args:
-            df: DataFrame with gaps
-            gaps: List of detected gaps
-            method: Fill method ('forward', 'backward', 'interpolate', 'zero')
-            timestamp_col: Name of timestamp column
-
-        Returns:
-            DataFrame with gaps filled
-        """
+        """Reject synthetic market values; an empty gap list remains a no-op."""
         if not gaps:
             return df
-
-        logger.info(
-            f"Filling {len(gaps)} gaps using {method} method",
-            total_periods=sum(g.missing_periods for g in gaps),
+        raise ValueError(
+            f"Synthetic gap imputation ({method!r}, {timestamp_col!r}) is unsupported; "
+            "inspect missing observations "
+            "and download available source data instead"
         )
-
-        # Create a complete time index
-        min_ts = df[timestamp_col].min()
-        max_ts = df[timestamp_col].max()
-        if not isinstance(min_ts, date) or not isinstance(max_ts, date):
-            raise TypeError(f"'{timestamp_col}' must contain non-null Date or Datetime values")
-
-        if gaps:
-            frequency = gaps[0].frequency
-            interval = self._get_expected_interval(frequency)
-
-            # Generate complete timestamp range
-            complete_timestamps = []
-            current = min_ts
-            while current <= max_ts:
-                complete_timestamps.append(current)
-                current = current + interval
-
-            # Create DataFrame with complete timestamps
-            complete_df = pl.DataFrame({timestamp_col: complete_timestamps})
-
-            # Cast to match original datetime precision to avoid join errors
-            original_dtype = df[timestamp_col].dtype
-            complete_df = complete_df.with_columns(pl.col(timestamp_col).cast(original_dtype))
-
-            # Join with original data
-            filled_df = complete_df.join(df, on=timestamp_col, how="left")
-
-            # Fill missing values based on method
-            if method == "forward":
-                filled_df = filled_df.fill_null(strategy="forward")
-            elif method == "backward":
-                filled_df = filled_df.fill_null(strategy="backward")
-            elif method == "interpolate":
-                # Interpolate numeric columns
-                numeric_cols = [
-                    col
-                    for col in filled_df.columns
-                    if col != timestamp_col
-                    and filled_df[col].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]
-                ]
-                for col in numeric_cols:
-                    filled_df = filled_df.with_columns(pl.col(col).interpolate())
-            elif method == "zero":
-                filled_df = filled_df.fill_null(0)
-
-            return filled_df
-
-        return df

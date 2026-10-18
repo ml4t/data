@@ -600,6 +600,7 @@ class TestBackfillManager:
 
             # Mock data provider
             mock_provider = MagicMock()
+            mock_provider.name = "mock"
             gap_data = pl.DataFrame(
                 {
                     "timestamp": pl.date_range(
@@ -642,7 +643,7 @@ class TestBackfillManager:
                 provider=mock_provider,
             )
 
-            assert result.success is True
+            assert result.success is True, result.errors
             assert result.gaps_filled == 1
             assert result.rows_added == 2  # Only 2 weekdays in Jan 6-9 gap
 
@@ -728,7 +729,16 @@ class TestUpdateStrategyBehavior:
                     "value": range(existing_days),
                 }
             )
-            storage.write(df_existing, "test")
+            storage.write(
+                df_existing,
+                "test",
+                {
+                    "calendar": "24/7",
+                    "time_contract_version": 2,
+                    "data_frequency": "daily",
+                    "timestamp_semantics": "session_label",
+                },
+            )
 
             # Determine update range for full year request
             start, end, update_type = updater.determine_update_range(

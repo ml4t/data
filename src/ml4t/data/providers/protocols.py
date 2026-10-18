@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import polars as pl
 
 
@@ -102,6 +104,21 @@ class OHLCVProvider(Protocol):
 
     def capabilities(self) -> ProviderCapabilities:
         """Return provider capabilities."""
+        ...
+
+
+@runtime_checkable
+class TimestampRangeProvider(Protocol):
+    """Optional single-series OHLCV capability with half-open aware timestamp bounds."""
+
+    def fetch_ohlcv_range(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        frequency: str = "minute",
+    ) -> pl.DataFrame:
+        """Return actual source observations with start <= timestamp < end."""
         ...
 
 

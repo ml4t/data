@@ -75,7 +75,8 @@ ml4t-data update -s AAPL --config ml4t-data.yaml
 | `--frequency` | `daily`, `hourly`, or `weekly` |
 | `--asset-class` | `equities`, `crypto`, `forex`, or `futures` |
 | `--lookback-days` | Existing-data overlap used for revisions |
-| `--fill-gaps`, `--no-fill-gaps` | Enable or disable gap filling |
+| `--check-gaps`, `--no-check-gaps` | Enable or disable read-only calendar gap checks |
+| `--fill-gaps`, `--no-fill-gaps` | Legacy: filling is rejected; `--no-fill-gaps` disables checks |
 | `--provider`, `-p` | Provider to use for fetching |
 | `--start`, `--end` | Date bounds used only for a first load |
 | `--initial-load-days` | First-load history when `--start` is omitted |

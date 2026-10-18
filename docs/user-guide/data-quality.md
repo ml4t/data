@@ -59,11 +59,11 @@ from ml4t.data.validation.rules import ValidationRulePresets
 
 # Crypto is more volatile - wider thresholds
 crypto_rules = ValidationRulePresets.crypto_rules()
-# max_return_threshold=0.5, staleness_threshold=3, no market hours check
+# max_return_threshold=0.5, staleness_threshold=3
 
 # Forex is less volatile - tighter thresholds
 forex_rules = ValidationRulePresets.forex_rules()
-# max_return_threshold=0.1, staleness_threshold=10, 24/5 market
+# max_return_threshold=0.1, staleness_threshold=10
 
 # Strict mode for production data
 strict_rules = ValidationRulePresets.strict_rules()
@@ -74,6 +74,57 @@ Available presets: `equity_rules()`, `crypto_rules()`, `forex_rules()`,
 `commodity_rules()`, `futures_rules()`, `strict_rules()`, `relaxed_rules()`.
 Commodity and futures presets report negative prices as warnings. The
 `negative_price_policy` setting accepts `"forbid"`, `"warn"`, or `"allow"`.
+Presets adjust numerical thresholds, not calendar selection. Crypto and forex presets no longer
+disable schedule checks implicitly; declare the market's actual schedule. Explicit per-check
+opt-outs remain available.
+
+### Validate Calendar Membership and Continuity
+
+`CrossValidator`, `AssetValidator` and `CryptoSessionValidator` accept the canonical `calendar`
+keyword and a shared `feed_spec` on construction and validation. A call's explicit calendar
+overrides its constructor setting; the effective explicit setting overrides feed metadata, then
+NYSE applies. Version-2 metadata can also explicitly disable calendars. Neither a descriptive
+asset class nor an exchange name selects a schedule.
+
+```python
+from ml4t.data.providers import SyntheticProvider
+from ml4t.data.validation.cross_validation import CrossValidator
+from ml4t.specs import FeedSpec
+
+with SyntheticProvider(calendar_mode="continuous") as provider:
+    spot = provider.fetch_ohlcv("BTCUSD", "2025-07-12", "2025-07-12", "minute")
+
+feed = FeedSpec(calendar="24/7", data_frequency="minute", timestamp_semantics="event_time")
+report = CrossValidator(feed_spec=feed).validate(spot)
+row_only = CrossValidator(calendar=None).validate(spot)
+```
+
+Calendar membership uses the same assignment as [native sessions](sessions.md), including DST,
+holidays, early closes, overnight dates, breaks and registered custom schedules. Nanosecond instants
+retain their precision in membership comparisons. Daily session
+labels are not wall-clock observations; explicit event or close semantics override the daily-label
+heuristic. Invalid calendars and incompatible temporal declarations fail clearly. Reported sample
+indices refer to the original input positions. `calendar=None` disables temporal checks without
+disabling price, volume, schema or reference-price checks.
+
+`CrossValidator` checks membership, not missing-bar completeness. `CryptoSessionValidator` checks
+continuity through the shared gap detector: explicit `"24/7"` still detects real outages, whereas
+`None` performs no schedule-derived gap check. Intraday continuity requires the complete version-2
+bar declaration described in [incremental updates](incremental-updates.md). An explicitly supplied
+legacy `CryptoCalendar` object retains its elapsed continuous-gap and maintenance behavior; omission
+no longer constructs that object automatically. `CrossValidator(is_crypto=True)` remains a legacy
+24/7 hint only when neither an explicit calendar nor a feed calendar is declared. It cannot override
+a canonical selection.
+
+`DataManager.load()` and `import_data()` pass their effective declaration and acquisition frequency
+to validation before storage. For spot data, declare `"24/7"`; use the selected exchange calendar
+for futures. Explicit calendar disable does not bypass OHLCV validation.
+
+`ValidationRuleConfig(calendar=...)` preserves omitted, named and explicitly disabled selections
+through model copying, JSON and `ValidationRuleSet` YAML. New rule configurations use version 2;
+version-1 payloads with a null calendar still inherit the default. Pass a restored configuration
+as `CrossValidator(feed_spec=rules)` to apply its declaration, or override it with `calendar=...`.
+Use ordinary `model_dump_json()` or `model_dump(mode="json")` without excluding explicit nulls.
 
 ### Persistent Rule Sets
 

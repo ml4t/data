@@ -253,8 +253,8 @@ class TestValidationRulePresets:
         config = ValidationRulePresets.crypto_rules()
 
         assert config.asset_class == AssetClass.CRYPTO
-        assert config.check_weekend_trading is False  # 24/7 trading
-        assert config.check_market_hours is False  # No market hours
+        assert config.check_weekend_trading is True
+        assert config.check_market_hours is True
         assert config.max_return_threshold == 0.5  # Higher volatility
         assert config.staleness_threshold == 3
         assert config.volume_spike_threshold == 20.0
@@ -265,7 +265,7 @@ class TestValidationRulePresets:
 
         assert config.asset_class == AssetClass.FOREX
         assert config.check_weekend_trading is True
-        assert config.check_market_hours is False  # 24/5 market
+        assert config.check_market_hours is True
         assert config.max_return_threshold == 0.1  # Less volatile
         assert config.price_gap_threshold == 0.02
 

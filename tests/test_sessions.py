@@ -401,8 +401,8 @@ class TestSessionCompleter:
         assert result["timestamp"].min() == start
         assert result["timestamp"].max() == end - timedelta(minutes=1)
 
-    def test_generated_bar_uses_prior_close_and_is_marked(self):
-        """A generated OHLC bar is a marked prior-close bar."""
+    def test_absent_minute_is_marked_and_keeps_unknown_prices_and_volume(self):
+        """A null placeholder must not be mistaken for a recovered market observation."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -423,15 +423,15 @@ class TestSessionCompleter:
 
         assert result["is_imputed"].to_list() == [False, True]
         assert result.select("open", "high", "low", "close").row(1) == (
-            105.0,
-            105.0,
-            105.0,
-            105.0,
+            None,
+            None,
+            None,
+            None,
         )
-        assert result["volume"].to_list() == [1000.0, 0.0]
+        assert result["volume"].to_list() == [1000.0, None]
 
-    def test_second_session_open_uses_previous_close_and_metadata(self):
-        """A session-opening gap carries the prior close and symbol forward."""
+    def test_second_session_open_does_not_acquire_previous_session_market_values(self):
+        """A session-opening absence must not copy a previous session's price."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -462,8 +462,8 @@ class TestSessionCompleter:
                 closed="left",
             )
         )
-        assert opening_gap["close"].to_list() == [100.0, 100.0]
-        assert opening_gap["symbol"].to_list() == ["AAPL", "AAPL"]
+        assert opening_gap["close"].to_list() == [None, None]
+        assert opening_gap["symbol"].to_list() == [None, None]
 
     def test_rejects_observations_outside_the_minute_template(self):
         """Completion never silently replaces unmatched observations."""
@@ -475,7 +475,7 @@ class TestSessionCompleter:
         with pytest.raises(ValueError, match="outside the completion template"):
             completer.complete_sessions(daily)
 
-    def test_forward_fill_uses_available_price_when_close_is_absent(self):
+    def test_missing_open_remains_unknown_when_close_is_absent(self):
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -488,7 +488,7 @@ class TestSessionCompleter:
             end_date=start + timedelta(minutes=2),
         )
 
-        assert result["open"].to_list() == [100.0, 100.0]
+        assert result["open"].to_list() == [100.0, None]
 
     def test_early_close_and_break_minutes_are_excluded(self):
         from ml4t.data.sessions.completer import SessionCompleter
@@ -520,8 +520,8 @@ class TestSessionCompleter:
             )
         ).height
 
-    def test_complete_sessions_fill_methods(self):
-        """Test different fill methods."""
+    def test_complete_sessions_rejects_synthetic_price_methods(self):
+        """Only null grid expansion remains supported."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -540,20 +540,16 @@ class TestSessionCompleter:
             }
         )
 
-        # Test forward fill
-        result_forward = completer.complete_sessions(df, fill_method="forward")
-        assert len(result_forward) >= len(df)
-
-        # Test backward fill
-        result_backward = completer.complete_sessions(df, fill_method="backward")
-        assert len(result_backward) >= len(df)
+        for method in ("forward", "backward"):
+            with pytest.raises(ValueError, match="imputation"):
+                completer.complete_sessions(df, fill_method=method)
 
         # Test no fill
         result_none = completer.complete_sessions(df, fill_method="none")
-        assert len(result_none) >= len(df)
+        assert result_none["close"].to_list() == [100.2, None, 101.2]
 
-    def test_complete_sessions_zero_volume(self):
-        """Test volume handling for filled rows."""
+    def test_complete_sessions_rejects_invented_zero_volume(self):
+        """An absent observation has no known volume, not a known zero."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -569,13 +565,10 @@ class TestSessionCompleter:
             }
         )
 
-        # With zero_volume=True (default)
-        result = completer.complete_sessions(df, zero_volume=True)
-        # Result should have more rows (gaps filled)
-        assert len(result) >= len(df)
-        # Verify volume column exists and has no NaN values (filled with 0)
-        assert "volume" in result.columns
-        assert result["volume"].null_count() == 0
+        with pytest.raises(ValueError, match="imputation"):
+            completer.complete_sessions(df, zero_volume=True)
+        result = completer.complete_sessions(df)
+        assert result["volume"].to_list() == [1000.0, None, 1100.0]
 
     def test_get_session_info_trading_day(self):
         """Test getting session info for a trading day."""
@@ -603,8 +596,8 @@ class TestSessionCompleter:
         assert info["market_open"] is None
         assert info["market_close"] is None
 
-    def test_fill_missing_data_with_metadata_columns(self):
-        """Test that metadata columns are forward-filled."""
+    def test_null_placeholder_does_not_claim_observed_symbol_metadata(self):
+        """Only observed rows carry source symbol values in the expanded grid."""
         from ml4t.data.sessions.completer import SessionCompleter
 
         completer = SessionCompleter("NYSE")
@@ -622,8 +615,7 @@ class TestSessionCompleter:
         )
 
         result = completer.complete_sessions(df)
-        # Symbol should be forward-filled
-        assert "symbol" in result.columns
+        assert result["symbol"].to_list() == ["AAPL", None, "AAPL"]
 
 
 class TestSessionIntegration:

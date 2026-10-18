@@ -71,3 +71,23 @@ pre-commit run --all-files
 For packaging or release changes, also run the verification scripts used by
 `.github/workflows/release.yml`. Never bypass hooks or weaken provider-specific checks to make a
 shared gate pass.
+
+## Maintainer-directed change batching
+
+For our own fixes and agent work directed by the maintainer, use a bounded, coherent PR rather
+than one PR per small defect or implementation step. One PR may close several related issues
+when the changes serve the same user workflow, subsystem repair or compatibility objective and
+can be reviewed and reverted together. Keep implementation, regressions, documentation and
+follow-up repairs together; use focused commits and retain evidence for each defect. Do not
+create separate issues or PRs merely for individual files, tests, assertions or platform variants.
+
+Split unrelated changes, independently risky or breaking changes, separate ownership boundaries,
+and work that needs independent release or rollback decisions. A general maintenance label alone
+does not make a batch coherent. Reuse or safely consolidate existing owned submissions instead of
+opening overlapping PRs; preserve contributor attribution, recoverable history and other owners'
+active work. Do not rewrite or close someone else's work merely to reduce the queue count.
+
+Run focused checks while iterating, then qualify the complete final revision with every applicable
+required gate. Group related work before expensive CI; do not weaken checks, bypass review or
+claim old-head checks qualify changed code. This maintainer-directed batching rule takes precedence
+over a literal one-issue-per-PR reading of contributor intake guidance.

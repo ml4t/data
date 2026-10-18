@@ -25,7 +25,7 @@ from ml4t.data.core.exceptions import (
     NetworkError,
     RateLimitError,
 )
-from ml4t.data.providers.base import BaseProvider
+from ml4t.data.providers.base import BaseProvider, provider_retry
 
 logger = structlog.get_logger()
 
@@ -91,6 +91,8 @@ class DataBentoProvider(BaseProvider):
         rate_limit: tuple[int, float] | None = None,
         adjust_session_dates: bool = False,
         session_start_hour_utc: int = 0,
+        *,
+        stype_in: str = "raw_symbol",
     ):
         """Initialize Databento provider.
 
@@ -100,6 +102,7 @@ class DataBentoProvider(BaseProvider):
             rate_limit: Optional custom rate limit (calls, period_seconds)
             adjust_session_dates: Whether to adjust dates for CME session logic
             session_start_hour_utc: Hour in UTC when trading session starts (for futures)
+            stype_in: Input symbology for OHLCV requests, such as continuous for BTC.c.0.
         """
         super().__init__(rate_limit=rate_limit or self.DEFAULT_RATE_LIMIT)
 
@@ -123,6 +126,7 @@ class DataBentoProvider(BaseProvider):
         self.default_schema = "ohlcv-1m"
         self.adjust_session_dates = adjust_session_dates
         self.session_start_hour_utc = session_start_hour_utc
+        self.stype_in = stype_in
 
         self.logger.info(
             "Initialized Databento provider",
@@ -149,15 +153,15 @@ class DataBentoProvider(BaseProvider):
             }
         )
 
-    def _map_frequency_to_schema(self, frequency: str) -> str:
+    def _map_frequency_to_schema(self, frequency: str, *, strict: bool = False) -> str:
         """Map frequency parameter to Databento schema."""
         freq_lower = frequency.lower()
 
-        if freq_lower in ["daily", "day", "1d", "d"]:
+        if freq_lower in ["daily", "day", "1day", "1d", "d"]:
             return "ohlcv-1d"
-        if freq_lower in ["hourly", "hour", "1h", "h"]:
+        if freq_lower in ["hourly", "hour", "1hour", "1h", "h"]:
             return "ohlcv-1h"
-        if freq_lower in ["minute", "min", "1m", "m"]:
+        if freq_lower in ["minute", "min", "1minute", "1min", "1m", "m"]:
             return "ohlcv-1m"
         if freq_lower in ["tick", "trades"]:
             return "trades"
@@ -166,6 +170,8 @@ class DataBentoProvider(BaseProvider):
         if freq_lower in ["mbo"]:
             return "mbo"
 
+        if strict:
+            raise ValueError(f"Unsupported targeted OHLCV frequency: {frequency}")
         # Default to daily
         return "ohlcv-1d"
 
@@ -303,7 +309,7 @@ class DataBentoProvider(BaseProvider):
                 end=end_dt,
                 symbols=symbol,
                 schema=schema,
-                stype_in="raw_symbol",
+                stype_in=self.stype_in,
             )
 
             return response
@@ -319,6 +325,56 @@ class DataBentoProvider(BaseProvider):
                 provider=self.name,
                 message=f"Failed to fetch data from Databento: {e}",
             )
+
+    @provider_retry
+    def fetch_ohlcv_range(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        frequency: str = "minute",
+        *,
+        stype_in: str | None = None,
+    ) -> pl.DataFrame:
+        """Fetch one series within exact UTC instants, including start and excluding end.
+
+        Session-date adjustment is never applied. Only native one-minute, one-hour and
+        daily OHLCV schemas are supported; no reaggregation or synthetic bars are produced.
+        """
+        if (
+            not isinstance(start, datetime)
+            or not isinstance(end, datetime)
+            or start.utcoffset() is None
+            or end.utcoffset() is None
+        ):
+            raise ValueError("start and end must be timezone-aware datetimes")
+        start, end = start.astimezone(UTC), end.astimezone(UTC)
+        if start >= end:
+            raise ValueError("start must be before end for a half-open range")
+        schema = self._map_frequency_to_schema(frequency, strict=True)
+        if schema not in {"ohlcv-1m", "ohlcv-1h", "ohlcv-1d"}:
+            raise ValueError(f"Unsupported targeted OHLCV frequency: {frequency}")
+        selected_stype = self.stype_in if stype_in is None else stype_in
+        if selected_stype not in {"raw_symbol", "continuous", "instrument_id"}:
+            raise ValueError("stype_in must select a single series, not a parent or universe")
+        if not isinstance(symbol, str) or symbol.strip().upper() == "ALL_SYMBOLS" or "," in symbol:
+            raise ValueError("symbol must identify a single instrument, not a universe")
+        self._validate_inputs(symbol, start.date().isoformat(), end.date().isoformat(), frequency)
+        self._acquire_rate_limit()
+
+        def fetch() -> pl.DataFrame:
+            raw = self._fetch_timeseries(
+                dataset=self.dataset,
+                symbols=symbol,
+                schema=schema,
+                stype_in=selected_stype,
+                start=start,
+                end=end,
+            )
+            frame = self._validate_ohlcv(self._transform_data(raw, symbol), self.name, symbol)
+            return frame.filter((pl.col("timestamp") >= start) & (pl.col("timestamp") < end))
+
+        return self._with_circuit_breaker(fetch)
 
     def _transform_data(self, raw_data: Any, symbol: str) -> pl.DataFrame:
         """Transform Databento data to standard schema."""

@@ -184,7 +184,7 @@ validation:
     strict: true  # Fail on any violation
   missing_data:
     max_gap_hours: 24
-    fill_method: "forward"  # forward, backward, or none
+    fill_method: "none"  # Preserve missing observations; never invent market values
   outlier_detection:
     method: "zscore"
     threshold: 4.0

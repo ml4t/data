@@ -283,7 +283,10 @@ Today:        Jan 15
 Missing:      [Jan 11] [Jan 12] [Jan 13] [Jan 14]
 ```
 
-**Solution**: Incremental updates automatically detect and fill gaps!
+Incremental updates request actual observations from the configured source. Missing periods remain
+missing when the source supplies no row; they are never replaced with synthetic market values.
+Use the [stored calendar report](../user-guide/incremental-updates.md#inspect-missing-observations-on-disk)
+to inspect internal gaps independently of acquisition.
 
 ```python
 # Even after 5 days without updates, incremental mode works
@@ -296,7 +299,7 @@ print(result)
 #     'records_added': 5,
 #     'gap_detected': True,
 #     'gap_days': 5,
-#     'message': 'Filled 5-day gap'
+#     'message': 'Downloaded available source observations'
 # }
 ```
 
@@ -410,7 +413,7 @@ def catch_up_all_symbols():
 
         if result.get('gap_detected'):
             logger.warning(
-                f"{symbol}: Filled {result['gap_days']}-day gap "
+                f"{symbol}: Downloaded source observations for {result['gap_days']} days "
                 f"({result['records_added']} records)"
             )
         elif result.get('skip_reason') == 'already_up_to_date':

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import polars as pl
 import structlog
 
 from ml4t.data.assets.asset_class import AssetClass, AssetInfo
 from ml4t.data.assets.schemas import AssetSchema
-from ml4t.data.calendar.crypto import CryptoCalendar, CryptoSessionValidator
+from ml4t.data.calendar.crypto import CryptoSessionValidator
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -15,7 +18,13 @@ logger = structlog.get_logger()
 class AssetValidator:
     """Validator for asset-specific data quality rules."""
 
-    def __init__(self, asset_info: AssetInfo):
+    def __init__(
+        self,
+        asset_info: AssetInfo,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+    ) -> None:
         """
         Initialize validator for specific asset.
 
@@ -24,19 +33,23 @@ class AssetValidator:
         """
         self.asset_info = asset_info
         self.asset_class = asset_info.asset_class
+        self._calendar = calendar
+        self.feed_spec = FeedSpec.from_any(feed_spec)
+        self.calendar = self.feed_spec.resolve_calendar(calendar=calendar)
 
         # Initialize specialized validators
         if self.asset_class == AssetClass.CRYPTO:
-            self.calendar = CryptoCalendar(exchange=asset_info.exchange)
-            self.session_validator = CryptoSessionValidator(self.calendar)
+            self.session_validator = CryptoSessionValidator(self.calendar, feed_spec=self.feed_spec)
         else:
-            self.calendar = None
             self.session_validator = None
 
     def validate(
         self,
         df: pl.DataFrame,
-        frequency: str = "daily",
+        frequency: str | None = None,
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> dict[str, list[str]]:
         """
         Perform comprehensive validation.
@@ -48,6 +61,11 @@ class AssetValidator:
         Returns:
             Dictionary of validation category to issues
         """
+        feed = self.feed_spec if feed_spec is None else FeedSpec.from_any(feed_spec)
+        if calendar is UNSET_CALENDAR:
+            calendar = self._calendar
+        selected = feed.resolve_calendar(calendar=calendar)
+        frequency = frequency or feed.data_frequency or "daily"
         results = {}
 
         # Schema validation
@@ -57,7 +75,7 @@ class AssetValidator:
 
         # Asset-specific validation
         if self.asset_class == AssetClass.CRYPTO:
-            results.update(self._validate_crypto(df, frequency))
+            results.update(self._validate_crypto(df, frequency, selected, feed))
         elif self.asset_class == AssetClass.EQUITY:
             results.update(self._validate_equity(df))
         elif self.asset_class == AssetClass.FOREX:
@@ -65,17 +83,45 @@ class AssetValidator:
 
         # Common validations
         results.update(self._validate_common(df))
+        if not df.is_empty() and "timestamp" in df.columns:
+            from ml4t.data.validation.cross_validation import CrossValidator
+
+            temporal = CrossValidator(
+                check_price_continuity=False,
+                check_volume_spikes=False,
+                calendar=selected,
+                feed_spec=feed,
+            ).validate(df, frequency=frequency)
+            category = {
+                AssetClass.EQUITY: "equity_specific",
+                AssetClass.FOREX: "forex_specific",
+            }.get(self.asset_class, "sessions")
+            for issue in temporal.issues:
+                if issue.check == "weekend_trading":
+                    message = f"Found {issue.row_count} weekend data points"
+                else:
+                    count = issue.row_count - issue.details["weekend_count"]
+                    if count == 0 or (
+                        self.asset_class == AssetClass.EQUITY and count <= len(df) * 0.1
+                    ):
+                        continue
+                    message = f"Found {count} data points outside market hours"
+                results.setdefault(category, []).append(message)
 
         # Remove empty categories
         return {k: v for k, v in results.items() if v}
 
-    def _validate_crypto(self, df: pl.DataFrame, frequency: str) -> dict[str, list[str]]:
+    def _validate_crypto(
+        self, df: pl.DataFrame, frequency: str, calendar: str | None, feed: FeedSpec
+    ) -> dict[str, list[str]]:
         """Validate crypto-specific rules."""
         results = {}
 
         # 24/7 continuity check
         if self.session_validator:
-            continuity_issues = self.session_validator.validate_continuity(df, frequency)
+            continuity_issues = self.session_validator.validate_continuity(
+                df, frequency, calendar=calendar, feed_spec=feed
+            )
             if continuity_issues:
                 results["continuity"] = continuity_issues
 
@@ -109,29 +155,6 @@ class AssetValidator:
         results = {}
         issues = []
 
-        # Check for trading during market hours only
-        if "timestamp" in df.columns:
-            timestamps = df["timestamp"].to_list()
-
-            # Check for after-hours trading (simplified)
-            after_hours = [
-                ts
-                for ts in timestamps
-                if ts.weekday() < 5
-                and (  # Weekday
-                    ts.hour < 9 or ts.hour >= 16 or (ts.hour == 9 and ts.minute < 30)
-                )
-            ]
-
-            if after_hours and len(after_hours) > len(timestamps) * 0.1:
-                issues.append(f"Found {len(after_hours)} data points outside market hours")
-
-        # Check for weekend data (should not exist for regular equities)
-        if "timestamp" in df.columns:
-            weekend_data = df.filter(pl.col("timestamp").dt.weekday() >= 6)
-            if len(weekend_data) > 0:
-                issues.append(f"Found {len(weekend_data)} weekend data points")
-
         # Check for reasonable price ranges
         if "close" in df.columns:
             prices = df["close"].to_numpy()
@@ -150,20 +173,6 @@ class AssetValidator:
         """Validate forex-specific rules."""
         results = {}
         issues = []
-
-        # Check for weekend gaps (forex closes Friday evening, opens Sunday evening)
-        if "timestamp" in df.columns:
-            timestamps = df["timestamp"].to_list()
-
-            # Check for Saturday data (should not exist)
-            saturday_data = [
-                ts
-                for ts in timestamps
-                if ts.weekday() == 5  # Saturday
-            ]
-
-            if saturday_data:
-                issues.append(f"Found {len(saturday_data)} Saturday data points")
 
         # Check for reasonable exchange rates
         if "close" in df.columns:

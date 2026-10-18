@@ -9,6 +9,7 @@ import polars as pl
 import structlog
 
 from ml4t.data.validation.base import Severity, ValidationIssue, ValidationResult, Validator
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -31,6 +32,9 @@ class CrossValidator(Validator):
         volume_spike_threshold: float = 10.0,  # 10x average volume
         price_gap_threshold: float = 0.1,  # 10% price gap
         is_crypto: bool = False,  # Crypto trades 24/7
+        *,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> None:
         """
         Initialize cross-validator.
@@ -51,13 +55,22 @@ class CrossValidator(Validator):
         self.volume_spike_threshold = volume_spike_threshold
         self.price_gap_threshold = price_gap_threshold
         self.is_crypto = is_crypto
+        self.calendar = calendar
+        self.feed_spec = FeedSpec.from_any(feed_spec)
 
     def name(self) -> str:
         """Return validator name."""
         return "CrossValidator"
 
     def validate(
-        self, df: pl.DataFrame, reference_df: pl.DataFrame | None = None, **kwargs: Any
+        self,
+        df: pl.DataFrame,
+        reference_df: pl.DataFrame | None = None,
+        *,
+        frequency: str | None = None,
+        calendar: str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
+        **kwargs: Any,
     ) -> ValidationResult:
         """
         Validate DataFrame with cross-validation checks.
@@ -85,11 +98,20 @@ class CrossValidator(Validator):
         if self.check_volume_spikes:
             self._check_volume_spikes(df, result)
 
-        if self.check_weekend_trading and not self.is_crypto:
-            self._check_weekend_trading(df, result)
-
-        if self.check_market_hours and not self.is_crypto:
-            self._check_market_hours(df, result)
+        feed = self.feed_spec if feed_spec is None else FeedSpec.from_any(feed_spec)
+        if calendar is UNSET_CALENDAR:
+            calendar = self.calendar
+        if (
+            calendar is UNSET_CALENDAR
+            and self.is_crypto
+            and (
+                feed.calendar is UNSET_CALENDAR
+                or (feed.time_contract_version == 1 and feed.calendar is None)
+            )
+        ):
+            calendar = "24/7"
+        if self.check_weekend_trading or self.check_market_hours:
+            self._check_sessions(df, result, calendar, feed, frequency)
 
         # Cross-reference validation if reference data provided
         if reference_df is not None:
@@ -171,59 +193,71 @@ class CrossValidator(Validator):
                 )
             )
 
-    def _check_weekend_trading(self, df: pl.DataFrame, result: ValidationResult) -> None:
-        """Check for weekend trading (Saturday/Sunday) for non-crypto assets."""
-        # Add day of week column (Polars: 1 = Monday, 7 = Sunday)
-        df_with_dow = df.with_columns(pl.col("timestamp").dt.weekday().alias("day_of_week"))
+    def _check_sessions(
+        self,
+        df: pl.DataFrame,
+        result: ValidationResult,
+        calendar: str | None | CalendarUnset,
+        feed: FeedSpec,
+        frequency: str | None,
+    ) -> None:
+        from ml4t.data.sessions import SessionAssigner
+        from ml4t.data.sessions.assigner import _uses_session_labels
 
-        # Find weekend trading (Saturday = 6, Sunday = 7 in Polars)
-        weekend_trading = df_with_dow.filter(pl.col("day_of_week").is_in([6, 7]))
+        assigner = SessionAssigner(calendar=calendar, feed_spec=feed)
+        if assigner.calendar is None or df.is_empty() or "timestamp" not in df.columns:
+            return
+        frequency = frequency or feed.data_frequency
+        daily = frequency is not None and frequency.lower() in {"daily", "1day", "1d"}
+        frame = df.select("timestamp").with_row_index("_validation_row")
+        bar_frequency = "daily" if daily else "auto" if frequency is None else "intraday"
+        assigned = assigner.assign_sessions(frame, bar_frequency=bar_frequency)
+        outside = assigned.filter(pl.col("session_date").is_null())
+        if outside.is_empty():
+            return
 
-        if len(weekend_trading) > 0:
+        daily = _uses_session_labels(frame, feed, bar_frequency)
+        clock = pl.col("timestamp")
+        dtype = df.schema["timestamp"]
+        if isinstance(dtype, pl.Datetime):
+            if daily:
+                if dtype.time_zone is not None and feed.timezone is not None:
+                    clock = clock.dt.convert_time_zone(feed.timezone)
+            else:
+                if dtype.time_zone is None:
+                    clock = clock.dt.replace_time_zone(feed.timezone or "UTC")
+                clock = clock.dt.convert_time_zone(str(assigner.calendar.tz))
+        weekend = outside.filter(clock.dt.weekday() >= 6)
+        if self.check_weekend_trading and not weekend.is_empty():
             result.add_issue(
                 ValidationIssue(
                     severity=Severity.WARNING,
                     check="weekend_trading",
-                    message=f"Found {len(weekend_trading)} records on weekends (non-crypto asset)",
+                    message=f"Found {len(weekend)} weekend records outside the selected schedule",
                     details={
-                        "weekend_count": len(weekend_trading),
+                        "weekend_count": len(weekend),
                         "total_count": len(df),
-                        "percentage": len(weekend_trading) / len(df) * 100,
+                        "percentage": len(weekend) / len(df) * 100,
                     },
-                    row_count=len(weekend_trading),
-                    sample_rows=weekend_trading.with_row_index()["index"].to_list()[:10],
+                    row_count=len(weekend),
+                    sample_rows=weekend["_validation_row"].head(10).to_list(),
                 )
             )
 
-    def _check_market_hours(self, df: pl.DataFrame, result: ValidationResult) -> None:
-        """Check for trades outside regular market hours (9:30 AM - 4:00 PM ET)."""
-        # Add hour column
-        df_with_hour = df.with_columns(
-            pl.col("timestamp").dt.hour().alias("hour"),
-            pl.col("timestamp").dt.minute().alias("minute"),
-        )
-
-        # Check for trades outside 9:30 AM - 4:00 PM (assuming UTC times need adjustment)
-        # This is a simplified check - in production, would need timezone handling
-        outside_hours = df_with_hour.filter(
-            (pl.col("hour") < 14)
-            | (pl.col("hour") >= 21)  # Approximate ET in UTC
-            | ((pl.col("hour") == 14) & (pl.col("minute") < 30))
-        )
-
-        if len(outside_hours) > 0:
+        if self.check_market_hours:
             result.add_issue(
                 ValidationIssue(
                     severity=Severity.INFO,
                     check="market_hours",
-                    message=f"Found {len(outside_hours)} records outside regular market hours",
+                    message=f"Found {len(outside)} records outside the selected market schedule",
                     details={
-                        "outside_hours_count": len(outside_hours),
+                        "outside_hours_count": len(outside),
+                        "weekend_count": len(weekend),
                         "total_count": len(df),
-                        "percentage": len(outside_hours) / len(df) * 100,
+                        "percentage": len(outside) / len(df) * 100,
                     },
-                    row_count=len(outside_hours),
-                    sample_rows=outside_hours.with_row_index()["index"].to_list()[:10],
+                    row_count=len(outside),
+                    sample_rows=outside["_validation_row"].head(10).to_list(),
                 )
             )
 

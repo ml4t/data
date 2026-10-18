@@ -41,26 +41,34 @@ metadata. Supplying the option overrides that value.
 
 ## Gap Handling
 
-Gap detection and forward filling are enabled by default. Disable them when missing periods must
-remain explicit:
+Updates preserve absent observations and null market values. Calendar gap checks are enabled by
+default and never create rows or substitute prices or volumes. To skip those checks:
 
 ```bash
-ml4t-data update --symbol AAPL --no-fill-gaps --storage-path ./data
+ml4t-data update --symbol AAPL --no-check-gaps --storage-path ./data
 ```
 
 Daily detection counts missing sessions from the selected exchange schedule, not elapsed days.
 The Python updater resolves its explicit `calendar`, then supplied feed or stored metadata, then
 NYSE. Asset class and descriptive exchange metadata do not select a schedule. Continuous feeds
-must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection and filling.
+must declare `calendar="24/7"`; `calendar=None` disables schedule-derived detection.
 Intraday detection requires the complete version-2 grid declaration described below, supplied
 through `feed_spec` or retained in stored metadata. Undeclared intraday datasets must migrate their
-metadata or use `--no-fill-gaps` / `fill_gaps=False` for updates.
-[Trading-session completion](sessions.md) is a separate one-minute operation. The acquisition-range
-planner's intraday limitations are described separately below.
+metadata or use `--no-check-gaps` / `check_gaps=False` for updates.
+[Minute-grid expansion](sessions.md) is a separate operation that exposes absent positions as nulls.
 
-Detection does not itself fill or modify observations. The updater's separately enabled forward
-fill uses a regular elapsed-time grid, not the selected exchange schedule, and can insert closed
-dates when a real gap is present. Disable filling when those synthetic rows are inappropriate.
+Synthetic imputation is unsupported. An explicit `fill_gaps=True` or `--fill-gaps` request fails
+before acquisition or a dataset write. The legacy `fill_gaps=False` / `--no-fill-gaps` controls remain
+compatible aliases for disabling checks. Configurations should use `check_gaps` instead.
+The updater records whether checking ran and the detected missing-observation count; disabled
+checks are not reported as proof of zero gaps. Source-history limits do not suppress detection.
+
+For an incremental tail, `IncrementalUpdater.determine_update_range()` uses the stored feed and
+the same bounded calendar report to select the first missing scheduled observation after the
+latest real row. It does not advance minute data by a day or request an exchange closure. Its
+keyword-only `calendar` and `feed_spec` arguments override stored declarations. With an explicitly
+disabled calendar, it overlaps the latest real row rather than guessing the next timestamp.
+Use the bounded report below for older interior gaps, not the incremental tail planner.
 
 ### Inspect Daily Gaps Without Filling
 
@@ -94,8 +102,8 @@ mapping, even with daily frequency or midnight timestamps. Right-labeled continu
 to the preceding session; event time belongs to the new session. Out-of-session instants fail clearly.
 Gap classification does not add a new off-session rejection policy for legacy daily labels. The
 requested daily frequency cannot silently override a declared intraday frequency.
-Unknown calendars and malformed daily timestamps fail without modifying the input. `fill_gaps()`
-remains a separate elapsed-grid operation, not calendar-aware imputation.
+Unknown calendars and malformed daily timestamps fail without modifying the input.
+The retired `fill_gaps()` helper rejects nonempty gap lists rather than manufacturing observations.
 
 ### Inspect Intraday Gaps Against a Declared Grid
 
@@ -135,16 +143,141 @@ Explicit `calendar=None` disables classification, while `"24/7"` still expects c
 
 This replaces the old fixed-US-clock approximation. Unqualified legacy intraday calls now require
 a complete feed declaration or explicit `calendar=None`; the detector does not invent an anchor,
-label side or partial-bar policy. Daily classification is unchanged. The separate intraday/weekly
-backfill range planner below still has its documented limitations.
+label side or partial-bar policy. Daily classification is unchanged. Use the bounded range report
+below to inspect leading/trailing absences; weekly grids are not supported.
 
-### Plan Daily Backfill Acquisition
+### Inspect Missing Observations on Disk
 
-`ml4t.data.update_manager.GapDetector` is a separate acquisition-range planner. Its constructor and
+`ml4t.data.update_manager.GapDetector` compares a stored dataset with its expected calendar grid.
+It reads timestamps, not prices, and neither contacts a provider nor changes stored rows or metadata.
+The report works with timestamped measurements as well as OHLCV data. Its constructor and
 `detect_gaps()` / `detect_gaps_in_storage()` accept the canonical `calendar` and shared `feed_spec`
 declaration. Explicit selection overrides the declaration, then NYSE applies. Storage reads use the
-dataset's persisted declaration unless a feed is supplied. Explicit `None` disables schedule-based
-planning, including for absent datasets; 24/7 still expects weekend observations.
+dataset's persisted declaration and frequency unless supplied explicitly. Explicit `None` disables
+schedule-based detection, including for absent datasets; 24/7 still expects weekend observations.
+
+For an existing spot-crypto minute dataset, supply or retain its complete grid declaration:
+
+```python
+from datetime import UTC, datetime
+
+from ml4t.data.storage import create_storage
+from ml4t.data.update_manager import GapDetector
+from ml4t.specs import FeedSpec
+
+storage = create_storage("./data", strategy="hive")
+feed = FeedSpec(
+    time_contract_version=2,
+    calendar="24/7",
+    data_frequency="minute",
+    timestamp_semantics="event_time",
+    bar_grid_anchor="session_open",
+    bar_label="left",
+    partial_bar_policy="include",
+)
+report = GapDetector(feed_spec=feed).detect_gaps_in_storage(
+    storage,
+    "crypto/minute/coinbase-btc-usd-spot",
+    datetime(2026, 10, 16, 0, 0, tzinfo=UTC),
+    datetime(2026, 10, 16, 23, 59, tzinfo=UTC),
+)
+for gap in report:
+    print(gap["start"], gap["end"], gap["size_bars"])
+```
+
+Intraday bounds are inclusive UTC instants. Each returned range starts at its first absent bar
+timestamp, ends at its last, and reports `size_bars`, an exact count of scheduled bars. Bounds need
+not land on a bar: only expected timestamps inside them count. The report includes missing boundary
+bars, wholly absent sessions and absent datasets. Breaks, maintenance, holidays, DST, shortened
+sessions and partial-bar policy follow the selected schedule. It shares the arithmetic expected grid
+with in-memory detection rather than constructing a second calendar or every absent row.
+
+Existing Parquet files do not need to be imported into a Data storage backend. Read the file with
+Polars and supply the same declaration and explicit coverage bounds:
+
+```python
+import polars as pl
+
+report = GapDetector(feed_spec=feed).detect_gaps(
+    pl.read_parquet("./prices.parquet"),
+    start_date=datetime(2026, 10, 16, 0, 0, tzinfo=UTC),
+    end_date=datetime(2026, 10, 16, 23, 59, tzinfo=UTC),
+)
+```
+
+Without explicit bounds, frame detection checks between the first and last stored timestamps.
+Explicit bounds also reveal missing boundary bars and wholly empty intervals. Use `timestamp_col`
+in the feed declaration when the file names its time column differently. A Boolean `is_imputed=True`
+marker identifies a known placeholder, which does not satisfy an expected observation. Zero volume
+alone does not identify a placeholder. Previously fabricated rows without a marker cannot be
+distinguished from real observations by timestamps alone.
+
+An intraday calendar alone is insufficient. Frequency, timestamp side, anchor and partial-bar policy
+must be declared, as in the example; contradictory or missing declarations fail clearly. Multi-asset
+datasets are compared separately by the declared `entity_col`, or `symbol` when present; their gap
+ranges include an `entity` value. The stored entity column is inspected across the dataset so an
+instrument absent throughout the requested interval is not overlooked. Instruments that have never
+been stored cannot be inferred: inspect an explicit absent dataset key and supply its declaration.
+For CME futures select the product's actual calendar, such as `CME_Equity`, rather than assuming
+every CME product uses the crypto schedule. CME cryptocurrency futures use `CME Globex Crypto`;
+spot crypto normally uses `24/7`. See [CME and spot session conventions](sessions.md#cme-crypto-and-spot-crypto).
+
+A missing scheduled observation is not proof of a provider outage. Databento OHLCV and Coin Metrics
+market candles can omit no-trade intervals. Keep these absences in the report; a source returning no
+row does not justify creating a replacement candle. Targeted source downloads are a separate step,
+not an effect of inspecting the dataset. Values inside present rows are checked by validation, not
+by this timestamp-completeness report.
+
+### Download Real Observations for a Selected Report
+
+This is an explicit, potentially billable operation. For an existing one-instrument CME minute
+dataset, first inspect the desired interval. The storage key and vendor symbol are separate:
+
+```python
+from ml4t.data.providers import DataBentoProvider
+from ml4t.data.storage.metadata_tracker import MetadataTracker
+from ml4t.data.update_manager import BackfillManager
+
+cme_feed = feed.with_overrides(calendar="CME Globex Crypto")
+key = "futures/minute/BTC"
+gaps = GapDetector(feed_spec=cme_feed).detect_gaps_in_storage(
+    storage,
+    key,
+    datetime(2026, 9, 5, 12, 0, tzinfo=UTC),
+    datetime(2026, 9, 5, 12, 2, tzinfo=UTC),
+)
+with DataBentoProvider(stype_in="continuous") as provider:
+    result = BackfillManager(storage, MetadataTracker(storage.base_path)).execute_backfill(
+        key, gaps, provider, source_symbol="BTC.c.0", feed_spec=cme_feed
+    )
+print(result.rows_added, result.remaining_gaps)
+```
+
+The consumer rechecks the selected ranges against disk before requesting data. It downloads only
+currently missing ranges, preserves real stored observations and identity/calendar metadata, and replaces a marked
+null placeholder only when an actual source observation is returned. Intraday requests use the
+optional `TimestampRangeProvider` capability; unsupported providers fail without falling back to a
+full-day download. `calendar=None` disables calendar-based recovery. The first supported adapter is
+Databento, with a left-labeled grid and one instrument per storage key. Multi-asset inspection is
+supported, but targeted recovery of a panel requires separate per-instrument datasets.
+
+`result.success` means processing completed without errors, not that every observation was recovered.
+An empty input report succeeds without downloading or writing; use `rows_added` and `gaps_filled`
+to distinguish recovered data from a no-op. Previously an empty report returned `success=False`.
+Inspect `errors` and `remaining_gaps`. Empty no-trade responses do not change storage or trigger
+unbounded retries. Partial responses retain their residual gaps; `gaps_filled` counts only completely
+recovered ranges. A history-recording failure reports an error even if observations were stored;
+the residual report still reflects disk. A failed operation that cannot establish coverage returns
+`remaining_gaps=None`, not an unverified clean report. Existing observed null values are a separate
+validation concern, not permission to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
+intraday data; its daily `min_gap_days` remains a session count.
+
+Coin Metrics is not currently a Data provider. Its candle and metric endpoints use different
+identities and schemas; this Databento workflow does not claim to download them. See the
+[Databento range contract](../providers/databento.md#exact-timestamp-ranges) before selecting a
+continuous symbol or price convention.
+
+### Daily Range Compatibility
 
 Daily plans include missing sessions at either boundary and within the inclusive requested date
 range. Closed dates never become missing sessions. Returned `start` and `end` are inclusive session
@@ -156,16 +289,16 @@ it does not manufacture observations or insert closed-date bars.
 The legacy `exclude_weekends=False` argument selects continuous days only when no canonical calendar
 or feed declaration is present. `exclude_weekends=True` now follows NYSE holidays as well as weekends.
 Omission follows NYSE, so callers requiring the old elapsed-day counts should pass `calendar="24/7"`.
-Intraday/weekly range planning retains its legacy elapsed-time behavior; named calendar/feed
-declarations for those frequencies are not supported by this planner yet. `calendar=None` disables
-classification. Session-label dates use their declared timezone, or their existing timezone when
+The legacy undeclared weekly path is elapsed-time based, not an exchange-grid completeness report;
+declared weekly grids are not supported. `calendar=None` disables classification.
+Session-label dates use their declared timezone, or their existing timezone when
 undeclared. Explicit event-time/bar-close/bar-side declarations map to authoritative session labels
 before planning, including for provider-row selection during backfill. Out-of-session instants fail
 clearly; original provider timestamps are retained in storage. Declare the feed's `timezone` when a
 non-UTC label must survive storage's canonical UTC reads.
 
 If a provider's history limit cannot reach the stored dataset, the updater records
-`provider_history_limited` and skips gap filling across the unavailable interval.
+`provider_history_limited`. Missing observations remain detectable even when they cannot be retrieved.
 
 ## Python API
 
@@ -184,7 +317,7 @@ key = manager.update(
     frequency="daily",
     asset_class="equities",
     lookback_days=7,
-    fill_gaps=True,
+    check_gaps=True,
     initial_start="2023-01-01",
     initial_end="2024-01-01",
 )
@@ -204,7 +337,7 @@ Feed timezone, timestamp semantics and bar-grid declarations survive ingestion. 
 `session_start_time` override is not supported by the native schedule adapter and is rejected.
 The requested frequency and bar type must agree with declared feed metadata. These declarations
 do not themselves validate OHLCV completeness or transform timestamps. Gap detection remains
-separate from the updater's optional elapsed-grid imputation described above.
+separate from acquisition; neither validation nor gap checking imputes missing market values.
 
 ## Inspect Stored State
 
@@ -245,7 +378,7 @@ fetching or writing data.
 - Run an update only after the provider is expected to have finalized the latest requested period.
 - Reuse one storage directory and the same asset-class and frequency values so updates address the
   intended key.
-- Treat forward-filled rows as synthetic observations. For minute-session completion, the
-  `is_imputed` column identifies inserted rows; the general updater does not add that marker.
+- Preserve missing market data. Optional minute-grid expansion marks null placeholder rows with
+  the legacy `is_imputed` column; those rows are not recovered source observations.
 - Use `ml4t-data validate` after an update when schema, OHLC relationships, duplicates, or anomaly
   checks are part of the ingestion contract.

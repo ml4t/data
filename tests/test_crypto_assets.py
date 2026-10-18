@@ -13,15 +13,25 @@ from ml4t.data.assets.asset_class import (
 )
 from ml4t.data.calendar.crypto import CryptoCalendar, CryptoSessionValidator
 from ml4t.data.providers import SyntheticProvider
+from ml4t.specs import FeedSpec
 
 
 @pytest.fixture(params=["direct", "asset"])
 def continuity_issues(request):
     def validate(frame, frequency):
+        feed = FeedSpec(
+            time_contract_version=2,
+            calendar="24/7",
+            data_frequency=frequency,
+            timestamp_semantics="session_label" if frequency == "daily" else "event_time",
+            bar_grid_anchor=None if frequency == "daily" else "session_open",
+            bar_label=None if frequency == "daily" else "left",
+            partial_bar_policy=None if frequency == "daily" else "exclude",
+        )
         if request.param == "direct":
-            return CryptoSessionValidator().validate_continuity(frame, frequency)
+            return CryptoSessionValidator(feed_spec=feed).validate_continuity(frame, frequency)
         info = AssetInfo(symbol="BTC/USD", asset_class=AssetClass.CRYPTO)
-        return AssetValidator(info).validate(frame, frequency).get("continuity", [])
+        return AssetValidator(info, feed_spec=feed).validate(frame, frequency).get("continuity", [])
 
     return validate
 

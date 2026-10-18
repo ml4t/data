@@ -30,6 +30,7 @@ from ml4t.data.update_manager import (
     UpdateStrategy,
     _ensure_datetime,
 )
+from ml4t.specs import FeedSpec
 
 
 class TestUpdateStrategy:
@@ -190,10 +191,10 @@ class TestGapDetector:
         assert len(gaps) == 0
 
     def test_detect_gaps_missing_timestamp(self, detector: GapDetector):
-        """Missing timestamp column returns no gaps."""
+        """A nonempty frame without timestamps cannot be certified as complete."""
         df = pl.DataFrame({"close": [100, 101, 102]})
-        gaps = detector.detect_gaps(df)
-        assert len(gaps) == 0
+        with pytest.raises(ValueError, match="timestamp"):
+            detector.detect_gaps(df)
 
     def test_detect_gaps_with_tolerance(self, detector: GapDetector, data_with_gaps: pl.DataFrame):
         """Tolerance days affects gap detection."""
@@ -216,8 +217,21 @@ class TestGapDetector:
             }
         )
 
-        gaps = detector.detect_gaps(df, frequency="hourly")
-        assert len(gaps) >= 1
+        gaps = detector.detect_gaps(
+            df,
+            frequency="hourly",
+            feed_spec=FeedSpec(
+                time_contract_version=2,
+                calendar="24/7",
+                timezone="UTC",
+                data_frequency="hourly",
+                timestamp_semantics="event_time",
+                bar_grid_anchor="session_open",
+                bar_label="left",
+                partial_bar_policy="include",
+            ),
+        )
+        assert [gap["size_bars"] for gap in gaps] == [5]
 
     def test_ensure_datetime_with_date(self):
         """Ensure date objects are converted to datetime."""
@@ -260,10 +274,10 @@ class TestGapDetector:
         delta = detector._get_expected_delta("weekly")
         assert delta == timedelta(weeks=1)
 
-    def test_expected_delta_default(self, detector: GapDetector):
-        """Unknown frequency defaults to daily."""
-        delta = detector._get_expected_delta("unknown")
-        assert delta == timedelta(days=1)
+    def test_expected_delta_rejects_unknown_frequency(self, detector: GapDetector):
+        """An unsupported frequency must not silently change the observation unit."""
+        with pytest.raises(ValueError, match="frequency"):
+            detector._get_expected_delta("unknown")
 
 
 class TestGapDetectorStorage:
@@ -784,12 +798,14 @@ class TestBackfillManager:
 
         result = manager.execute_backfill("TEST", [], mock_provider)
 
-        assert result.success is False  # No gaps filled
+        assert result.success
         assert result.gaps_filled == 0
+        mock_provider.fetch_ohlcv.assert_not_called()
 
     def test_execute_backfill_with_mocked_provider(self, manager: BackfillManager):
         """Execute backfill with mocked provider."""
         mock_provider = MagicMock()
+        mock_provider.name = "mock"
 
         # Mock fetch_ohlcv to return data
         mock_data = pl.DataFrame(
@@ -812,11 +828,12 @@ class TestBackfillManager:
             }
         ]
 
-        _result = manager.execute_backfill("TEST", gaps, mock_provider)
+        result = manager.execute_backfill("TEST", gaps, mock_provider)
 
         # Provider should have been called
         mock_provider.fetch_ohlcv.assert_called()
-        assert _result is not None
+        assert result.success, result.errors
+        assert result.rows_added == 2
 
 
 class TestBackfillManagerPrioritization:

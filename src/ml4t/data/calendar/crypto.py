@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import polars as pl
 import structlog
+
+from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 logger = structlog.get_logger()
 
@@ -274,19 +277,28 @@ class CryptoCalendar:
 class CryptoSessionValidator:
     """Validator for crypto trading sessions."""
 
-    def __init__(self, calendar: CryptoCalendar | None = None) -> None:
+    def __init__(
+        self,
+        calendar: CryptoCalendar | str | None | CalendarUnset = UNSET_CALENDAR,
+        *,
+        feed_spec: Any | None = None,
+    ) -> None:
         """
         Initialize validator.
 
         Args:
             calendar: Crypto calendar to use
         """
-        self.calendar = calendar or CryptoCalendar()
+        self.calendar = calendar
+        self.feed_spec = FeedSpec.from_any(feed_spec)
 
     def validate_continuity(
         self,
         df: pl.DataFrame,
-        frequency: str = "daily",
+        frequency: str | None = None,
+        *,
+        calendar: CryptoCalendar | str | None | CalendarUnset = UNSET_CALENDAR,
+        feed_spec: Any | None = None,
     ) -> list[str]:
         """
         Validate data continuity for 24/7 market.
@@ -299,6 +311,19 @@ class CryptoSessionValidator:
             List of validation issues
         """
         issues = []
+        feed = self.feed_spec if feed_spec is None else FeedSpec.from_any(feed_spec)
+        if calendar is UNSET_CALENDAR:
+            calendar = self.calendar
+        selected = (
+            calendar
+            if isinstance(calendar, CryptoCalendar)
+            else feed.resolve_calendar(calendar=calendar)
+        )
+        if selected is None:
+            return issues
+        frequency = frequency or feed.data_frequency or "daily"
+        if frequency.lower() in {"1d", "1day"}:
+            frequency = "daily"
 
         if df.is_empty():
             return ["No data to validate"]
@@ -307,7 +332,17 @@ class CryptoSessionValidator:
             return ["Missing timestamp column"]
 
         # Find gaps
-        gaps = self.calendar.find_gaps(df, frequency)
+        if isinstance(selected, CryptoCalendar):
+            gaps = selected.find_gaps(df, frequency)
+        else:
+            from ml4t.data.utils.gaps import GapDetector
+
+            gaps = [
+                (gap.start, gap.end)
+                for gap in GapDetector().detect_gaps(
+                    df, frequency, calendar=selected, feed_spec=feed
+                )
+            ]
 
         for gap_start, gap_end in gaps:
             duration = gap_end - gap_start
