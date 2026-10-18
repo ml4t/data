@@ -1,7 +1,4 @@
-"""Session completion with gap filling for trading data.
-
-Ported from crypto-data-pipeline with enhancements for ml4t.data.
-"""
+"""Expose absent minute positions without manufacturing market observations."""
 
 from __future__ import annotations
 
@@ -28,21 +25,10 @@ def _datetime_scalar(value: object, name: str) -> datetime:
 
 
 class SessionCompleter:
-    """Fill gaps in trading data to create complete sessions.
+    """Left join observations to scheduled minutes, retaining absent values as nulls.
 
-    For each trading session:
-    1. Generate all minute timestamps in session (e.g., 1380 for 23-hour CME sessions)
-    2. Left join with actual data
-    3. Forward fill OHLC prices from last close
-    4. Set volume=0 for filled rows
-    5. Add session_date column
-
-    Example:
-        ```python
-        completer = SessionCompleter("CME_Globex_Crypto")
-        df_complete = completer.complete_sessions(df)
-        # Now has continuous timestamps with no gaps
-        ```
+    The legacy is_imputed marker identifies placeholder rows, not fabricated prices.
+    Use the disk gap report instead when expansion into a nullable grid is unnecessary.
     """
 
     def __init__(
@@ -73,17 +59,17 @@ class SessionCompleter:
         df: pl.DataFrame,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
-        fill_method: str = "forward",
-        zero_volume: bool = True,
+        fill_method: str = "none",
+        zero_volume: bool = False,
     ) -> pl.DataFrame:
-        """Fill gaps in data to create complete trading sessions.
+        """Represent missing scheduled minutes with nulls, preserving observed values.
 
         Args:
             df: Input DataFrame with timestamp, open, high, low, close, volume
             start_date: Optional start date (auto-detected if not provided)
             end_date: Optional exclusive end date (auto-detected if not provided)
-            fill_method: Method for filling prices ("forward", "backward", "none")
-            zero_volume: If True, set volume=0 for filled rows; if False, use NaN
+            fill_method: Only "none" is supported; synthetic prices are rejected.
+            zero_volume: Must be False; an absent observation has no known volume.
 
         Returns:
             DataFrame with complete sessions, an is_imputed column, and timestamp order
@@ -117,8 +103,11 @@ class SessionCompleter:
             )
         if "timestamp" not in df.columns:
             raise ValueError("DataFrame must have 'timestamp' column")
-        if fill_method not in {"forward", "backward", "none"}:
-            raise ValueError("fill_method must be 'forward', 'backward', or 'none'")
+        if fill_method != "none" or zero_volume:
+            raise ValueError(
+                "Synthetic price/volume imputation is unsupported; "
+                "use fill_method='none' and zero_volume=False"
+            )
 
         if df.is_empty():
             logger.warning("DataFrame is empty, cannot complete sessions")
@@ -258,14 +247,6 @@ class SessionCompleter:
                 pl.col("_is_observed").is_null().alias("is_imputed")
             )
 
-            # Fill missing data based on method
-            if fill_method != "none":
-                complete_df = self._fill_missing_data(
-                    complete_df,
-                    method=fill_method,
-                    zero_volume=zero_volume,
-                )
-
             complete_df = complete_df.drop("_is_observed")
             rows_added = complete_df.get_column("is_imputed").sum()
             logger.info(f"Completed sessions: added {rows_added} rows ({len(complete_df)} total)")
@@ -275,82 +256,6 @@ class SessionCompleter:
         except Exception as e:
             logger.error(f"Failed to complete sessions: {e}", exc_info=True)
             raise
-
-    def _fill_missing_data(
-        self,
-        df: pl.DataFrame,
-        method: str = "forward",
-        zero_volume: bool = True,
-    ) -> pl.DataFrame:
-        """Fill missing data with forward-filled prices and zero/NaN volume.
-
-        Strategy:
-        1. Forward/backward fill OHLC from last/next available close
-        2. Set volume=0 (or NaN) for filled rows
-        3. Preserve all other columns
-
-        Args:
-            df: DataFrame with nulls in OHLCV columns
-            method: Fill method ("forward" or "backward")
-            zero_volume: If True, use 0 for missing volume; if False, keep NaN
-
-        Returns:
-            DataFrame with filled data
-        """
-        price_columns = ["open", "high", "low", "close"]
-
-        reference_price: pl.Expr | None = None
-        reference_column = next((column for column in price_columns if column in df.columns), None)
-        if method == "forward":
-            if "close" in df.columns:
-                reference_column = "close"
-            if reference_column is not None:
-                reference_price = pl.col(reference_column).forward_fill()
-        elif method == "backward":
-            if "close" in df.columns:
-                reference_column = "close"
-            if reference_column is not None:
-                reference_price = pl.col(reference_column).backward_fill().over("session_date")
-
-        filled_df = df
-        if reference_price is not None:
-            filled_df = filled_df.with_columns(
-                *[
-                    pl.when(pl.col("is_imputed"))
-                    .then(reference_price)
-                    .otherwise(pl.col(column))
-                    .alias(column)
-                    for column in price_columns
-                    if column in df.columns
-                ]
-            )
-
-        # Handle volume
-        if "volume" in df.columns:
-            if zero_volume:
-                filled_df = filled_df.with_columns(
-                    pl.when(pl.col("is_imputed"))
-                    .then(pl.lit(0.0))
-                    .otherwise(pl.col("volume"))
-                    .alias("volume")
-                )
-            # else: keep NaN for missing volume
-
-        # Forward fill common metadata columns if present
-        metadata_columns = [
-            "instrument_id",
-            "symbol",
-            "raw_symbol",
-            "base_symbol",
-            "rtype",
-            "publisher_id",
-        ]
-
-        for col in metadata_columns:
-            if col in filled_df.columns:
-                filled_df = filled_df.with_columns(pl.col(col).forward_fill())
-
-        return filled_df
 
     def get_session_info(
         self, date_or_datetime: datetime | date

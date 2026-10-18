@@ -259,9 +259,19 @@ class DatasetConfig(BaseModel):
     validation: dict[str, Any] = Field(default_factory=dict, description="Validation settings")
     storage: dict[str, Any] = Field(default_factory=dict, description="Storage settings")
     lookback_days: int = Field(default=7, ge=0, description="Days to revisit during updates")
-    fill_gaps: bool = Field(default=True, description="Fill gaps during updates")
+    fill_gaps: bool | None = Field(
+        default=None, description="Legacy False disables checks; synthetic filling is unsupported"
+    )
+    check_gaps: bool = Field(default=True, description="Report calendar gaps without imputation")
     initial_load_days: int = Field(default=365, ge=1, description="Initial history length")
     extra: dict[str, Any] = Field(default_factory=dict, description="Dataset-specific settings")
+
+    @field_validator("fill_gaps")
+    @classmethod
+    def reject_synthetic_imputation(cls, value: bool | None) -> bool | None:
+        if value is True:
+            raise ValueError("Synthetic gap imputation is unsupported; use check_gaps for reports")
+        return value
 
     @model_validator(mode="before")
     @classmethod

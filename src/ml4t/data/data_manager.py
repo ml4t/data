@@ -400,7 +400,7 @@ class DataManager:
         frequency: str = "daily",
         asset_class: str = "equities",
         lookback_days: int = 7,
-        fill_gaps: bool = True,
+        fill_gaps: bool | None = None,
         provider: str | None = None,
         initial_start: str | None = None,
         initial_end: str | None = None,
@@ -408,6 +408,7 @@ class DataManager:
         *,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         feed_spec: Any | None = None,
+        check_gaps: bool = True,
     ) -> str:
         """Update existing data with incremental fetch."""
         if not self._storage_manager:
@@ -426,6 +427,7 @@ class DataManager:
             initial_load_days,
             calendar=calendar,
             feed_spec=feed_spec,
+            check_gaps=check_gaps,
         )
 
     # ========================================================================
@@ -480,12 +482,12 @@ class DataManager:
         exchange: str | None = None,
         calendar: str | None | CalendarUnset = UNSET_CALENDAR,
         fill_gaps: bool = True,
-        fill_method: str = "forward",
-        zero_volume: bool = True,
+        fill_method: str = "none",
+        zero_volume: bool = False,
         *,
         feed_spec: Any | None = None,
     ) -> pl.DataFrame:
-        """Complete sessions by filling gaps."""
+        """Expose absent minute positions as nulls without inventing market values."""
         manager = self._metadata_manager or MetadataManager(None)
         return manager.complete_sessions(
             df, exchange, calendar, fill_gaps, fill_method, zero_volume, feed_spec=feed_spec

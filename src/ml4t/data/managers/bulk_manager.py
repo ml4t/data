@@ -146,10 +146,12 @@ class BulkManager:
         asset_class: str = "equities",
         provider: str | None = None,
         lookback_days: int = 7,
-        fill_gaps: bool = True,
+        fill_gaps: bool | None = None,
         initial_start: str | None = None,
         initial_end: str | None = None,
         initial_load_days: int = 365,
+        *,
+        check_gaps: bool = True,
     ) -> dict[str, str]:
         """Update specific symbols.
 
@@ -159,7 +161,8 @@ class BulkManager:
             asset_class: Asset class
             provider: Optional provider override
             lookback_days: Days to look back for updates
-            fill_gaps: If True, detect and fill gaps
+            fill_gaps: Legacy False disables checks; True is rejected.
+            check_gaps: Report calendar gaps without creating observations.
             initial_start: Optional start date for first load when no data exists
             initial_end: Optional end date for first load when no data exists
             initial_load_days: Days to fetch on first load when initial_start is not set
@@ -178,6 +181,7 @@ class BulkManager:
                     asset_class=asset_class,
                     lookback_days=lookback_days,
                     fill_gaps=fill_gaps,
+                    check_gaps=check_gaps,
                     provider=provider,
                     initial_start=initial_start,
                     initial_end=initial_end,

@@ -587,7 +587,7 @@ class TestDataManagerUpdate:
         key = manager.load("AAPL", "2024-01-01", "2024-01-05", provider="mock")
 
         # Update - should merge data
-        manager.update("AAPL", fill_gaps=True, provider="mock")
+        manager.update("AAPL", check_gaps=True, provider="mock")
 
         stored_df = storage.read(key).collect()
         # Should have data without duplicates

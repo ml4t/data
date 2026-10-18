@@ -274,23 +274,13 @@ data = provider.fetch_ohlcv("AAPL", start, end)
 data = clean_ohlcv_data(data)
 ```
 
-### Option 3: Fill Forward (Last Resort)
+### Preserve and Investigate Missing Observations
 
-```python
-def fill_missing_data(df):
-    """Fill missing values with forward fill (use sparingly)."""
-    # Fill nulls with previous valid value
-    df = df.with_columns([
-        pl.col("open").fill_null(strategy="forward"),
-        pl.col("high").fill_null(strategy="forward"),
-        pl.col("low").fill_null(strategy="forward"),
-        pl.col("close").fill_null(strategy="forward"),
-        pl.col("volume").fill_null(0),  # Volume = 0 for missing days
-    ])
-
-    logger.warning("Applied forward fill to missing data")
-    return df
-```
+Do not replace absent OHLCV values with copied prices or zero volume. Preserve the missing data,
+use the [calendar-based disk report](../user-guide/incremental-updates.md#inspect-missing-observations-on-disk)
+to identify absent scheduled observations, and request actual rows from the original source when
+its API and coverage permit. Intervals without trades may legitimately have no candle. A null price
+inside a present row remains a validation finding, not permission to invent a replacement.
 
 ## Provider-Specific Validation
 
