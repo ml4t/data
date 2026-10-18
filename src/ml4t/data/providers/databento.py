@@ -357,7 +357,7 @@ class DataBentoProvider(BaseProvider):
         selected_stype = self.stype_in if stype_in is None else stype_in
         if selected_stype not in {"raw_symbol", "continuous", "instrument_id"}:
             raise ValueError("stype_in must select a single series, not a parent or universe")
-        if not isinstance(symbol, str) or symbol.upper() == "ALL_SYMBOLS":
+        if not isinstance(symbol, str) or symbol.strip().upper() == "ALL_SYMBOLS" or "," in symbol:
             raise ValueError("symbol must identify a single instrument, not a universe")
         self._validate_inputs(symbol, start.date().isoformat(), end.date().isoformat(), frequency)
         self._acquire_rate_limit()

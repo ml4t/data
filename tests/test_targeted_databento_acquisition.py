@@ -290,10 +290,11 @@ def test_generic_backfill_cannot_put_another_instrument_in_a_missing_bar(source,
     assert storage.get_metadata("BTC.c.0") == original
 
 
-def test_targeted_single_series_cannot_expand_to_all_vendor_instruments(source):
+@pytest.mark.parametrize("symbol", ["ALL_SYMBOLS", " ALL_SYMBOLS ", "ALL_SYMBOLS,", "BTCU6,MBTU6"])
+def test_targeted_single_series_cannot_expand_to_all_vendor_instruments(source, symbol):
     provider, _, calls = source
     with pytest.raises(ValueError, match="single|universe|instrument"):
-        provider.fetch_ohlcv_range("ALL_SYMBOLS", instant("12:01"), instant("12:02"), "minute")
+        provider.fetch_ohlcv_range(symbol, instant("12:01"), instant("12:02"), "minute")
     assert calls == []
 
 
