@@ -1114,7 +1114,7 @@ class BackfillManager:
         started = time.time()
         errors: list[str] = []
         rows_before = rows_after = added = replaced = filled = 0
-        remaining = list(gaps)
+        remaining = None
         try:
             if self.storage is None:
                 raise ValueError("Backfill requires a storage backend")
@@ -1228,30 +1228,37 @@ class BackfillManager:
 
             if parts:
                 recovered = pl.concat(parts, how="diagonal_relaxed")
-                combined, added, replaced = _merge_backfill_rows(existing, recovered, feed)
-                if added or replaced:
+                combined, proposed_added, proposed_replaced = _merge_backfill_rows(
+                    existing, recovered, feed
+                )
+                if proposed_added or proposed_replaced:
+                    remaining = None
                     _rewrite_preserving_metadata(self.storage, symbol, combined)
+                    added, replaced = proposed_added, proposed_replaced
                     rows_after = len(combined)
                     if self.tracker is not None:
-                        self.tracker.update_metadata(
-                            symbol,
-                            UpdateRecord(
-                                timestamp=datetime.now(),
-                                update_type="backfill",
-                                rows_before=rows_before,
-                                rows_after=rows_after,
-                                rows_added=added,
-                                rows_updated=replaced,
-                                start_date=_ensure_datetime(recovered["timestamp"].min()),
-                                end_date=_ensure_datetime(recovered["timestamp"].max()),
-                                provider=provider.name,
-                                duration_seconds=time.time() - started,
-                                errors=errors,
-                            ),
-                            rows_after,
-                            _ensure_datetime(combined["timestamp"].min()),
-                            _ensure_datetime(combined["timestamp"].max()),
-                        )
+                        try:
+                            self.tracker.update_metadata(
+                                symbol,
+                                UpdateRecord(
+                                    timestamp=datetime.now(),
+                                    update_type="backfill",
+                                    rows_before=rows_before,
+                                    rows_after=rows_after,
+                                    rows_added=added,
+                                    rows_updated=replaced,
+                                    start_date=_ensure_datetime(recovered["timestamp"].min()),
+                                    end_date=_ensure_datetime(recovered["timestamp"].max()),
+                                    provider=provider.name,
+                                    duration_seconds=time.time() - started,
+                                    errors=errors,
+                                ),
+                                rows_after,
+                                _ensure_datetime(combined["timestamp"].min()),
+                                _ensure_datetime(combined["timestamp"].max()),
+                            )
+                        except Exception as error:
+                            errors.append(f"Observations stored but update history failed: {error}")
             remaining = inspect(gaps)
             filled = sum(not inspect([gap]) for gap in fresh)
         except Exception as error:

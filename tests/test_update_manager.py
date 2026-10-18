@@ -804,6 +804,7 @@ class TestBackfillManager:
     def test_execute_backfill_with_mocked_provider(self, manager: BackfillManager):
         """Execute backfill with mocked provider."""
         mock_provider = MagicMock()
+        mock_provider.name = "mock"
 
         # Mock fetch_ohlcv to return data
         mock_data = pl.DataFrame(
@@ -826,11 +827,12 @@ class TestBackfillManager:
             }
         ]
 
-        _result = manager.execute_backfill("TEST", gaps, mock_provider)
+        result = manager.execute_backfill("TEST", gaps, mock_provider)
 
         # Provider should have been called
         mock_provider.fetch_ohlcv.assert_called()
-        assert _result is not None
+        assert result.success, result.errors
+        assert result.rows_added == 2
 
 
 class TestBackfillManagerPrioritization:

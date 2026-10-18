@@ -257,7 +257,9 @@ supported, but targeted recovery of a panel requires separate per-instrument dat
 `result.success` means processing completed without errors, not that every observation was recovered.
 Inspect `errors` and `remaining_gaps`. Empty no-trade responses do not change storage or trigger
 unbounded retries. Partial responses retain their residual gaps; `gaps_filled` counts only completely
-recovered ranges. Existing observed null values are a separate validation concern, not permission
+recovered ranges. A history-recording failure reports an error even if observations were stored;
+the residual report still reflects disk. A failed operation that cannot establish coverage returns
+`remaining_gaps=None`, not an unverified clean report. Existing observed null values are a separate validation concern, not permission
 to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
 intraday data; its daily `min_gap_days` remains a session count.
 

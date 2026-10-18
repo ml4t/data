@@ -437,3 +437,16 @@ def test_unsupported_recovery_fails_without_vendor_calls_or_storage_mutation(
     assert calls == []
     assert storage.get_metadata("BTC.c.0") == before
     assert_frame_equal(storage.read("BTC.c.0").collect(), observed)
+
+
+def test_history_write_failure_still_reports_the_observations_actually_published(source, tmp_path):
+    provider, complete, _, _, storage, report = stored_source(source, FlatStorage, tmp_path)
+    tracker = MetadataTracker(tmp_path)
+    tracker._get_metadata_path("BTC.c.0").mkdir()
+    result = BackfillManager(storage, tracker).execute_backfill("BTC.c.0", report, provider)
+    assert not result.success
+    assert any("directory" in error.lower() for error in result.errors)
+    assert result.rows_added == 1
+    assert result.rows_after == 3
+    assert result.remaining_gaps == []
+    assert_frame_equal(storage.read("BTC.c.0").collect(), complete)
