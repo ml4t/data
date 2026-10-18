@@ -1126,7 +1126,7 @@ class BackfillManager:
             rows_before = rows_after = len(existing)
             if not gaps:
                 return UpdateResult(
-                    False, "backfill", 0, 0, rows_before, rows_after, remaining_gaps=[]
+                    True, "backfill", 0, 0, rows_before, rows_after, remaining_gaps=[]
                 )
             metadata = (
                 normalize_storage_metadata(self.storage.get_metadata(symbol), symbol) or {}

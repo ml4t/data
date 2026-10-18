@@ -450,3 +450,23 @@ def test_history_write_failure_still_reports_the_observations_actually_published
     assert result.rows_after == 3
     assert result.remaining_gaps == []
     assert_frame_equal(storage.read("BTC.c.0").collect(), complete)
+
+
+def test_an_empty_actual_report_completes_without_download_or_storage_changes(source, tmp_path):
+    provider, complete, _, calls, storage, _ = stored_source(source, FlatStorage, tmp_path)
+    storage.write(complete, "BTC.c.0", preserve_metadata=True)
+    report = GapDetector().detect_gaps_in_storage(
+        storage, "BTC.c.0", instant("12:00"), instant("12:02")
+    )
+    assert report == []
+    before = storage.get_metadata("BTC.c.0")
+    result = BackfillManager(storage, MetadataTracker(tmp_path)).execute_backfill(
+        "BTC.c.0", report, provider
+    )
+    assert result.success, result.errors
+    assert result.rows_added == result.gaps_filled == 0
+    assert result.rows_before == result.rows_after == 3
+    assert result.remaining_gaps == []
+    assert calls == []
+    assert storage.get_metadata("BTC.c.0") == before
+    assert_frame_equal(storage.read("BTC.c.0").collect(), complete)

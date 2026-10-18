@@ -255,12 +255,14 @@ Databento, with a left-labeled grid and one instrument per storage key. Multi-as
 supported, but targeted recovery of a panel requires separate per-instrument datasets.
 
 `result.success` means processing completed without errors, not that every observation was recovered.
+An empty input report succeeds without downloading or writing; use `rows_added` and `gaps_filled`
+to distinguish recovered data from a no-op. Previously an empty report returned `success=False`.
 Inspect `errors` and `remaining_gaps`. Empty no-trade responses do not change storage or trigger
 unbounded retries. Partial responses retain their residual gaps; `gaps_filled` counts only completely
 recovered ranges. A history-recording failure reports an error even if observations were stored;
 the residual report still reflects disk. A failed operation that cannot establish coverage returns
-`remaining_gaps=None`, not an unverified clean report. Existing observed null values are a separate validation concern, not permission
-to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
+`remaining_gaps=None`, not an unverified clean report. Existing observed null values are a separate
+validation concern, not permission to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
 intraday data; its daily `min_gap_days` remains a session count.
 
 Coin Metrics is not currently a Data provider. Its candle and metric endpoints use different

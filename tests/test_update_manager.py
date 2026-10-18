@@ -798,8 +798,9 @@ class TestBackfillManager:
 
         result = manager.execute_backfill("TEST", [], mock_provider)
 
-        assert result.success is False  # No gaps filled
+        assert result.success
         assert result.gaps_filled == 0
+        mock_provider.fetch_ohlcv.assert_not_called()
 
     def test_execute_backfill_with_mocked_provider(self, manager: BackfillManager):
         """Execute backfill with mocked provider."""
