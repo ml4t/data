@@ -123,6 +123,14 @@ the same dividend cash event. The consuming broker owns entitlement, payment, or
 Source availability remains separate from effective time; this preparation step makes no causal
 as-of claim.
 
+Isolated wheel and source-distribution checks qualified Data `0.2.2.dev23+g0917c8401`,
+Specs `0.2.0`, Diagnostic `0.1.9` and the immutable Engineer source candidate identified above.
+The installed Data recipe produced two versioned event facts. Both consumers' public return/label
+APIs produced `0.01` for native adjusted prices and `1/97` for the supplied-factor prices, while
+retaining raw prices `200, 98` and volumes `1000, 7`. These checks qualify preparation and
+analytical input consumption, not Backtest's corporate-action account transitions or published
+Engineer-package compatibility.
+
 ## Names preserved through the 0.x series
 
 The package preserves two former QLDM names during the 0.x release series. Their use emits
