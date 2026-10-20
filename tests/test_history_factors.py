@@ -5,6 +5,7 @@ from io import StringIO
 
 import polars as pl
 import pytest
+from polars.testing import assert_frame_equal
 
 from ml4t.data.adjustments import prepare_adjusted_history
 from ml4t.specs import FeedSpec
@@ -170,3 +171,102 @@ def test_a_source_factor_method_cannot_be_silently_relabelled_with_another_defin
             as_of=None,
             feed_spec=feed,
         )
+
+
+@pytest.mark.parametrize(
+    "defect,match",
+    [
+        ("future_basis", "later than"),
+        ("stale_basis", "predates"),
+        ("mixed_basis", "one supplied share basis"),
+        ("currency", "currency"),
+        ("missing", "coverage"),
+        ("duplicate", "Duplicate"),
+        ("negative", "positive"),
+        ("infinite", "finite"),
+    ],
+)
+def test_invalid_causal_factor_definitions_fail_without_changing_source_inputs(defect, match):
+    prices, actions, original, feed = captured_factor_inputs()
+    factors = original.clone()
+    if defect == "future_basis":
+        factors = factors.with_columns(
+            pl.lit(datetime(2025, 7, 3, 17, tzinfo=UTC)).alias("basis_at")
+        )
+    elif defect == "stale_basis":
+        factors = factors.with_columns(pl.lit(datetime(2025, 7, 1, tzinfo=UTC)).alias("basis_at"))
+    elif defect == "mixed_basis":
+        factors = factors.with_columns(
+            pl.when(pl.col("price_adjustment_factor") == 1)
+            .then(datetime(2025, 7, 3, 14, tzinfo=UTC))
+            .otherwise(pl.col("basis_at"))
+            .alias("basis_at")
+        )
+    elif defect == "currency":
+        factors = factors.with_columns(pl.lit("EUR").alias("currency"))
+    elif defect == "missing":
+        factors = factors.head(1)
+    elif defect == "duplicate":
+        factors = pl.concat([factors, factors.head(1)])
+    else:
+        factors = factors.with_columns(
+            pl.lit(-1.0 if defect == "negative" else float("inf")).alias("price_adjustment_factor")
+        )
+    before = factors.clone()
+    with pytest.raises(ValueError, match=match):
+        prepare_adjusted_history(
+            prices,
+            actions,
+            factors=factors,
+            basis="total_return",
+            factor_method="captured",
+            as_of=datetime(2025, 7, 3, 16, 30, tzinfo=UTC),
+            feed_spec=feed,
+            action_coverage="complete",
+        )
+    assert_frame_equal(factors, before)
+    assert_frame_equal(original, captured_factor_inputs()[2])
+
+
+def test_future_factor_revisions_cannot_change_prior_causal_history_or_raw_source_provenance():
+    prices, actions, factors, feed = captured_factor_inputs()
+    later = factors.with_columns(
+        pl.lit(9.0).alias("price_adjustment_factor"),
+        pl.lit("r2").alias("revision_id"),
+        pl.lit(datetime(2025, 7, 20, tzinfo=UTC)).alias("available_at"),
+    )
+    results = [
+        prepare_adjusted_history(
+            prices,
+            actions,
+            factors=table,
+            basis="total_return",
+            factor_method="captured",
+            as_of=datetime(2025, 7, 3, 16, 30, tzinfo=UTC),
+            feed_spec=feed,
+            action_coverage="complete",
+        )
+        for table in (factors, pl.concat([factors, later]))
+    ]
+    assert_frame_equal(results[0].prices, results[1].prices)
+    assert results[1].prices["revision_id"].to_list() == ["r1", "r0"]
+    assert results[1].prices["factor_revision_id"].to_list() == ["r1", "r1"]
+
+
+def test_supplied_price_only_factors_do_not_fabricate_adjusted_volume_and_keep_typed_empties():
+    prices, actions, factors, feed = captured_factor_inputs()
+    for count in (2, 0):
+        result = prepare_adjusted_history(
+            prices.head(count),
+            actions,
+            factors=factors.head(count).drop("volume_adjustment_factor"),
+            basis="total_return",
+            factor_method="captured",
+            action_coverage="complete",
+            as_of=datetime(2025, 7, 3, 16, 30, tzinfo=UTC),
+            feed_spec=feed,
+        )
+        assert "adj_volume" not in result.prices.columns
+        assert result.prices["volume"].to_list() == [1000, 5][:count]
+        assert result.metadata["volume_factor_supplied"] is False
+        assert result.prices.schema["adj_close"] == pl.Float64

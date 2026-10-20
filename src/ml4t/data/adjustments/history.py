@@ -128,8 +128,7 @@ def _actions_at(
     frame = frame.filter(pl.col(asset).is_in(prices[asset].unique().implode()))
     frame = utc_column(frame, "available_at", feed.timezone)
     if "effective_at" not in frame.columns or frame["effective_at"].null_count():
-        if frame.height:
-            raise ValueError("Unknown effective_at cannot establish history adjustment coverage")
+        raise ValueError("Unknown effective_at cannot establish history adjustment coverage")
     if frame.schema["effective_at"] != pl.Date:
         frame = utc_column(frame, "effective_at", feed.timezone)
     keys = [asset, "source", "event_id"]
@@ -333,6 +332,31 @@ def prepare_adjusted_history(
     Native total-return factors use the actual available ex-date close. Intraday callers supply
     a separately captured ex_date_closes table with the same units and revision/availability keys.
     No action cash,positions,synthetic prices,FX or historical availability is inferred.
+
+    Args:
+        prices: Raw observations with source,revision_id,available_at and declared entity/clock.
+        actions: Captured action revisions,or None. Absence does not declare complete coverage.
+        as_of: Availability cutoff instant;None explicitly selects retrospective latest revisions.
+        feed_spec: Shared observation clock,entity,price,calendar and bar-grid declaration.
+        calendar: Explicit schedule override;None disables schedules,omission preserves the feed.
+        basis: raw,split_adjusted or total_return. Native default is total_return. Supplied
+            factors require an explicit basis and method;native defaults are not substituted.
+        action_coverage: Caller declaration of complete or unknown source event coverage for
+            the requested price range. Native adjusted history requires complete coverage.
+        ex_date_closes: Captured native cash-factor close facts keyed by asset/ex_date with
+            source,revision_id,available_at,reference price and currency. Required intraday.
+        factors: Exact per-observation supplied factors. Causal inputs require version identity,
+            actual availability and one known basis_at instant per asset,not a future/stale basis.
+        factor_method: Name of the supplied financial definition,retained in output provenance.
+        instruments: Optional captured dated registry for ID validation or symbol normalization.
+        identity_mode: stable_id validates declared IDs;symbol resolves the feed entity column
+            by date and optional exchange. Source symbols remain and stable IDs are added.
+        action_feed_spec: Separate physical action clock/entity mappings when source names differ.
+
+    Returns:
+        Prepared raw/derived prices,selected actions,used identity provenance and between-endpoint
+        missing/null coverage. metadata.feed_spec points consumers to the requested basis and
+        stable IDs;input_feed_spec and source_feed_spec describe input/raw physical fields.
     """
     if basis is None:
         if factors is not None:

@@ -2,6 +2,8 @@
 
 from datetime import UTC, date, datetime
 from io import StringIO
+from pathlib import Path
+from runpy import run_path
 
 import polars as pl
 import pytest
@@ -232,3 +234,16 @@ def test_empty_symbol_history_retains_identity_and_source_schemas():
     assert result.prices.schema["ticker"] == pl.String
     assert result.identities.height == 0
     assert result.identities.schema["valid_from"] == pl.Date
+
+
+def test_offline_migration_retains_pre_entry_history_and_future_revision_invariance(tmp_path):
+    recipe = run_path(
+        str(Path(__file__).resolve().parents[1] / "examples/dated_history_migration.py")
+    )
+    past, changed, later = recipe["migrate_history"](tmp_path)
+    assert_frame_equal(past.prices, changed.prices)
+    assert past.prices["adj_close"].to_list() == [198, 200]
+    assert past.prices["asset"].to_list() == [17, 17]
+    assert past.prices["adj_close"][-1] > 199
+    assert later.actions["event_id"].to_list() == ["s1", "c1"]
+    assert later.coverage["missing_periods"].to_list() == [0]

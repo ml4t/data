@@ -131,6 +131,97 @@ retaining raw prices `200, 98` and volumes `1000, 7`. These checks qualify prepa
 analytical input consumption, not Backtest's corporate-action account transitions or published
 Engineer-package compatibility.
 
+## Prepare dated identities and known-at history
+
+A mutable ticker is not an instrument ID. Replace static symbol dictionaries with captured
+identity intervals when normalizing saved data:
+
+```python
+from ml4t.data.assets import InstrumentRegistry
+
+registry = InstrumentRegistry.from_frame(identities, memberships, feed_spec=identity_feed)
+asset = registry.resolve("OLD", "2025-07-03", exchange="NYSE", as_of="2025-07-03T18:00:00Z")
+universe = registry.lifetimes(
+    "2025-07-03", as_of="2025-07-03T18:00:00Z", universe="captured_index"
+)
+```
+
+Identity rows require stable `asset`,source `symbol`, `exchange`, `instrument_type`, `source`,
+`revision_id` and `valid_from`. `valid_to` is exclusive. Use `entity_col` for an existing stable-ID
+field such as `sid`. Source listing/delisting columns are retained. Memberships are a separate
+captured table keyed by asset,universe,source and interval. Neither missing quotes nor absence
+from an incomplete table establishes delisting or universe completeness. Multiple venues require
+an exchange; overlapping or ambiguous intervals fail before output.
+
+Do not replace a runtime Zipline `data.history(...)` call with a Data history engine. Backtest
+owns runtime history requests. Data prepares the source inputs and preserves pre-entry observations
+for that consumer. Replace retrospective whole-file adjustment during input preparation with an
+explicit cutoff:
+
+```python
+from ml4t.data.adjustments import prepare_adjusted_history
+
+prepared = prepare_adjusted_history(
+    prices, actions, as_of="2025-07-02T21:00:00Z", feed_spec=price_feed,
+    instruments=registry, identity_mode="symbol", action_coverage="complete",
+)
+native_prices = prepared.prices
+consumer_feed = prepared.metadata["feed_spec"]
+```
+
+In symbol mode, `price_feed.entity_col` names the captured source symbol column. It is preserved;
+the registry's stable-ID column is added. Use a distinct physical symbol name,not `asset` for both
+meanings. Stable-ID mode is the default and validates dated identity coverage when a registry is
+supplied. Without a registry,caller-supplied stable IDs remain usable. A separate `action_feed_spec`
+maps existing action entity/effective-time fields without renaming source columns on disk.
+
+Each causal price/action/identity revision needs actual `available_at`, `source` and `revision_id`.
+Observation time,effective time and availability are different. Only revisions available by the
+cutoff are eligible. Future symbol changes,price corrections and effective actions cannot change
+earlier causal output. Unknown relevant availability fails. `as_of=None` explicitly selects latest
+retrospective revisions and may change when later facts arrive; no historical availability is
+invented. Timestamps retain nanosecond precision. Date identity intervals and price session labels
+use their declared calendar; instant identity boundaries are not inferred from civil dates.
+
+The native default is total-return research history on the latest applicable known share basis.
+`basis="split_adjusted"` excludes cash factors. `basis="raw"` retains raw prices and does not require
+unused action facts. Adjusted history requires the caller to declare complete source action
+coverage for the supplied range. That declaration cannot be deduced from an empty event table.
+Native cash factors need an actually published ex-date close,not a provisional quote before the
+selected exchange close. Intraday preparation needs a separate captured `ex_date_closes` table
+with matching currency,revision and availability fields. Explicit `calendar=None` disables schedule
+checks but still requires an explicit available close fact for causal cash adjustment. Named
+`24/7` remains a schedule. Explicit argument,declared feed and NYSE retain their precedence.
+
+Imported factors keep their source definition through `factors=...`,an explicit `basis` and
+`factor_method`. They must exactly cover requested observations. A causal supplied-factor history
+requires actual version/availability and one known `basis_at` instant per asset. A future basis,
+a basis preceding applicable known actions,or conflicting source method/currency fails. An
+unversioned legacy factor capture remains usable only through the explicitly retrospective route,
+with unknown provenance recorded. Supplied merger/stock-distribution research factors do not
+invent destination consideration,cash,positions or account transitions. Volume adjusts only when
+its factor is supplied.
+
+Raw columns remain alongside `adj_*` columns. `prepared.metadata['feed_spec']` points consumers
+to the requested adjusted price/volume fields and stable IDs; source/input feed declarations remain
+separate. `prepared.actions` contains selected facts and `prepared.identities` the matched identity
+provenance. Coverage distinguishes observed null prices from absent scheduled observations between
+the supplied endpoints. It does not fill either kind of gap or claim completeness outside that
+range. Intraday coverage requires the complete declared version-2 bar grid.
+
+Run the Data-only CSV-to-disk recipe:
+
+```bash
+uv run python examples/dated_history_migration.py
+```
+
+The recipe retains July1/2 warmup prices `198,200` at the July2 cutoff. A later correction to `999`
+does not change that input. The July3 split/cash facts produce the independent native shareholder
+return `1.01`; a July7 symbol rename retains ID17. July4 is an exchange closure,not a missing
+observation. The example needs no Reloaded,Engineer,Diagnostic or Backtest runtime dependency.
+These are unreleased source APIs;final installed-consumer qualification is recorded with its
+actual candidate version before merge.
+
 ## Names preserved through the 0.x series
 
 The package preserves two former QLDM names during the 0.x release series. Their use emits

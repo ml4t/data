@@ -191,9 +191,9 @@ class InstrumentRegistry:
             if isinstance(dtype, pl.Datetime):
                 if session_intervals and feed.timestamp_semantics != "session_label":
                     point = pl.lit(session_labels_at(frame[timestamp], feed))
-                elif feed.timezone is not None:
-                    point = point.dt.convert_time_zone(feed.timezone)
-                if not (session_intervals and feed.timestamp_semantics != "session_label"):
+                else:
+                    if feed.timezone is not None:
+                        point = point.dt.convert_time_zone(feed.timezone)
                     point = point.dt.date()
         else:
             if dtype == pl.Date:

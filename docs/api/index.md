@@ -500,3 +500,30 @@ for ratio direction, required source fields and native versus vendor adjustment 
     options:
       show_source: false
       heading_level: 3
+
+## Dated identity and known-at history inputs
+
+Use captured identity intervals and source availability for preparation,not an asset database or
+runtime history request. The [offline dated-history recipe](../getting-started/migration.md#prepare-dated-identities-and-known-at-history)
+shows symbol normalization,pre-entry observations and actual source revisions.
+
+::: ml4t.data.assets.InstrumentRegistry
+    options:
+      show_source: false
+      heading_level: 3
+      members:
+        - from_frame
+        - resolve
+        - lifetimes
+        - identities
+        - memberships
+
+::: ml4t.data.adjustments.prepare_adjusted_history
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.adjustments.AdjustedHistory
+    options:
+      show_source: false
+      heading_level: 3
