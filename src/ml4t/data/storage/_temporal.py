@@ -2,13 +2,25 @@
 
 from datetime import UTC, datetime
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import polars as pl
 
 from ml4t.specs import FeedSpec
 
 from .backend import normalize_storage_metadata
+
+
+def storage_feed(metadata: dict[str, Any]) -> FeedSpec:
+    """Validate the stored declaration without adding defaults to the source metadata."""
+    feed = FeedSpec.from_any(normalize_storage_metadata(metadata))
+    feed.resolve_calendar()
+    if feed.timezone is not None:
+        try:
+            ZoneInfo(feed.timezone)
+        except (TypeError, ValueError, ZoneInfoNotFoundError) as error:
+            raise ValueError(f"Invalid declared timezone: {feed.timezone!r}") from error
+    return feed
 
 
 def read_bound(
@@ -21,13 +33,11 @@ def read_bound(
     """Interpret a bound in the observation domain, or its physical partition timezone."""
     if value is None:
         return None
-    feed = FeedSpec.from_any(normalize_storage_metadata(metadata))
+    feed = storage_feed(metadata)
     if not isinstance(dtype, pl.Datetime):
         return value.replace(tzinfo=None)
-    source_zone = ZoneInfo(dtype.time_zone) if dtype.time_zone else UTC
+    source_zone = ZoneInfo(dtype.time_zone or feed.timezone or "UTC")
     if feed.timestamp_semantics == "session_label":
-        if dtype.time_zone is None and feed.timezone is not None:
-            source_zone = ZoneInfo(feed.timezone)
         label_zone = ZoneInfo(feed.timezone) if feed.timezone else source_zone
         label = value.replace(tzinfo=label_zone) if value.tzinfo is None else value
         target_zone = source_zone if partition or feed.timezone is None else UTC
@@ -43,7 +53,7 @@ def read_timestamps(
     end: datetime | None,
 ) -> pl.LazyFrame:
     """Keep source precision and declared labels, retaining legacy UTC instant reads."""
-    feed = FeedSpec.from_any(normalize_storage_metadata(metadata))
+    feed = storage_feed(metadata)
     timestamp_col = feed.timestamp_col
     dtype = frame.collect_schema().get(timestamp_col)
     if dtype is None:
@@ -54,11 +64,7 @@ def read_timestamps(
         or dtype.time_zone is None
     ):
         timestamp = pl.col(timestamp_col)
-        naive_zone = (
-            feed.timezone
-            if feed.timestamp_semantics == "session_label" and feed.timezone is not None
-            else "UTC"
-        )
+        naive_zone = feed.timezone or "UTC"
         timestamp = (
             timestamp.dt.replace_time_zone(naive_zone).dt.convert_time_zone("UTC")
             if dtype.time_zone is None

@@ -13,9 +13,7 @@ from typing import Any
 import polars as pl
 import structlog
 
-from ml4t.specs import FeedSpec
-
-from ._temporal import read_timestamps
+from ._temporal import read_timestamps, storage_feed
 from .backend import StorageBackend, StorageConfig
 from .keys import KEY_ENCODING_PREFIX, decode_storage_key
 
@@ -66,7 +64,7 @@ class FlatStorage(StorageBackend):
         df = lazy_data.collect()
         with self._key_lock(key):
             effective_metadata = self._effective_metadata(key, metadata, preserve_metadata)
-            FeedSpec.from_any(effective_metadata).resolve_calendar()
+            storage_feed(effective_metadata)
             staging_path, generation_id = self._prepare_generation(key)
             try:
                 staged_file = staging_path / "data.parquet"

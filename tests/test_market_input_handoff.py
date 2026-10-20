@@ -16,7 +16,7 @@ from ml4t.data.sessions import SessionAssigner
 from ml4t.data.storage.config import StorageConfig
 from ml4t.data.storage.flat import FlatStorage
 from ml4t.data.storage.hive import HiveStorage
-from ml4t.data.utils.conversion import from_price_panel, to_price_panel
+from ml4t.data.utils.conversion import from_price_panel, polars_to_pandas, to_price_panel
 from ml4t.specs import FeedSpec
 
 
@@ -382,3 +382,63 @@ def test_declared_physical_columns_survive_bounded_storage_to_panel_without_rena
     assert_frame_equal(from_price_panel(panel), source)
     assert panel.attrs["ml4t_price_panel"]["feed_spec"]["data_frequency"] == "1ns"
     assert storage.read("custom", datetime(2025, 7, 8, tzinfo=UTC)).collect().is_empty()
+
+
+@pytest.mark.parametrize("local_hour,utc_day,utc_hour", [(9, 7, 13), (23, 8, 3)])
+def test_imported_naive_instants_honor_the_declared_source_timezone(
+    storage, local_hour, utc_day, utc_hour
+):
+    source = source_observations().with_columns(
+        pl.col("timestamp").dt.replace_time_zone(None).dt.offset_by(f"{local_hour}h15m")
+    )
+    feed = FeedSpec(
+        time_contract_version=2,
+        calendar="NYSE",
+        timezone="America/New_York",
+        timestamp_semantics="event_time",
+    )
+    with DataManager(storage=storage, enable_validation=False) as manager:
+        key = manager.import_data(source, "captured", "file", frequency="tick", feed_spec=feed)
+        restored = storage.read(key).collect()
+        assert restored["timestamp"].dt.hour().to_list() == [utc_hour, utc_hour]
+        assert restored["timestamp"].dt.day().to_list() == [utc_day, utc_day]
+        bounded = storage.read(
+            key,
+            datetime(2025, 7, utc_day, utc_hour, tzinfo=UTC),
+            datetime(2025, 7, utc_day, utc_hour + 1, tzinfo=UTC),
+        ).collect()
+        assert_frame_equal(bounded.select(source.columns), restored.select(source.columns))
+
+
+@pytest.mark.parametrize("timezone", ["", "Not/A_Zone", 7])
+def test_bad_timezone_metadata_cannot_replace_a_valid_source_generation(storage, timezone):
+    source = source_observations()
+    storage.write(source, "valid")
+    before = storage.get_metadata("valid")
+    with pytest.raises(ValueError, match="timezone"):
+        storage.write(source.head(1), "valid", {"timezone": timezone})
+    assert storage.get_metadata("valid") == before
+    assert_frame_equal(storage.read("valid").collect().select(source.columns), source)
+
+
+def test_price_panel_keeps_native_nan_distinct_from_an_explicit_null_source_cell():
+    source = pl.read_csv(
+        StringIO("timestamp,asset,close\n2025-07-07,A,NaN\n2025-07-07,B,\n"),
+        try_parse_dates=True,
+        schema_overrides={"close": pl.Float64},
+    )
+    restored = from_price_panel(to_price_panel(source))
+    assert_frame_equal(restored, source)
+    assert restored["close"].null_count() == 1
+    assert restored["close"].is_nan().sum() == 1
+
+
+def test_pandas_input_retains_a_late_local_session_label_without_a_timezone_declaration():
+    source = (
+        source_observations(labels=True)
+        .select("timestamp", "asset", "close")
+        .with_columns(pl.col("timestamp").dt.offset_by("23h"))
+    )
+    feed = FeedSpec(time_contract_version=2, calendar=None, timestamp_semantics="session_label")
+    restored = from_price_panel(to_price_panel(polars_to_pandas(source), feed_spec=feed))
+    assert_frame_equal(restored, source)

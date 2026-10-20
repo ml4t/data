@@ -227,7 +227,27 @@ def to_price_panel(
         "assets": assets.tolist(),
         "schema": dict(data.select(names).schema) if isinstance(data, pl.DataFrame) else None,
     }
+    if isinstance(data, pl.DataFrame) and data.schema[feed.price_col].is_float():
+        nulls = pd.Series(data[feed.price_col].is_null().to_numpy(), index=indexed.index)
+        panel.attrs["ml4t_price_panel"]["null_cells"] = (
+            nulls.reindex(grid, fill_value=False).to_numpy().reshape(panel.shape).tolist()
+        )
     return panel
+
+
+def _panel_mask(values: Any, shape: tuple[int, int]) -> np.ndarray:
+    if (
+        not isinstance(values, list)
+        or len(values) != shape[0]
+        or any(
+            not isinstance(row, list)
+            or len(row) != shape[1]
+            or any(not isinstance(value, bool) for value in row)
+            for row in values
+        )
+    ):
+        raise ValueError("Panel cell mask does not match its axes")
+    return np.asarray(values, dtype=bool).reshape(shape)
 
 
 def from_price_panel(
@@ -269,17 +289,9 @@ def from_price_panel(
         if (
             contract.get("clock") != panel.index.tolist()
             or contract.get("assets") != panel.columns.tolist()
-            or not isinstance(observed, list)
-            or len(observed) != panel.shape[0]
-            or any(
-                not isinstance(row, list)
-                or len(row) != panel.shape[1]
-                or any(not isinstance(value, bool) for value in row)
-                for row in observed
-            )
         ):
             raise ValueError("Panel observation mask does not match its axes")
-        mask = np.asarray(observed, dtype=bool).reshape(panel.shape)
+        mask = _panel_mask(observed, panel.shape)
         if panel.notna().to_numpy()[~mask].any():
             raise ValueError("An absent observation mask cell contains a price")
     rows, cols = np.nonzero(mask)
@@ -291,6 +303,9 @@ def from_price_panel(
         }
     )
     result = pandas_to_polars(frame)
+    timestamp_dtype = frame[names[0]].dtype
+    if isinstance(timestamp_dtype, pd.DatetimeTZDtype):
+        result = result.with_columns(pl.col(names[0]).dt.convert_time_zone(str(timestamp_dtype.tz)))
     schema = contract.get("schema")
     if schema is not None:
         expressions = []
@@ -300,4 +315,11 @@ def from_price_panel(
                 expr = expr.dt.convert_time_zone(dtype.time_zone)
             expressions.append(expr.cast(dtype, strict=True))
         result = result.select(expressions)
+        if "null_cells" in contract:
+            nulls = _panel_mask(contract["null_cells"], panel.shape)[rows, cols]
+            values = [
+                value if not pd.isna(value) else None if was_null else float("nan")
+                for value, was_null in zip(frame[names[2]], nulls, strict=True)
+            ]
+            result = result.with_columns(pl.Series(names[2], values, dtype=schema[names[2]]))
     return result

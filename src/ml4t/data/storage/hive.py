@@ -15,9 +15,8 @@ import polars as pl
 import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
-from ml4t.specs import FeedSpec
 
-from ._temporal import read_bound, read_timestamps
+from ._temporal import read_bound, read_timestamps, storage_feed
 from .backend import StorageBackend, StorageConfig
 from .keys import (
     KEY_ENCODING_PREFIX,
@@ -306,8 +305,7 @@ class HiveStorage(StorageBackend):
 
         with self._key_lock(key):
             effective_metadata = self._effective_metadata(key, metadata, preserve_metadata)
-            feed = FeedSpec.from_any(effective_metadata)
-            feed.resolve_calendar()
+            feed = storage_feed(effective_metadata)
             if feed.timestamp_col not in df.columns:
                 raise ValueError(
                     f"Data must have '{feed.timestamp_col}' column for Hive partitioning"
@@ -388,7 +386,7 @@ class HiveStorage(StorageBackend):
                 else pl.LazyFrame()
             )
             return empty.select(columns) if columns else empty
-        timestamp_col = FeedSpec.from_any(commit.metadata.get("custom")).timestamp_col
+        timestamp_col = storage_feed(commit.metadata).timestamp_col
         timestamp_type = pl.scan_parquet(all_paths[0]).collect_schema().get(timestamp_col)
         partition_start = read_bound(start_date, timestamp_type, commit.metadata, partition=True)
         partition_end = read_bound(end_date, timestamp_type, commit.metadata, partition=True)

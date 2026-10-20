@@ -49,8 +49,9 @@ delisting or zero return. Duplicate keys and conflicting mappings fail without c
 Pass existing physical names through `feed_spec` rather than renaming stored datasets.
 
 Storage reads preserve datetime precision. Undeclared instant timestamps retain the existing UTC
-read behavior. Declared session labels with a timezone retain that declaration when represented in
-UTC; labels without a declared timezone retain their source timezone. Naive bounds on labels use
+read behavior. Naive instants with a declared source timezone are interpreted in that timezone
+before conversion to UTC. Declared session labels with a timezone retain that declaration when
+represented in UTC; labels without a declared timezone retain their source timezone. Naive bounds on labels use
 the declared label clock; instant bounds use UTC. Read ranges are start-inclusive/end-exclusive.
 Calendar omission, explicit `None` and a named `24/7` schedule remain distinct. Panel conversion
 does not invoke a calendar resolver or create an expected clock.
