@@ -171,6 +171,12 @@ def prepare_action_inputs(
         ).height:
             raise ValueError("Split ratio conflicts with supplied rational terms")
         frame = frame.with_columns(pl.coalesce("split_ratio", rational).alias("split_ratio"))
+    if frame.filter(
+        (pl.col("action_kind") == "split")
+        & pl.col("split_ratio").is_not_null()
+        & (~pl.col("split_ratio").is_finite() | (pl.col("split_ratio") <= 0))
+    ).height:
+        raise ValueError("Normalized split ratio must be positive and finite")
     if frame.filter(pl.col("action_kind").is_in(_CASH) & (pl.col("cash_per_share") < 0)).height:
         raise ValueError("Cash distribution amounts cannot be negative")
     if frame.filter(pl.col("action_kind").is_in(_STOCK) & (pl.col("quantity_ratio") <= 0)).height:

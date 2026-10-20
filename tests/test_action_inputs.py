@@ -130,6 +130,31 @@ def test_invalid_known_split_ratio_fails_without_mutating_the_source(ratio):
     assert_frame_equal(source, before)
 
 
+@pytest.mark.parametrize(
+    "source_terms,convention",
+    [
+        ("split_ratio\n5e-324", "price_factor"),
+        ("split_ratio,split_numerator,split_denominator\n,1e308,1e-308", "new_per_old"),
+        ("split_ratio,split_numerator,split_denominator\n,1e-308,1e308", "new_per_old"),
+    ],
+)
+def test_normalizing_finite_csv_terms_cannot_publish_infinite_or_zero_share_ratios(
+    source_terms, convention
+):
+    header, values = source_terms.split("\n")
+    source = pl.read_csv(
+        StringIO(
+            f"asset,source,event_id,revision_id,action_kind,{header}\n"
+            f"17,captured,s1,r1,split,{values}\n"
+        ),
+        schema_overrides={"split_ratio": pl.Float64},
+    )
+    before = source.clone()
+    with pytest.raises(ValueError, match="positive.*finite"):
+        prepare_action_inputs(source, split_convention=convention, required_terms=["split_ratio"])
+    assert_frame_equal(source, before)
+
+
 def test_duplicate_revisions_and_unknown_stable_ids_are_not_silently_selected():
     source = captured_actions()
     with pytest.raises(ValueError, match="Duplicate"):
