@@ -8,6 +8,7 @@ from ml4t.data.assets.contracts import (
     load_contract_specs,
     register_contract_spec,
 )
+from ml4t.data.assets.registry import InstrumentRegistry
 from ml4t.data.assets.schemas import AssetSchema, get_asset_schema
 from ml4t.data.assets.validation import AssetValidator
 
@@ -16,6 +17,7 @@ __all__ = [
     "AssetInfo",
     "AssetSchema",
     "AssetValidator",
+    "InstrumentRegistry",
     "get_asset_schema",
     # Contract specifications
     "ContractSpec",
