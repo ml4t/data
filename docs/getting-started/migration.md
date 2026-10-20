@@ -219,8 +219,16 @@ The recipe retains July1/2 warmup prices `198,200` at the July2 cutoff. A later 
 does not change that input. The July3 split/cash facts produce the independent native shareholder
 return `1.01`; a July7 symbol rename retains ID17. July4 is an exchange closure,not a missing
 observation. The example needs no Reloaded,Engineer,Diagnostic or Backtest runtime dependency.
-These are unreleased source APIs;final installed-consumer qualification is recorded with its
-actual candidate version before merge.
+These are unreleased source APIs. Isolated wheel and source-distribution checks qualified Data
+`0.2.2.dev35+g2c4ff2050`, Specs `0.2.0`, Diagnostic `0.1.9` and the immutable Engineer source
+candidate identified above, with pandas `3.0.6` and Polars `2.0.0`. The installed Engineer public
+`features.trend.sma` consumed Data's two pre-entry observations and produced `null,199`; the
+price-sensitive decision `200 > 199` remained true after the future correction. Engineer's public
+label API and Diagnostic's forward-return API consumed the later adjusted prices and produced
+`1/99,0.01,3/98,null` while retaining the raw prices, stable ID and renamed source symbol. These
+checks qualify Data's producer and analytical handoff, not Backtest runtime/account behavior or
+released Engineer-package compatibility. Subsequent action-ratio validation rejects nonfinite
+derived share terms; it does not change these native adjustment definitions.
 
 ## Names preserved through the 0.x series
 
