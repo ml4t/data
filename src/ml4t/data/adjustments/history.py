@@ -8,6 +8,7 @@ from typing import Any, Literal
 import pandas as pd
 import polars as pl
 
+from ml4t.data.assets.registry import InstrumentRegistry
 from ml4t.data.core.feeds import resolve_feed_spec
 from ml4t.data.core.revisions import (
     native_frame,
@@ -36,6 +37,7 @@ class AdjustedHistory:
     actions: pl.DataFrame
     coverage: pl.DataFrame
     metadata: dict[str, Any]
+    identities: pl.DataFrame | None = None
 
 
 def _through(
@@ -85,11 +87,12 @@ def _actions_at(
     as_of: datetime | str | None,
     basis: str,
     imported: bool = False,
+    action_feed_spec: Any | None = None,
 ) -> pl.DataFrame:
     asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
     if basis == "raw":
         actions = None
-    if actions is None or not len(actions):
+    if actions is None:
         frame = pl.DataFrame(
             schema={
                 asset: prices.schema[asset],
@@ -102,6 +105,22 @@ def _actions_at(
         )
     else:
         frame = native_frame(actions)
+        if action_feed_spec is not None:
+            declaration = resolve_feed_spec(action_feed_spec)
+            aliases = {
+                FeedSpec._coerce_entity_col(declaration.entity_col) or "asset": asset,
+                declaration.timestamp_col: "effective_at",
+            }
+            for source, target in aliases.items():
+                if source not in frame.columns:
+                    raise ValueError(f"Missing declared action field {source}")
+                if source != target:
+                    if target in frame.columns:
+                        raise ValueError("Declared action mappings collide with source fields")
+                    frame = frame.with_columns(pl.col(source).alias(target))
+            frame = utc_column(frame, "available_at", declaration.timezone)
+            if frame.schema["effective_at"] != pl.Date:
+                frame = utc_column(frame, "effective_at", declaration.timezone)
     if _CLOCK in frame.columns or "__ml4t_history_limit" in frame.columns:
         raise ValueError("Source action columns collide with an internal history key")
     if asset not in frame.columns:
@@ -295,6 +314,9 @@ def prepare_adjusted_history(
     ex_date_closes: pl.DataFrame | pd.DataFrame | None = None,
     factors: pl.DataFrame | pd.DataFrame | None = None,
     factor_method: str | None = None,
+    instruments: InstrumentRegistry | None = None,
+    identity_mode: Literal["stable_id", "symbol"] = "stable_id",
+    action_feed_spec: Any | None = None,
 ) -> AdjustedHistory:
     """Prepare source revisions available at a cutoff,or explicitly retrospective latest history.
 
@@ -329,6 +351,7 @@ def prepare_adjusted_history(
     )
     if calendar is not UNSET_CALENDAR:
         feed = feed.with_overrides(calendar=calendar, time_contract_version=2)
+    input_feed = feed
     selected_calendar = feed.resolve_calendar()
     asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
     frame = _price_clock(native_frame(prices), feed)
@@ -341,11 +364,29 @@ def prepare_adjusted_history(
         else:
             frame = _through(frame, feed.timestamp_col, as_of, feed)
     frame = utc_column(frame, "available_at", feed.timezone)
+    identities = None
+    if as_of is not None:
+        frame = frame.filter(
+            pl.col("available_at").is_null() | (pl.col("available_at") <= utc_cutoff(as_of))
+        )
+    if instruments is not None:
+        frame, identities, asset = instruments._normalize(frame, feed, as_of, identity_mode)
+        feed = feed.with_overrides(entity_col=asset)
+    elif identity_mode != "stable_id":
+        raise ValueError("Symbol history requires captured dated instruments")
     frame = select_revisions(frame, [asset, _CLOCK, "source"], as_of)
     if frame.select(asset, _CLOCK).is_duplicated().any():
         raise ValueError("Choose one source revision stream per observation")
     frame = frame.sort([asset, feed.timestamp_col])
-    facts = _actions_at(actions, frame, feed, as_of, basis, imported=factors is not None)
+    facts = _actions_at(
+        actions,
+        frame,
+        feed,
+        as_of,
+        basis,
+        imported=factors is not None,
+        action_feed_spec=action_feed_spec,
+    )
     supplied = None
     factor_metadata = {}
     if factors is not None:
@@ -467,6 +508,7 @@ def prepare_adjusted_history(
         metadata={
             "feed_spec": consumer.to_dict(),
             "source_feed_spec": feed.to_dict(),
+            "input_feed_spec": input_feed.to_dict(),
             "calendar": selected_calendar,
             "perspective": "retrospective" if as_of is None else "causal",
             "as_of": None if as_of is None else utc_stamp(as_of).isoformat(),
@@ -478,4 +520,5 @@ def prepare_adjusted_history(
             **factor_metadata,
             "coverage_scope": "between supplied observed endpoints;not a completeness claim outside that range",
         },
+        identities=identities,
     )

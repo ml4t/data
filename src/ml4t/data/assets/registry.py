@@ -1,7 +1,7 @@
 """Dated instrument identity and membership over captured native tables."""
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import polars as pl
@@ -154,6 +154,70 @@ class InstrumentRegistry:
     def memberships(self) -> pl.DataFrame | None:
         """Return captured membership provenance,or None when no coverage was supplied."""
         return None if self._memberships is None else self._memberships.clone()
+
+    def _normalize(
+        self,
+        frame: pl.DataFrame,
+        feed: FeedSpec,
+        as_of: datetime | str | None,
+        mode: Literal["stable_id", "symbol"],
+    ) -> tuple[pl.DataFrame, pl.DataFrame, str]:
+        asset = FeedSpec._coerce_entity_col(self._feed.entity_col) or "asset"
+        entity = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
+        prefix = "__ml4t_identity_"
+        if any(name.startswith(prefix) for name in frame.columns):
+            raise ValueError("Source columns collide with internal identity keys")
+        if mode not in {"stable_id", "symbol"}:
+            raise ValueError("Declare stable_id or symbol identity_mode")
+        if asset in frame.columns and (asset != entity or mode == "symbol"):
+            raise ValueError("Stable identity output would collide with a captured source column")
+        if entity not in frame.columns:
+            raise ValueError("History requires the declared source entity column")
+        lookup = "symbol" if mode == "symbol" else asset
+        ids = self._identities.filter(pl.col(lookup).is_in(frame[entity].unique().implode()))[
+            asset
+        ].unique()
+        candidates = self._identities.filter(pl.col(asset).is_in(ids.implode()))
+        snapshot_feed = feed.with_overrides(entity_col=asset)
+        identities = InstrumentRegistry(candidates, None, snapshot_feed).lifetimes(as_of=as_of)
+        timestamp = feed.timestamp_col
+        dtype = frame.schema[timestamp]
+        if identities.schema["valid_from"] == pl.Date:
+            point = pl.col(timestamp)
+            if isinstance(dtype, pl.Datetime):
+                if feed.timezone is not None:
+                    point = point.dt.convert_time_zone(feed.timezone)
+                point = point.dt.date()
+        else:
+            if dtype == pl.Date:
+                raise ValueError("Date labels cannot establish an instant identity interval")
+            point = pl.col(timestamp).dt.convert_time_zone("UTC")
+        left = frame.with_row_index(prefix + "row").with_columns(point.alias(prefix + "point"))
+        right = identities.rename({name: prefix + name for name in identities.columns})
+        left_keys, right_keys = [entity], [prefix + lookup]
+        if "exchange" in frame.columns:
+            left_keys.append("exchange")
+            right_keys.append(prefix + "exchange")
+        matched = (
+            left.join(right, left_on=left_keys, right_on=right_keys, how="inner", coalesce=False)
+            .filter(
+                (pl.col(prefix + "valid_from") <= pl.col(prefix + "point"))
+                & (
+                    pl.col(prefix + "valid_to").is_null()
+                    | (pl.col(prefix + "point") < pl.col(prefix + "valid_to"))
+                )
+            )
+            .sort(prefix + "row")
+        )
+        if matched.height != frame.height or matched[prefix + "row"].n_unique() != frame.height:
+            raise ValueError("Missing or ambiguous dated identity;declare source ID,venue and date")
+        used = matched.select(
+            pl.col(prefix + name).alias(name) for name in identities.columns
+        ).unique(maintain_order=True)
+        output = matched.select(frame.columns)
+        if asset != entity:
+            output = output.with_columns(matched[prefix + asset].alias(asset))
+        return output, used, asset
 
     def lifetimes(
         self,
