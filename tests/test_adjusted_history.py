@@ -83,6 +83,51 @@ def test_prepared_feed_declares_the_adjusted_price_and_volume_fields_to_consumer
     assert result.prices[source.price_col].to_list() == [200, 98]
 
 
+def test_intraday_cash_factors_require_a_captured_actual_close_in_the_same_currency():
+    daily, actions = captured_history()
+    observed = pl.col("timestamp").cast(pl.Datetime("ns", "UTC")) + pl.duration(
+        hours=14, minutes=30
+    )
+    prices = daily.with_columns(
+        observed.alias("timestamp"),
+        observed.alias("available_at"),
+    )
+    closes = pl.read_csv(
+        StringIO(
+            "asset,ex_date,close,currency,available_at,source,revision_id\n"
+            "17,2025-07-03,98,EUR,2025-07-03T17:00:00Z,capture,r1\n"
+        ),
+        try_parse_dates=True,
+    )
+    feed = history_feed().with_overrides(
+        timestamp_semantics="event_time",
+        data_frequency="1h",
+        bar_grid_anchor="session_open",
+        bar_label="left",
+        partial_bar_policy="include",
+    )
+    with pytest.raises(ValueError, match="currency"):
+        adjustments.prepare_adjusted_history(
+            prices,
+            actions,
+            ex_date_closes=closes,
+            as_of=datetime(2025, 7, 3, 18, tzinfo=UTC),
+            feed_spec=feed,
+            action_coverage="complete",
+        )
+    valid = adjustments.prepare_adjusted_history(
+        prices,
+        actions,
+        ex_date_closes=closes.with_columns(pl.lit("USD").alias("currency")),
+        as_of=datetime(2025, 7, 3, 18, tzinfo=UTC),
+        feed_spec=feed,
+        action_coverage="complete",
+    )
+    assert valid.prices["close"].to_list() == [200, 98]
+    assert valid.prices["adj_close"][0] == pytest.approx(200 * 98 / 202)
+    assert valid.prices["adj_close"][1] == 98
+
+
 def test_retrospective_latest_observation_basis_does_not_apply_an_announced_future_split():
     prices, actions = captured_history()
     future = pl.read_csv(

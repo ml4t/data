@@ -26,21 +26,34 @@ def utc_cutoff(value: datetime | str) -> pl.Expr:
     return pl.lit(stamp.value).cast(pl.Datetime("ns", "UTC"))
 
 
-def session_label_at(value: datetime | str, feed: FeedSpec) -> date:
+def session_labels_at(points: pl.Series, feed: FeedSpec) -> pl.Series:
     from ml4t.data.sessions import SessionAssigner
 
-    stamp = utc_stamp(value)
     selected = feed.resolve_calendar()
     if selected is None:
-        return stamp.tz_convert(feed.timezone or "UTC").date()
+        return points.dt.convert_time_zone(feed.timezone or "UTC").dt.date()
     point_feed = FeedSpec(
-        time_contract_version=2, calendar=selected, timestamp_semantics="event_time"
+        time_contract_version=2,
+        calendar=selected,
+        timestamp_semantics="event_time"
+        if feed.timestamp_semantics == "session_label"
+        else feed.timestamp_semantics,
+        bar_label=None if feed.timestamp_semantics == "session_label" else feed.bar_label,
     )
     assigner = SessionAssigner(feed_spec=point_feed)
-    points = pl.DataFrame({"timestamp": pl.Series([stamp.value], dtype=pl.Datetime("ns", "UTC"))})
-    assigned = assigner.assign_sessions(points, bar_frequency="intraday")["session_date"][0]
+    assigned = assigner.assign_sessions(
+        pl.DataFrame({"timestamp": points}), bar_frequency="intraday"
+    )["session_date"]
     timezone = feed.timezone or str(getattr(assigner.calendar, "tz", "UTC"))
-    return stamp.tz_convert(timezone).date() if assigned is None else assigned
+    return assigned.fill_null(points.dt.convert_time_zone(timezone).dt.date())
+
+
+def session_label_at(value: datetime | str, feed: FeedSpec) -> date:
+    stamp = utc_stamp(value)
+    points = pl.Series([stamp.value], dtype=pl.Datetime("ns", "UTC"))
+    return session_labels_at(
+        points, feed.with_overrides(timestamp_semantics="event_time", bar_label=None)
+    )[0]
 
 
 def utc_column(frame: pl.DataFrame, name: str, timezone: str | None = None) -> pl.DataFrame:

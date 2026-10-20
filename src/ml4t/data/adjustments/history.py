@@ -234,6 +234,12 @@ def _native_factors(
                 raise ValueError(
                     "An actually available ex-date close is required for a native cash factor"
                 )
+            if closes is not None and (
+                "currency" not in quote.columns
+                or quote["currency"].null_count()
+                or not quote["currency"].eq(currencies[0]).all()
+            ):
+                raise ValueError("Captured ex-date close currency must match price/cash currency")
             if close_times is not None:
                 actual_close = close_times.get(ex_date)
                 if (

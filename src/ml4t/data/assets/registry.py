@@ -12,6 +12,7 @@ from ml4t.data.core.revisions import (
     native_frame,
     select_revisions,
     session_label_at,
+    session_labels_at,
     utc_column,
     utc_stamp,
 )
@@ -179,15 +180,21 @@ class InstrumentRegistry:
         ].unique()
         candidates = self._identities.filter(pl.col(asset).is_in(ids.implode()))
         snapshot_feed = feed.with_overrides(entity_col=asset)
+        session_intervals = self._feed.timestamp_semantics == "session_label"
+        if session_intervals:
+            snapshot_feed = snapshot_feed.with_overrides(timestamp_semantics="session_label")
         identities = InstrumentRegistry(candidates, None, snapshot_feed).lifetimes(as_of=as_of)
         timestamp = feed.timestamp_col
         dtype = frame.schema[timestamp]
         if identities.schema["valid_from"] == pl.Date:
             point = pl.col(timestamp)
             if isinstance(dtype, pl.Datetime):
-                if feed.timezone is not None:
+                if session_intervals and feed.timestamp_semantics != "session_label":
+                    point = pl.lit(session_labels_at(frame[timestamp], feed))
+                elif feed.timezone is not None:
                     point = point.dt.convert_time_zone(feed.timezone)
-                point = point.dt.date()
+                if not (session_intervals and feed.timestamp_semantics != "session_label"):
+                    point = point.dt.date()
         else:
             if dtype == pl.Date:
                 raise ValueError("Date labels cannot establish an instant identity interval")

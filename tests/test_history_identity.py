@@ -181,3 +181,54 @@ def test_custom_action_feed_maps_source_keys_without_overwriting_captured_column
     assert result.actions["asset"].to_list() == [17]
     assert result.actions["effective_at"].to_list() == [date(2025, 7, 7)]
     assert_frame_equal(actions, actions.clone())
+
+
+def test_overnight_instant_prices_use_declared_session_identity_intervals():
+    feed = FeedSpec(
+        time_contract_version=2,
+        entity_col="asset",
+        calendar="CME_Equity",
+        timezone="America/New_York",
+        timestamp_semantics="session_label",
+    )
+    identities = pl.read_csv(
+        StringIO(
+            "asset,symbol,exchange,instrument_type,valid_from,available_at,source,revision_id\n"
+            "17,FUT,CME,future,2025-07-07,2025-07-06T23:00:00Z,capture,r1\n"
+        ),
+        try_parse_dates=True,
+    )
+    prices = pl.read_csv(
+        StringIO(
+            "timestamp,asset,close,available_at,source,revision_id\n"
+            "2025-07-06T23:15:00Z,17,100,2025-07-06T23:20:00Z,capture,r1\n"
+        ),
+        try_parse_dates=True,
+    )
+    result = prepare_adjusted_history(
+        prices,
+        None,
+        instruments=InstrumentRegistry.from_frame(identities, feed_spec=feed),
+        feed_spec=feed.with_overrides(timestamp_semantics="event_time"),
+        basis="raw",
+        as_of=datetime(2025, 7, 6, 23, 45, tzinfo=UTC),
+    )
+    assert result.prices["close"].to_list() == [100]
+    assert result.identities["valid_from"].to_list() == [date(2025, 7, 7)]
+
+
+def test_empty_symbol_history_retains_identity_and_source_schemas():
+    result = prepare_adjusted_history(
+        source_prices().head(0),
+        None,
+        instruments=identity_registry(),
+        identity_mode="symbol",
+        as_of=datetime(2025, 7, 8, tzinfo=UTC),
+        feed_spec=source_feed(),
+        basis="raw",
+    )
+    assert result.prices.height == 0
+    assert result.prices.schema["asset"] == pl.Int64
+    assert result.prices.schema["ticker"] == pl.String
+    assert result.identities.height == 0
+    assert result.identities.schema["valid_from"] == pl.Date
