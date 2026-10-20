@@ -112,6 +112,10 @@ def prepare_action_inputs(
         _keys(identities, [asset])
         if not frame[asset].is_in(identities[asset].implode()).all():
             raise ValueError("Action identity is not in the declared instruments")
+        if "destination_asset" in frame.columns and not (
+            frame["destination_asset"].drop_nulls().is_in(identities[asset].implode()).all()
+        ):
+            raise ValueError("Destination identity is not in the declared instruments")
     frame = _event_times(frame, feed)
     for name in _NUMERIC:
         if name not in frame.columns or frame.schema[name] == pl.Null:
@@ -208,7 +212,11 @@ def prepare_action_inputs(
             relevant.update({"quantity_ratio", "cash_component", "currency"})
             if row["quantity_ratio"] != 0:
                 relevant.add("destination_asset")
-        missing = sorted(name for name in relevant if row.get(name) is None)
+        missing = sorted(
+            name
+            for name in relevant
+            if row.get(name) is None or (isinstance(row[name], str) and not row[name].strip())
+        )
         if requested.intersection(missing):
             raise ValueError(f"Unavailable required action terms: {missing}")
         coverage.append(missing)
@@ -307,6 +315,8 @@ def apply_adjustment_factors(
         outputs.add(f"adj_{feed.volume_col}")
     if outputs.intersection(frame.columns):
         raise ValueError("Supply raw prices, not an already-adjusted output")
+    if outputs.intersection(extra):
+        raise ValueError("Factor provenance uses reserved adjustment output fields")
     joined = frame.join(supplied, on=keys, how="left", maintain_order="left", validate="1:1")
     expressions = [
         (pl.col(name) * pl.col("price_adjustment_factor")).alias(f"adj_{name}") for name in selected

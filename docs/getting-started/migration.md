@@ -71,6 +71,58 @@ integration until a compatible Engineer release is available. This is source int
 not a claim of released-package migration compatibility. Neither consumer nor any Reloaded package
 is required for the Data-only example.
 
+## Import corporate-action facts without changing their financial definition
+
+Use `prepare_action_inputs` for captured event tables. Each row needs stable `asset`, `source`,
+`event_id`, `revision_id` and `action_kind` fields. Dates, source identifiers and raw terms remain
+in the result. Map existing `sid` or clock columns through `FeedSpec`; a ticker is not a stable ID.
+Pass a captured unique-ID instrument table when its membership must be checked. Dated identity
+resolution is a separate operation.
+
+Zipline split ratios multiply historical prices. Declare that convention when importing them:
+
+```python
+from ml4t.data.adjustments import prepare_action_inputs
+
+facts = prepare_action_inputs(actions, instruments, split_convention="price_factor")
+```
+
+A source ratio of `0.5` becomes native new-shares-per-old-share ratio `2`. The original ratio and
+source convention remain in `raw_split_ratio` and `source_split_convention`. A native prepared
+table can be validated again without reciprocating twice. Rational numerator/denominator terms
+are retained and must agree with a supplied ratio.
+
+Unknown availability, destination IDs, consideration and payment dates stay null and appear in
+`missing_terms`. Use `required_terms` to reject unavailable facts needed by a particular consumer.
+Requirements apply to the relevant action kinds; a split does not require a cash payment date.
+Absence of an event does not establish source coverage or prove that no action occurred.
+Cash/stock distributions and mergers remain facts, without account or position effects.
+
+Run the offline CSV, validation and storage recipe:
+
+```bash
+uv run python examples/action_input_migration.py
+```
+
+The source explicitly marks a no-action observation. The recipe validates all applicable price
+adjustment terms before aggregation; it never replaces missing prices. The existing native
+`apply_corporate_actions` uses the ex-date close. Raw close `200` followed by `98`, a `2:1` split
+and `USD3` cash per post-event share yield factor `98/202`, prior adjusted volume `2000` and gross
+shareholder return `1.01`. The event row stays unchanged. These native defaults are preserved.
+
+Use `apply_adjustment_factors(prices, factors, method="vendor_prior_close")` to retain imported
+per-observation factors instead. The recipe's supplied factor `0.485` gives prior adjusted close
+`97`, rather than the native `97.029703...`. Neither function claims these definitions are equal.
+Factor keys must exactly cover the raw observations. Volume is adjusted only when its own factor
+is supplied. Raw prices, volume and factor provenance remain available; known conflicting currency
+units, reserved output fields and incomplete or duplicate keys fail without input mutation.
+
+These are unreleased source APIs. The Data-only recipe needs no Reloaded, Engineer or Backtest
+dependency. Prepared adjusted research prices are not execution marks with an additional copy of
+the same dividend cash event. The consuming broker owns entitlement, payment, orders and positions.
+Source availability remains separate from effective time; this preparation step makes no causal
+as-of claim.
+
 ## Names preserved through the 0.x series
 
 The package preserves two former QLDM names during the 0.x release series. Their use emits

@@ -2,6 +2,8 @@
 
 from datetime import UTC, date, datetime
 from io import StringIO
+from pathlib import Path
+from runpy import run_path
 
 import polars as pl
 import pytest
@@ -249,3 +251,57 @@ def test_custom_price_fields_and_unknown_volume_factors_do_not_invent_volume_adj
     assert result["adj_raw"].to_list() == [100, 98]
     assert "adj_volume" not in result.columns
     assert result["volume"].to_list() == [1000, 7]
+
+
+def test_produced_adjustment_method_cannot_be_silently_overwritten_as_factor_provenance():
+    prices = captured_prices()
+    factors = prices.select("timestamp", "asset").with_columns(
+        pl.lit(1.0).alias("price_adjustment_factor")
+    )
+    produced = apply_adjustment_factors(prices, factors, method="captured_vendor")
+    imported = produced.select("timestamp", "asset", "price_adjustment_factor", "adjustment_method")
+    before = imported.clone()
+    with pytest.raises(ValueError, match="provenance"):
+        apply_adjustment_factors(prices, imported)
+    assert_frame_equal(imported, before)
+
+
+def test_declared_instrument_membership_includes_a_stock_distribution_destination():
+    source = (
+        captured_actions()
+        .head(1)
+        .with_columns(
+            pl.lit("stock_distribution").alias("action_kind"),
+            pl.lit(23).alias("destination_asset"),
+            pl.lit(0.1).alias("quantity_ratio"),
+        )
+    )
+    with pytest.raises(ValueError, match="Destination identity"):
+        prepare_action_inputs(source, pl.DataFrame({"asset": [17]}))
+    result = prepare_action_inputs(source, pl.DataFrame({"asset": [17, 23]}))
+    assert result["destination_asset"].to_list() == [23]
+
+
+def test_whitespace_source_terms_are_retained_as_unknown_coverage_not_usable_currency():
+    source = captured_actions().with_columns(pl.lit(" ").alias("currency"))
+    result = prepare_action_inputs(source)
+    assert result["currency"].to_list() == [" ", " "]
+    assert "currency" in result["missing_terms"][1]
+    with pytest.raises(ValueError, match="currency"):
+        prepare_action_inputs(source, required_terms=["currency"])
+
+
+@pytest.mark.parametrize("identifier", [float("nan"), float("inf")])
+def test_nonfinite_source_ids_cannot_become_stable_action_identities(identifier):
+    source = captured_actions().with_columns(pl.lit(identifier).alias("asset"))
+    with pytest.raises(ValueError, match="finite"):
+        prepare_action_inputs(source)
+
+
+def test_offline_csv_to_disk_action_recipe_retains_source_facts_and_method_difference(tmp_path):
+    recipe = run_path(str(Path(__file__).parents[1] / "examples/action_input_migration.py"))
+    facts, native, supplied = recipe["migrate_actions"](tmp_path)
+    assert facts["available_at"].to_list() == [datetime(2025, 7, 1, 12, tzinfo=UTC)] * 2
+    assert native["close"].to_list() == supplied["close"].to_list() == [200, 98]
+    assert native["price_adjustment_factor"][0] == pytest.approx(98 / 202)
+    assert supplied["price_adjustment_factor"][0] == 0.485
