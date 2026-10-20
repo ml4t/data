@@ -59,7 +59,7 @@ key = manager.update("AAPL")
 
 ### StorageConfig
 
-Dataclass configuring the storage backend. Controls partitioning strategy,
+Validated configuration for the storage backend. Controls partitioning strategy,
 compression, locking, and metadata tracking.
 
 ```python
@@ -106,8 +106,8 @@ implement this contract.
 
 ### HiveStorage
 
-Hive-partitioned storage with configurable time-based partitioning. Delivers
-7x query performance improvement for time-range queries via partition pruning.
+Hive-partitioned storage with configurable time-based partitioning and
+time-range partition pruning.
 
 ```python
 from ml4t.data.storage import HiveStorage, StorageConfig
@@ -459,3 +459,25 @@ elapsed days into row counts.
       members:
         - __init__
         - select_contracts
+
+## Price-table representations
+
+Convert one price field between native long observations and a pandas clock-by-asset panel.
+The functions preserve supplied values and missing cells; they do not fill prices, infer
+availability or calculate returns. Other observation fields remain in the original table.
+The panel's attrs retain the declared feed, source dtypes and sparse presence information.
+Default metadata supports pandas Parquet round trips; caller-supplied provenance must also be
+JSON-serializable to use pandas' metadata export.
+
+See the [offline migration recipe](../getting-started/migration.md#move-a-long-price-table-to-a-pandas-analytical-panel)
+for required input columns, mapping conflicts and the qualified consumer versions.
+
+::: ml4t.data.utils.conversion.to_price_panel
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.utils.conversion.from_price_panel
+    options:
+      show_source: false
+      heading_level: 3

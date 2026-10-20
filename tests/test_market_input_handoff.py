@@ -442,3 +442,15 @@ def test_pandas_input_retains_a_late_local_session_label_without_a_timezone_decl
     feed = FeedSpec(time_contract_version=2, calendar=None, timestamp_semantics="session_label")
     restored = from_price_panel(to_price_panel(polars_to_pandas(source), feed_spec=feed))
     assert_frame_equal(restored, source)
+
+
+def test_price_panel_attrs_do_not_break_pandas_parquet_and_sparse_inverse(tmp_path):
+    pytest.importorskip("pyarrow")
+    source = captured_prices().filter(
+        ~((pl.col("asset") == 23) & (pl.col("timestamp").dt.day() == 8))
+    )
+    panel = to_price_panel(source)
+    path = tmp_path / "prices.parquet"
+    panel.to_parquet(path)
+    restored = from_price_panel(pd.read_parquet(path))
+    assert_frame_equal(restored, source)

@@ -1,7 +1,6 @@
 """Hive partitioned storage implementation.
 
-Provides efficient time-series data storage using Hive-style partitioning
-with measured 7x query performance improvement.
+Provides time-series data storage using Hive-style partitioning.
 """
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ class HiveStorage(StorageBackend):
     """Hive partitioned storage with configurable time-based partitioning.
 
     This implementation provides:
-    - 7x query performance improvement for time-based queries
+    - Partition pruning for time-based queries
     - Configurable partition granularity (year, month, day, hour)
     - Atomic writes with temp file pattern
     - Metadata tracking in JSON manifests

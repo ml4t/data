@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from io import BytesIO
 from typing import Any
 
 import numpy as np
@@ -165,6 +166,10 @@ def _panel_feed(
     return feed.with_overrides(**overrides)
 
 
+def _axis_keys(index: pd.Index) -> list[str]:
+    return [f"{type(value).__name__}:{value!r}" for value in index.tolist()]
+
+
 def to_price_panel(
     data: pl.DataFrame | pd.DataFrame,
     *,
@@ -223,9 +228,13 @@ def to_price_panel(
         "feed_spec": feed.to_dict(),
         "metadata": deepcopy(dict(metadata or {})),
         "observed": present.to_numpy().reshape(panel.shape).tolist(),
-        "clock": clock.tolist(),
-        "assets": assets.tolist(),
-        "schema": dict(data.select(names).schema) if isinstance(data, pl.DataFrame) else None,
+        "clock": _axis_keys(clock),
+        "assets": _axis_keys(assets),
+        "schema": (
+            data.select(names).head(0).write_ipc(None).getvalue().hex()
+            if isinstance(data, pl.DataFrame)
+            else None
+        ),
     }
     if isinstance(data, pl.DataFrame) and data.schema[feed.price_col].is_float():
         nulls = pd.Series(data[feed.price_col].is_null().to_numpy(), index=indexed.index)
@@ -286,9 +295,8 @@ def from_price_panel(
     if observed is None:
         mask = np.ones(panel.shape, dtype=bool)
     else:
-        if (
-            contract.get("clock") != panel.index.tolist()
-            or contract.get("assets") != panel.columns.tolist()
+        if contract.get("clock") != _axis_keys(panel.index) or contract.get("assets") != _axis_keys(
+            panel.columns
         ):
             raise ValueError("Panel observation mask does not match its axes")
         mask = _panel_mask(observed, panel.shape)
@@ -307,6 +315,8 @@ def from_price_panel(
     if isinstance(timestamp_dtype, pd.DatetimeTZDtype):
         result = result.with_columns(pl.col(names[0]).dt.convert_time_zone(str(timestamp_dtype.tz)))
     schema = contract.get("schema")
+    if isinstance(schema, str):
+        schema = dict(pl.read_ipc(BytesIO(bytes.fromhex(schema))).schema)
     if schema is not None:
         expressions = []
         for name, dtype in schema.items():
