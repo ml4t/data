@@ -1,7 +1,6 @@
 """Hive partitioned storage implementation.
 
-Provides efficient time-series data storage using Hive-style partitioning
-with measured 7x query performance improvement.
+Provides time-series data storage using Hive-style partitioning.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import structlog
 
 from ml4t.data.core.schemas import align_frames_for_concat
 
+from ._temporal import read_bound, read_timestamps, storage_feed
 from .backend import StorageBackend, StorageConfig
 from .keys import (
     KEY_ENCODING_PREFIX,
@@ -53,7 +53,7 @@ class HiveStorage(StorageBackend):
     """Hive partitioned storage with configurable time-based partitioning.
 
     This implementation provides:
-    - 7x query performance improvement for time-based queries
+    - Partition pruning for time-based queries
     - Configurable partition granularity (year, month, day, hour)
     - Atomic writes with temp file pattern
     - Metadata tracking in JSON manifests
@@ -97,7 +97,9 @@ class HiveStorage(StorageBackend):
         }
         return granularity_to_cols.get(granularity, ["year", "month"])
 
-    def _add_partition_columns(self, df: pl.DataFrame, partition_cols: list[str]) -> pl.DataFrame:
+    def _add_partition_columns(
+        self, df: pl.DataFrame, partition_cols: list[str], timestamp_col: str = "timestamp"
+    ) -> pl.DataFrame:
         """Add partition columns to DataFrame based on timestamp.
 
         Args:
@@ -109,13 +111,13 @@ class HiveStorage(StorageBackend):
         """
         col_exprs = []
         if "year" in partition_cols:
-            col_exprs.append(pl.col("timestamp").dt.year().alias("year"))
+            col_exprs.append(pl.col(timestamp_col).dt.year().alias("year"))
         if "month" in partition_cols:
-            col_exprs.append(pl.col("timestamp").dt.month().alias("month"))
+            col_exprs.append(pl.col(timestamp_col).dt.month().alias("month"))
         if "day" in partition_cols:
-            col_exprs.append(pl.col("timestamp").dt.day().alias("day"))
+            col_exprs.append(pl.col(timestamp_col).dt.day().alias("day"))
         if "hour" in partition_cols:
-            col_exprs.append(pl.col("timestamp").dt.hour().alias("hour"))
+            col_exprs.append(pl.col(timestamp_col).dt.hour().alias("hour"))
 
         if col_exprs:
             return df.with_columns(col_exprs)
@@ -297,22 +299,24 @@ class HiveStorage(StorageBackend):
         # Collect minimal data for partitioning info
         df = lazy_data.collect()
 
-        # Ensure timestamp column exists
-        if "timestamp" not in df.columns:
-            raise ValueError("Data must have 'timestamp' column for Hive partitioning")
-
         # Get partition columns based on granularity
         partition_cols = self._get_partition_columns()
 
-        # Add partition columns dynamically based on granularity
-        df = self._add_partition_columns(df, partition_cols)
-
         with self._key_lock(key):
             effective_metadata = self._effective_metadata(key, metadata, preserve_metadata)
+            feed = storage_feed(effective_metadata)
+            if feed.timestamp_col not in df.columns:
+                raise ValueError(
+                    f"Data must have '{feed.timestamp_col}' column for Hive partitioning"
+                )
+            df = self._add_partition_columns(df, partition_cols, feed.timestamp_col)
 
             staging_path, generation_id = self._prepare_generation(key)
             try:
                 partitions_written = []
+                if df.is_empty():
+                    self._atomic_write(df.drop(partition_cols), staging_path / "data.parquet")
+                    partitions_written.append("data.parquet")
                 for partition_values, partition_df in df.group_by(
                     partition_cols, maintain_order=True
                 ):
@@ -360,49 +364,49 @@ class HiveStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        key_path = self._current_commit(key).generation_path
+        commit = self._current_commit(key)
+        key_path = commit.generation_path
 
         # Get partition columns based on granularity
         partition_cols = self._get_partition_columns()
 
         # Build list of partition paths to read with pruning
-        partition_paths = self._find_partition_paths(key_path, partition_cols, start_date, end_date)
-
+        all_paths = self._find_partition_paths(key_path, partition_cols, None, None)
+        all_paths.sort(
+            key=lambda path: tuple(
+                self._extract_partition_values(path, partition_cols)[col] for col in partition_cols
+            )
+        )
+        if not all_paths:
+            empty_path = key_path / "data.parquet"
+            empty = (
+                read_timestamps(pl.scan_parquet(empty_path), commit.metadata, start_date, end_date)
+                if empty_path.is_file()
+                else pl.LazyFrame()
+            )
+            return empty.select(columns) if columns else empty
+        timestamp_col = storage_feed(commit.metadata).timestamp_col
+        timestamp_type = pl.scan_parquet(all_paths[0]).collect_schema().get(timestamp_col)
+        partition_start = read_bound(start_date, timestamp_type, commit.metadata, partition=True)
+        partition_end = read_bound(end_date, timestamp_type, commit.metadata, partition=True)
+        partition_paths = [
+            path
+            for path in all_paths
+            if self._partition_in_range(
+                self._extract_partition_values(path, partition_cols), partition_start, partition_end
+            )
+        ]
         if not partition_paths:
-            return pl.LazyFrame()
+            empty = read_timestamps(
+                pl.scan_parquet(all_paths[0]).limit(0), commit.metadata, start_date, end_date
+            )
+            return empty.select(columns) if columns else empty
 
         # Use Polars lazy reading with predicate pushdown
         lazy_frames = []
-        normalized_start = (
-            start_date.replace(tzinfo=UTC)
-            if start_date is not None and start_date.tzinfo is None
-            else start_date.astimezone(UTC)
-            if start_date is not None
-            else None
-        )
-        normalized_end = (
-            end_date.replace(tzinfo=UTC)
-            if end_date is not None and end_date.tzinfo is None
-            else end_date.astimezone(UTC)
-            if end_date is not None
-            else None
-        )
         for path in partition_paths:
             lf = pl.scan_parquet(path)
-            timestamp_type = lf.collect_schema().get("timestamp")
-            if isinstance(timestamp_type, pl.Datetime):
-                timestamp = pl.col("timestamp")
-                if timestamp_type.time_zone is None:
-                    timestamp = timestamp.dt.replace_time_zone("UTC")
-                else:
-                    timestamp = timestamp.dt.convert_time_zone("UTC")
-                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
-
-            # Apply date filters
-            if normalized_start:
-                lf = lf.filter(pl.col("timestamp") >= normalized_start)
-            if normalized_end:
-                lf = lf.filter(pl.col("timestamp") < normalized_end)
+            lf = read_timestamps(lf, commit.metadata, start_date, end_date)
 
             # Apply column selection after timestamp filtering.
             if columns:

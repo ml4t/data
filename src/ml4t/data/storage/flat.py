@@ -13,6 +13,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ._temporal import read_timestamps, storage_feed
 from .backend import StorageBackend, StorageConfig
 from .keys import KEY_ENCODING_PREFIX, decode_storage_key
 
@@ -63,6 +64,7 @@ class FlatStorage(StorageBackend):
         df = lazy_data.collect()
         with self._key_lock(key):
             effective_metadata = self._effective_metadata(key, metadata, preserve_metadata)
+            storage_feed(effective_metadata)
             staging_path, generation_id = self._prepare_generation(key)
             try:
                 staged_file = staging_path / "data.parquet"
@@ -104,43 +106,15 @@ class FlatStorage(StorageBackend):
         Returns:
             LazyFrame with requested data
         """
-        file_path = self._current_commit(key).generation_path / "data.parquet"
+        commit = self._current_commit(key)
+        file_path = commit.generation_path / "data.parquet"
         if not file_path.is_file():
             raise RuntimeError(f"Published data file is missing for key '{key}'")
 
         # Use lazy reading
         lf = pl.scan_parquet(file_path)
 
-        # Apply date filters if timestamp column exists
-        schema = lf.collect_schema()
-        if "timestamp" in schema:
-            timestamp_type = schema["timestamp"]
-            if isinstance(timestamp_type, pl.Datetime):
-                timestamp = pl.col("timestamp")
-                if timestamp_type.time_zone is None:
-                    timestamp = timestamp.dt.replace_time_zone("UTC")
-                else:
-                    timestamp = timestamp.dt.convert_time_zone("UTC")
-                lf = lf.with_columns(timestamp.cast(pl.Datetime("us", "UTC")))
-
-            normalized_start = (
-                start_date.replace(tzinfo=UTC)
-                if start_date is not None and start_date.tzinfo is None
-                else start_date.astimezone(UTC)
-                if start_date is not None
-                else None
-            )
-            normalized_end = (
-                end_date.replace(tzinfo=UTC)
-                if end_date is not None and end_date.tzinfo is None
-                else end_date.astimezone(UTC)
-                if end_date is not None
-                else None
-            )
-            if normalized_start:
-                lf = lf.filter(pl.col("timestamp") >= normalized_start)
-            if normalized_end:
-                lf = lf.filter(pl.col("timestamp") < normalized_end)
+        lf = read_timestamps(lf, commit.metadata, start_date, end_date)
 
         # Select after timestamp filtering so callers can omit the filter column.
         if columns:

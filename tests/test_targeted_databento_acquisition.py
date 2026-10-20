@@ -274,7 +274,11 @@ def test_real_nullable_grid_placeholder_is_replaced_only_by_a_source_observation
     assert result.rows_updated == 1
     assert result.remaining_gaps == []
     actual = storage.read("BTC.c.0").collect()
-    assert_frame_equal(actual.select(complete.columns), complete)
+    assert expanded.schema["timestamp"] == pl.Datetime("ns", "UTC")
+    assert_frame_equal(
+        actual.select(complete.columns),
+        complete.with_columns(pl.col("timestamp").cast(pl.Datetime("ns", "UTC"))),
+    )
     assert not actual["is_imputed"].any()
     assert len(calls) == 1
 
