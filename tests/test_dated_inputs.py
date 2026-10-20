@@ -95,6 +95,24 @@ def test_historical_membership_uses_captured_intervals_not_current_constituents(
         registry.lifetimes(date(2025, 7, 7), universe="unknown_index")
 
 
+def test_a_late_membership_revision_cannot_change_the_universe_known_at_an_earlier_cutoff():
+    members = pl.read_csv(
+        StringIO(
+            "asset,universe,valid_from,valid_to,available_at,source,revision_id\n"
+            "17,captured_index,2025-07-01,,2025-06-01T12:00:00Z,capture,r1\n"
+            "17,captured_index,2025-07-01,2025-07-02,2025-07-20T12:00:00Z,capture,r2\n"
+        ),
+        try_parse_dates=True,
+    )
+    registry = InstrumentRegistry.from_frame(captured_identities(), members)
+    old = registry.lifetimes(
+        date(2025, 7, 2), as_of=datetime(2025, 7, 2, 21, tzinfo=UTC), universe="captured_index"
+    )
+    assert old["asset"].to_list() == [17]
+    assert registry.lifetimes(date(2025, 7, 2), universe="captured_index").height == 0
+    assert registry.memberships["revision_id"].to_list() == ["r1", "r2"]
+
+
 def test_unknown_availability_blocks_causal_resolution_but_not_retrospective_inspection():
     source = captured_identities().with_columns(pl.lit(None).alias("available_at"))
     registry = InstrumentRegistry.from_frame(source)

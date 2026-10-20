@@ -83,6 +83,32 @@ def test_prepared_feed_declares_the_adjusted_price_and_volume_fields_to_consumer
     assert result.prices[source.price_col].to_list() == [200, 98]
 
 
+def test_cash_terms_per_pre_event_share_convert_without_overwriting_the_source_basis():
+    prices, actions = captured_history()
+    actions = actions.with_columns(
+        pl.when(pl.col("action_kind") == "cash_dividend")
+        .then(6.0)
+        .otherwise(pl.col("cash_per_share"))
+        .alias("cash_per_share"),
+        pl.when(pl.col("action_kind") == "cash_dividend")
+        .then(pl.lit("pre_event"))
+        .otherwise(pl.col("share_basis"))
+        .alias("share_basis"),
+    )
+    result = adjustments.prepare_adjusted_history(
+        prices,
+        actions,
+        as_of=datetime(2025, 7, 3, 18, tzinfo=UTC),
+        feed_spec=history_feed(),
+        action_coverage="complete",
+    )
+    assert result.prices["adj_close"][1] / result.prices["adj_close"][0] == pytest.approx(1.01)
+    cash = result.actions.filter(pl.col("action_kind") == "cash_dividend")
+    assert cash["cash_per_share"].to_list() == [6]
+    assert cash["share_basis"].to_list() == ["pre_event"]
+    assert result.prices["adj_volume"].to_list() == [2000, 7]
+
+
 def test_intraday_cash_factors_require_a_captured_actual_close_in_the_same_currency():
     daily, actions = captured_history()
     observed = pl.col("timestamp").cast(pl.Datetime("ns", "UTC")) + pl.duration(
