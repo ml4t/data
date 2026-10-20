@@ -20,6 +20,7 @@ from ml4t.data.core.revisions import (
 from ml4t.data.utils.gaps import GapDetector
 from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
+from ._history_factors import prepare_supplied_factors
 from .core import _event_adjustment_factors
 from .inputs import apply_adjustment_factors, prepare_action_inputs
 
@@ -83,6 +84,7 @@ def _actions_at(
     feed: FeedSpec,
     as_of: datetime | str | None,
     basis: str,
+    imported: bool = False,
 ) -> pl.DataFrame:
     asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
     if basis == "raw":
@@ -120,7 +122,7 @@ def _actions_at(
     frame = select_revisions(frame, keys, as_of)
     if as_of is not None:
         frame = _through(frame, "effective_at", as_of, feed)
-    else:
+    elif not imported:
         limits = prices.group_by(asset).agg(pl.col(_CLOCK).max().alias("__ml4t_history_limit"))
         frame = (
             _action_clock(frame, feed)
@@ -128,14 +130,18 @@ def _actions_at(
             .filter(pl.col(_CLOCK) <= pl.col("__ml4t_history_limit"))
             .drop(_CLOCK, "__ml4t_history_limit")
         )
-    required = ["split_ratio"] if basis == "split_adjusted" else []
-    if basis == "total_return":
+    required = ["split_ratio"] if basis == "split_adjusted" and not imported else []
+    if basis == "total_return" and not imported:
         required += ["split_ratio", "cash_per_share", "currency", "share_basis"]
     action_feed = feed.with_overrides(timestamp_col="effective_at")
     if frame.schema["effective_at"] == pl.Date:
         action_feed = action_feed.with_overrides(timestamp_semantics="session_label")
     facts = prepare_action_inputs(frame, feed_spec=action_feed, required_terms=required)
-    if basis != "raw" and facts.filter(~pl.col("action_kind").is_in(["split", *_CASH])).height:
+    if (
+        basis != "raw"
+        and not imported
+        and facts.filter(~pl.col("action_kind").is_in(["split", *_CASH])).height
+    ):
         raise ValueError("Merger/stock distribution price history requires supplied source factors")
     return _action_clock(facts, feed)
 
@@ -284,9 +290,11 @@ def prepare_adjusted_history(
     as_of: datetime | str | None,
     feed_spec: Any | None = None,
     calendar: str | None | CalendarUnset = UNSET_CALENDAR,
-    basis: Literal["raw", "split_adjusted", "total_return"] = "total_return",
+    basis: Literal["raw", "split_adjusted", "total_return"] | None = None,
     action_coverage: Literal["complete", "unknown"] = "unknown",
     ex_date_closes: pl.DataFrame | pd.DataFrame | None = None,
+    factors: pl.DataFrame | pd.DataFrame | None = None,
+    factor_method: str | None = None,
 ) -> AdjustedHistory:
     """Prepare source revisions available at a cutoff,or explicitly retrospective latest history.
 
@@ -298,11 +306,23 @@ def prepare_adjusted_history(
     a separately captured ex_date_closes table with the same units and revision/availability keys.
     No action cash,positions,synthetic prices,FX or historical availability is inferred.
     """
+    if basis is None:
+        if factors is not None:
+            raise ValueError("Declare the supplied factor price/share basis explicitly")
+        basis = "total_return"
+    if factors is not None and (not isinstance(factor_method, str) or not factor_method.strip()):
+        raise ValueError("Declare the supplied factor method explicitly")
+    if factors is not None and basis == "raw":
+        raise ValueError("Raw history cannot simultaneously apply supplied adjustment factors")
     if basis not in {"raw", "split_adjusted", "total_return"}:
         raise ValueError("Declare raw,split_adjusted or total_return history basis")
     if action_coverage not in {"complete", "unknown"}:
         raise ValueError("Declare complete or unknown action coverage")
-    if basis != "raw" and action_coverage != "complete":
+    if (
+        basis != "raw"
+        and action_coverage != "complete"
+        and not (factors is not None and as_of is None)
+    ):
         raise ValueError("Declare complete source action coverage before adjusting history")
     feed = resolve_feed_spec(
         FeedSpec(entity_col="asset", time_contract_version=2) if feed_spec is None else feed_spec
@@ -321,20 +341,35 @@ def prepare_adjusted_history(
         else:
             frame = _through(frame, feed.timestamp_col, as_of, feed)
     frame = utc_column(frame, "available_at", feed.timezone)
-    frame = select_revisions(frame, [asset, feed.timestamp_col, "source"], as_of)
-    if frame.select(asset, feed.timestamp_col).is_duplicated().any():
+    frame = select_revisions(frame, [asset, _CLOCK, "source"], as_of)
+    if frame.select(asset, _CLOCK).is_duplicated().any():
         raise ValueError("Choose one source revision stream per observation")
     frame = frame.sort([asset, feed.timestamp_col])
-    facts = _actions_at(actions, frame, feed, as_of, basis)
+    facts = _actions_at(actions, frame, feed, as_of, basis, imported=factors is not None)
+    supplied = None
+    factor_metadata = {}
+    if factors is not None:
+        supplied, factor_metadata = prepare_supplied_factors(
+            _price_clock(native_frame(factors), feed),
+            frame,
+            facts,
+            feed,
+            as_of,
+            _CLOCK,
+        )
+        if "factor_adjustment_method" in supplied.columns and not (
+            supplied["factor_adjustment_method"].drop_nulls().eq(factor_method).all()
+        ):
+            raise ValueError("Requested factor method conflicts with the source declaration")
     closes = None
-    if ex_date_closes is not None and basis == "total_return":
+    if ex_date_closes is not None and basis == "total_return" and supplied is None:
         closes = utc_column(native_frame(ex_date_closes), "available_at", feed.timezone)
         if as_of is not None:
             closes = _through(closes, "ex_date", as_of, feed)
         closes = select_revisions(closes, [asset, "ex_date", "source"], as_of)
     close_times = None
     cash_dates = facts.filter(pl.col("action_kind").is_in(_CASH))["ex_date"].drop_nulls()
-    if as_of is not None and basis == "total_return" and len(cash_dates):
+    if as_of is not None and basis == "total_return" and len(cash_dates) and supplied is None:
         if selected_calendar is None:
             if closes is None:
                 raise ValueError("Row mode requires explicit available ex-date close facts")
@@ -351,13 +386,19 @@ def prepare_adjusted_history(
         events = facts.filter(pl.col(asset) == group[asset][0])
         if basis == "raw":
             events = events.head(0)
-        factors = _native_factors(group, events, feed, basis, closes, close_times)
+        group_factors = (
+            _native_factors(group, events, feed, basis, closes, close_times)
+            if supplied is None
+            else supplied.filter(pl.col(asset) == group[asset][0])
+        )
         adjusted.append(
             apply_adjustment_factors(
                 group.drop(_CLOCK),
-                factors,
+                group_factors,
                 feed_spec=feed,
-                method="raw"
+                method=factor_method
+                if supplied is not None
+                else "raw"
                 if basis == "raw"
                 else "native_ex_date_close"
                 if basis == "total_return"
@@ -386,11 +427,20 @@ def prepare_adjusted_history(
     if adjusted:
         result = pl.concat(adjusted)
     else:
-        factors = frame.select(feed.timestamp_col, asset).with_columns(
-            pl.lit(1.0).alias("price_adjustment_factor"),
-            pl.lit(1.0).alias("volume_adjustment_factor"),
+        empty_factors = (
+            supplied
+            if supplied is not None
+            else frame.select(feed.timestamp_col, asset).with_columns(
+                pl.lit(1.0).alias("price_adjustment_factor"),
+                pl.lit(1.0).alias("volume_adjustment_factor"),
+            )
         )
-        result = apply_adjustment_factors(frame.drop(_CLOCK), factors, feed_spec=feed)
+        result = apply_adjustment_factors(
+            frame.drop(_CLOCK),
+            empty_factors,
+            feed_spec=feed,
+            method=factor_method if supplied is not None else "supplied",
+        )
     coverage_frame = pl.DataFrame(
         coverage,
         schema={
@@ -424,6 +474,8 @@ def prepare_adjusted_history(
             "input_price_basis": "raw",
             "action_coverage": action_coverage,
             "actions_used": basis != "raw",
+            "factor_source": "native" if supplied is None else "supplied",
+            **factor_metadata,
             "coverage_scope": "between supplied observed endpoints;not a completeness claim outside that range",
         },
     )
