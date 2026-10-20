@@ -47,6 +47,22 @@ def _future_cumulative_product(column: str) -> pl.Expr:
     return pl.col(column).shift(-1, fill_value=1.0).reverse().cum_prod().reverse()
 
 
+def _event_adjustment_factors(
+    prices: pl.DataFrame, *, split_col: str, dividend_col: str | None
+) -> pl.DataFrame:
+    """Add canonical local event factors before composing a historical share basis."""
+    price_event_factor = (
+        pl.col("close")
+        / (pl.col(split_col).cast(pl.Float64) * (pl.col("close") + pl.col(dividend_col)))
+        if dividend_col is not None
+        else 1.0 / pl.col(split_col).cast(pl.Float64)
+    )
+    return prices.with_columns(
+        price_event_factor.alias("_price_event_factor"),
+        pl.col(split_col).cast(pl.Float64).alias("_volume_event_factor"),
+    )
+
+
 def _apply_canonical_adjustments(
     prices: pl.DataFrame,
     *,
@@ -64,16 +80,7 @@ def _apply_canonical_adjustments(
     )
     df = prices.sort("date").clone()
 
-    price_event_factor = (
-        pl.col("close")
-        / (pl.col(split_col).cast(pl.Float64) * (pl.col("close") + pl.col(dividend_col)))
-        if dividend_col is not None
-        else 1.0 / pl.col(split_col).cast(pl.Float64)
-    )
-    df = df.with_columns(
-        price_event_factor.alias("_price_event_factor"),
-        pl.col(split_col).cast(pl.Float64).alias("_volume_event_factor"),
-    ).with_columns(
+    df = _event_adjustment_factors(df, split_col=split_col, dividend_col=dividend_col).with_columns(
         _future_cumulative_product("_price_event_factor").alias("price_adjustment_factor"),
         _future_cumulative_product("_volume_event_factor").alias("volume_adjustment_factor"),
     )
