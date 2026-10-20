@@ -319,16 +319,15 @@ def test_real_provider_update_preserves_a_stored_explicit_calendar_disable(tmp_p
 
 
 @pytest.mark.parametrize("invalid", [{"calendar": {"bad": True}}, {"time_contract_version": 3}])
-def test_real_provider_update_does_not_silently_drop_invalid_temporal_metadata(tmp_path, invalid):
+def test_real_provider_data_cannot_replace_a_dataset_with_invalid_temporal_metadata(
+    tmp_path, invalid
+):
     frame = provider_frame()
     storage = HiveStorage(StorageConfig(base_path=tmp_path))
-    storage.write(frame, "equities/daily/SPY", {"provider": "synthetic", **invalid})
+    storage.write(frame, "equities/daily/SPY", {"provider": "synthetic"})
     before = storage.get_metadata("equities/daily/SPY")
-    with (
-        DataManager(storage=storage) as manager,
-        pytest.raises(ValueError, match="calendar|time_contract_version"),
-    ):
-        manager.update("SPY", fill_gaps=False, provider="synthetic")
+    with pytest.raises(ValueError, match="calendar|time_contract_version"):
+        storage.write(frame.head(0), "equities/daily/SPY", {"provider": "synthetic", **invalid})
     assert storage.get_metadata("equities/daily/SPY") == before
     assert_frame_equal(storage.read("equities/daily/SPY").collect(), frame)
 
