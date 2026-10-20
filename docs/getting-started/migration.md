@@ -55,9 +55,20 @@ the declared label clock; instant bounds use UTC. Read ranges are start-inclusiv
 Calendar omission, explicit `None` and a named `24/7` schedule remain distinct. Panel conversion
 does not invoke a calendar resolver or create an expected clock.
 
-These adapters are unreleased source functionality. The migration example is checked alongside
-the implementation; installed-consumer qualification is recorded with the corresponding PR.
-No Reloaded package is required to execute it.
+These adapters are unreleased source functionality. Isolated wheel and source-distribution checks
+qualified Data `0.2.2.dev14+gbe73c5d86`, Specs `0.2.0`, Diagnostic `0.1.9` and Engineer
+`0.1.7.dev29+gc69e7bada` from immutable source
+[`c69e7bada`](https://github.com/ml4t/engineer/commit/c69e7badaac012ad98b1c4b8aa9a67a952b08f5c).
+The checks used pandas `3.0.6` and Polars `2.0.0`. Diagnostic's public
+`metrics.basic.compute_forward_returns` consumed the reconstructed native table without dropping
+B's missing quote. Engineer's public `labeling.fixed_time_horizon_labels` consumed A's complete
+price history. Both produced the independently expected one-observation outcomes.
+
+Engineer `0.1.7` is not yet a published release; published `0.1.6` requires Specs `<0.2` and
+cannot be installed alongside current Data. Use the qualified immutable Engineer source for this
+integration until a compatible Engineer release is available. This is source integration evidence,
+not a claim of released-package migration compatibility. Neither consumer nor any Reloaded package
+is required for the Data-only example.
 
 ## Names preserved through the 0.x series
 

@@ -211,6 +211,19 @@ def test_omitted_calendar_is_not_serialized_as_null_by_panel():
     assert "calendar" not in panel.attrs["ml4t_price_panel"]["feed_spec"]
 
 
+def test_panel_keeps_a_whole_missing_price_session_instead_of_compressing_the_clock():
+    source = captured_prices().with_columns(
+        pl.when(pl.col("timestamp") == date(2025, 7, 7))
+        .then(None)
+        .otherwise(pl.col("close"))
+        .alias("close")
+    )
+    panel = to_price_panel(source)
+    assert panel.index.day.tolist() == [2, 3, 7, 8]
+    assert panel.iloc[2].isna().all()
+    assert_frame_equal(from_price_panel(panel), source)
+
+
 @pytest.mark.parametrize("calendar", ["omitted", None, "NYSE", "24/7"])
 def test_storage_keeps_source_facts_and_calendar_presence(storage, calendar):
     metadata = {
