@@ -8,7 +8,13 @@ import polars as pl
 
 from ml4t.data.assets.asset_class import AssetClass
 from ml4t.data.core.feeds import resolve_feed_spec
-from ml4t.data.core.revisions import native_frame, select_revisions, utc_column
+from ml4t.data.core.revisions import (
+    native_frame,
+    select_revisions,
+    session_label_at,
+    utc_column,
+    utc_stamp,
+)
 from ml4t.specs import FeedSpec
 
 
@@ -51,17 +57,22 @@ def _on(
     frame: pl.DataFrame,
     value: date | datetime | str,
     *,
-    timezone: str | None = None,
+    feed: FeedSpec,
     start_only: bool = False,
 ) -> pl.DataFrame:
     dtype = frame.schema["valid_from"]
     stamp = pd.Timestamp(value)
     if pd.isna(stamp):
         raise ValueError("on must identify a known date or instant")
+    timezone = feed.timezone
     if dtype == pl.Date:
-        if stamp.tzinfo is not None and timezone is not None:
-            stamp = stamp.tz_convert(timezone)
-        point = pl.lit(stamp.date())
+        instant = isinstance(value, datetime) or isinstance(value, str) and len(value) > 10
+        if instant and feed.timestamp_semantics == "session_label":
+            point = pl.lit(session_label_at(value, feed))
+        else:
+            if stamp.tzinfo is not None and timezone is not None:
+                stamp = stamp.tz_convert(timezone)
+            point = pl.lit(stamp.date())
     else:
         stamp = (
             stamp.tz_localize(timezone or "UTC")
@@ -159,14 +170,14 @@ class InstrumentRegistry:
         asset = FeedSpec._coerce_entity_col(self._feed.entity_col) or "asset"
         frame = self._identities
         if on is not None:
-            frame = _on(frame, on, timezone=self._feed.timezone, start_only=True)
+            frame = _on(frame, on, feed=self._feed, start_only=True)
         elif as_of is not None:
-            frame = _on(frame, as_of, timezone=self._feed.timezone, start_only=True)
+            frame = _on(frame, utc_stamp(as_of), feed=self._feed, start_only=True)
         frame = select_revisions(frame, [asset, "source", "valid_from"], as_of)
         _intervals(frame, [asset])
         _intervals(frame, ["symbol", "exchange"])
         if on is not None:
-            frame = _on(frame, on, timezone=self._feed.timezone)
+            frame = _on(frame, on, feed=self._feed)
         if universe is not None:
             if self._memberships is None:
                 raise ValueError("A historical universe requires captured membership intervals")
@@ -177,13 +188,13 @@ class InstrumentRegistry:
             members = _on(
                 self._memberships.filter(pl.col("universe") == universe),
                 on,
-                timezone=self._feed.timezone,
+                feed=self._feed,
                 start_only=True,
             )
             members = select_revisions(members, [asset, "universe", "source", "valid_from"], as_of)
             _intervals(members, [asset, "universe"])
             frame = frame.join(
-                _on(members, on, timezone=self._feed.timezone).select(asset).unique(),
+                _on(members, on, feed=self._feed).select(asset).unique(),
                 on=asset,
                 how="semi",
             )

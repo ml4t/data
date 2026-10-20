@@ -166,3 +166,23 @@ def test_revision_availability_cutoff_retains_nanoseconds_and_rejects_indistingu
     assert registry.resolve("B", date(2025, 7, 7), "NYSE", as_of=after_revision) == 17
     with pytest.raises(ValueError, match="indistinguishable"):
         InstrumentRegistry.from_frame(source.with_columns(pl.col("available_at").min()))
+
+
+def test_cme_dated_identity_uses_the_same_current_overnight_session_as_history():
+    source = pl.read_csv(
+        StringIO(
+            "asset,symbol,exchange,instrument_type,valid_from,available_at,source,revision_id\n"
+            "17,FUT,CME,future,2025-07-07,2025-07-06T23:30:00Z,captured,r1\n"
+        ),
+        try_parse_dates=True,
+    )
+    feed = FeedSpec(
+        time_contract_version=2,
+        entity_col="asset",
+        calendar="CME_Equity",
+        timestamp_semantics="session_label",
+        timezone="America/New_York",
+    )
+    registry = InstrumentRegistry.from_frame(source, feed_spec=feed)
+    instant = datetime(2025, 7, 6, 23, 45, tzinfo=UTC)
+    assert registry.resolve("FUT", instant, "CME", as_of=instant) == 17

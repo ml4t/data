@@ -1,24 +1,46 @@
 """Availability-based revision selection for native input tables."""
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 import polars as pl
 
 from ml4t.data.utils.conversion import pandas_to_polars
+from ml4t.specs import FeedSpec
 
 
 def native_frame(frame: pl.DataFrame | pd.DataFrame) -> pl.DataFrame:
     return pandas_to_polars(frame) if isinstance(frame, pd.DataFrame) else frame.clone()
 
 
-def utc_cutoff(value: datetime | str) -> pl.Expr:
+def utc_stamp(value: datetime | str) -> pd.Timestamp:
     stamp = pd.Timestamp(value)
     if pd.isna(stamp):
         raise ValueError("An as_of cutoff must be a known instant")
-    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+
+def utc_cutoff(value: datetime | str) -> pl.Expr:
+    stamp = utc_stamp(value)
     return pl.lit(stamp.value).cast(pl.Datetime("ns", "UTC"))
+
+
+def session_label_at(value: datetime | str, feed: FeedSpec) -> date:
+    from ml4t.data.sessions import SessionAssigner
+
+    stamp = utc_stamp(value)
+    selected = feed.resolve_calendar()
+    if selected is None:
+        return stamp.tz_convert(feed.timezone or "UTC").date()
+    point_feed = FeedSpec(
+        time_contract_version=2, calendar=selected, timestamp_semantics="event_time"
+    )
+    assigner = SessionAssigner(feed_spec=point_feed)
+    points = pl.DataFrame({"timestamp": pl.Series([stamp.value], dtype=pl.Datetime("ns", "UTC"))})
+    assigned = assigner.assign_sessions(points, bar_frequency="intraday")["session_date"][0]
+    timezone = feed.timezone or str(getattr(assigner.calendar, "tz", "UTC"))
+    return stamp.tz_convert(timezone).date() if assigned is None else assigned
 
 
 def utc_column(frame: pl.DataFrame, name: str, timezone: str | None = None) -> pl.DataFrame:
