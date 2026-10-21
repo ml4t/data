@@ -508,3 +508,137 @@ def test_unpublished_invalid_definition_values_do_not_change_an_earlier_causal_s
     )
     assert result.selections["selected_instrument_id"].to_list() == [23]
     assert result.definitions["revision_id"].unique().to_list() == ["r1"]
+
+
+def test_normalized_feed_and_roll_provenance_point_to_the_actual_leg_observations(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    cents = bars.with_columns(pl.lit("cents").alias("price_quote_unit"))
+    facts = definitions.with_columns(pl.lit("cents").alias("price_quote_unit"))
+    result = futures.prepare_futures_inputs(
+        cents,
+        facts,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        price_quote_unit="dollars",
+        feed_spec=contract_feed(),
+    )
+    normalized = FeedSpec.from_any(result.metadata["normalized_feed_spec"])
+    assert normalized.price_col == "normalized_close"
+    assert normalized.volume_col == "volume"
+    assert result.rolls["old_normalized_mark"].to_list() == [40.2]
+    assert result.rolls["new_normalized_mark"].to_list() == pytest.approx([40.3], rel=0, abs=1e-12)
+    assert result.rolls["old_normalized_multiplier"].to_list() == [5000.0]
+    assert result.rolls["old_mark_source"].to_list() == ["capture"]
+    assert result.rolls["new_mark_revision_id"].to_list() == ["r1"]
+    assert result.rolls["old_currency"].to_list() == ["USD"]
+    assert result.rolls["new_normalized_price_quote_unit"].to_list() == ["dollars"]
+
+
+def test_empty_and_populated_preparations_have_the_same_output_table_schemas(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    kwargs = {
+        "as_of": datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        "roll_strategy": HighestVolumeRoll(),
+        "feed_spec": contract_feed(),
+    }
+    populated = futures.prepare_futures_inputs(bars, definitions, **kwargs)
+    empty = futures.prepare_futures_inputs(bars.head(0), definitions, **kwargs)
+    for name in ("bars", "definitions", "chain", "metrics", "selections", "rolls", "coverage"):
+        assert getattr(empty, name).schema == getattr(populated, name).schema, name
+        assert getattr(empty, name).height == 0
+
+
+def test_declared_custom_columns_and_symbol_identity_preserve_the_source_tables(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    physical = bars.drop("asset").rename(
+        {"timestamp": "observed_on", "symbol": "contract_code", "close": "mark", "volume": "qty"}
+    )
+    feed = FeedSpec(
+        timestamp_col="observed_on",
+        entity_col="contract_code",
+        price_col="mark",
+        close_col="mark",
+        volume_col="qty",
+        time_contract_version=2,
+        calendar="CME_Equity",
+        timestamp_semantics="session_label",
+        data_frequency="daily",
+    )
+    result = futures.prepare_futures_inputs(
+        physical,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=feed,
+        definitions_feed_spec=contract_feed(),
+        identity_mode="symbol",
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.bars["contract_code"].equals(physical["contract_code"])
+    assert result.bars["mark"].equals(physical["mark"])
+    assert result.rolls["old_mark"].to_list() == [4020]
+    assert (
+        result.metrics.filter(pl.col("metric") == "volume")["volume"].to_list()
+        == physical["qty"].to_list()
+    )
+
+
+def test_unknown_mark_meaning_cannot_be_presented_as_a_qualified_roll_mark(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    with pytest.raises(ValueError, match="mark_kind"):
+        futures.prepare_futures_inputs(
+            bars.with_columns(pl.lit("").alias("mark_kind")),
+            definitions,
+            as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+            roll_strategy=HighestVolumeRoll(),
+            feed_spec=contract_feed(),
+        )
+
+
+def test_identity_unit_mapping_keeps_integer_marks_beyond_float64_exact_range(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    captured = bars.with_columns(
+        (pl.col(name) + 2**53 + 1).alias(name) for name in ("open", "high", "low", "close")
+    )
+    result = futures.prepare_futures_inputs(
+        captured,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert result.bars["normalized_close"].to_list() == [
+        9007199254744993,
+        9007199254745003,
+        9007199254745003,
+        9007199254745013,
+        9007199254745013,
+        9007199254745023,
+    ]
+    assert result.bars["normalized_close"].dtype == pl.Int64
+
+
+def test_declared_local_naive_open_instants_use_the_same_session_for_identity_and_selection(
+    tmp_path,
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    local = bars.with_columns(
+        (
+            pl.col("timestamp").cast(pl.Datetime("ns"))
+            - pl.duration(days=1, time_unit="ns")
+            + pl.duration(hours=18, time_unit="ns")
+        ).alias("timestamp")
+    )
+    dated = definitions.with_columns(pl.lit(date(2025, 7, 7)).alias("valid_from"))
+    result = futures.prepare_futures_inputs(
+        local,
+        dated,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=FirstNoticeDateRoll(1),
+        feed_spec=contract_feed().with_overrides(timestamp_semantics="event_time"),
+        definitions_feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.bars["timestamp"].equals(
+        local["timestamp"].dt.replace_time_zone("America/New_York").dt.convert_time_zone("UTC")
+    )

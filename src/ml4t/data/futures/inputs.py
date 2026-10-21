@@ -84,6 +84,8 @@ def _dated_bars(frame: pl.DataFrame, feed: FeedSpec) -> pl.DataFrame:
         if feed.timestamp_semantics != "session_label":
             raise ValueError("Declare session_label semantics for Date contract observations")
         return frame.with_columns(pl.col(column).alias(_DATE))
+    if feed.timestamp_semantics != "session_label":
+        frame = utc_column(frame, column, feed.timezone)
     labels = _daily_session_labels(frame, SessionAssigner(feed_spec=feed), column)
     return frame.with_columns(labels.alias(_DATE))
 
@@ -131,8 +133,15 @@ def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _normalized_prices(frame: pl.DataFrame, feed: FeedSpec, target: str | None) -> pl.DataFrame:
+    if target is not None:
+        price_conversion_factor(target, target)
     for name in ("price_quote_unit", "currency", "mark_kind"):
-        if name not in frame.columns or frame[name].null_count():
+        if (
+            name not in frame.columns
+            or frame.schema[name] != pl.String
+            or frame[name].null_count()
+            or frame[name].str.strip_chars().eq("").any()
+        ):
             raise ValueError(f"Raw bars require declared {name};do not infer source units")
     if frame.filter(pl.col("currency") != pl.col("instrument_currency")).height:
         raise ValueError("Known bar and contract currency units conflict")
@@ -187,7 +196,9 @@ def _normalized_prices(frame: pl.DataFrame, feed: FeedSpec, target: str | None) 
         ):
             raise ValueError("Known raw contract prices must be finite numeric observations")
     frame = frame.with_columns(
-        (pl.col(name) * pl.col("price_conversion_factor")).alias(f"normalized_{name}")
+        (
+            pl.col(name) if target is None else pl.col(name) * pl.col("price_conversion_factor")
+        ).alias(f"normalized_{name}")
         for name in prices
     )
     if frame.filter(
@@ -284,6 +295,41 @@ def _metric_facts(
     return pl.concat(parts, how="diagonal")
 
 
+def _leg_marks(frame: pl.DataFrame, feed: FeedSpec, side: str) -> pl.DataFrame:
+    asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
+    fields = {
+        "instrument_id": asset,
+        "mark": feed.price_col,
+        "mark_observed_at": feed.timestamp_col,
+        "mark_available_at": "available_at",
+        "mark_source": "source",
+        "mark_revision_id": "revision_id",
+        "price_quote_unit": "price_quote_unit",
+        "currency": "currency",
+        "normalized_mark": f"normalized_{feed.price_col}",
+        "normalized_multiplier": "normalized_multiplier",
+        "normalized_price_quote_unit": "normalized_price_quote_unit",
+        "definition_source": "instrument_source",
+        "definition_revision_id": "instrument_revision_id",
+    }
+    return frame.select(pl.col(column).alias(f"{side}_{name}") for name, column in fields.items())
+
+
+def _roll_proposal(
+    old: pl.DataFrame, new: pl.DataFrame, feed: FeedSpec, point: pl.Expr
+) -> pl.DataFrame:
+    return (
+        old.select(
+            pl.col("instrument_root").alias("root"),
+            pl.col("instrument_exchange").alias("exchange"),
+            "mark_kind",
+        )
+        .hstack(_leg_marks(old, feed, "old"))
+        .join(_leg_marks(new, feed, "new"), how="cross")
+        .with_columns(point.alias("decision_at"), point.alias("effective_at"))
+    )
+
+
 def prepare_futures_inputs(
     bars: pl.DataFrame | pd.DataFrame,
     definitions: pl.DataFrame | pd.DataFrame,
@@ -374,6 +420,7 @@ def prepare_futures_inputs(
         else None
     )
     metrics = _metric_facts(source, feed, as_of, requested)
+    point = pl.lit(None, dtype=pl.Datetime("ns", "UTC")) if as_of is None else utc_cutoff(as_of)
     decisions, proposals = [], []
     for group in normalized.partition_by(
         ["instrument_root", "instrument_exchange"], maintain_order=True
@@ -450,10 +497,9 @@ def prepare_futures_inputs(
             decision = decision.join(clock, how="cross")
         else:
             decision = decision.with_columns(
-                pl.lit(None, dtype=pl.Date).alias("metric_observed_at"),
+                pl.lit(None, dtype=source.schema[feed.timestamp_col]).alias("metric_observed_at"),
                 pl.lit(None, dtype=pl.Datetime("ns", "UTC")).alias("metric_available_at"),
             )
-        point = pl.lit(None, dtype=pl.Datetime("ns", "UTC")) if as_of is None else utc_cutoff(as_of)
         decisions.append(
             decision.with_columns(
                 point.alias("decision_at"),
@@ -466,52 +512,33 @@ def prepare_futures_inputs(
             new = group.filter((pl.col(_ID) == event.new_symbol) & (pl.col(_DATE) == event.date))
             if old["mark_kind"][0] != new["mark_kind"][0]:
                 raise ValueError("Paired roll marks have conflicting source mark kinds")
-            proposals.append(
-                old.select(
-                    pl.col("instrument_root").alias("root"),
-                    pl.col(asset).alias("old_instrument_id"),
-                    pl.col(feed.price_col).alias("old_mark"),
-                    pl.col(feed.timestamp_col).alias("old_mark_observed_at"),
-                    pl.col("available_at").alias("old_mark_available_at"),
-                    pl.col("price_quote_unit").alias("old_price_quote_unit"),
-                    "mark_kind",
+            if old["currency"][0] != new["currency"][0]:
+                raise ValueError(
+                    "Paired roll marks have conflicting currency units;no FX is inferred"
                 )
-                .join(
-                    new.select(
-                        pl.col(asset).alias("new_instrument_id"),
-                        pl.col(feed.price_col).alias("new_mark"),
-                        pl.col(feed.timestamp_col).alias("new_mark_observed_at"),
-                        pl.col("available_at").alias("new_mark_available_at"),
-                        pl.col("price_quote_unit").alias("new_price_quote_unit"),
-                    ),
-                    how="cross",
-                )
-                .with_columns(point.alias("decision_at"), point.alias("effective_at"))
-            )
+            proposals.append(_roll_proposal(old, new, feed, point))
     selections_frame = (
         pl.concat(decisions)
         if decisions
         else pl.DataFrame(
             schema={
-                "root": pl.String,
-                "exchange": pl.String,
+                "root": used.schema["root"],
+                "exchange": used.schema["exchange"],
                 "selected_instrument_id": source.schema[asset],
+                "observation_label": pl.Date,
+                **{"definition_" + name: used.schema[name] for name in _DEFINITION_FIELDS},
+                "metric_observed_at": source.schema[feed.timestamp_col],
+                "metric_available_at": pl.Datetime("ns", "UTC"),
                 "decision_at": pl.Datetime("ns", "UTC"),
                 "effective_at": pl.Datetime("ns", "UTC"),
+                "selection_method": pl.String,
             }
         )
     )
     rolls_frame = (
         pl.concat(proposals)
         if proposals
-        else pl.DataFrame(
-            schema={
-                "old_instrument_id": source.schema[asset],
-                "new_instrument_id": source.schema[asset],
-                "old_mark": source.schema[feed.price_col],
-                "new_mark": source.schema[feed.price_col],
-            }
-        )
+        else _roll_proposal(normalized.head(0), normalized.head(0), feed, point)
     )
     chain = used.select(
         asset,
@@ -535,6 +562,12 @@ def prepare_futures_inputs(
         coverage=coverage,
         metadata={
             "feed_spec": feed.to_dict(),
+            "normalized_feed_spec": feed.with_overrides(
+                **{
+                    name: f"normalized_{getattr(feed, name)}"
+                    for name in ("open_col", "high_col", "low_col", "close_col", "price_col")
+                }
+            ).to_dict(),
             "calendar": selected_calendar,
             "price_basis": "raw",
             "perspective": "retrospective" if as_of is None else "causal_current_decision",
