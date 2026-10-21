@@ -642,3 +642,75 @@ def test_declared_local_naive_open_instants_use_the_same_session_for_identity_an
     assert result.bars["timestamp"].equals(
         local["timestamp"].dt.replace_time_zone("America/New_York").dt.convert_time_zone("UTC")
     )
+
+
+def test_loaded_expiration_instants_keep_their_precision_and_drive_the_same_daily_chain(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    instants = definitions.with_columns(
+        (
+            pl.col("expiration").cast(pl.Datetime("ns", "UTC"))
+            + pl.duration(hours=14, nanoseconds=1, time_unit="ns")
+        ).alias("expiration")
+    )
+    instants.write_parquet(tmp_path / "definition/product=TEST/definition.parquet")
+    captured = load_databento_definitions("TEST", tmp_path)
+    result = futures.prepare_futures_inputs(
+        bars,
+        captured,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=TimeBasedRoll(0),
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [17]
+    assert result.definitions["expiration"].equals(instants["expiration"])
+    assert result.definitions.schema["expiration"] == pl.Datetime("ns", "UTC")
+
+
+def test_expiration_instants_end_current_eligibility_at_the_exact_nanosecond(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    instant = pl.lit("2025-07-09T21:30:00.000000001Z").str.to_datetime(
+        time_unit="ns", time_zone="UTC"
+    )
+    dated = definitions.with_columns(instant.alias("expiration"))
+    kwargs = {"roll_strategy": HighestVolumeRoll(), "feed_spec": contract_feed()}
+    before = futures.prepare_futures_inputs(bars, dated, as_of="2025-07-09T21:30:00Z", **kwargs)
+    assert before.selections["selected_instrument_id"].to_list() == [23]
+    with pytest.raises(ValueError, match="current.*lifecycle"):
+        futures.prepare_futures_inputs(
+            bars, dated, as_of="2025-07-09T21:30:00.000000002Z", **kwargs
+        )
+
+
+def test_stale_observations_cannot_backdate_a_notice_policy_trigger(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    with pytest.raises(ValueError, match="current.*(lifecycle|policy)"):
+        futures.prepare_futures_inputs(
+            bars.filter(pl.col("timestamp") < date(2025, 7, 9)),
+            definitions,
+            as_of=datetime(2025, 7, 10, 21, 30, tzinfo=UTC),
+            roll_strategy=FirstNoticeDateRoll(1),
+            feed_spec=contract_feed(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,source_unit,target_unit",
+    [("multiplier", "dollars", "cents"), ("tick_size", "cents", "dollars")],
+)
+def test_unit_conversion_rejects_a_positive_source_contract_term_that_underflows_to_zero(
+    tmp_path, field, source_unit, target_unit
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    source = bars.with_columns(pl.lit(source_unit).alias("price_quote_unit"))
+    facts = definitions.with_columns(
+        pl.lit(source_unit).alias("price_quote_unit"), pl.lit(5e-324).alias(field)
+    )
+    with pytest.raises(ValueError, match="positive|underflow"):
+        futures.prepare_futures_inputs(
+            source,
+            facts,
+            as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+            roll_strategy=HighestVolumeRoll(),
+            price_quote_unit=target_unit,
+            feed_spec=contract_feed(),
+        )

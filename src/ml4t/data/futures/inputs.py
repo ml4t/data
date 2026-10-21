@@ -13,6 +13,7 @@ from ml4t.data.core.revisions import (
     native_frame,
     select_revisions,
     session_label_at,
+    session_labels_at,
     utc_column,
     utc_cutoff,
     utc_stamp,
@@ -117,19 +118,43 @@ def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:
             or frame.filter(~pl.col(name).is_finite() | (pl.col(name) <= 0)).height
         ):
             raise ValueError(f"Contract {name} must be positive and finite")
-    if frame.schema["expiration"] != pl.Date:
-        raise ValueError("Contract expiration must be an explicit civil Date")
+    if frame.schema["expiration"] != pl.Date and not isinstance(
+        frame.schema["expiration"], pl.Datetime
+    ):
+        raise ValueError("Contract expiration must contain Date labels or Datetime instants")
     for name in ("first_notice_date", "last_trade_date", "auto_close_date"):
         if name not in frame.columns or frame.schema[name] == pl.Null:
             frame = frame.with_columns(pl.lit(None, dtype=pl.Date).alias(name))
-        elif frame.schema[name] != pl.Date:
-            raise ValueError(f"{name} must be an explicit civil Date")
+        elif frame.schema[name] != pl.Date and not isinstance(frame.schema[name], pl.Datetime):
+            raise ValueError(f"{name} must contain Date labels or Datetime instants")
     for name in ("volume_unit", "open_interest_unit"):
         if name not in frame.columns:
             frame = frame.with_columns(pl.lit(None, dtype=pl.String).alias(name))
     if not frame["settlement_type"].is_in(["cash", "physical"]).all():
         raise ValueError("Declare cash or physical settlement_type")
     return frame
+
+
+def _lifecycle_labels(frame: pl.DataFrame, name: str, feed: FeedSpec) -> pl.Series:
+    if frame.schema[name] == pl.Date:
+        return frame[name]
+    points = utc_column(frame, name, feed.timezone)[name]
+    if points.drop_nulls().is_empty():
+        return pl.Series(name, [None] * frame.height, dtype=pl.Date)
+    labels = iter(
+        session_labels_at(
+            points.drop_nulls(),
+            FeedSpec(
+                time_contract_version=2,
+                calendar=feed.resolve_calendar(),
+                timezone=feed.timezone,
+                timestamp_semantics="event_time",
+            ),
+        )
+    )
+    return pl.Series(
+        name, [None if missing else next(labels) for missing in points.is_null()], dtype=pl.Date
+    )
 
 
 def _normalized_prices(frame: pl.DataFrame, feed: FeedSpec, target: str | None) -> pl.DataFrame:
@@ -212,6 +237,10 @@ def _normalized_prices(frame: pl.DataFrame, feed: FeedSpec, target: str | None) 
         )
     ).height:
         raise ValueError("Unit normalization produced nonfinite derived values")
+    if frame.filter(
+        (pl.col("normalized_multiplier") <= 0) | (pl.col("normalized_tick_size") <= 0)
+    ).height:
+        raise ValueError("Normalized multiplier and tick size must remain positive;unit underflow")
     return frame
 
 
@@ -428,8 +457,10 @@ def prepare_futures_inputs(
         projection = group.select(
             pl.col(_DATE).alias("date"),
             pl.col(_ID).alias("symbol"),
-            pl.col("instrument_expiration").alias("expiration"),
-            pl.col("instrument_first_notice_date").alias("first_notice_date"),
+            _lifecycle_labels(group, "instrument_expiration", registry_feed).alias("expiration"),
+            _lifecycle_labels(group, "instrument_first_notice_date", registry_feed).alias(
+                "first_notice_date"
+            ),
             pl.col(feed.price_col).alias("close"),
         )
         for metric in ("volume", "open_interest"):
@@ -456,7 +487,7 @@ def prepare_futures_inputs(
         identity_point = (
             decision_label
             if registry.identities.schema["valid_from"] == pl.Date
-            else utc_stamp(as_of).to_pydatetime()
+            else utc_stamp(as_of)
             if as_of is not None
             else chosen[feed.timestamp_col][0]
         )
@@ -465,11 +496,28 @@ def prepare_futures_inputs(
         ).lifetimes(on=identity_point, as_of=as_of)
         if current_facts.height != 1:
             raise ValueError("The current selection lacks dated identity coverage")
-        if any(
-            current_facts[name][0] is not None and current_facts[name][0] < decision_label
-            for name in ("expiration", "last_trade_date")
-        ):
-            raise ValueError("The current selection is past its declared lifecycle date")
+        for name in ("expiration", "last_trade_date"):
+            if isinstance(current_facts.schema[name], pl.Datetime) and as_of is not None:
+                past = (
+                    utc_column(current_facts, name, registry_feed.timezone)
+                    .filter(pl.col(name) <= utc_cutoff(as_of))
+                    .height
+                )
+            else:
+                past = (
+                    _lifecycle_labels(current_facts, name, registry_feed).lt(decision_label).any()
+                )
+            if past:
+                raise ValueError("The current selection is past its declared lifecycle date")
+        if isinstance(strategy, TimeBasedRoll | FirstNoticeDateRoll):
+            current_policy = current_facts.select(
+                pl.lit(decision_label).alias("date"),
+                pl.lit(current["symbol"][0]).alias("symbol"),
+                _lifecycle_labels(current_facts, "expiration", registry_feed),
+                _lifecycle_labels(current_facts, "first_notice_date", registry_feed),
+            )
+            if strategy.select_contracts(current_policy).is_empty():
+                raise ValueError("The current selection is past its dated policy trigger")
         used = pl.concat([used, current_facts]).unique(maintain_order=True)
         decision = chosen.select(
             pl.col("instrument_root").alias("root"),
