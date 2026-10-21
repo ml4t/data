@@ -105,7 +105,7 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
 
     for name, series in df.items():
         column_name = str(name)
-        if pd.api.types.is_datetime64_any_dtype(series):
+        if pd.api.types.is_datetime64_any_dtype(series.dtype):
             columns[column_name] = _datetime_to_polars(column_name, series)
         else:
             values = series.astype(object).where(series.notna(), None).tolist()

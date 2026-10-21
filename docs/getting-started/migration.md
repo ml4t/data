@@ -372,8 +372,13 @@ FX conversion. Read `metadata['normalized_feed_spec']` to consume those fields a
 The same calculation after cents-to-dollars conversion uses price change0.1 and multiplier5000.
 Neither notional value nor these marks establish cash settlement, margin or fills.
 
-These are unreleased source APIs. Source and installed-consumer qualification revisions are
-recorded as they are completed; no complete released-package migration claim is made here.
+These are unreleased source APIs. Isolated wheel and sdist checks qualified Data
+`0.2.2.dev53+g4a87b339c`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
+[`12a2c483f`](https://github.com/ml4t/backtest/commit/12a2c483f8f1fda54244af187db8bf44e6f85fc9)
+(`0.1.13.dev22+g12a2c483f`) on Python `3.12.11`. Actual Backtest `ContractSpec` and `Position`
+consumed the produced raw and converted fields, retaining IDs, paired marks and units; both
+produced the independently expected USD500 price P&L. These checks do not qualify simulated
+roll fills, settlement, margin or a complete released-package migration.
 Data does not replace Backtest's runtime history, account, roll execution or auto-close policy.
 The recipe needs no credentials, network, Reloaded package or Backtest installation.
 
