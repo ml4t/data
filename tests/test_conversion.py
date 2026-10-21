@@ -1,6 +1,6 @@
 """Tests for DataFrame conversion utilities."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import numpy as np
 import pandas as pd
@@ -71,6 +71,28 @@ def test_pandas_parquet_arrow_preserves_adjacent_nanosecond_observations(tmp_pat
     ]
     assert result["asset"].to_list() == [17, 17]
     assert result["close"].to_list() == [100, 101]
+
+
+@pytest.mark.parametrize("bits", [32, 64])
+@pytest.mark.parametrize(
+    "values", [[date(2025, 7, 3), None], [None, None], []], ids=["partial", "unknown", "empty"]
+)
+def test_pandas_feather_arrow_dates_remain_session_labels_not_instants(
+    tmp_path, bits, values
+) -> None:
+    arrow = pytest.importorskip("pyarrow")
+    dtype = arrow.date32() if bits == 32 else arrow.date64()
+    source_file = tmp_path / "daily_labels.feather"
+    pd.DataFrame({"timestamp": pd.Series(values, dtype=pd.ArrowDtype(dtype))}).to_feather(
+        source_file
+    )
+    captured = pd.read_feather(source_file, dtype_backend="pyarrow")
+    assert captured["timestamp"].dtype == pd.ArrowDtype(dtype)
+
+    result = pandas_to_polars(captured)
+
+    assert result.schema["timestamp"] == pl.Date
+    assert result["timestamp"].to_list() == values
 
 
 def test_pandas_to_polars_preserves_all_null_float_dtype() -> None:
