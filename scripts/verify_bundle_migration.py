@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import sys
 from importlib.metadata import distribution, version
 from pathlib import Path
 
@@ -21,7 +20,13 @@ def main() -> int:
     """Reject source-shadowed installs before testing real standard writers and readers."""
     root = Path(__file__).resolve().parents[1]
     package = Path(ml4t.data.__file__).resolve().parent
-    if not package.is_relative_to(Path(sys.prefix).resolve()):
+    installed_data = distribution("ml4t-data")
+    direct_data = json.loads(installed_data.read_text("direct_url.json") or "{}")
+    if (
+        package != Path(installed_data.locate_file("ml4t/data")).resolve()
+        or package.is_relative_to(root / "src")
+        or direct_data.get("dir_info", {}).get("editable", False)
+    ):
         raise ValueError("Bundle qualification must use installed Data, not an editable checkout")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if "g" + revision[:9] not in version("ml4t-data"):
