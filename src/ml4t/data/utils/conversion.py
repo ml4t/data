@@ -74,6 +74,8 @@ def _datetime_to_polars(name: str, series: pd.Series) -> pl.Series:
 def _all_null_dtype(dtype: Any) -> pl.DataType | type[pl.DataType] | None:
     """Map typed all-null pandas columns to their Polars scalar dtype."""
     arrow_dtype = getattr(dtype, "pyarrow_dtype", None)
+    if arrow_dtype is not None and str(arrow_dtype).startswith(("date32[", "date64[")):
+        return pl.Date
     if arrow_dtype is not None and str(arrow_dtype).startswith("duration["):
         unit = getattr(arrow_dtype, "unit", "ms")
         return pl.Duration(unit if unit in {"ms", "us", "ns"} else "ms")
@@ -105,7 +107,13 @@ def pandas_to_polars(df: pd.DataFrame) -> pl.DataFrame:
 
     for name, series in df.items():
         column_name = str(name)
-        if pd.api.types.is_datetime64_any_dtype(series):
+        arrow_dtype = getattr(series.dtype, "pyarrow_dtype", None)
+        is_timestamp = (
+            str(arrow_dtype).startswith("timestamp[")
+            if arrow_dtype is not None
+            else pd.api.types.is_datetime64_any_dtype(series.dtype)
+        )
+        if is_timestamp:
             columns[column_name] = _datetime_to_polars(column_name, series)
         else:
             values = series.astype(object).where(series.notna(), None).tolist()

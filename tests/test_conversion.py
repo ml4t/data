@@ -1,6 +1,6 @@
 """Tests for DataFrame conversion utilities."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import numpy as np
 import pandas as pd
@@ -10,10 +10,13 @@ import pytest
 from ml4t.data.utils.conversion import pandas_to_polars
 
 
-def test_pandas_to_polars_preserves_mixed_types_and_nulls() -> None:
+@pytest.mark.parametrize(
+    "unit,tick", [("us", 1_704_067_200_000_000), ("ns", 1_704_067_200_000_000_000)]
+)
+def test_pandas_to_polars_preserves_mixed_types_and_nulls(unit: str, tick: int) -> None:
     source = pd.DataFrame(
         {
-            "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", None], utc=True),
+            "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", None], utc=True).as_unit(unit),
             "count": pd.Series([1, None], dtype="Int64"),
             "state": pd.Series(["open", None], dtype="string"),
         }
@@ -22,7 +25,7 @@ def test_pandas_to_polars_preserves_mixed_types_and_nulls() -> None:
     result = pandas_to_polars(source)
 
     assert dict(result.schema) == {
-        "timestamp": pl.Datetime("us", "UTC"),
+        "timestamp": pl.Datetime(unit, "UTC"),
         "count": pl.Int64,
         "state": pl.String,
     }
@@ -30,6 +33,7 @@ def test_pandas_to_polars_preserves_mixed_types_and_nulls() -> None:
         {"timestamp": datetime(2024, 1, 1, tzinfo=UTC), "count": 1, "state": "open"},
         {"timestamp": None, "count": None, "state": None},
     ]
+    assert result["timestamp"].cast(pl.Int64).to_list() == [tick, None]
 
 
 def test_pandas_to_polars_preserves_nanosecond_timestamps() -> None:
@@ -43,6 +47,54 @@ def test_pandas_to_polars_preserves_nanosecond_timestamps() -> None:
     assert result["timestamp"].cast(pl.Int64).item() == 1_704_067_200_123_456_789
 
 
+def test_pandas_parquet_arrow_preserves_adjacent_nanosecond_observations(tmp_path) -> None:
+    pytest.importorskip("pyarrow")
+    source_file = tmp_path / "observations.parquet"
+    pl.DataFrame(
+        {
+            "timestamp": pl.Series(
+                [1_704_067_200_123_456_789, 1_704_067_200_123_456_790],
+                dtype=pl.Datetime("ns", "UTC"),
+            ),
+            "asset": [17, 17],
+            "close": [100, 101],
+        }
+    ).write_parquet(source_file)
+    captured = pd.read_parquet(source_file, dtype_backend="pyarrow")
+
+    result = pandas_to_polars(captured)
+
+    assert result.schema["timestamp"] == pl.Datetime("ns", "UTC")
+    assert result["timestamp"].cast(pl.Int64).to_list() == [
+        1_704_067_200_123_456_789,
+        1_704_067_200_123_456_790,
+    ]
+    assert result["asset"].to_list() == [17, 17]
+    assert result["close"].to_list() == [100, 101]
+
+
+@pytest.mark.parametrize("bits", [32, 64])
+@pytest.mark.parametrize(
+    "values", [[date(2025, 7, 3), None], [None, None], []], ids=["partial", "unknown", "empty"]
+)
+def test_pandas_feather_arrow_dates_remain_session_labels_not_instants(
+    tmp_path, bits, values
+) -> None:
+    arrow = pytest.importorskip("pyarrow")
+    dtype = arrow.date32() if bits == 32 else arrow.date64()
+    source_file = tmp_path / "daily_labels.feather"
+    pd.DataFrame({"timestamp": pd.Series(values, dtype=pd.ArrowDtype(dtype))}).to_feather(
+        source_file
+    )
+    captured = pd.read_feather(source_file, dtype_backend="pyarrow")
+    assert captured["timestamp"].dtype == pd.ArrowDtype(dtype)
+
+    result = pandas_to_polars(captured)
+
+    assert result.schema["timestamp"] == pl.Date
+    assert result["timestamp"].to_list() == values
+
+
 def test_pandas_to_polars_preserves_all_null_float_dtype() -> None:
     source = pd.DataFrame({"value": pd.Series([None, None], dtype="float64")})
 
@@ -52,13 +104,23 @@ def test_pandas_to_polars_preserves_all_null_float_dtype() -> None:
     assert result["value"].null_count() == 2
 
 
-def test_pandas_to_polars_normalizes_fixed_offset_timestamps() -> None:
-    source = pd.DataFrame({"timestamp": pd.to_datetime(["2024-01-01T00:00:00.123456-05:00"])})
+@pytest.mark.parametrize(
+    "unit,timestamp,tick",
+    [
+        ("us", "2024-01-01T00:00:00.123456-05:00", 1_704_085_200_123_456),
+        ("ns", "2024-01-01T00:00:00.123456789-05:00", 1_704_085_200_123_456_789),
+    ],
+)
+def test_pandas_to_polars_normalizes_fixed_offset_timestamps(
+    unit: str, timestamp: str, tick: int
+) -> None:
+    source = pd.DataFrame({"timestamp": pd.to_datetime([timestamp]).as_unit(unit)})
 
     result = pandas_to_polars(source)
 
-    assert result.schema == {"timestamp": pl.Datetime("us", "UTC")}
+    assert result.schema == {"timestamp": pl.Datetime(unit, "UTC")}
     assert result["timestamp"].dt.hour().item() == 5
+    assert result["timestamp"].cast(pl.Int64).item() == tick
 
 
 def test_pandas_to_polars_preserves_arrow_timestamp_dtype() -> None:
@@ -100,15 +162,23 @@ def test_pandas_to_polars_uses_one_dtype_for_partial_and_all_null_categories() -
     assert all_null.schema["category"] == pl.String
 
 
-def test_pandas_to_polars_normalizes_named_timezones_to_utc() -> None:
+@pytest.mark.parametrize(
+    "unit,tick", [("us", 1_704_085_200_000_000), ("ns", 1_704_085_200_000_000_000)]
+)
+def test_pandas_to_polars_normalizes_named_timezones_to_utc(unit: str, tick: int) -> None:
     source = pd.DataFrame(
-        {"timestamp": pd.Series(pd.date_range("2024-01-01", periods=1, tz="America/New_York"))}
+        {
+            "timestamp": pd.Series(
+                pd.date_range("2024-01-01", periods=1, tz="America/New_York").as_unit(unit)
+            )
+        }
     )
 
     result = pandas_to_polars(source)
 
-    assert result.schema == {"timestamp": pl.Datetime("us", "UTC")}
+    assert result.schema == {"timestamp": pl.Datetime(unit, "UTC")}
     assert result["timestamp"].dt.hour().item() == 5
+    assert result["timestamp"].cast(pl.Int64).item() == tick
 
 
 def test_pandas_to_polars_rescales_second_timestamps() -> None:
