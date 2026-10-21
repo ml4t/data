@@ -401,3 +401,61 @@ Built-in selectors use the dated source symbol to break ties, then stable ID str
 does not change when a source symbol changes. Custom strategy subclasses retain the original
 `select_contracts(data, contract_spec=None)` call contract and their own tie policy; they are not
 required to accept the built-in selectors' optional `tie_breaker_col` keyword.
+
+## Empyrical acquisition utilities
+
+Change acquisition imports without installing a legacy analytics runtime:
+
+```python
+# Previously: from empyrical.utils import get_fama_french, default_returns_func
+from ml4t.data.compat.empyrical import get_fama_french, default_returns_func
+
+factors = get_fama_french("2024-01-02", "2024-01-05")
+benchmark = default_returns_func("SPY", start="2024-01-02", end="2024-01-06")
+```
+
+These are data utilities only. Diagnostic owns analytical Empyrical replacements. Supplied-table
+analysis does not import Data or fetch data unless the caller explicitly selects acquisition.
+The Yahoo path needs the optional `ml4t-data[yahoo]` dependency. Factor downloads need no key;
+Treasury acquisition can use public FRED CSV without a key. When `FRED_API_KEY` is configured,
+API errors propagate rather than silently falling back to anonymous access.
+
+| Helper | Retained behavior and material differences |
+|---|---|
+| `get_fama_french(start="1-1-1970", end=None, datasets=...)` | Default FF3 plus momentum, ordered `Mkt-RF,SMB,HML,RF,Mom`, decimal returns and complete-case UTC date sample. Supported source names map to existing provider datasets; unknown names fail. Monthly bounds select the labeled period, including a month whose label precedes a mid-month start. Native provider filtering is unchanged. |
+| `load_portfolio_risk_factors(filepath_prefix=None, start=None, end=None)` | `filepath_prefix` is the actual CSV filename. Slice the requested dates after legacy file-mtime cache selection. |
+| `get_treasury_yield(start=None, end=None, period="3MO")` | One-column pandas frame, mapped `DGS1MO/3MO/6MO/1/5/10`, annual percent yield. Legacy forward-fill only affects existing reported rows; initial missing values and unreported dates are not invented. `source_missing_mask` retains the reported missing cells. Native `fetch_series` never fills them. |
+| `get_symbol_returns_from_yahoo(symbol, start=None, end=None)` | One-column adjusted-close simple-return frame, UTC dates and upstream exclusive end. No price filling or second dividend adjustment; a missing price also prevents a return through that gap. Infinite percentage returns fail. |
+| `default_returns_func(symbol, start=None, end=None)` | Named pandas Series; SPY uses `spy.csv`, other symbols use the same direct return route. Suitable for Pyfolio's existing return-function hook. |
+| `get_returns_cached(filepath, update_func, latest_dt, **kwargs)` | DataFrame callback, unchanged keyword forwarding, actual caller CSV path and file-mtime freshness. A fresh file is not proof of observation coverage. Validate keys/values before atomic replacement; a failed refresh preserves the old file. A cache-write failure warns and returns valid fetched data without claiming it was persisted. |
+| `cache_dir(environ=...)`, `data_path(name)`, `ensure_directory(path)` | Preserve `EMPYRICAL_CACHE_DIR`, then `XDG_CACHE_HOME/empyrical`, then `~/.cache/empyrical`. Native Data paths are unchanged. A file/directory collision fails explicitly. |
+
+RF factor values are returns for their source frequency: `0.02%` becomes `0.0002`. A Treasury
+yield such as `5.46` remains an annual percent yield, not that day's risk-free return. Source
+observation dates, vintage requests and download times do not establish historical publication.
+Native scalar inputs retain unknown availability, route and unit provenance explicitly.
+
+The default previous-weekday recipe uses pandas `BDay`, not an exchange calendar. For a Monday
+following an exchange holiday on Friday, it still selects Friday. Prefer explicit bounds for new
+work. Pandas index names and period/SDK clock units follow the original data presentation for the
+installed pandas version. CSV parsing retains its legacy UTC normalization; CSV does not preserve
+the full native metadata declaration. Use portable snapshots when that declaration must survive.
+
+Direct compatibility factor calls bypass the native Parquet cache so an outer CSV refresh cannot
+read stale inner factors. Native callers can choose refresh/offline/age policy separately.
+Native factor tables retain source nulls and canonical `MOM`; only this opt-in presentation uses
+`Mom` and the legacy complete-case sample. No analytical cleaner, feature engine or broker is added.
+
+For existing Pyfolio workflows, register the same callable through its own public hook:
+
+```python
+from pyfolio.utils import register_return_func
+from ml4t.data.compat.empyrical import default_returns_func
+
+register_return_func(default_returns_func)
+```
+
+The offline [acquisition migration example](https://github.com/ml4t/data/blob/main/examples/acquisition_migration.py)
+replays retained public response captures through actual parsers, providers and CSV files. It runs
+without credentials or network and does not require any Reloaded package. This is an unreleased
+source workflow, not a claim that a released successor stack already replaces every legacy option.

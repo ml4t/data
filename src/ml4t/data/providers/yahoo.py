@@ -158,8 +158,11 @@ class YahooFinanceProvider(BaseProvider):
         """Return the provider name."""
         return "yahoo"
 
-    def _download_prices(self, symbol: str, start: Any, end: Any, frequency: str) -> pd.DataFrame:
+    def _download_prices(
+        self, symbol: str, start: Any, end: Any, frequency: str, *, keepna: bool = False
+    ) -> pd.DataFrame:
         interval = self.FREQUENCY_MAP.get(frequency.lower(), "1d")
+        missing_policy = {"keepna": True} if keepna else {}
         try:
             result = yf.download(
                 symbol,
@@ -169,9 +172,12 @@ class YahooFinanceProvider(BaseProvider):
                 progress=self.enable_progress,
                 auto_adjust=True,
                 actions=False,
+                **missing_policy,
             )
             if result.empty:
-                result = self._resolve_empty_download(symbol, start, end, interval, frequency)
+                result = self._resolve_empty_download(
+                    symbol, start, end, interval, frequency, **missing_policy
+                )
             return result
         except (DataNotAvailableError, SymbolNotFoundError, NetworkError):
             raise
@@ -197,7 +203,7 @@ class YahooFinanceProvider(BaseProvider):
         def fetch() -> pl.DataFrame:
             from ml4t.data.utils.conversion import pandas_to_polars
 
-            frame = self._download_prices(symbol, start, end, "daily")
+            frame = self._download_prices(symbol, start, end, "daily", keepna=True)
             if isinstance(frame.columns, pd.MultiIndex):
                 if symbol.upper() not in frame.columns.get_level_values(1):
                     raise DataValidationError(self.name, "Response lacks the requested symbol")
@@ -301,7 +307,14 @@ class YahooFinanceProvider(BaseProvider):
             ) from e
 
     def _resolve_empty_download(
-        self, symbol: str, start: str, end: str, interval: str, frequency: str
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        interval: str,
+        frequency: str,
+        *,
+        keepna: bool = False,
     ) -> pd.DataFrame:
         """Return the data an empty ``yf.download`` missed, or raise what actually went wrong.
 
@@ -353,6 +366,7 @@ class YahooFinanceProvider(BaseProvider):
                 auto_adjust=True,
                 actions=False,
                 raise_errors=True,
+                **({"keepna": True} if keepna else {}),
             )
         except YFRateLimitError as e:
             logger.warning("Yahoo rate limited the request", symbol=symbol, error=str(e))

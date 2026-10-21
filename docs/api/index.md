@@ -55,6 +55,29 @@ key = manager.update("AAPL")
 
 ---
 
+## Acquisition compatibility
+
+The opt-in `ml4t.data.compat.empyrical` module adapts acquisition, CSV caches and paths only.
+Analytical Empyrical replacements belong in Diagnostic. No legacy package is a Data runtime
+dependency. See the [migration workflow](../getting-started/migration.md#empyrical-acquisition-utilities)
+and [FRED](../providers/fred.md), [Fama-French](../providers/fama_french.md) and
+[Yahoo](../providers/yahoo.md) provider contracts.
+
+::: ml4t.data.compat.empyrical
+    options:
+      show_source: false
+      heading_level: 3
+      members:
+        - get_fama_french
+        - load_portfolio_risk_factors
+        - get_treasury_yield
+        - get_symbol_returns_from_yahoo
+        - default_returns_func
+        - get_returns_cached
+        - cache_dir
+        - data_path
+        - ensure_directory
+
 ## Storage
 
 ### StorageConfig

@@ -6,6 +6,7 @@ import os
 import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from runpy import run_path
 
 import httpx
 import numpy as np
@@ -59,6 +60,15 @@ def french_http(monkeypatch):
 
     monkeypatch.setattr(httpx.Client, "get", get)
     return calls
+
+
+def test_offline_import_migration_uses_actual_native_caches_and_a_created_spy_csv(tmp_path):
+    recipe = Path(__file__).parents[1] / "examples/acquisition_migration.py"
+    result = run_path(str(recipe))["migrate_acquisition"](tmp_path, CAPTURES)
+    assert result["native_factors"].height == 4
+    assert result["native_yields"]["value"].to_list() == [5.46, 5.48, 5.48]
+    assert (tmp_path / "spy.csv").is_file()
+    assert result["benchmark"].name == "SPY"
 
 
 def test_official_zip_parser_and_real_cache_preserve_decimal_rf_and_complete_dates(
@@ -499,6 +509,31 @@ def captured_yahoo(monkeypatch):
 
     monkeypatch.setattr(yahoo.yf, "download", download)
     return calls, frame, records
+
+
+def test_reported_all_missing_sdk_price_rows_cannot_be_dropped_before_return_calculation(
+    captured_yahoo, monkeypatch
+):
+    from ml4t.data.providers import yahoo
+
+    _, frame, _ = captured_yahoo
+    for column in ("Open", "High", "Low", "Close"):
+        frame[(column, "SPY")] = [100.0, np.nan, 102.0, 101.0]
+    frame.loc[frame.index[1], ("Volume", "SPY")] = 0
+    original = frame.copy(deep=True)
+
+    def download(symbol, **kwargs):
+        # yfinance's documented default removes all-missing source rows. These are the
+        # two possible SDK outputs,not a Data-side fill or return implementation.
+        return (
+            frame.copy(deep=True) if kwargs.get("keepna", False) else frame.iloc[[0, 2, 3]].copy()
+        )
+
+    monkeypatch.setattr(yahoo.yf, "download", download)
+    actual = compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-06")
+    assert actual.index.to_list() == [pd.Timestamp("2024-01-05", tz="UTC")]
+    assert actual["SPY"].to_list() == pytest.approx([-1 / 102], rel=0, abs=1e-16)
+    assert_frame_equal(frame, original)
 
 
 def test_adjusted_yahoo_route_matches_captured_legacy_adj_close_without_dividend_double_count(
