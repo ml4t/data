@@ -151,6 +151,7 @@ class YahooFinanceProvider(BaseProvider):
             )
         super().__init__(rate_limit=rate_limit)
         self.enable_progress = enable_progress
+        self.last_fetch_metadata: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
@@ -217,6 +218,11 @@ class YahooFinanceProvider(BaseProvider):
             )
             if result.filter(pl.col("close").is_not_null() & ~pl.col("close").is_finite()).height:
                 raise DataValidationError(self.name, "Known adjusted closes must be finite")
+            self.last_fetch_metadata = {
+                "source_index_name": frame.index.name,
+                "price_basis": "yahoo_auto_adjusted",
+                "source_package_version": str(getattr(yf, "__version__", "unknown")),
+            }
             return result.sort("timestamp")
 
         return self._with_circuit_breaker(fetch)

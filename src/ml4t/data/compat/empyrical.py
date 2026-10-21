@@ -82,8 +82,9 @@ def get_fama_french(
             for name, _ in selected
         ]
     result = pd.concat(parts, axis=1).dropna().rename(columns={"MOM": "Mom"})
+    period = "M" if frequency == "monthly" else "D"
     result.index = (
-        pd.DatetimeIndex(pd.to_datetime(result.index, utc=True)).as_unit("ns").rename(None)
+        pd.PeriodIndex(result.index, freq=period, name="Date").to_timestamp().tz_localize("UTC")
     )
     result.attrs.update(
         source="Kenneth R. French Data Library",
@@ -201,11 +202,12 @@ def get_symbol_returns_from_yahoo(symbol: str, start: Any = None, end: Any = Non
 
     with YahooFinanceProvider() as provider:
         native = provider.fetch_adjusted_close(symbol, start=start, end=end)
+        index_name = provider.last_fetch_metadata["source_index_name"]
     prices = polars_to_pandas(native).set_index("timestamp")["close"]
     result = prices.pct_change(fill_method=None).dropna().to_frame(symbol)
     if not np.isfinite(result.to_numpy(dtype=float)).all():
         raise DataValidationError("yahoo", "Adjusted-price percentage returns must be finite")
-    result.index = pd.DatetimeIndex(result.index).rename(None)
+    result.index = pd.DatetimeIndex(result.index).rename(index_name)
     result.attrs.update(
         price_basis="yahoo_auto_adjusted",
         missingness_policy="no_fill",

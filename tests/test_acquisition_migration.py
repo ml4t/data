@@ -246,7 +246,7 @@ def test_legacy_factor_import_consumes_actual_zip_parser_without_a_stale_inner_c
             ).div(100)
         )
     expected = pd.concat(parts, axis=1).dropna().rename(columns=str.strip)
-    expected.index = expected.index.to_timestamp().tz_localize("UTC")
+    expected.index = expected.index.to_timestamp().tz_localize("UTC").rename("Date")
     assert_frame_equal(actual, expected, check_freq=False, check_dtype=False)
     assert actual.columns.to_list() == ["Mkt-RF", "SMB", "HML", "RF", "Mom"]
     assert actual.iloc[0]["RF"] == 0.0002
@@ -304,7 +304,11 @@ def test_factor_bounds_preserve_actual_legacy_period_selection_and_index_precisi
     # whole labeled period,not only a midnight instant falling inside the date bounds.
     actual = compat.get_fama_french(start, end, datasets)
     assert actual.index.to_list() == list(pd.to_datetime(expected_dates, utc=True))
-    assert str(actual.index.dtype) == "datetime64[ns, UTC]"
+    expected_clock = (
+        pd.PeriodIndex(expected_dates, freq="D", name="Date").to_timestamp().tz_localize("UTC")
+    )
+    assert str(actual.index.dtype) == str(expected_clock.dtype)
+    assert actual.index.name == "Date"
 
 
 def test_a_valid_factor_file_in_the_wrong_dataset_cache_is_not_silently_accepted(
@@ -481,6 +485,7 @@ def test_adjusted_yahoo_route_matches_captured_legacy_adj_close_without_dividend
         index=pd.to_datetime(old["index"], utc=True),
     )
     expected = raw["Adj Close"]["SPY"].pct_change(fill_method=None).dropna().to_frame()
+    expected.index.name = "Date"
     assert_frame_equal(actual, expected, check_dtype=False)
     assert calls[0][1]["start"] == "2024-01-02"
     assert calls[0][1]["end"] == "2024-01-06"
@@ -509,6 +514,7 @@ def test_missing_yahoo_price_is_not_filled_or_dropped_before_return_derivation(c
     frame[("Close", "SPY")] = [100, np.nan, 102, 101]
     actual = compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-06")
     expected = pd.DataFrame({"SPY": [-1 / 102]}, index=pd.to_datetime(["2024-01-05"], utc=True))
+    expected.index.name = "Date"
     assert_frame_equal(actual, expected)
 
 
