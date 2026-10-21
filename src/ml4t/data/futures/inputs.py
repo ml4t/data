@@ -28,6 +28,8 @@ from ml4t.data.futures.roll import (
     build_roll_events,
 )
 from ml4t.data.futures.schema import price_conversion_factor
+from ml4t.data.sessions import SessionAssigner
+from ml4t.data.sessions.assigner import _daily_session_labels
 from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 _DATE = "__ml4t_futures_date"
@@ -82,11 +84,8 @@ def _dated_bars(frame: pl.DataFrame, feed: FeedSpec) -> pl.DataFrame:
         if feed.timestamp_semantics != "session_label":
             raise ValueError("Declare session_label semantics for Date contract observations")
         return frame.with_columns(pl.col(column).alias(_DATE))
-    frame = utc_column(frame, column, feed.timezone)
-    point = pl.col(column)
-    if feed.timezone is not None:
-        point = point.dt.convert_time_zone(feed.timezone)
-    return frame.with_columns(point.dt.date().alias(_DATE))
+    labels = _daily_session_labels(frame, SessionAssigner(feed_spec=feed), column)
+    return frame.with_columns(labels.alias(_DATE))
 
 
 def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:

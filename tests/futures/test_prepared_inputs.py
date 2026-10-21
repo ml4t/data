@@ -412,3 +412,43 @@ def test_explicit_metric_revisions_are_not_deduplicated_as_repeated_price_captur
             roll_strategy=HighestOpenInterestRoll(),
             feed_spec=contract_feed(),
         )
+
+
+def test_cme_daily_period_open_instants_map_to_the_same_notice_session_as_date_labels(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    instants = bars.with_columns(
+        (
+            pl.col("timestamp").cast(pl.Datetime("ns", "UTC"))
+            - pl.duration(days=1, time_unit="ns")
+            + pl.duration(hours=22, nanoseconds=1, time_unit="ns")
+        ).alias("timestamp")
+    )
+    result = futures.prepare_futures_inputs(
+        instants,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=FirstNoticeDateRoll(1),
+        feed_spec=contract_feed().with_overrides(timestamp_semantics="event_time", timezone="UTC"),
+        definitions_feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.selections["observation_label"].to_list() == [date(2025, 7, 9)]
+    assert result.bars["timestamp"].equals(instants["timestamp"])
+    assert result.bars.schema["timestamp"] == pl.Datetime("ns", "UTC")
+
+
+def test_aware_session_labels_keep_their_intrinsic_civil_date_when_timezone_is_omitted(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    labels = bars.with_columns(
+        pl.col("timestamp").cast(pl.Datetime("ns")).dt.replace_time_zone("Asia/Tokyo")
+    )
+    result = futures.prepare_futures_inputs(
+        labels,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=FirstNoticeDateRoll(1),
+        feed_spec={**contract_feed().to_dict(), "timezone": None},
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.selections["observation_label"].to_list() == [date(2025, 7, 9)]
+    assert result.bars["timestamp"].equals(labels["timestamp"])
