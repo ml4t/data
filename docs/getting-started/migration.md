@@ -459,3 +459,14 @@ The offline [acquisition migration example](https://github.com/ml4t/data/blob/ma
 replays retained public response captures through actual parsers, providers and CSV files. It runs
 without credentials or network and does not require any Reloaded package. This is an unreleased
 source workflow, not a claim that a released successor stack already replaces every legacy option.
+
+Isolated wheel and source-distribution checks qualified Data `0.2.2.dev27+g5ff44e4ac`,
+Specs `0.2.0`, Diagnostic `0.1.9`, Pyfolio Reloaded `0.10.0` at immutable commit
+`365e649f591c39cef5d0170958280e49b8eeb953`, and Alphalens Reloaded `0.5.0` at
+`1bc181de4aafbe33437ed0e362ff96aa7ce20acd`. The checks exercised actual Diagnostic
+`FactorData`, Pyfolio's registered return callback and Alphalens' forward-return calculation from
+Data-produced inputs. They used Python `3.12`, pandas `2.3.3`, Polars `2.0.0` and yfinance
+`1.7.0`. The selected dependency-floor lane separately passed with Polars `1.36.1`,
+pandas-market-calendars `5.4.0` and yfinance `1.5.2`. Older yfinance versions admitted by the
+former `>=0.2.0` declaration lack the exception API used by Data's empty-download recovery;
+the Yahoo extra now requires the qualified `>=1.5.2` range.

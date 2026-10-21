@@ -107,7 +107,7 @@ dependencies = [
 [project.optional-dependencies]
 # Provider-specific dependencies
 yahoo = [
-    "yfinance>=0.2.0",
+    "yfinance>=1.5.2",
 ]
 databento = [
     "databento>=0.38.0",
@@ -186,7 +186,7 @@ dev = [
     "twine>=6.0.0",
     "pip-audit>=2.10.1",
     "databento>=0.38.0",
-    "yfinance>=0.2.0",
+    "yfinance>=1.5.2",
 ]
 
 [tool.uv]

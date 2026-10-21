@@ -1566,9 +1566,9 @@ requires-dist = [
     { name = "ty", marker = "extra == 'dev'" },
     { name = "xlsxwriter", marker = "extra == 'all'", specifier = ">=3.1.0" },
     { name = "xlsxwriter", marker = "extra == 'dev'", specifier = ">=3.1.0" },
-    { name = "yfinance", marker = "extra == 'all'", specifier = ">=0.2.0" },
-    { name = "yfinance", marker = "extra == 'all-providers'", specifier = ">=0.2.0" },
-    { name = "yfinance", marker = "extra == 'yahoo'", specifier = ">=0.2.0" },
+    { name = "yfinance", marker = "extra == 'all'", specifier = ">=1.5.2" },
+    { name = "yfinance", marker = "extra == 'all-providers'", specifier = ">=1.5.2" },
+    { name = "yfinance", marker = "extra == 'yahoo'", specifier = ">=1.5.2" },
 ]
 provides-extras = ["all", "all-providers", "cot", "databento", "dev", "docs", "oanda", "yahoo"]
 
@@ -1589,7 +1589,7 @@ dev = [
     { name = "twine", specifier = ">=6.0.0" },
     { name = "ty" },
     { name = "xlsxwriter", specifier = ">=3.1.0" },
-    { name = "yfinance", specifier = ">=0.2.0" },
+    { name = "yfinance", specifier = ">=1.5.2" },
 ]
 test = [
     { name = "hypothesis", specifier = ">=6.80.0" },
