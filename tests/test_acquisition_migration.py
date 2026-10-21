@@ -496,3 +496,148 @@ def test_default_returns_callable_preserves_named_series_and_creates_spy_csv(
         compat.cache_dir({"EMPYRICAL_CACHE_DIR": "legacy", "XDG_CACHE_HOME": "other"}) == "legacy"
     )
     assert compat.cache_dir({"XDG_CACHE_HOME": "other"}) == str(Path("other") / "empyrical")
+
+
+def test_unknown_treasury_source_units_cannot_be_labeled_annual_percent(fred_http, monkeypatch):
+    original = httpx.Client.get
+
+    def get(client, url, **kwargs):
+        response = original(client, url, **kwargs)
+        body = response.json()
+        if "seriess" in body:
+            body["seriess"][0]["units"] = "Index"
+        return httpx.Response(200, json=body, request=response.request)
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    with pytest.raises(DataValidationError, match="units"):
+        compat.get_treasury_yield("2024-01-02", "2024-01-04")
+
+
+def test_zero_predecessor_price_cannot_publish_infinite_yahoo_percentage_returns(captured_yahoo):
+    _, frame, _ = captured_yahoo
+    frame[("Close", "SPY")] = [0.0, 100.0, 102.0, 101.0]
+    with pytest.raises(DataValidationError, match="finite"):
+        compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-06")
+
+
+def test_native_inclusive_and_legacy_exclusive_ends_request_different_captured_samples(
+    captured_yahoo, monkeypatch
+):
+    from ml4t.data.providers import yahoo
+
+    calls, frame, _ = captured_yahoo
+
+    def download(symbol, **kwargs):
+        calls.append((symbol, kwargs))
+        if kwargs["end"] == "2024-01-04":
+            return frame.iloc[:2].copy()
+        if kwargs["end"] == "2024-01-05":
+            return frame.iloc[:3].copy()
+        pytest.fail("Unexpected source request boundary")
+
+    monkeypatch.setattr(yahoo.yf, "download", download)
+    actual = compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-04")
+    assert actual.index.to_list() == [pd.Timestamp("2024-01-03", tz="UTC")]
+    with yahoo.YahooFinanceProvider() as provider:
+        inclusive = provider.fetch_ohlcv("SPY", "2024-01-02", "2024-01-04")
+    assert inclusive["timestamp"].dt.date().to_list() == [date(2024, 1, d) for d in (2, 3, 4)]
+    assert calls[0][1]["end"] == "2024-01-04"
+    assert calls[1][1]["end"] == "2024-01-05"
+
+
+def test_adjusted_float_price_oracle_preserves_both_simple_returns(captured_yahoo):
+    _, frame, _ = captured_yahoo
+    frame[("Close", "SPY")] = [100.0, 102.0, 101.0, np.nan]
+    actual = compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-06")
+    assert actual.index.to_list() == list(pd.to_datetime(["2024-01-03", "2024-01-04"], utc=True))
+    assert actual["SPY"].to_list() == pytest.approx([0.02, -1 / 102], rel=0, abs=1e-16)
+
+
+@pytest.mark.parametrize(
+    "now,expected_end", [("2025-07-07 11:00", "2025-07-04"), ("2025-07-08 11:00", "2025-07-07")]
+)
+def test_default_factor_end_is_previous_weekday_not_an_invented_exchange_session(
+    tmp_path, monkeypatch, now, expected_end
+):
+    class FixedTimestamp(pd.Timestamp):
+        @classmethod
+        def now(cls, tz=None):
+            result = pd.Timestamp(now)
+            return result if tz is None else result.tz_localize(tz)
+
+    class FrozenPandas:
+        Timestamp = FixedTimestamp
+
+        def __getattr__(self, name):
+            return getattr(pd, name)
+
+    path = tmp_path / "actual-caller-path.csv"
+    source = pd.DataFrame(
+        {"Mkt-RF": [0.01, 0.02, 0.03, 0.04]},
+        index=pd.to_datetime(["2025-07-03", "2025-07-04", "2025-07-07", "2025-07-08"], utc=True),
+    )
+    source.to_csv(path)
+    os.utime(path, (2000000000, 2000000000))
+    monkeypatch.setattr(compat, "pd", FrozenPandas())
+    result = compat.load_portfolio_risk_factors(path, start="2025-07-03")
+    assert result.index[-1] == pd.Timestamp(expected_end, tz="UTC")
+    assert (
+        result.index.to_list() == source.loc[: pd.Timestamp(expected_end, tz="UTC")].index.to_list()
+    )
+    assert [entry.name for entry in tmp_path.iterdir()] == [path.name]
+
+
+def test_legacy_cache_paths_do_not_silently_ignore_a_directory_file_collision(tmp_path):
+    path = tmp_path / "already-a-file"
+    path.write_text("keep me")
+    with pytest.raises(FileExistsError):
+        compat.ensure_directory(path)
+    assert path.read_text() == "keep me"
+
+
+def test_legacy_treasury_fill_cannot_create_initial_history_or_new_observation_dates(fred_http):
+    _, records = fred_http
+    records[0]["value"] = "."
+    records[1]["date"] = "2024-01-04"
+    records[2]["date"] = "2024-01-08"
+    records[1]["value"] = "5.4"
+    records[2]["value"] = "."
+    result = compat.get_treasury_yield("2024-01-02", "2024-01-08")
+    assert result.index.to_list() == list(
+        pd.to_datetime(["2024-01-02", "2024-01-04", "2024-01-08"])
+    )
+    assert pd.isna(result.iloc[0, 0])
+    assert result.iloc[1:, 0].to_list() == [5.4, 5.4]
+    assert result.attrs["source_missing_mask"] == (True, False, True)
+
+
+def test_fred_native_monthly_cadence_does_not_request_impossible_daily_upsampling(
+    fred_http, monkeypatch
+):
+    original = httpx.Client.get
+    calls, records = fred_http
+    for record, month in zip(records, (1, 2, 3), strict=True):
+        record["date"] = f"2024-{month:02d}-01"
+
+    def get(client, url, **kwargs):
+        if kwargs["params"].get("frequency") == "d":
+            return httpx.Response(
+                400,
+                json={
+                    "error_code": 400,
+                    "error_message": "Requested frequency exceeds native Monthly series frequency",
+                },
+                request=httpx.Request("GET", url),
+            )
+        response = original(client, url, **kwargs)
+        body = response.json()
+        if "seriess" in body:
+            body["seriess"][0]["frequency"] = "Monthly"
+        return httpx.Response(200, json=body, request=response.request)
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    with FREDProvider() as provider:
+        result = provider.fetch_series("UNRATE", "2024-01-01", "2024-03-31")
+    assert result["timestamp"].to_list() == [date(2024, month, 1) for month in (1, 2, 3)]
+    assert result["frequency"].to_list() == ["Monthly"] * 3
+    assert "frequency" not in next(params for url, params in calls if url.endswith("/observations"))

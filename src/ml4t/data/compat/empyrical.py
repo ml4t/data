@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ml4t.data.core.exceptions import DataValidationError
 from ml4t.data.utils.atomic import atomic_write
 from ml4t.data.utils.conversion import polars_to_pandas
 from ml4t.data.utils.locking import file_lock
@@ -164,6 +165,8 @@ def get_treasury_yield(start: Any = None, end: Any = None, period: str = "3MO") 
             _date("1970-01-01" if start is None else start),
             _date(_1_bday_ago() if end is None else end),
         )
+    if native.height and set(native["units"].to_list()) != {"Percent"}:
+        raise DataValidationError("fred", f"Expected Percent source units for {name}")
     values = polars_to_pandas(native).set_index("timestamp")["value"]
     missing = tuple(bool(value) for value in values.isna())
     result = values.ffill().to_frame(name)
@@ -188,6 +191,8 @@ def get_symbol_returns_from_yahoo(symbol: str, start: Any = None, end: Any = Non
         native = provider.fetch_adjusted_close(symbol, start=start, end=end)
     prices = polars_to_pandas(native).set_index("timestamp")["close"]
     result = prices.pct_change(fill_method=None).dropna().to_frame(symbol)
+    if not np.isfinite(result.to_numpy(dtype=float)).all():
+        raise DataValidationError("yahoo", "Adjusted-price percentage returns must be finite")
     result.index = pd.DatetimeIndex(result.index).rename(None)
     result.attrs.update(
         price_basis="yahoo_auto_adjusted",
