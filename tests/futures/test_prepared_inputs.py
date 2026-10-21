@@ -893,3 +893,50 @@ print(json.dumps(TimeBasedRoll(0).select_contracts(frame)["symbol"].to_list()))
             check=True,
         )
         assert json.loads(run.stdout.splitlines()[-1]) == ["TESTN2025"], seed
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        HighestVolumeRoll(),
+        HighestOpenInterestRoll(),
+        VolumeBasedRoll(),
+        OpenInterestBasedRoll(),
+        CalendarRoll(),
+        TimeBasedRoll(0),
+        FirstNoticeDateRoll(0),
+    ],
+)
+@pytest.mark.parametrize("invalid", ["missing", "unknown", "empty_missing"])
+def test_native_tie_mapping_requires_known_declared_facts_without_mutating_input(
+    tmp_path, strategy, invalid
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    frame = bars.rename({"timestamp": "date"}).join(
+        definitions.select("asset", "expiration", "first_notice_date"), on="asset", how="left"
+    )
+    if invalid == "unknown":
+        frame = frame.with_columns(pl.lit(None, dtype=pl.String).alias("priority"))
+    elif invalid == "empty_missing":
+        frame = frame.head(0)
+    before = frame.clone()
+    with pytest.raises(ValueError, match="priority|tie-breaker"):
+        strategy.select_contracts(frame, tie_breaker_col="priority")
+    assert_frame_equal(frame, before)
+
+
+@pytest.mark.parametrize("strategy", [TimeBasedRoll(0), FirstNoticeDateRoll(0)])
+def test_conflicting_tie_facts_for_one_contract_observation_do_not_pick_an_arbitrary_value(
+    tmp_path, strategy
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    frame = (
+        bars.rename({"timestamp": "date"})
+        .join(
+            definitions.select("asset", "expiration", "first_notice_date"), on="asset", how="left"
+        )
+        .with_columns(pl.lit("A").alias("priority"))
+    )
+    duplicate = frame.head(1).with_columns(pl.lit("B").alias("priority"))
+    with pytest.raises(ValueError, match="Conflicting tie-breaker"):
+        strategy.select_contracts(pl.concat([frame, duplicate]), tie_breaker_col="priority")
