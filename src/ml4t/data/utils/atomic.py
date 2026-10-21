@@ -13,7 +13,7 @@ def atomic_write(path: Path, writer: Callable[[Path], None]) -> None:
     temporary = Path(name)
     try:
         writer(temporary)
-        with temporary.open("rb") as stream:
+        with temporary.open("r+b") as stream:
             os.fsync(stream.fileno())
         temporary.replace(path)
         try:

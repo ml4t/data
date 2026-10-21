@@ -38,8 +38,17 @@ _DECLARATIONS = frozenset(
         "revisions",
     }
 )
-_PRIVATE_KEYS = frozenset(
-    {"apikey", "password", "secret", "token", "credential", "credentials", "authorization"}
+_PRIVATE_SUFFIXES = (
+    "apikey",
+    "password",
+    "secret",
+    "token",
+    "credential",
+    "credentials",
+    "authorization",
+    "privatekey",
+    "signingkey",
+    "accesskeyid",
 )
 
 
@@ -80,7 +89,7 @@ def _portable(value: Any) -> Any:
                 url.username
                 or url.password
                 or any(
-                    re.sub(r"[^a-z]", "", name.lower()) in _PRIVATE_KEYS
+                    re.sub(r"[^a-z]", "", name.lower()).endswith(_PRIVATE_SUFFIXES)
                     for name, _ in parse_qsl(url.query)
                 )
             ):
@@ -91,7 +100,7 @@ def _portable(value: Any) -> Any:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise TypeError("Snapshot declaration keys must be strings")
-            if re.sub(r"[^a-z]", "", key.lower()) in _PRIVATE_KEYS:
+            if re.sub(r"[^a-z]", "", key.lower()).endswith(_PRIVATE_SUFFIXES):
                 raise ValueError("Snapshot declarations must not contain credentials")
             result[key] = _portable(item)
         return result

@@ -356,3 +356,16 @@ def test_snapshot_copies_a_generation_while_holding_the_actual_source_writer_loc
         observations().with_columns(pl.lit(10000.0).alias("close")), "prices", declaration()
     )
     assert_frame_equal(captured.tables["prices"], observations())
+
+
+@pytest.mark.parametrize("field", ["FRED_API_KEY", "access_token", "client_secret"])
+def test_snapshot_rejects_provider_credential_fields_before_publishing_a_fresh_archive(
+    tmp_path, field
+):
+    path = tmp_path / "new-snapshot"
+    with pytest.raises(ValueError, match="credentials"):
+        export(
+            path,
+            {"prices": replace(table(), metadata=declaration(**{field: "not-a-real-credential"}))},
+        )
+    assert not path.exists()
