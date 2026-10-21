@@ -132,7 +132,7 @@ class FREDProvider(BaseProvider):
         symbol: str,
         start: str,
         end: str,
-        frequency: str = "daily",
+        frequency: str | None = "daily",
         vintage_date: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch raw data from FRED API.
@@ -151,8 +151,8 @@ class FREDProvider(BaseProvider):
         series_id = symbol.upper()
 
         # Map frequency if provided
-        freq_code = self.FREQUENCY_MAP.get(frequency.lower())
-        if not freq_code:
+        freq_code = None if frequency is None else self.FREQUENCY_MAP.get(frequency.lower())
+        if frequency is not None and not freq_code:
             raise DataValidationError(
                 provider="fred",
                 message=f"Unsupported frequency '{frequency}'. "
@@ -169,8 +169,9 @@ class FREDProvider(BaseProvider):
             "file_type": "json",
             "observation_start": start,
             "observation_end": end,
-            "frequency": freq_code,
         }
+        if freq_code is not None:
+            params["frequency"] = freq_code
 
         # Point-in-time support via realtime_start/end
         if vintage_date:
@@ -339,6 +340,71 @@ class FREDProvider(BaseProvider):
 
         return df
 
+    def fetch_series(
+        self,
+        series_id: str,
+        start: str,
+        end: str,
+        *,
+        frequency: str | None = None,
+        vintage_date: str | None = None,
+    ) -> pl.DataFrame:
+        """Return scalar observations,including reported missing cells and source units.
+
+        The default omits API frequency aggregation and retains the series' native cadence.
+        Observation and realtime dates are labels,not historical publication instants. Even
+        a vintage request does not establish available_at;that field remains explicitly null.
+        """
+        self._validate_inputs(series_id, start, end, frequency or "daily")
+        if vintage_date is not None:
+            from datetime import date
+
+            date.fromisoformat(vintage_date)
+        self._acquire_rate_limit()
+        records = self._fetch_raw_data(series_id, start, end, frequency, vintage_date=vintage_date)
+        metadata = self.fetch_series_metadata(series_id, vintage_date=vintage_date)
+        schema = {
+            "timestamp": pl.Date,
+            "series_id": pl.String,
+            "value": pl.Float64,
+            "units": pl.String,
+            "frequency": pl.String,
+            "source": pl.String,
+            "realtime_start": pl.Date,
+            "realtime_end": pl.Date,
+            "vintage_date": pl.Date,
+            "available_at": pl.Datetime("ns", "UTC"),
+        }
+        if not records:
+            return pl.DataFrame(schema=schema)
+        try:
+            frame = pl.DataFrame(records)
+            frame = frame.select(
+                pl.col("date").str.to_date().alias("timestamp"),
+                pl.lit(series_id.upper()).alias("series_id"),
+                pl.col("value").replace(".", None).cast(pl.Float64),
+                pl.lit(metadata.get("units"), dtype=pl.String).alias("units"),
+                pl.lit(frequency or metadata.get("frequency"), dtype=pl.String).alias("frequency"),
+                pl.lit("FRED").alias("source"),
+                *[
+                    pl.col(name).str.to_date()
+                    if name in frame.columns
+                    else pl.lit(None, dtype=pl.Date).alias(name)
+                    for name in ("realtime_start", "realtime_end")
+                ],
+                pl.lit(vintage_date, dtype=pl.String).str.to_date().alias("vintage_date"),
+                pl.lit(None, dtype=pl.Datetime("ns", "UTC")).alias("available_at"),
+            )
+            if frame["timestamp"].null_count() or frame["timestamp"].is_duplicated().any():
+                raise ValueError("Scalar observations require known unique dates")
+            if frame.filter(pl.col("value").is_not_null() & ~pl.col("value").is_finite()).height:
+                raise ValueError("Known scalar observations must be finite")
+            return frame.sort("timestamp")
+        except Exception as error:
+            raise DataValidationError(
+                "fred", f"Malformed scalar observations for {series_id}"
+            ) from error
+
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -403,7 +469,9 @@ class FREDProvider(BaseProvider):
 
         return df
 
-    def fetch_series_metadata(self, series_id: str) -> dict[str, Any]:
+    def fetch_series_metadata(
+        self, series_id: str, *, vintage_date: str | None = None
+    ) -> dict[str, Any]:
         """Fetch metadata for a FRED series.
 
         Args:
@@ -437,6 +505,9 @@ class FREDProvider(BaseProvider):
             "file_type": "json",
         }
 
+        if vintage_date is not None:
+            params["realtime_start"] = vintage_date
+            params["realtime_end"] = vintage_date
         self._acquire_rate_limit()
 
         try:

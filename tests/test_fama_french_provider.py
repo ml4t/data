@@ -306,6 +306,9 @@ class TestFetch:
                         date(2025, 1, 1),
                     ],
                     "Mkt-RF": [0.01, 0.02, 0.03, 0.04],
+                    "SMB": [0.005] * 4,
+                    "HML": [0.003] * 4,
+                    "RF": [0.001] * 4,
                 }
             )
             cached_df.write_parquet(cache_file)
@@ -327,6 +330,9 @@ class TestFetch:
                         datetime(2024, 3, 1),
                     ],
                     "Mkt-RF": [0.01, 0.02, 0.03],
+                    "SMB": [0.005] * 3,
+                    "HML": [0.003] * 3,
+                    "RF": [0.001] * 3,
                 }
             )
             cached_df.write_parquet(Path(tmpdir) / "ff3_daily.parquet")
@@ -416,6 +422,9 @@ class TestFetch:
                 {
                     "timestamp": [datetime(2024, 1, 1)],
                     "Mkt-RF": [0.01],
+                    "SMB": [0.005],
+                    "HML": [0.003],
+                    "RF": [0.001],
                 }
             )
             cached_df.write_parquet(cache_file)
