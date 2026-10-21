@@ -314,7 +314,15 @@ def prepare_futures_inputs(
     registry_feed = (
         feed if definitions_feed_spec is None else resolve_feed_spec(definitions_feed_spec)
     )
-    facts = _contract_definitions(native_frame(definitions))
+    registry_feed = registry_feed.with_overrides(
+        calendar=selected_calendar, time_contract_version=2
+    )
+    facts = utc_column(native_frame(definitions), "available_at", registry_feed.timezone)
+    if as_of is not None:
+        facts = facts.filter(
+            pl.col("available_at").is_null() | (pl.col("available_at") <= utc_cutoff(as_of))
+        )
+    facts = _contract_definitions(facts)
     registry = InstrumentRegistry.from_frame(facts, feed_spec=registry_feed)
     asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
     source = _dated_bars(native_frame(bars), feed)
@@ -397,13 +405,35 @@ def prepare_futures_inputs(
         )
         if chosen.height != 1:
             raise ValueError("Current selection must have exactly one raw source observation")
+        decision_label = current["date"][0] if as_of is None else session_label_at(as_of, feed)
+        identity_point = (
+            decision_label
+            if registry.identities.schema["valid_from"] == pl.Date
+            else utc_stamp(as_of).to_pydatetime()
+            if as_of is not None
+            else chosen[feed.timestamp_col][0]
+        )
+        current_facts = InstrumentRegistry(
+            registry.identities.filter(pl.col(asset) == chosen[asset][0]), None, registry_feed
+        ).lifetimes(on=identity_point, as_of=as_of)
+        if current_facts.height != 1:
+            raise ValueError("The current selection lacks dated identity coverage")
+        if any(
+            current_facts[name][0] is not None and current_facts[name][0] < decision_label
+            for name in ("expiration", "last_trade_date")
+        ):
+            raise ValueError("The current selection is past its declared lifecycle date")
+        used = pl.concat([used, current_facts]).unique(maintain_order=True)
         decision = chosen.select(
             pl.col("instrument_root").alias("root"),
             pl.col("instrument_exchange").alias("exchange"),
             pl.col(asset).alias("selected_instrument_id"),
             pl.col(_DATE).alias("observation_label"),
-            pl.col("instrument_source").alias("definition_source"),
-            pl.col("instrument_revision_id").alias("definition_revision_id"),
+        ).join(
+            current_facts.select(
+                pl.col(name).alias("definition_" + name) for name in _DEFINITION_FIELDS
+            ),
+            how="cross",
         )
         if requested is not None:
             prior_dates = projection.filter(pl.col("date") < current["date"][0])["date"]

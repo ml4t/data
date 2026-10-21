@@ -452,3 +452,59 @@ def test_aware_session_labels_keep_their_intrinsic_civil_date_when_timezone_is_o
     assert result.selections["selected_instrument_id"].to_list() == [23]
     assert result.selections["observation_label"].to_list() == [date(2025, 7, 9)]
     assert result.bars["timestamp"].equals(labels["timestamp"])
+
+
+@pytest.mark.parametrize("limit", ["expiration", "last_trade_date", "valid_to"])
+def test_stale_observations_cannot_qualify_a_current_contract_past_its_declared_lifecycle(
+    tmp_path, limit
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    dated = definitions.with_columns(pl.lit(date(2025, 7, 10)).alias(limit))
+    with pytest.raises(ValueError, match="current.*(identity|lifecycle)"):
+        futures.prepare_futures_inputs(
+            bars,
+            dated,
+            as_of=datetime(2025, 7, 11, 21, 30, tzinfo=UTC),
+            roll_strategy=TimeBasedRoll(0),
+            feed_spec=contract_feed(),
+        )
+    assert_frame_equal(bars, load_databento_ohlcv("TEST", tmp_path))
+
+
+def test_current_definition_provenance_is_distinct_from_the_stale_observation_definition(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    prior = definitions.with_columns(pl.lit(date(2025, 7, 10)).alias("valid_to"))
+    current = definitions.with_columns(
+        pl.lit(date(2025, 7, 10)).alias("valid_from"),
+        pl.lit("r2").alias("revision_id"),
+        pl.lit(100, dtype=definitions.schema["multiplier"]).alias("multiplier"),
+    )
+    result = futures.prepare_futures_inputs(
+        bars,
+        pl.concat([prior, current], how="diagonal"),
+        as_of=datetime(2025, 7, 11, 21, 30, tzinfo=UTC),
+        roll_strategy=TimeBasedRoll(0),
+        feed_spec=contract_feed(),
+    )
+    assert result.bars["instrument_revision_id"].unique().to_list() == ["r1"]
+    assert result.selections["definition_revision_id"].to_list() == ["r2"]
+    assert set(result.definitions["revision_id"]) == {"r1", "r2"}
+
+
+def test_unpublished_invalid_definition_values_do_not_change_an_earlier_causal_selection(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    future = definitions.head(1).with_columns(
+        pl.lit("r2").alias("revision_id"),
+        pl.lit(datetime(2025, 7, 20, tzinfo=UTC)).alias("available_at"),
+        pl.lit(0, dtype=definitions.schema["multiplier"]).alias("multiplier"),
+        pl.lit("").alias("currency"),
+    )
+    result = futures.prepare_futures_inputs(
+        bars,
+        pl.concat([definitions, future]),
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.definitions["revision_id"].unique().to_list() == ["r1"]
