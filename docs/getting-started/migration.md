@@ -299,3 +299,75 @@ failing validation.
 Remove the `garch_omega` argument from `SyntheticProvider`. The provider derives the per-period
 constant from `annual_volatility`, the requested frequency, `garch_alpha`, and `garch_beta` so the
 configured unconditional variance is preserved.
+
+## Prepare individual futures inputs
+
+Keep the existing `ContinuousContractBuilder` for continuous research prices. To prepare the
+individual contracts needed by a simulation, load saved observations and captured dated definitions,
+then request the source facts known at each actual decision cutoff:
+
+```python
+from ml4t.data.futures import HighestVolumeRoll, prepare_futures_inputs
+
+prepared = prepare_futures_inputs(
+    bars, definitions, as_of="2025-07-09T21:30:00Z",
+    roll_strategy=HighestVolumeRoll(), feed_spec=feed,
+)
+```
+
+Run the complete offline file-loader, continuous-builder and prepared-input comparison:
+
+```bash
+uv run python examples/futures_input_migration.py
+```
+
+The fictional TEST contracts use the CME Equity schedule, not a claim about a real contract's
+specification. The earlier cutoff selects ID17. Previous-observation volume later selects ID23;
+actual paired marks are4020/4030. Delayed ID23 open interest does not qualify the same decision,
+so the OI method still selects17. Source files and caller tables remain unchanged. Neither route
+fills missing observations. The legacy continuous builder does not itself certify historical
+field-publication times.
+
+Input bars need declared timestamp/entity mappings, raw reference prices, `source`, `revision_id`,
+`available_at`, `currency`, `price_quote_unit` and nonempty `mark_kind`. Ranking metrics need their
+units in the definitions. Volume defaults to the bar's publication time unless
+`volume_available_at` is supplied. OI needs its own `open_interest_available_at` for causal ranking;
+do not copy a price's time into it. Supply `<metric>_revision_id` when metric revisions have their
+own identities. Repeated unchanged metrics retain their original capture; indistinguishable
+publication ties fail. `metrics` contains eligible field vintages. Raw `bars` deliberately retain
+captured OI values even when that field was published later; do not use them as causal OI features.
+
+Definitions extend the dated identity contract with root, venue, future instrument type, currency,
+multiplier, tick size, quote unit, settlement type and expiration. First-notice, last-trade and
+auto-close facts stay unknown unless supplied. Lifecycle fields retain Date versus Datetime
+semantics and precision. Known expiration/last-trade instants end eligibility at that instant;
+Date facts do not invent an intraday cutoff. A current selection also requires a currently valid
+identity interval. Stale bars cannot backdate a time/notice trigger. The request fails rather than
+guessing an unobserved replacement contract or an execution.
+
+Use `definitions_feed_spec` when definitions use different identity/temporal mappings, and
+`identity_mode="symbol"` for explicit dated symbol-to-ID resolution. Calendar precedence remains
+explicit `calendar`, declared feed, then NYSE. Explicit `None` disables scheduling; it does not
+enable a session-count expiry policy without a schedule. Daily period-open/close instants use the
+selected authoritative session, including CME overnight trading. This preparation accepts one
+declared observation per contract/session; it is not an intraday execution engine.
+
+`definitions` and `chain` retain the facts used for observations and current decisions. Selection
+`definition_*` fields identify the current facts separately from each bar's `instrument_*` facts.
+Roll rows retain both raw marks, timestamps, publication/source/revision IDs, currencies and
+normalized marks/multipliers. Missing paired marks or conflicting mark kinds/currencies fail.
+`coverage` counts observed rows, not proof of a complete source chain or a calendar-complete price
+history. Use the calendar gap report for missing observations.
+
+Raw prices and volumes stay unchanged. With no conversion requested, normalized prices preserve
+their source dtype, including large integers. Explicit `price_quote_unit` conversion creates
+floating-point price fields with declared factors and adjusted multipliers/ticks; it performs no
+FX conversion. Read `metadata['normalized_feed_spec']` to consume those fields and
+`metadata['feed_spec']` for raw fields. A multiplier50 and price change10 imply USD500 per contract.
+The same calculation after cents-to-dollars conversion uses price change0.1 and multiplier5000.
+Neither notional value nor these marks establish cash settlement, margin or fills.
+
+These are unreleased source APIs. Source and installed-consumer qualification revisions are
+recorded as they are completed; no complete released-package migration claim is made here.
+Data does not replace Backtest's runtime history, account, roll execution or auto-close policy.
+The recipe needs no credentials, network, Reloaded package or Backtest installation.

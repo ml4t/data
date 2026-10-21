@@ -2,6 +2,8 @@
 
 from datetime import UTC, date, datetime
 from io import StringIO
+from pathlib import Path
+from runpy import run_path
 
 import polars as pl
 import pytest
@@ -714,3 +716,12 @@ def test_unit_conversion_rejects_a_positive_source_contract_term_that_underflows
             price_quote_unit=target_unit,
             feed_spec=contract_feed(),
         )
+
+
+def test_offline_migration_recipe_retains_individual_legs_beside_the_research_series(tmp_path):
+    recipe = run_path(str(Path(__file__).parents[2] / "examples/futures_input_migration.py"))
+    first, second, delayed = recipe["migrate_futures"](tmp_path)
+    assert first.bars["asset"].to_list() == [17, 23, 17, 23]
+    assert second.bars["asset"].to_list() == [17, 23, 17, 23, 17, 23]
+    assert second.selections["selected_instrument_id"].to_list() == [23]
+    assert delayed.selections["selected_instrument_id"].to_list() == [17]
