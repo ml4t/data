@@ -345,6 +345,11 @@ Date facts do not invent an intraday cutoff. A current selection also requires a
 identity interval. Stale bars cannot backdate a time/notice trigger. The request fails rather than
 guessing an unobserved replacement contract or an execution.
 
+Unknown contract terms are checked only for definitions actually used by observations or the
+current selected contract. An unrelated or future-effective definition cannot block an earlier
+valid request. For instant-labelled bars, both observation and publication must be at or before
+the cutoff. Publishing a preliminary end-labelled bar early does not make its future close visible.
+
 Use `definitions_feed_spec` when definitions use different identity/temporal mappings, and
 `identity_mode="symbol"` for explicit dated symbol-to-ID resolution. Calendar precedence remains
 explicit `calendar`, declared feed, then NYSE. Explicit `None` disables scheduling; it does not
@@ -371,3 +376,8 @@ These are unreleased source APIs. Source and installed-consumer qualification re
 recorded as they are completed; no complete released-package migration claim is made here.
 Data does not replace Backtest's runtime history, account, roll execution or auto-close policy.
 The recipe needs no credentials, network, Reloaded package or Backtest installation.
+
+This source candidate requires Polars `>=1.36.1` and pandas-market-calendars `>=5.4.0`.
+Isolated runs using the former advertised minima failed during ordinary Data import or calendar
+construction. The saved-file recipe passes with Polars `1.36.1`, pandas-market-calendars `5.4.0`
+and pandas `2.3.3`; those checks do not certify every possible dependency-version combination.

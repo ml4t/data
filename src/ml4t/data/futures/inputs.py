@@ -91,7 +91,7 @@ def _dated_bars(frame: pl.DataFrame, feed: FeedSpec) -> pl.DataFrame:
     return frame.with_columns(labels.alias(_DATE))
 
 
-def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:
+def _contract_definitions(frame: pl.DataFrame, *, validate_values: bool = True) -> pl.DataFrame:
     required = {
         "root",
         "exchange",
@@ -105,17 +105,19 @@ def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:
     }
     if missing := required.difference(frame.columns):
         raise ValueError(f"Missing required contract facts: {sorted(missing)}")
-    for name in required:
-        if frame[name].null_count() or (
-            frame.schema[name] == pl.String and frame[name].str.strip_chars().eq("").any()
-        ):
-            raise ValueError(f"Required contract fact {name} must be known")
-    if not frame["instrument_type"].eq("future").all():
+    if validate_values:
+        for name in required:
+            if frame[name].null_count() or (
+                frame.schema[name] == pl.String and frame[name].str.strip_chars().eq("").any()
+            ):
+                raise ValueError(f"Required contract fact {name} must be known")
+    if validate_values and not frame["instrument_type"].eq("future").all():
         raise ValueError("Declare future instrument_type;do not inherit equity defaults")
     for name in ("multiplier", "tick_size"):
         if (
             not frame.schema[name].is_numeric()
-            or frame.filter(~pl.col(name).is_finite() | (pl.col(name) <= 0)).height
+            or validate_values
+            and frame.filter(~pl.col(name).is_finite() | (pl.col(name) <= 0)).height
         ):
             raise ValueError(f"Contract {name} must be positive and finite")
     if frame.schema["expiration"] != pl.Date and not isinstance(
@@ -130,7 +132,7 @@ def _contract_definitions(frame: pl.DataFrame) -> pl.DataFrame:
     for name in ("volume_unit", "open_interest_unit"):
         if name not in frame.columns:
             frame = frame.with_columns(pl.lit(None, dtype=pl.String).alias(name))
-    if not frame["settlement_type"].is_in(["cash", "physical"]).all():
+    if validate_values and not frame["settlement_type"].is_in(["cash", "physical"]).all():
         raise ValueError("Declare cash or physical settlement_type")
     return frame
 
@@ -397,12 +399,17 @@ def prepare_futures_inputs(
         facts = facts.filter(
             pl.col("available_at").is_null() | (pl.col("available_at") <= utc_cutoff(as_of))
         )
-    facts = _contract_definitions(facts)
+    facts = _contract_definitions(facts, validate_values=False)
     registry = InstrumentRegistry.from_frame(facts, feed_spec=registry_feed)
     asset = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
     source = _dated_bars(native_frame(bars), feed)
     source = utc_column(source, "available_at", feed.timezone)
     if as_of is not None:
+        if (
+            source.schema[feed.timestamp_col] != pl.Date
+            and feed.timestamp_semantics != "session_label"
+        ):
+            source = source.filter(pl.col(feed.timestamp_col) <= utc_cutoff(as_of))
         source = source.filter(pl.col(_DATE) <= pl.lit(session_label_at(as_of, feed)))
         source = source.filter(
             pl.col("available_at").is_null() | (pl.col("available_at") <= utc_cutoff(as_of))
@@ -414,6 +421,7 @@ def prepare_futures_inputs(
         identity_mode,
         include_fields=_DEFINITION_FIELDS,
     )
+    used = _contract_definitions(used)
     feed = feed.with_overrides(entity_col=asset)
     source = source.with_columns(pl.col(asset).cast(pl.String).alias(_ID))
     selected_prices = select_revisions(source, [asset, feed.timestamp_col, "source"], as_of)
@@ -496,6 +504,7 @@ def prepare_futures_inputs(
         ).lifetimes(on=identity_point, as_of=as_of)
         if current_facts.height != 1:
             raise ValueError("The current selection lacks dated identity coverage")
+        current_facts = _contract_definitions(current_facts)
         for name in ("expiration", "last_trade_date"):
             if isinstance(current_facts.schema[name], pl.Datetime) and as_of is not None:
                 past = (

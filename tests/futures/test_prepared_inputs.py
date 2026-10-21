@@ -725,3 +725,58 @@ def test_offline_migration_recipe_retains_individual_legs_beside_the_research_se
     assert second.bars["asset"].to_list() == [17, 23, 17, 23, 17, 23]
     assert second.selections["selected_instrument_id"].to_list() == [23]
     assert delayed.selections["selected_instrument_id"].to_list() == [17]
+
+
+@pytest.mark.parametrize("different_asset", [False, True])
+def test_unknown_terms_are_required_only_for_used_observations_and_current_contracts(
+    tmp_path, different_asset
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    prior = (
+        definitions
+        if different_asset
+        else definitions.with_columns(pl.lit(date(2025, 7, 12)).alias("valid_to"))
+    )
+    unused = definitions.tail(1).with_columns(
+        pl.lit("r2").alias("revision_id"),
+        pl.lit("").alias("currency"),
+    )
+    if different_asset:
+        unused = unused.with_columns(
+            pl.lit(999, dtype=definitions.schema["asset"]).alias("asset"),
+            pl.lit("UNUSEDU2025").alias("symbol"),
+        )
+    else:
+        unused = unused.with_columns(pl.lit(date(2025, 7, 12)).alias("valid_from"))
+    captured = pl.concat([prior, unused], how="diagonal")
+    kwargs = {"roll_strategy": HighestVolumeRoll(), "feed_spec": contract_feed()}
+    result = futures.prepare_futures_inputs(bars, captured, as_of="2025-07-09T21:30:00Z", **kwargs)
+    assert result.selections["selected_instrument_id"].to_list() == [23]
+    assert result.definitions["revision_id"].unique().to_list() == ["r1"]
+    if not different_asset:
+        with pytest.raises(ValueError, match="currency.*known"):
+            futures.prepare_futures_inputs(bars, captured, as_of="2025-07-13T21:30:00Z", **kwargs)
+
+
+def test_a_published_preliminary_capture_cannot_reveal_a_future_bar_close(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    preliminary = bars.with_columns(
+        (
+            pl.col("timestamp").cast(pl.Datetime("ns", "UTC"))
+            + pl.duration(hours=21, time_unit="ns")
+        ).alias("timestamp"),
+        pl.when(pl.col("timestamp") == date(2025, 7, 9))
+        .then(pl.lit("2025-07-09T20:01:00Z").str.to_datetime(time_zone="UTC"))
+        .otherwise(pl.col("available_at"))
+        .alias("available_at"),
+    )
+    result = futures.prepare_futures_inputs(
+        preliminary,
+        definitions,
+        as_of="2025-07-09T20:30:00Z",
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed().with_overrides(timestamp_semantics="bar_close"),
+        definitions_feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [17]
+    assert result.bars.height == 4
