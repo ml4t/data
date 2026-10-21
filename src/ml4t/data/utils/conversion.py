@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 
+from ml4t.data.core.feeds import resolve_feed_spec
 from ml4t.specs import FeedSpec
 
 
@@ -145,27 +146,6 @@ def polars_to_pandas(df: pl.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({name: _polars_series_to_pandas(df[name]) for name in df.columns})
 
 
-def _panel_feed(
-    value: Any | None,
-    timestamp_col: str | None,
-    entity_col: str | None,
-    price_col: str | None,
-) -> FeedSpec:
-    if isinstance(value, Mapping):
-        for aliases in FeedSpec._FIELD_ALIASES.values():
-            supplied = [value[name] for name in aliases if name in value]
-            if supplied and any(item != supplied[0] for item in supplied[1:]):
-                raise ValueError(f"Conflicting feed mappings: {aliases}")
-    feed = FeedSpec.from_any(value)
-    overrides = {"timestamp_col": timestamp_col, "entity_col": entity_col, "price_col": price_col}
-    for name, column in overrides.items():
-        if column is None:
-            continue
-        if value is not None and getattr(feed, name) not in (None, column):
-            raise ValueError(f"{name} conflicts with feed_spec")
-    return feed.with_overrides(**overrides)
-
-
 def _axis_keys(index: pd.Index) -> list[str]:
     return [f"{type(value).__name__}:{value!r}" for value in index.tolist()]
 
@@ -187,7 +167,7 @@ def to_price_panel(
     distinguishing an observed null from an absent asset/clock pair. Keep these attrs for a sparse
     inverse. The caller must keep per-observation availability and revision facts separately.
     """
-    feed = _panel_feed(feed_spec, timestamp_col, entity_col, price_col)
+    feed = resolve_feed_spec(feed_spec, timestamp_col, entity_col, price_col)
     columns = list(data.columns)
     if feed.entity_col is None:
         candidates = [column for column in ("asset", "symbol", "ticker") if column in columns]
@@ -278,7 +258,7 @@ def from_price_panel(
     if feed_spec is not None and declared is not None:
         if FeedSpec.from_any(feed_spec).to_dict() != declared:
             raise ValueError("feed_spec conflicts with panel declaration")
-    feed = _panel_feed(
+    feed = resolve_feed_spec(
         declared if feed_spec is None else feed_spec, timestamp_col, entity_col, price_col
     )
     asset_col = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"

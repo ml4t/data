@@ -481,3 +481,22 @@ for required input columns, mapping conflicts and the qualified consumer version
     options:
       show_source: false
       heading_level: 3
+
+## Corporate-action input preparation
+
+Validate versioned source facts or apply supplied per-observation factors without changing the
+existing split/dividend kernels. Source facts do not mutate broker positions or cash. Unavailable
+terms remain explicit; requesting missing applicable terms fails before output.
+
+See the [offline action migration recipe](../getting-started/migration.md#import-corporate-action-facts-without-changing-their-financial-definition)
+for ratio direction, required source fields and native versus vendor adjustment definitions.
+
+::: ml4t.data.adjustments.prepare_action_inputs
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.adjustments.apply_adjustment_factors
+    options:
+      show_source: false
+      heading_level: 3
