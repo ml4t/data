@@ -50,6 +50,7 @@ from ml4t.data.futures.databento_parser import (
     parse_databento,
     parse_databento_raw,
 )
+from ml4t.data.futures.inputs import FuturesInputs, prepare_futures_inputs
 from ml4t.data.futures.parser import parse_quandl_chris, parse_quandl_chris_raw
 from ml4t.data.futures.roll import (
     # Databento-compatible selection-based roll strategies
@@ -127,6 +128,8 @@ def require_databento(name: str = "FuturesDownloader") -> None:
 
 
 __all__ = [
+    "FuturesInputs",
+    "prepare_futures_inputs",
     # Schema
     "AssetClass",  # Backward compat alias for FuturesAssetClass
     "FuturesAssetClass",
