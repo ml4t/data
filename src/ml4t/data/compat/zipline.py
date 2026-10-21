@@ -147,6 +147,26 @@ def _bars_and_factors(
     )
     if not len(dates) or dates[0] != lower or dates[-1] != upper:
         raise ValueError("Export bounds must identify available source sessions or minutes")
+    if not sids:
+        clock_type = pl.Date if daily else pl.Datetime("ns", "UTC")
+        keys = {
+            "timestamp": clock_type,
+            "asset": pl.String,
+            "source_sid": pl.Int64,
+            "source": pl.String,
+            "revision_id": pl.String,
+            "available_at": pl.Datetime("ns", "UTC"),
+        }
+        empty_bars = pl.DataFrame(schema={**keys, **dict.fromkeys(_FIELDS, pl.Float64)})
+        empty_factors = pl.DataFrame(
+            schema={
+                **keys,
+                "price_adjustment_factor": pl.Float64,
+                "volume_adjustment_factor": pl.Float64,
+                "basis_at": clock_type,
+            }
+        )
+        return empty_bars, empty_factors, source_calendar.name
     arrays = reader.load_raw_arrays(_FIELDS, lower, upper, sids)
     expected = (len(dates), len(sids))
     if any(array.shape != expected for array in arrays):
@@ -180,26 +200,6 @@ def _bars_and_factors(
         supplied["volume_adjustment_factor"] = curves[1][:, 0]
         supplied["basis_at"] = upper.date() if daily else upper
         factors.append(_frame(supplied))
-    if not sids:
-        clock_type = pl.Date if daily else pl.Datetime("ns", "UTC")
-        keys = {
-            "timestamp": clock_type,
-            "asset": pl.String,
-            "source_sid": pl.Int64,
-            "source": pl.String,
-            "revision_id": pl.String,
-            "available_at": pl.Datetime("ns", "UTC"),
-        }
-        empty_bars = pl.DataFrame(schema={**keys, **dict.fromkeys(_FIELDS, pl.Float64)})
-        empty_factors = pl.DataFrame(
-            schema={
-                **keys,
-                "price_adjustment_factor": pl.Float64,
-                "volume_adjustment_factor": pl.Float64,
-                "basis_at": clock_type,
-            }
-        )
-        return empty_bars, empty_factors, source_calendar.name
     return pl.concat(bars), pl.concat(factors), source_calendar.name
 
 
@@ -313,7 +313,11 @@ def export_bundle(
         raise ValueError(
             "Frequency bounds must name selected frequencies and contain start/end pairs"
         )
-    sources = _asset_tables(bundle, sids, namespace)
+    components = bundle.adjustment_reader.unpack_db_to_component_dfs(convert_dates=False)
+    payouts = components["stock_dividend_payouts"]
+    recipients = {int(sid) for sid in payouts.loc[payouts["sid"].isin(sids), "payment_sid"]}
+    metadata_sids = [*sids, *sorted(recipients.difference(sids))]
+    sources = _asset_tables(bundle, metadata_sids, namespace)
     tables = {
         name: SnapshotTable(frame, name, _source_metadata(namespace, source_revision, name))
         for name, frame in sources.items()
@@ -352,7 +356,6 @@ def export_bundle(
                 metadata["factor_perspective"] = str(_clock(upper, daily=frequency == "daily"))
             tables[role] = SnapshotTable(frame, role, metadata, feed_spec=feed)
     raw = {}
-    components = bundle.adjustment_reader.unpack_db_to_component_dfs(convert_dates=False)
     for name in (*_FACTOR_TABLES, *_PAYOUT_TABLES):
         pandas = components[name].copy()
         pandas.insert(0, "source_index", pandas.index.to_numpy())

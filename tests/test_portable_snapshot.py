@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 import shutil
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
@@ -189,17 +191,19 @@ def test_snapshot_identity_ignores_capture_time_json_key_order_and_storage_gener
 
 def test_snapshot_records_a_per_table_revision_tuple_not_an_invented_common_vintage(tmp_path):
     backend = FlatStorage(StorageConfig(base_path=tmp_path / "source"))
-    for key, revision in (("prices", "p1"), ("actions", "a7")):
+    for key, revision, as_of in (("prices", "p1", "2025-07-08T16:00:00Z"), ("actions", "a7", None)):
         backend.write(
             observations(),
             key,
-            {**declaration(source_revision=revision), **table().feed_spec.to_dict()},
+            {**declaration(source_revision=revision, as_of=as_of), **table().feed_spec.to_dict()},
         )
     sources = {key: SnapshotTable(backend, key, {}, key=key) for key in ("prices", "actions")}
     result = export(tmp_path / "snapshot", sources)
     entries = result.manifest["content"]["tables"]
     assert entries["prices"]["metadata"]["source_revision"] == "p1"
     assert entries["actions"]["metadata"]["source_revision"] == "a7"
+    assert entries["prices"]["metadata"]["as_of"] == "2025-07-08T16:00:00Z"
+    assert entries["actions"]["metadata"]["as_of"] is None
     assert set(result.manifest["captures"]) == {"prices", "actions"}
     assert (
         result.manifest["captures"]["prices"]["commit"]
@@ -369,3 +373,60 @@ def test_snapshot_rejects_provider_credential_fields_before_publishing_a_fresh_a
             {"prices": replace(table(), metadata=declaration(**{field: "not-a-real-credential"}))},
         )
     assert not path.exists()
+
+
+def test_csv_produced_snapshot_retains_table_role_schema_units_and_reported_missing_cells(tmp_path):
+    source = tmp_path / "observations.csv"
+    source.write_text(
+        "timestamp,asset_id,close,volume\n2025-01-02,A,100,0\n2025-01-03,A,,\n2025-01-04,A,102,200\n"
+    )
+    frame = pl.read_csv(source, try_parse_dates=True, schema_overrides={"close": pl.Float64})
+    feed = FeedSpec(
+        time_contract_version=2,
+        calendar=None,
+        entity_col="asset_id",
+        timestamp_semantics="session_label",
+        data_frequency="daily",
+    )
+    result = export(
+        tmp_path / "snapshot",
+        {"observations": SnapshotTable(frame, "raw_observations", declaration(), feed_spec=feed)},
+    )
+    entry = result.manifest["content"]["tables"]["observations"]
+    assert entry["role"] == "raw_observations"
+    assert entry["schema"] == [
+        ["timestamp", "Date"],
+        ["asset_id", "String"],
+        ["close", "Float64"],
+        ["volume", "Int64"],
+    ]
+    assert entry["row_count"] == 3
+    assert entry["metadata"]["units"] == {"close": "USD/share", "volume": "shares"}
+    assert result.tables["observations"]["asset_id"].to_list() == ["A", "A", "A"]
+    assert result.tables["observations"]["close"].to_list() == [100.0, None, 102.0]
+    assert result.tables["observations"]["volume"].to_list() == [0, None, 200]
+
+
+def test_snapshot_data_flush_failure_does_not_publish_a_manifest_or_replace_a_previous_archive(
+    tmp_path,
+):
+    previous = export(tmp_path / "previous")
+    sync = os.fsync
+
+    def fail_data_flush(descriptor):
+        if stat.S_ISREG(os.fstat(descriptor).st_mode):
+            position = os.lseek(descriptor, 0, os.SEEK_CUR)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            header = os.read(descriptor, 4)
+            os.lseek(descriptor, position, os.SEEK_SET)
+            if header == b"PAR1":
+                raise OSError("data volume full during flush")
+        sync(descriptor)
+
+    with (
+        patch("os.fsync", side_effect=fail_data_flush),
+        pytest.raises(OSError, match="data volume full"),
+    ):
+        export(tmp_path / "failed")
+    assert not (tmp_path / "failed").exists()
+    assert read_snapshot(tmp_path / "previous").snapshot_id == previous.snapshot_id

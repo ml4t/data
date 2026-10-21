@@ -219,7 +219,11 @@ def _capture(
                     path = _member(commit.generation_path, relative)
                 target = _member(destination, relative)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, target)
+
+                def copy_file(temporary: Path, *, source_path: Path = path) -> None:
+                    shutil.copyfile(source_path, temporary)
+
+                atomic_write(target, copy_file)
                 relative_files.append(relative)
             capture = {
                 "backend": type(backend).__name__,
@@ -235,7 +239,7 @@ def _capture(
         frame = (
             source.source.collect() if isinstance(source.source, pl.LazyFrame) else source.source
         )
-        frame.write_parquet(destination / "data.parquet")
+        atomic_write(destination / "data.parquet", frame.write_parquet)
         relative_files = ["data.parquet"]
     frame = pl.concat([pl.read_parquet(destination / name) for name in relative_files])
     if clock is not None and clock["feed_spec"]["timestamp_col"] not in frame.columns:
@@ -346,6 +350,9 @@ def export_snapshot(
 
         atomic_write(staging / "manifest.json", write_manifest)
         result = read_snapshot(staging)
+        directories = [staging, *(path for path in staging.rglob("*") if path.is_dir())]
+        for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+            StorageBackend._fsync_directory(directory)
         if path.exists() or path.is_symlink():
             existing = read_snapshot(path)
             if existing.snapshot_id != result.snapshot_id:

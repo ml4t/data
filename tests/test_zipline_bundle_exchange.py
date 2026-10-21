@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
@@ -26,6 +27,17 @@ def _hashes(root):
         for path in root.rglob("*")
         if path.is_file()
     }
+
+
+@pytest.fixture
+def source_bundle(tmp_path):
+    name = "source-" + uuid4().hex
+    bundle, original, _ = produce_bundle(tmp_path / "source", name)
+    try:
+        yield bundle, original
+    finally:
+        bundle.close()
+        bundles.unregister(name)
 
 
 def test_real_bundle_export_preserves_source_and_reingests_daily_minute_actions_and_contracts(
@@ -146,3 +158,134 @@ def test_real_bundle_export_preserves_source_and_reingests_daily_minute_actions_
         bundles.unregister(source_name)
         if target_name in bundles.bundles:
             bundles.unregister(target_name)
+
+
+def test_empty_asset_selection_exports_typed_empty_daily_and_minute_inputs_and_reingests(
+    tmp_path, source_bundle
+):
+    bundle, original = source_bundle
+    minutes = original["minute_dates"]
+    snapshot = export_bundle(
+        bundle,
+        tmp_path / "empty",
+        namespace="empty-selection",
+        source_revision="captured-v1",
+        sids=[],
+        start="2024-01-02",
+        end="2024-01-04",
+        frequencies=("daily", "minute"),
+        frequency_bounds={"minute": (minutes[0], minutes[-1])},
+    )
+    assert snapshot.tables["daily_bars"].height == 0
+    assert snapshot.tables["minute_bars"].height == 0
+    assert snapshot.tables["daily_factors"].height == 0
+    assert snapshot.tables["minute_factors"].height == 0
+    assert snapshot.tables["daily_bars"].schema["timestamp"] == pl.Date
+    name = "empty-target-" + uuid4().hex
+    bundles.register(
+        name,
+        make_bundle_ingest(tmp_path / "empty"),
+        calendar_name="XNYS",
+        start_session=pd.Timestamp("2024-01-02"),
+        end_session=pd.Timestamp("2024-01-04"),
+    )
+    environment = {"ZIPLINE_ROOT": str(tmp_path / "target")}
+    try:
+        bundles.ingest(name, environ=environment, timestamp=pd.Timestamp("2024-02-03", tz="UTC"))
+        with bundles.load(
+            name, environ=environment, timestamp=pd.Timestamp("2024-02-04", tz="UTC")
+        ) as restored:
+            assert restored.asset_finder.sids == ()
+            arrays = restored.equity_minute_bar_reader.load_raw_arrays(
+                ["close"], minutes[0], minutes[-1], []
+            )
+            assert arrays[0].shape == (3, 0)
+    finally:
+        bundles.unregister(name)
+
+
+def test_bundle_calendar_none_disables_native_schedule_without_relabeling_source_clock(
+    tmp_path, source_bundle
+):
+    bundle, _ = source_bundle
+    snapshot = export_bundle(
+        bundle,
+        tmp_path / "row-mode",
+        namespace="explicit-source",
+        source_revision="captured-v1",
+        sids=[1],
+        start="2024-01-02",
+        end="2024-01-04",
+        calendar=None,
+    )
+    entry = snapshot.manifest["content"]["tables"]["daily_bars"]
+    assert entry["clock"]["resolved_calendar"] is None
+    assert entry["clock"]["schedule_provider"] is None
+    assert entry["metadata"]["source_reader_calendar"] == "XNYS"
+    assert snapshot.tables["daily_bars"]["close"].to_list() == [100, 51, 52]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"sids": [1, 1]},
+        {"sids": [True]},
+        {"namespace": ""},
+        {"source_revision": ""},
+        {"frequencies": ["weekly"]},
+        {"end": "2024-01-06"},
+        {"start": "2024-01-02T12:00:00"},
+    ],
+)
+def test_invalid_bounded_bundle_requests_do_not_publish_an_archive(
+    tmp_path, source_bundle, overrides
+):
+    bundle, _ = source_bundle
+    options = {
+        "namespace": "permanent",
+        "source_revision": "captured-v1",
+        "sids": [1],
+        "start": "2024-01-02",
+        "end": "2024-01-04",
+        **overrides,
+    }
+    with pytest.raises(ValueError):
+        export_bundle(bundle, tmp_path / "invalid", **options)
+    assert not (tmp_path / "invalid").exists()
+
+
+def test_selected_bundle_export_retains_stock_payment_identity_without_inventing_its_prices(
+    tmp_path, source_bundle
+):
+    bundle, _ = source_bundle
+    snapshot = export_bundle(
+        bundle,
+        tmp_path / "selected",
+        namespace="permanent",
+        source_revision="capture-v1",
+        sids=[1],
+        start="2024-01-02",
+        end="2024-01-04",
+    )
+    assert snapshot.tables["zipline_equities"]["source_sid"].to_list() == [1, 2]
+    assert snapshot.tables["daily_bars"]["source_sid"].to_list() == [1, 1, 1]
+    name = "selected-target-" + uuid4().hex
+    bundles.register(
+        name,
+        make_bundle_ingest(tmp_path / "selected"),
+        calendar_name="XNYS",
+        start_session=pd.Timestamp("2024-01-02"),
+        end_session=pd.Timestamp("2024-01-04"),
+    )
+    environment = {"ZIPLINE_ROOT": str(tmp_path / "target")}
+    try:
+        bundles.ingest(name, environ=environment, timestamp=pd.Timestamp("2024-02-03", tz="UTC"))
+        with bundles.load(
+            name, environ=environment, timestamp=pd.Timestamp("2024-02-04", tz="UTC")
+        ) as restored:
+            payouts = restored.adjustment_reader.get_stock_dividends_with_ex_date(
+                [1], pd.Timestamp("2024-01-04", tz="UTC"), restored.asset_finder
+            )
+            assert payouts[0].payment_asset.sid == 2
+    finally:
+        bundles.unregister(name)
