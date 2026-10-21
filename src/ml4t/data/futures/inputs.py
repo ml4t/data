@@ -19,6 +19,7 @@ from ml4t.data.core.revisions import (
     utc_stamp,
 )
 from ml4t.data.futures.roll import (
+    CalendarRoll,
     FirstNoticeDateRoll,
     HighestOpenInterestRoll,
     HighestVolumeRoll,
@@ -35,7 +36,17 @@ from ml4t.specs import UNSET_CALENDAR, CalendarUnset, FeedSpec
 
 _DATE = "__ml4t_futures_date"
 _ID = "__ml4t_futures_id"
+_SOURCE_SYMBOL_TIES = (
+    VolumeBasedRoll,
+    OpenInterestBasedRoll,
+    HighestVolumeRoll,
+    HighestOpenInterestRoll,
+    TimeBasedRoll,
+    FirstNoticeDateRoll,
+    CalendarRoll,
+)
 _DEFINITION_FIELDS = (
+    "symbol",
     "root",
     "exchange",
     "currency",
@@ -465,6 +476,7 @@ def prepare_futures_inputs(
         projection = group.select(
             pl.col(_DATE).alias("date"),
             pl.col(_ID).alias("symbol"),
+            pl.col("instrument_symbol").alias("source_symbol"),
             _lifecycle_labels(group, "instrument_expiration", registry_feed).alias("expiration"),
             _lifecycle_labels(group, "instrument_first_notice_date", registry_feed).alias(
                 "first_notice_date"
@@ -482,7 +494,10 @@ def prepare_futures_inputs(
                 )
             else:
                 projection = projection.with_columns(pl.lit(None, dtype=pl.Float64).alias(metric))
-        selections = strategy.select_contracts(projection)
+        if isinstance(strategy, _SOURCE_SYMBOL_TIES):
+            selections = strategy.select_contracts(projection, tie_breaker_col="source_symbol")
+        else:
+            selections = strategy.select_contracts(projection)
         if selections.height == 0:
             continue
         current = selections.tail(1)
@@ -632,6 +647,9 @@ def prepare_futures_inputs(
             "selection_scope": "one current source-vintage decision per root/venue,not backdated account history",
             "selection_policy": {
                 "kind": f"{type(strategy).__module__}.{type(strategy).__name__}",
+                "tie_breaker": "observation_definition_symbol_then_stable_id_string"
+                if isinstance(strategy, _SOURCE_SYMBOL_TIES)
+                else "strategy_defined",
                 "parameters": {
                     name: getattr(strategy, name)
                     for name in (

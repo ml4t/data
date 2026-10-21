@@ -328,6 +328,13 @@ so the OI method still selects17. Source files and caller tables remain unchange
 fills missing observations. The legacy continuous builder does not itself certify historical
 field-publication times.
 
+Stable IDs identify contracts; they do not replace source names in financial tie ordering.
+Prepared selections use each observation's dated definition symbol for ties, with the stable ID
+string as a final disambiguator. Native `select_contracts(..., tie_breaker_col=...)` exposes this
+mapping explicitly; its default remains `symbol`. Equal-expiry time selections now use a
+deterministic symbol tie rather than interpreter-dependent set order. A rename alone is not a
+contract switch, and a current alias does not replace an earlier ranking observation's name.
+
 Input bars need declared timestamp/entity mappings, raw reference prices, `source`, `revision_id`,
 `available_at`, `currency`, `price_quote_unit` and nonempty `mark_kind`. Ranking metrics need their
 units in the definitions. Volume defaults to the bar's publication time unless

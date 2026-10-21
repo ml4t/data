@@ -1,5 +1,9 @@
 """Known-at futures preparation must retain source identity,metric timing and raw leg units."""
 
+import json
+import os
+import subprocess
+import sys
 from datetime import UTC, date, datetime
 from io import StringIO
 from pathlib import Path
@@ -11,6 +15,7 @@ from polars.testing import assert_frame_equal
 
 import ml4t.data.futures as futures
 from ml4t.data.futures import (
+    CalendarRoll,
     ContinuousContractBuilder,
     ContractSpec,
     FirstNoticeDateRoll,
@@ -18,8 +23,10 @@ from ml4t.data.futures import (
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     NoAdjustment,
+    OpenInterestBasedRoll,
     SettlementType,
     TimeBasedRoll,
+    VolumeBasedRoll,
     load_databento_definitions,
     load_databento_ohlcv,
 )
@@ -780,3 +787,109 @@ def test_a_published_preliminary_capture_cannot_reveal_a_future_bar_close(tmp_pa
     )
     assert result.selections["selected_instrument_id"].to_list() == [17]
     assert result.bars.height == 4
+
+
+@pytest.mark.parametrize(
+    "strategy,expected_id,expected_symbol",
+    [
+        (HighestVolumeRoll(), 23, "TESTN2025"),
+        (HighestOpenInterestRoll(), 23, "TESTN2025"),
+        (VolumeBasedRoll(), 23, "TESTN2025"),
+        (OpenInterestBasedRoll(), 23, "TESTN2025"),
+        (HighestVolumeRoll(rank=1), 17, "TESTU2025"),
+        (HighestOpenInterestRoll(rank=1), 17, "TESTU2025"),
+        (CalendarRoll(), 23, "TESTN2025"),
+        (CalendarRoll(rank=1), 17, "TESTU2025"),
+        (TimeBasedRoll(0), 23, "TESTN2025"),
+        (FirstNoticeDateRoll(0), 23, "TESTN2025"),
+    ],
+)
+def test_native_tie_definitions_survive_stable_ids_that_sort_opposite_to_source_names(
+    tmp_path, strategy, expected_id, expected_symbol
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    bars = bars.with_columns(
+        pl.when(pl.col("asset") == 17).then(23).otherwise(17).cast(pl.Int64).alias("asset"),
+        pl.lit(100, dtype=pl.Int64).alias("volume"),
+        pl.lit(100, dtype=pl.Int64).alias("open_interest"),
+        pl.col("available_at").alias("open_interest_available_at"),
+    )
+    definitions = definitions.with_columns(
+        pl.when(pl.col("asset") == 17).then(23).otherwise(17).cast(pl.Int64).alias("asset"),
+        pl.lit(date(2025, 9, 15)).alias("expiration"),
+        pl.lit(date(2025, 9, 10)).alias("first_notice_date"),
+    )
+    bars.write_parquet(tmp_path / "ohlcv_1d/product=TEST/ohlcv_1d.parquet")
+    definitions.write_parquet(tmp_path / "definition/product=TEST/definition.parquet")
+    restored = load_databento_ohlcv("TEST", tmp_path)
+    facts = load_databento_definitions("TEST", tmp_path)
+    native = strategy.select_contracts(
+        restored.rename({"timestamp": "date"}).join(
+            facts.select("asset", "expiration", "first_notice_date"), on="asset", how="left"
+        )
+    )
+    assert native["symbol"][-1] == expected_symbol
+    result = futures.prepare_futures_inputs(
+        restored,
+        facts,
+        as_of="2025-07-09T21:30:00Z",
+        roll_strategy=strategy,
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [expected_id]
+    assert result.rolls.is_empty()
+
+
+def test_a_contract_rename_keeps_identity_while_lagged_ties_use_the_observation_name(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    bars = bars.with_columns(
+        pl.lit(100, dtype=pl.Int64).alias("volume"),
+        pl.when((pl.col("asset") == 17) & (pl.col("timestamp") == date(2025, 7, 9)))
+        .then(pl.lit("ZNEWN2025"))
+        .otherwise(pl.col("symbol"))
+        .alias("symbol"),
+    )
+    first = definitions.with_columns(
+        pl.when(pl.col("asset") == 17).then(date(2025, 7, 9)).otherwise(None).alias("valid_to")
+    )
+    renamed = definitions.head(1).with_columns(
+        pl.lit(date(2025, 7, 9)).alias("valid_from"),
+        pl.lit("ZNEWN2025").alias("symbol"),
+    )
+    result = futures.prepare_futures_inputs(
+        bars,
+        pl.concat([first, renamed], how="diagonal"),
+        as_of="2025-07-09T21:30:00Z",
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [17]
+    assert result.selections["definition_symbol"].to_list() == ["ZNEWN2025"]
+    assert result.rolls.is_empty()
+    assert result.bars.filter(pl.col("asset") == 17)["symbol"].to_list() == [
+        "TESTN2025",
+        "TESTN2025",
+        "ZNEWN2025",
+    ]
+
+
+def test_equal_expiry_time_selection_does_not_depend_on_interpreter_hash_order():
+    script = """
+import json
+from datetime import date
+import polars as pl
+from ml4t.data.futures import TimeBasedRoll
+frame = pl.DataFrame({"date":[date(2025,7,9)]*2,
+                      "symbol":["TESTN2025","TESTU2025"],
+                      "expiration":[date(2025,9,15)]*2})
+print(json.dumps(TimeBasedRoll(0).select_contracts(frame)["symbol"].to_list()))
+"""
+    for seed in range(4):
+        run = subprocess.run(
+            [sys.executable, "-c", script],
+            env={**os.environ, "PYTHONHASHSEED": str(seed)},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert json.loads(run.stdout.splitlines()[-1]) == ["TESTN2025"], seed
