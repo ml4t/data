@@ -320,6 +320,11 @@ Pass existing `FeedSpec` column and clock declarations through `feed_spec`. A fu
 `calendar=None` disables schedules; `"24/7"` selects a real schedule. The manifest keeps the
 original feed and resolved selection separately, including the schedule-provider version.
 `ArtifactSpec` declarations can accompany tables; artifact storage locations become portable.
+Tables with the default `timestamp` column also capture their default or metadata-only clock
+without a separate feed object. Mappings without an explicit time-contract version use version 2,
+including the distinction between omitted and null calendars. Explicitly versioned feed contracts
+retain their declared compatibility semantics. Reference tables without a declared or default
+clock column remain unclocked.
 
 The destination must be new, or already contain the same verified snapshot ID. A different
 snapshot never overwrites an existing destination. Export flushes staged files, verifies the

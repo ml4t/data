@@ -164,12 +164,18 @@ def _clock(
     feed_spec: FeedSpec | Mapping[str, Any] | None,
     metadata: dict[str, Any],
     calendar: str | None | CalendarUnset,
+    columns: Sequence[str],
 ) -> dict[str, Any] | None:
-    if feed_spec is None and not any(name in metadata for name in ("timestamp_col", "feed_spec")):
+    if (
+        feed_spec is None
+        and not any(name in metadata for name in ("timestamp_col", "feed_spec"))
+        and "timestamp" not in columns
+    ):
         return None
-    feed = FeedSpec.from_any(
-        feed_spec if feed_spec is not None else metadata.get("feed_spec", metadata)
-    )
+    declaration = feed_spec if feed_spec is not None else metadata.get("feed_spec", metadata)
+    if isinstance(declaration, Mapping):
+        declaration = {"time_contract_version": 2, **declaration}
+    feed = FeedSpec.from_any(declaration)
     assigner = SessionAssigner(feed_spec=feed, calendar=calendar)
     clock = {
         "feed_spec": feed.to_dict(),
@@ -198,7 +204,6 @@ def _capture(
         with backend._key_lock(source.key):
             commit = backend._current_commit(source.key)
             metadata = _metadata({**commit.metadata.get("custom", {}), **source.metadata})
-            clock = _clock(source.feed_spec, metadata, calendar)
             declared = commit.metadata.get("partitions")
             if declared is None:
                 declared = (
@@ -235,13 +240,13 @@ def _capture(
         if source.key is not None:
             raise ValueError("key only applies to a storage-backed table")
         metadata = _metadata(source.metadata)
-        clock = _clock(source.feed_spec, metadata, calendar)
         frame = (
             source.source.collect() if isinstance(source.source, pl.LazyFrame) else source.source
         )
         atomic_write(destination / "data.parquet", frame.write_parquet)
         relative_files = ["data.parquet"]
     frame = pl.concat([pl.read_parquet(destination / name) for name in relative_files])
+    clock = _clock(source.feed_spec, metadata, calendar, frame.columns)
     if clock is not None and clock["feed_spec"]["timestamp_col"] not in frame.columns:
         raise ValueError("The declared snapshot timestamp column is missing")
     files = [

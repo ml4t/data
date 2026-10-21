@@ -331,6 +331,39 @@ def test_snapshot_preserves_shared_artifact_declaration_with_a_portable_storage_
     assert content["unavailable"] == {"merger_terms": "not supplied by source"}
 
 
+@pytest.mark.parametrize("stored", [False, True])
+def test_csv_snapshot_records_default_and_metadata_only_calendars_without_a_feed_object(
+    tmp_path, stored
+):
+    path = tmp_path / "observations.csv"
+    path.write_text("timestamp,symbol,close\n2025-07-04T12:00:00Z,SPY,100\n")
+    frame = pl.read_csv(path, try_parse_dates=True)
+    cases = [
+        ({}, {}, "NYSE"),
+        ({"calendar": None}, {}, None),
+        ({"calendar": "24/7"}, {}, "24/7"),
+        ({"calendar": "24/7"}, {"calendar": None}, None),
+        ({"calendar": None}, {"calendar": "24/7"}, "24/7"),
+    ]
+    identities = []
+    for index, (declared, explicit, expected) in enumerate(cases):
+        metadata = declaration(**declared)
+        if stored:
+            backend = FlatStorage(StorageConfig(base_path=tmp_path / f"source-{index}"))
+            backend.write(frame, "prices", metadata)
+            source = SnapshotTable(backend, "prices", {}, key="prices")
+        else:
+            source = SnapshotTable(frame, "prices", metadata)
+        captured = export(tmp_path / f"snapshot-{index}", {"prices": source}, **explicit)
+        clock = captured.manifest["content"]["tables"]["prices"]["clock"]
+        assert clock is not None
+        assert clock["resolved_calendar"] == expected
+        assert (clock["schedule_provider"] is None) == (expected is None)
+        assert_frame_equal(captured.tables["prices"], frame)
+        identities.append(captured.snapshot_id)
+    assert len(set(identities)) == len(cases)
+
+
 def test_snapshot_copies_a_generation_while_holding_the_actual_source_writer_lock(tmp_path):
     backend = FlatStorage(StorageConfig(base_path=tmp_path / "source"))
     backend.write(observations(), "prices", declaration())
