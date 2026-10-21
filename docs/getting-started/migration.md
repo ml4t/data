@@ -457,7 +457,7 @@ from ml4t.data.compat.empyrical import default_returns_func
 register_return_func(default_returns_func)
 ```
 
-The offline [acquisition migration example](https://github.com/ml4t/data/blob/main/examples/acquisition_migration.py)
+The offline [acquisition migration example](https://github.com/ml4t/data/blob/3dd71cb394c390316ff0bb36ad1d7d0f3dd6aefc/examples/acquisition_migration.py)
 replays retained public response captures through actual parsers, providers and CSV files. It runs
 without credentials or network and does not require any Reloaded package. This is an unreleased
 source workflow, not a claim that a released successor stack already replaces every legacy option.
