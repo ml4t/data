@@ -472,3 +472,95 @@ Data-produced inputs. They used Python `3.12`, pandas `2.3.3`, Polars `2.0.0` an
 pandas-market-calendars `5.4.0` and yfinance `1.5.2`. Older yfinance versions admitted by the
 former `>=0.2.0` declaration lack the exception API used by Data's empty-download recovery;
 the Yahoo extra now requires the qualified `>=1.5.2` range.
+
+## Reconstruct inputs after source pruning
+
+Retain the input tables and declarations instead of referring to mutable source paths. Run the
+offline [portable snapshot example](https://github.com/ml4t/data/blob/a98cede0a36ba6856a010456f302e3e987d255de/examples/portable_snapshot_migration.py)
+from a source checkout:
+
+```bash
+uv run python examples/portable_snapshot_migration.py
+```
+
+The recipe reuses the dated-history and individual-futures examples. It captures six tables,
+their separate source cutoffs and revisions, stable identity namespaces, units, raw price/share
+basis, feed declarations and effective selection configuration. It then prunes source generations,
+changes the original futures file, relocates the archive, and reconstructs the same prepared inputs.
+The checks compare equity keys, ticker changes, action facts, adjusted prices/volume, selected
+contracts and paired roll marks. Missing quotes remain missing. No Reloaded package, credentials
+or network is needed. Read the [snapshot storage contract](../user-guide/storage.md#portable-input-snapshots)
+for required metadata and integrity rules.
+
+Effective configuration must be supplied by the caller. A Data snapshot does not establish a
+common historical publication time for independently sourced tables, discover omitted execution
+policies, or certify an account result. Backtest owns runtime history, execution and account
+reconstruction; Engineer owns feature computation and Diagnostic owns analytical fill views.
+
+### Convert an existing Zipline bundle once
+
+In a separate conversion environment with Zipline Reloaded installed, load the original bundle
+through its standard API and export selected stable source IDs and inclusive reader bounds:
+
+```python
+from zipline.data import bundles
+from ml4t.data.compat.zipline import export_bundle
+
+with bundles.load("my-existing-bundle") as bundle:
+    snapshot = export_bundle(
+        bundle,
+        "captured-bundle",
+        namespace="original-bundle-permanent-ids",
+        source_revision="original-ingestion-id",
+        sids=[1, 2],
+        start="2024-01-02",
+        end="2024-01-04",
+        frequencies=("daily",),
+    )
+```
+
+Keep the namespace stable across captures; exported identities combine it with the original sid.
+The bridge reads standard asset, bar and adjustment readers without modifying the source bundle.
+Native tables include raw observations, source history-adjustment factors, dated asset definitions,
+symbol lookup intervals, and corporate-action facts. A bounded stock-dividend selection also retains
+the payment asset's identity metadata, without creating price observations for it.
+
+Daily bounds are civil session labels. Minute bounds are UTC instants; use `frequency_bounds`
+when selecting daily and minute data together. Minute timestamps retain the source's right-labeled
+bar-close convention. Source reader zeros in volume remain zeros without an inferred no-trade
+status. Source schedule/provider declarations remain separate from Data's selected calendar;
+`calendar=None` disables the native schedule without changing the captured source grid.
+
+Zipline split price factors are converted to native new-shares-per-old-share terms. Source
+history factors remain a declared, supplied adjustment method; they are not recomputed as a
+different vendor's total-return definition. Publication times, quote currency, merger consideration
+and original listing endpoints that public readers cannot establish remain explicitly unavailable.
+Symbol ownership lookup intervals must not be interpreted as original listing intervals.
+Capturing unknown publication times does not make a bundle suitable for causal known-at claims.
+
+For staged migration, `make_bundle_ingest("captured-bundle")` returns a standard Zipline bundle
+ingestion callback. Register it with the same source calendar and a range covering the captured
+bars, then use normal `bundles.ingest` and `bundles.load`. The callback verifies all files and
+prepares all tables before invoking writers. Asset metadata, source action-table indexes and raw
+daily/minute values round-trip through standard writers. A target minute writer must have enough
+price precision for the source; incompatible scales fail before writes instead of rounding prices.
+Configure `BcolzMinuteBarWriter`'s per-sid scale when needed. Native snapshots impose no legacy
+integer price scale. Reverse ingestion is optional and is not required for native reconstruction.
+
+The actual optional conversion checks use immutable Zipline Reloaded `3.2.0` source
+[`cf649ac06`](https://github.com/stefan-jansen/zipline-reloaded/commit/cf649ac06fddce76f6caa2403cd8494ac84f72ad),
+Python `3.12`, pandas `2.3.3`, Specs `0.2.0` and Polars `2.0.0`. They construct a real bundle
+with renamed equities, two venues, two futures, missing quotes, split/cash/stock actions and daily
+and minute observations, then compare native preparation and standard re-ingestion. The native
+recipe requires no legacy runtime. This is unreleased source functionality; it does not claim that
+published Data `0.2.1` provides these APIs or that Data replaces Zipline's runtime or broker.
+
+Clean wheel and source-distribution installs qualified Data `0.2.2.dev27+g90c06ba9c` for native
+reconstruction, the optional conversion and the selected dependency floors. Reconstructed tables
+also passed actual Engineer labeling, Diagnostic forward returns and Backtest contract/position
+checks using Engineer `0.1.7.dev29+gc69e7bada`, Diagnostic `0.1.9` and Backtest
+`0.1.13.dev22+g12a2c483f`. That Backtest check verifies a USD500 marked position result, not
+cash settlement or corporate-action account execution. The source recipes and input contracts
+remain usable without any of those consumers. CI's separate `Installed bundle migration` job
+keeps the optional conversion qualified against the pinned Zipline source without adding it to
+Data's production dependencies.

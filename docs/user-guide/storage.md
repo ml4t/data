@@ -268,3 +268,77 @@ Both backends use two mechanisms for safe concurrent access:
   when multiple processes write simultaneously. Lock timeout is 10 seconds.
 
 These are enabled by default and can be toggled via `StorageConfig`.
+
+## Portable input snapshots
+
+Use `export_snapshot` to retain explicitly selected inputs independently of mutable storage
+generations. Each `SnapshotTable` accepts a Polars frame, a lazy frame, or a storage backend plus
+`key`. Backend capture holds the existing key lock and copies the current committed generation,
+including its custom metadata. Different keys retain their own revision declarations; export does
+not establish a common historical vintage.
+
+```python
+from ml4t.data.storage import SnapshotTable, export_snapshot, read_snapshot
+
+snapshot = export_snapshot(
+    "retained-inputs",
+    {
+        "prices": SnapshotTable(
+            storage,
+            role="prices",
+            key="equities/daily/AAPL",
+            metadata={
+                "source_revision": "captured-provider-revision",
+                "identity_namespace": "my-permanent-asset-ids",
+                "units": {"close": "USD/share", "volume": "shares"},
+                "as_of": None,
+                "price_basis": "raw",
+                "share_basis": "source",
+                "revisions": {},
+            },
+        )
+    },
+    effective_config={"price_field": "close"},
+    artifacts={},
+)
+restored = read_snapshot("retained-inputs")
+assert restored.snapshot_id == snapshot.snapshot_id
+prices = restored.tables["prices"]
+```
+
+The seven metadata fields shown above are required. Use `None` for unavailable facts, rather than
+inferring publication times, currencies or adjustment rules. `source_revision` must be a nonempty
+string. A known `identity_namespace` is also a nonempty string; explicit `None` records that the
+namespace is unknown and does not establish stable cross-source identity. `units` and `revisions`
+are mappings. All declarations,
+effective configuration and artifact descriptions must contain finite JSON values. Machine paths
+and credential-bearing keys or URLs are rejected. This check cannot identify arbitrary secrets
+hidden inside ordinary strings; supply public provenance only.
+
+Pass existing `FeedSpec` column and clock declarations through `feed_spec`. A function's explicit
+`calendar` wins over the feed declaration; omission uses the feed calendar, then NYSE.
+`calendar=None` disables schedules; `"24/7"` selects a real schedule. The manifest keeps the
+original feed and resolved selection separately, including the schedule-provider version.
+`ArtifactSpec` declarations can accompany tables; artifact storage locations become portable.
+Tables with the default `timestamp` column also capture their default or metadata-only clock
+without a separate feed object. Mappings without an explicit time-contract version use version 2,
+including the distinction between omitted and null calendars. Explicitly versioned feed contracts
+retain their declared compatibility semantics. Reference tables without a declared or default
+clock column remain unclocked.
+
+The destination must be new, or already contain the same verified snapshot ID. A different
+snapshot never overwrites an existing destination. Export flushes staged files, verifies the
+complete archive, and then publishes the directory. It does not update a source `CURRENT` pointer.
+The archive uses relative member paths and survives relocation and source-generation pruning.
+Reading verifies the manifest and every member hash before parsing any table; missing, changed,
+escaping or symlinked members fail without returning partial inputs.
+
+The snapshot ID identifies physical input bytes, schemas, roles, clock declarations, source and
+unit metadata, effective configuration, artifacts and software versions. Capture time and random
+storage-generation identifiers do not change that ID. Equivalent financial values stored with
+different bytes can have different IDs. Hashes detect accidental modification; they do not
+authenticate an archive supplied by an untrusted party. These APIs prepare inputs and do not
+serialize an executable strategy, credentials, broker state or a complete account ledger.
+
+See the [reconstruction recipe](../getting-started/migration.md#reconstruct-inputs-after-source-pruning)
+for an offline equity-and-futures workflow and the optional legacy bundle transition.
