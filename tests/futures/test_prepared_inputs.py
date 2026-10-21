@@ -280,3 +280,135 @@ def test_an_explicit_zero_legacy_notice_offset_is_not_replaced_with_twenty_five_
     )
     selected = FirstNoticeDateRoll(1, feed_spec=contract_feed()).select_contracts(data, spec)
     assert selected["symbol"].to_list() == ["TESTN2025"] * 3
+
+
+def test_a_new_price_capture_cannot_hide_an_older_open_interest_fact_that_was_known(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    b = (pl.col("asset") == 23) & (pl.col("timestamp") == date(2025, 7, 8))
+    original = bars.with_columns(
+        pl.when(b)
+        .then(datetime(2025, 7, 8, 21, 1, tzinfo=UTC))
+        .otherwise(pl.col("open_interest_available_at"))
+        .alias("open_interest_available_at")
+    )
+    correction = original.filter(b).with_columns(
+        pl.lit(4022, dtype=bars.schema["close"]).alias("close"),
+        pl.lit(4022, dtype=bars.schema["open"]).alias("open"),
+        pl.lit(4023, dtype=bars.schema["high"]).alias("high"),
+        pl.lit(4021, dtype=bars.schema["low"]).alias("low"),
+        pl.lit(5, dtype=bars.schema["open_interest"]).alias("open_interest"),
+        pl.lit("r2").alias("revision_id"),
+        pl.lit(datetime(2025, 7, 9, 12, tzinfo=UTC)).alias("available_at"),
+        pl.lit(datetime(2025, 7, 10, 21, 1, tzinfo=UTC)).alias("open_interest_available_at"),
+    )
+    captured = pl.concat([original, correction])
+    before = futures.prepare_futures_inputs(
+        captured,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestOpenInterestRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert before.selections["selected_instrument_id"].to_list() == [23]
+    assert before.bars.filter(b)["close"].to_list() == [4022]
+    oi = before.metrics.filter(b & (pl.col("metric") == "open_interest"))
+    assert oi["open_interest"].to_list() == [80]
+    assert oi["revision_id"].to_list() == ["r1"]
+    after = futures.prepare_futures_inputs(
+        captured,
+        definitions,
+        as_of=datetime(2025, 7, 11, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestOpenInterestRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert after.selections["selected_instrument_id"].to_list() == [17]
+    assert_frame_equal(captured, pl.concat([original, correction]))
+
+
+def test_repeated_unchanged_oi_on_price_revisions_retains_the_original_metric_capture(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    b = (pl.col("asset") == 23) & (pl.col("timestamp") == date(2025, 7, 8))
+    original = bars.with_columns(
+        pl.when(b)
+        .then(datetime(2025, 7, 8, 21, 1, tzinfo=UTC))
+        .otherwise(pl.col("open_interest_available_at"))
+        .alias("open_interest_available_at")
+    )
+    correction = original.filter(b).with_columns(
+        pl.lit("r2").alias("revision_id"),
+        pl.lit(datetime(2025, 7, 9, 12, tzinfo=UTC)).alias("available_at"),
+    )
+    result = futures.prepare_futures_inputs(
+        pl.concat([original, correction]),
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestOpenInterestRoll(),
+        feed_spec=contract_feed(),
+    )
+    oi = result.metrics.filter(b & (pl.col("metric") == "open_interest"))
+    assert oi["open_interest"].to_list() == [80]
+    assert oi["revision_id"].to_list() == ["r1"]
+
+
+@pytest.mark.parametrize("strategy,expected", [(TimeBasedRoll(0), 17), (HighestVolumeRoll(), 23)])
+def test_an_all_unknown_optional_oi_column_does_not_block_a_price_or_volume_policy(
+    tmp_path, strategy, expected
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    unknown = bars.with_columns(
+        pl.lit(None).alias("open_interest"), pl.lit(None).alias("open_interest_available_at")
+    )
+    result = futures.prepare_futures_inputs(
+        unknown,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=strategy,
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [expected]
+    assert result.metrics.filter(pl.col("metric") == "open_interest").height == 0
+    assert result.bars["open_interest"].null_count() == 6
+
+
+def test_empty_source_observations_return_typed_empty_inputs_without_inventing_a_contract(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    result = futures.prepare_futures_inputs(
+        bars.head(0),
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed(),
+    )
+    assert result.bars.height == result.selections.height == result.rolls.height == 0
+    assert (
+        result.bars.schema["asset"]
+        == result.selections.schema["selected_instrument_id"]
+        == pl.Int64
+    )
+    assert result.bars.schema["timestamp"] == pl.Date
+    assert result.metrics.schema["volume"] == pl.Int64
+
+
+def test_explicit_metric_revisions_are_not_deduplicated_as_repeated_price_captures(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    b = (pl.col("asset") == 23) & (pl.col("timestamp") == date(2025, 7, 8))
+    original = bars.with_columns(
+        pl.lit("oi-r1").alias("open_interest_revision_id"),
+        pl.when(b)
+        .then(datetime(2025, 7, 8, 21, 1, tzinfo=UTC))
+        .otherwise(pl.col("open_interest_available_at"))
+        .alias("open_interest_available_at"),
+    )
+    ambiguous = original.filter(b).with_columns(
+        pl.lit("r2").alias("revision_id"),
+        pl.lit("oi-r2").alias("open_interest_revision_id"),
+        pl.lit(datetime(2025, 7, 9, 12, tzinfo=UTC)).alias("available_at"),
+    )
+    with pytest.raises(ValueError, match="indistinguishable"):
+        futures.prepare_futures_inputs(
+            pl.concat([original, ambiguous]),
+            definitions,
+            as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+            roll_strategy=HighestOpenInterestRoll(),
+            feed_spec=contract_feed(),
+        )

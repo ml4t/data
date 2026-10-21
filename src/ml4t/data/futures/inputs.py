@@ -221,7 +221,7 @@ def _metric_facts(
             continue
         available = f"{metric}_available_at"
         observed = frame.filter(pl.col(physical).is_not_null())
-        if (
+        if observed.height and (
             not observed.schema[physical].is_numeric()
             or observed.filter(~pl.col(physical).is_finite() | (pl.col(physical) < 0)).height
         ):
@@ -241,8 +241,13 @@ def _metric_facts(
             observed = observed.filter(pl.col(available) <= utc_cutoff(as_of))
         observed = observed.with_columns(
             pl.col("available_at").alias("capture_available_at"),
-            pl.col(available).alias("available_at"),
-        ).select(
+            pl.col("revision_id").alias("capture_revision_id"),
+            pl.col(available).cast(pl.Datetime("ns", "UTC")).alias("available_at"),
+        )
+        revision = f"{metric}_revision_id"
+        if revision in observed.columns:
+            observed = observed.with_columns(pl.col(revision).alias("revision_id"))
+        observed = observed.select(
             feed.timestamp_col,
             asset,
             _DATE,
@@ -251,8 +256,15 @@ def _metric_facts(
             "revision_id",
             "available_at",
             "capture_available_at",
+            "capture_revision_id",
             pl.lit(metric).alias("metric"),
             pl.col(physical).alias(metric),
+        )
+        observed = observed.sort("capture_available_at").unique(
+            subset=[asset, feed.timestamp_col, "source", "available_at", metric]
+            + (["revision_id"] if revision in frame.columns else []),
+            keep="first",
+            maintain_order=True,
         )
         observed = select_revisions(observed, [asset, feed.timestamp_col, "source"], as_of)
         if observed.select(asset, feed.timestamp_col).is_duplicated().any():
@@ -310,7 +322,9 @@ def prepare_futures_inputs(
     source = utc_column(source, "available_at", feed.timezone)
     if as_of is not None:
         source = source.filter(pl.col(_DATE) <= pl.lit(session_label_at(as_of, feed)))
-    source = select_revisions(source, [asset, feed.timestamp_col, "source"], as_of)
+        source = source.filter(
+            pl.col("available_at").is_null() | (pl.col("available_at") <= utc_cutoff(as_of))
+        )
     source, used, asset = registry._normalize(
         source,
         feed,
@@ -320,9 +334,10 @@ def prepare_futures_inputs(
     )
     feed = feed.with_overrides(entity_col=asset)
     source = source.with_columns(pl.col(asset).cast(pl.String).alias(_ID))
-    if source.select(asset, _DATE).is_duplicated().any():
+    selected_prices = select_revisions(source, [asset, feed.timestamp_col, "source"], as_of)
+    if selected_prices.select(asset, _DATE).is_duplicated().any():
         raise ValueError("Roll inputs require one declared source observation per contract/session")
-    normalized = _normalized_prices(source, feed, price_quote_unit)
+    normalized = _normalized_prices(selected_prices, feed, price_quote_unit)
     strategy = roll_strategy or VolumeBasedRoll()
     if type(strategy) is TimeBasedRoll:
         strategy = TimeBasedRoll(
@@ -351,7 +366,7 @@ def prepare_futures_inputs(
         if isinstance(strategy, HighestVolumeRoll | VolumeBasedRoll)
         else None
     )
-    metrics = _metric_facts(normalized, feed, as_of, requested)
+    metrics = _metric_facts(source, feed, as_of, requested)
     decisions, proposals = [], []
     for group in normalized.partition_by(
         ["instrument_root", "instrument_exchange"], maintain_order=True
