@@ -840,6 +840,37 @@ def test_native_tie_definitions_survive_stable_ids_that_sort_opposite_to_source_
     assert result.rolls.is_empty()
 
 
+@pytest.mark.parametrize(
+    "strategy_type,parameters,expected",
+    [
+        (HighestVolumeRoll, {}, 23),
+        (HighestOpenInterestRoll, {}, 17),
+        (VolumeBasedRoll, {"lookback_days": 1, "min_days_between_rolls": 0}, 23),
+        (OpenInterestBasedRoll, {"lookback_days": 1}, 17),
+        (TimeBasedRoll, {"days_before_expiration": 0}, 17),
+        (FirstNoticeDateRoll, {"days_before_first_notice": 0}, 17),
+        (CalendarRoll, {}, 17),
+    ],
+)
+def test_an_existing_strategy_subclass_keeps_the_original_selection_signature(
+    tmp_path, strategy_type, parameters, expected
+):
+    class CustomSelection(strategy_type):
+        def select_contracts(self, data, contract_spec=None):
+            return super().select_contracts(data, contract_spec)
+
+    bars, definitions = captured_contract_files(tmp_path)
+    result = futures.prepare_futures_inputs(
+        bars,
+        definitions,
+        as_of="2025-07-09T21:30:00Z",
+        roll_strategy=CustomSelection(**parameters),
+        feed_spec=contract_feed(),
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [expected]
+    assert result.metadata["selection_policy"]["tie_breaker"] == "strategy_defined"
+
+
 def test_a_contract_rename_keeps_identity_while_lagged_ties_use_the_observation_name(tmp_path):
     bars, definitions = captured_contract_files(tmp_path)
     bars = bars.with_columns(

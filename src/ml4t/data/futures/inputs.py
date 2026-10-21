@@ -494,7 +494,7 @@ def prepare_futures_inputs(
                 )
             else:
                 projection = projection.with_columns(pl.lit(None, dtype=pl.Float64).alias(metric))
-        if isinstance(strategy, _SOURCE_SYMBOL_TIES):
+        if isinstance(strategy, _SOURCE_SYMBOL_TIES) and type(strategy) in _SOURCE_SYMBOL_TIES:
             selections = strategy.select_contracts(projection, tie_breaker_col="source_symbol")
         else:
             selections = strategy.select_contracts(projection)
@@ -648,7 +648,7 @@ def prepare_futures_inputs(
             "selection_policy": {
                 "kind": f"{type(strategy).__module__}.{type(strategy).__name__}",
                 "tie_breaker": "observation_definition_symbol_then_stable_id_string"
-                if isinstance(strategy, _SOURCE_SYMBOL_TIES)
+                if type(strategy) in _SOURCE_SYMBOL_TIES
                 else "strategy_defined",
                 "parameters": {
                     name: getattr(strategy, name)

@@ -380,7 +380,7 @@ The same calculation after cents-to-dollars conversion uses price change0.1 and 
 Neither notional value nor these marks establish cash settlement, margin or fills.
 
 These are unreleased source APIs. Isolated wheel and sdist checks qualified Data
-`0.2.2.dev53+g4a87b339c`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
+`0.2.2.dev57+ge83e6b086`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
 [`12a2c483f`](https://github.com/ml4t/backtest/commit/12a2c483f8f1fda54244af187db8bf44e6f85fc9)
 (`0.1.13.dev22+g12a2c483f`) on Python `3.12.11`. Actual Backtest `ContractSpec` and `Position`
 consumed the produced raw and converted fields, retaining IDs, paired marks and units; both
@@ -393,3 +393,11 @@ This source candidate requires Polars `>=1.36.1` and pandas-market-calendars `>=
 Isolated runs using the former advertised minima failed during ordinary Data import or calendar
 construction. The saved-file recipe passes with Polars `1.36.1`, pandas-market-calendars `5.4.0`
 and pandas `2.3.3`; those checks do not certify every possible dependency-version combination.
+The installed minimum pair passed 415 input/calendar/conversion cases with Arrow and 405 with 10
+optional Arrow skips without it. Captured Arrow Parquet timestamps retain adjacent nanoseconds;
+Arrow Date32/64 values, including nullable/empty inputs, remain civil dates.
+
+Built-in selectors use the dated source symbol to break ties, then stable ID strings. Identity
+does not change when a source symbol changes. Custom strategy subclasses retain the original
+`select_contracts(data, contract_spec=None)` call contract and their own tie policy; they are not
+required to accept the built-in selectors' optional `tie_breaker_col` keyword.
