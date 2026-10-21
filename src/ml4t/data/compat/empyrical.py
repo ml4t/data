@@ -169,10 +169,10 @@ def get_treasury_yield(start: Any = None, end: Any = None, period: str = "3MO") 
     """Return annual percent yield; legacy filling only affects existing reported rows."""
     from ml4t.data.providers.fred import FREDProvider
 
-    if period not in {"1MO", "3MO", "6MO", "1", "5", "10"}:
+    if period not in FREDProvider.TREASURY_SERIES:
         raise ValueError("Supported Treasury maturities:1MO,3MO,6MO,1,5,10")
-    name = "DGS" + period
-    with FREDProvider() as provider:
+    name = FREDProvider.TREASURY_SERIES[period]
+    with FREDProvider(anonymous=not bool(os.getenv("FRED_API_KEY"))) as provider:
         native = provider.fetch_series(
             name,
             _date("1970-01-01" if start is None else start),
@@ -183,7 +183,8 @@ def get_treasury_yield(start: Any = None, end: Any = None, period: str = "3MO") 
     values = polars_to_pandas(native).set_index("timestamp")["value"]
     missing = tuple(bool(value) for value in values.isna())
     result = values.ffill().to_frame(name)
-    result.index = pd.DatetimeIndex(result.index, name="DATE")
+    labels = [stamp.isoformat() for stamp in native["timestamp"]]
+    result.index = pd.DatetimeIndex(pd.to_datetime(labels), name="DATE")
     result.attrs.update(
         units="annual_percent_yield",
         source="FRED",
@@ -203,11 +204,12 @@ def get_symbol_returns_from_yahoo(symbol: str, start: Any = None, end: Any = Non
     with YahooFinanceProvider() as provider:
         native = provider.fetch_adjusted_close(symbol, start=start, end=end)
         index_name = provider.last_fetch_metadata["source_index_name"]
+        index_unit = provider.last_fetch_metadata["source_index_unit"]
     prices = polars_to_pandas(native).set_index("timestamp")["close"]
     result = prices.pct_change(fill_method=None).dropna().to_frame(symbol)
     if not np.isfinite(result.to_numpy(dtype=float)).all():
         raise DataValidationError("yahoo", "Adjusted-price percentage returns must be finite")
-    result.index = pd.DatetimeIndex(result.index).rename(index_name)
+    result.index = pd.DatetimeIndex(result.index).as_unit(index_unit).rename(index_name)
     result.attrs.update(
         price_basis="yahoo_auto_adjusted",
         missingness_policy="no_fill",

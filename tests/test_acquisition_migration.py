@@ -547,6 +547,31 @@ def test_unknown_treasury_source_units_cannot_be_labeled_annual_percent(fred_htt
         compat.get_treasury_yield("2024-01-02", "2024-01-04")
 
 
+def test_keyless_treasury_import_uses_real_public_csv_and_preserves_the_original_pandas_frame(
+    monkeypatch,
+):
+    monkeypatch.delenv("FRED_API_KEY", raising=False)
+    calls = []
+
+    def get(client, url, **kwargs):
+        calls.append((url, kwargs["params"]))
+        assert url == "https://fred.stlouisfed.org/graph/fredgraph.csv"
+        return httpx.Response(
+            200,
+            content=(CAPTURES / "fred-dgs3mo.csv").read_bytes(),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    actual = compat.get_treasury_yield("2024-01-02", "2024-01-04")
+    expected = pd.DataFrame(
+        {"DGS3MO": [5.46, 5.48, 5.48]},
+        index=pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"]).rename("DATE"),
+    )
+    assert_frame_equal(actual, expected)
+    assert calls[0][1] == {"id": "DGS3MO", "cosd": "2024-01-02", "coed": "2024-01-04"}
+
+
 def test_zero_predecessor_price_cannot_publish_infinite_yahoo_percentage_returns(captured_yahoo):
     _, frame, _ = captured_yahoo
     frame[("Close", "SPY")] = [0.0, 100.0, 102.0, 101.0]
@@ -585,6 +610,40 @@ def test_adjusted_float_price_oracle_preserves_both_simple_returns(captured_yaho
     actual = compat.get_symbol_returns_from_yahoo("SPY", "2024-01-02", "2024-01-06")
     assert actual.index.to_list() == list(pd.to_datetime(["2024-01-03", "2024-01-04"], utc=True))
     assert actual["SPY"].to_list() == pytest.approx([0.02, -1 / 102], rel=0, abs=1e-16)
+
+
+def test_actual_dst_sdk_capture_retains_exclusive_aware_bounds_source_clock_unit_and_date_name(
+    monkeypatch,
+):
+    from ml4t.data.providers import yahoo
+
+    capture = json.loads((CAPTURES / "yahoo-dst-provider.json").read_text())
+    request = capture["request"]
+    start, end = (pd.Timestamp(request[key]) for key in ("start", "end"))
+    frames = {}
+    for key, record in capture["records"].items():
+        frames[key] = pd.DataFrame(
+            record["data"],
+            columns=pd.MultiIndex.from_tuples(record["columns"]),
+            index=pd.DatetimeIndex(record["index"])
+            .astype(record["index_dtype"])
+            .rename(record["index_name"]),
+        )
+    calls = []
+
+    def download(symbol, **kwargs):
+        calls.append((symbol, kwargs))
+        return frames[str(kwargs["auto_adjust"])].copy(deep=True)
+
+    monkeypatch.setattr(yahoo.yf, "download", download)
+    actual = compat.get_symbol_returns_from_yahoo("SPY", start, end)
+    expected = frames["False"]["Adj Close"]["SPY"].pct_change(fill_method=None).dropna().to_frame()
+    expected.index = expected.index.tz_localize("UTC")
+    assert_frame_equal(actual, expected)
+    assert actual.index.to_list() == [pd.Timestamp("2025-03-10", tz="UTC")]
+    assert calls[0][1]["start"] == start
+    assert calls[0][1]["end"] == end
+    assert start.utcoffset() != end.utcoffset()
 
 
 @pytest.mark.parametrize(
@@ -675,3 +734,97 @@ def test_fred_native_monthly_cadence_does_not_request_impossible_daily_upsamplin
     assert result["timestamp"].to_list() == [date(2024, month, 1) for month in (1, 2, 3)]
     assert result["frequency"].to_list() == ["Monthly"] * 3
     assert "frequency" not in next(params for url, params in calls if url.endswith("/observations"))
+
+
+def test_public_scalar_route_preserves_unknown_units_and_missing_values_instead_of_inference(
+    monkeypatch,
+):
+    def get(client, url, **kwargs):
+        return httpx.Response(
+            200,
+            text="observation_date,GENERIC\n2024-01-02,17.0\n2024-01-03,.\n2024-01-04,18.0\n",
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    with FREDProvider(anonymous=True) as provider:
+        actual = provider.fetch_series("GENERIC", "2024-01-02", "2024-01-04")
+    assert actual["value"].to_list() == [17.0, None, 18.0]
+    assert actual["units"].null_count() == actual.height
+    assert actual["frequency"].null_count() == actual.height
+    assert actual["available_at"].null_count() == actual.height
+    assert actual["realtime_start"].null_count() == actual.height
+    assert actual["units_source"].to_list() == ["unknown"] * 3
+    assert actual["source_route"].to_list() == ["fredgraph_csv"] * 3
+
+
+@pytest.mark.parametrize("options", [{"vintage_date": "2024-02-01"}, {"frequency": "monthly"}])
+def test_public_csv_does_not_pretend_to_support_api_vintages_or_aggregation(monkeypatch, options):
+    from ml4t.data.core.exceptions import AuthenticationError
+
+    def fail(*args, **kwargs):
+        pytest.fail("Unsupported public CSV options must not attempt an API request")
+
+    monkeypatch.setattr(httpx.Client, "get", fail)
+    with FREDProvider(anonymous=True) as provider, pytest.raises(AuthenticationError):
+        provider.fetch_series("DGS3MO", "2024-01-02", "2024-01-04", **options)
+
+
+def test_a_configured_api_authentication_failure_never_falls_back_to_anonymous_access(monkeypatch):
+    from ml4t.data.core.exceptions import AuthenticationError
+
+    monkeypatch.setenv("FRED_API_KEY", "invalid-fixture-value-not-a-credential")
+    calls = []
+
+    def get(client, url, **kwargs):
+        calls.append(url)
+        return httpx.Response(
+            401, json={"error_message": "Invalid api_key"}, request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    with pytest.raises(AuthenticationError):
+        compat.get_treasury_yield("2024-01-02", "2024-01-04")
+    assert calls == ["https://api.stlouisfed.org/fred/series/observations"]
+
+
+def test_overlapping_factor_dataset_columns_keep_the_original_legacy_names_order_and_values(
+    french_http,
+):
+    result = compat.get_fama_french(
+        "2024-01-02",
+        "2024-01-02",
+        ("F-F_Research_Data_Factors_daily", "F-F_Research_Data_5_Factors_2x3_daily"),
+    )
+    assert result.columns.to_list() == [
+        "Mkt-RF",
+        "SMB",
+        "HML",
+        "RF",
+        "Mkt-RF",
+        "SMB",
+        "HML",
+        "RMW",
+        "CMA",
+        "RF",
+    ]
+    assert not any(str(name).endswith("_right") for name in result)
+    assert result.shape == (1, 10)
+    assert result.iloc[0].to_list() == pytest.approx(
+        [-0.007, -0.0055, 0.0079, 0.0002, -0.007, -0.0025, 0.0079, 0.0067, 0.0059, 0.0002],
+        rel=0,
+        abs=4e-18,
+    )
+
+
+def test_actual_ragged_factor_history_keeps_only_complete_cases_without_a_weekday_filter(
+    french_http,
+):
+    result = compat.get_fama_french("1926-07-01", "1926-11-06")
+    assert result.index.to_list() == list(
+        pd.to_datetime(["1926-11-03", "1926-11-04", "1926-11-05", "1926-11-06"], utc=True)
+    )
+    assert result.index[-1].weekday() == 5
+    assert result["Mom"].to_list() == pytest.approx(
+        [0.0055, -0.0051, 0.0117, -0.0003], rel=0, abs=4e-18
+    )

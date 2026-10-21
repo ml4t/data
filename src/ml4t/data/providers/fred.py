@@ -32,6 +32,7 @@ Example:
     >>> provider.close()
 """
 
+import io
 import os
 from typing import Any, ClassVar
 
@@ -73,6 +74,14 @@ class FREDProvider(BaseProvider):
 
     # FRED API base URL
     BASE_URL: ClassVar[str] = "https://api.stlouisfed.org/fred"
+    TREASURY_SERIES: ClassVar[dict[str, str]] = {
+        "1MO": "DGS1MO",
+        "3MO": "DGS3MO",
+        "6MO": "DGS6MO",
+        "1": "DGS1",
+        "5": "DGS5",
+        "10": "DGS10",
+    }
 
     # Map common frequency names to FRED frequency codes
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {
@@ -98,19 +107,24 @@ class FREDProvider(BaseProvider):
         self,
         api_key: str | None = None,
         rate_limit: tuple[int, float] | None = None,
-    ):
+        *,
+        anonymous: bool = False,
+    ) -> None:
         """Initialize FRED provider.
 
         Args:
             api_key: FRED API key (or set FRED_API_KEY env var).
                      Get free key at: https://fred.stlouisfed.org/docs/api/api_key.html
             rate_limit: Optional custom rate limit (calls, period_seconds)
+            anonymous: Use the public scalar CSV route without API credentials. No vintage,
+                aggregation or API metadata requests are available through that route.
 
         Raises:
             AuthenticationError: If API key is not provided
         """
         self.api_key = api_key or os.getenv("FRED_API_KEY")
-        if not self.api_key:
+        self.anonymous = anonymous
+        if not self.api_key and not anonymous:
             raise AuthenticationError(
                 provider="fred",
                 message="FRED API key required. Set FRED_API_KEY "
@@ -126,6 +140,43 @@ class FREDProvider(BaseProvider):
     def name(self) -> str:
         """Return provider name."""
         return "fred"
+
+    def _require_api(self) -> None:
+        if self.anonymous:
+            raise AuthenticationError(
+                "fred",
+                "API operations require credentials; anonymous mode supports scalar CSV only",
+            )
+
+    def _fetch_public_series(
+        self, series_id: str, start: str, end: str
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        response = self._request(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv",
+            resource=series_id,
+            params={"id": series_id.upper(), "cosd": start, "coed": end},
+        )
+        try:
+            frame = pl.read_csv(
+                io.StringIO(response.text), schema_overrides={series_id.upper(): pl.String}
+            )
+            if (
+                len(frame.columns) != 2
+                or frame.columns[0] not in {"observation_date", "DATE"}
+                or frame.columns[1] != series_id.upper()
+            ):
+                raise ValueError("Public CSV does not identify the requested scalar series")
+            records = frame.select(
+                pl.col(frame.columns[0]).alias("date"), pl.col(series_id.upper()).alias("value")
+            ).to_dicts()
+        except Exception as error:
+            raise DataValidationError("fred", f"Malformed public CSV for {series_id}") from error
+        treasury = series_id.upper() in self.TREASURY_SERIES.values()
+        return records, {
+            "units": "Percent" if treasury else None,
+            "frequency": "Daily" if treasury else None,
+            "units_source": "FRED_series_definition" if treasury else "unknown",
+        }
 
     def _fetch_raw_data(
         self,
@@ -148,6 +199,7 @@ class FREDProvider(BaseProvider):
         Returns:
             List of observation dictionaries from FRED API
         """
+        self._require_api()
         series_id = symbol.upper()
 
         # Map frequency if provided
@@ -360,9 +412,20 @@ class FREDProvider(BaseProvider):
             from datetime import date
 
             date.fromisoformat(vintage_date)
-        self._acquire_rate_limit()
-        records = self._fetch_raw_data(series_id, start, end, frequency, vintage_date=vintage_date)
-        metadata = self.fetch_series_metadata(series_id, vintage_date=vintage_date)
+        if self.anonymous:
+            if frequency is not None or vintage_date is not None:
+                raise AuthenticationError(
+                    "fred", "Vintage/aggregation requests require API credentials"
+                )
+            records, metadata = self._fetch_public_series(series_id, start, end)
+            source_route = "fredgraph_csv"
+        else:
+            self._acquire_rate_limit()
+            records = self._fetch_raw_data(
+                series_id, start, end, frequency, vintage_date=vintage_date
+            )
+            metadata = self.fetch_series_metadata(series_id, vintage_date=vintage_date)
+            source_route = "fred_api"
         schema = {
             "timestamp": pl.Date,
             "series_id": pl.String,
@@ -370,6 +433,8 @@ class FREDProvider(BaseProvider):
             "units": pl.String,
             "frequency": pl.String,
             "source": pl.String,
+            "source_route": pl.String,
+            "units_source": pl.String,
             "realtime_start": pl.Date,
             "realtime_end": pl.Date,
             "vintage_date": pl.Date,
@@ -386,6 +451,8 @@ class FREDProvider(BaseProvider):
                 pl.lit(metadata.get("units"), dtype=pl.String).alias("units"),
                 pl.lit(frequency or metadata.get("frequency"), dtype=pl.String).alias("frequency"),
                 pl.lit("FRED").alias("source"),
+                pl.lit(source_route).alias("source_route"),
+                pl.lit(metadata.get("units_source", "FRED_API_metadata")).alias("units_source"),
                 *[
                     pl.col(name).str.to_date()
                     if name in frame.columns
@@ -496,6 +563,7 @@ class FREDProvider(BaseProvider):
             >>> print(meta['frequency'])
             'Daily, Close'
         """
+        self._require_api()
         series_id = series_id.upper()
 
         endpoint = f"{self.BASE_URL}/series"

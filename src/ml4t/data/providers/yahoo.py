@@ -220,6 +220,7 @@ class YahooFinanceProvider(BaseProvider):
                 raise DataValidationError(self.name, "Known adjusted closes must be finite")
             self.last_fetch_metadata = {
                 "source_index_name": frame.index.name,
+                "source_index_unit": frame.index.unit,
                 "price_basis": "yahoo_auto_adjusted",
                 "source_package_version": str(getattr(yf, "__version__", "unknown")),
             }
