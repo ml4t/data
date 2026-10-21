@@ -18,10 +18,12 @@ from ml4t.data.core.revisions import (
     utc_stamp,
 )
 from ml4t.data.futures.roll import (
+    FirstNoticeDateRoll,
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     OpenInterestBasedRoll,
     RollStrategy,
+    TimeBasedRoll,
     VolumeBasedRoll,
     build_roll_events,
 )
@@ -322,6 +324,26 @@ def prepare_futures_inputs(
         raise ValueError("Roll inputs require one declared source observation per contract/session")
     normalized = _normalized_prices(source, feed, price_quote_unit)
     strategy = roll_strategy or VolumeBasedRoll()
+    if type(strategy) is TimeBasedRoll:
+        strategy = TimeBasedRoll(
+            strategy.days_before_expiration,
+            strategy.use_business_days,
+            calendar=selected_calendar,
+            feed_spec=feed,
+        )
+    elif type(strategy) is FirstNoticeDateRoll:
+        strategy = FirstNoticeDateRoll(
+            strategy.days_before_first_notice,
+            calendar=selected_calendar,
+            feed_spec=feed,
+        )
+        if normalized.filter(
+            (pl.col("instrument_settlement_type") == "physical")
+            & pl.col("instrument_first_notice_date").is_null()
+        ).height:
+            raise ValueError(
+                "Dated physical notice selection requires actual first_notice_date facts"
+            )
     requested = (
         "open_interest"
         if isinstance(strategy, HighestOpenInterestRoll | OpenInterestBasedRoll)
@@ -338,6 +360,7 @@ def prepare_futures_inputs(
             pl.col(_DATE).alias("date"),
             pl.col(_ID).alias("symbol"),
             pl.col("instrument_expiration").alias("expiration"),
+            pl.col("instrument_first_notice_date").alias("first_notice_date"),
             pl.col(feed.price_col).alias("close"),
         )
         for metric in ("volume", "open_interest"):
@@ -473,7 +496,31 @@ def prepare_futures_inputs(
             "perspective": "retrospective" if as_of is None else "causal_current_decision",
             "as_of": None if as_of is None else utc_stamp(as_of).isoformat(),
             "selection_scope": "one current source-vintage decision per root/venue,not backdated account history",
+            "selection_policy": {
+                "kind": f"{type(strategy).__module__}.{type(strategy).__name__}",
+                "parameters": {
+                    name: getattr(strategy, name)
+                    for name in (
+                        "rank",
+                        "min_volume",
+                        "min_oi",
+                        "lookback_days",
+                        "min_days_between_rolls",
+                        "days_before_expiration",
+                        "use_business_days",
+                        "days_before_first_notice",
+                    )
+                    if hasattr(strategy, name)
+                },
+                "calendar": selected_calendar,
+            },
             "raw_metric_availability": "raw bar fields retain source values;only metrics qualifies independent OI/volume publication",
             "roll_scope": "paired raw source marks and selection switches,not fills or continuous-price execution",
+            "notice_method": "source_dates"
+            if isinstance(strategy, FirstNoticeDateRoll)
+            and normalized["instrument_first_notice_date"].is_not_null().any()
+            else "expiration_only"
+            if isinstance(strategy, FirstNoticeDateRoll)
+            else "not_requested",
         },
     )

@@ -10,9 +10,14 @@ from polars.testing import assert_frame_equal
 import ml4t.data.futures as futures
 from ml4t.data.futures import (
     ContinuousContractBuilder,
+    ContractSpec,
+    FirstNoticeDateRoll,
+    FuturesAssetClass,
     HighestOpenInterestRoll,
     HighestVolumeRoll,
     NoAdjustment,
+    SettlementType,
+    TimeBasedRoll,
     load_databento_definitions,
     load_databento_ohlcv,
 )
@@ -100,6 +105,7 @@ def test_source_file_selection_matches_lagged_builder_and_retains_actual_paired_
     ]
     assert second.bars["close"].to_list() == [4000, 4010, 4010, 4020, 4020, 4030]
     assert second.metadata["calendar"] == "CME_Equity"
+    assert second.metadata["selection_policy"]["parameters"] == {"rank": 0, "min_volume": 0}
 
 
 def test_delayed_open_interest_does_not_enter_an_earlier_current_selection(tmp_path):
@@ -175,3 +181,102 @@ def test_a_missing_old_leg_is_not_replaced_with_a_continuous_price_or_a_syntheti
             roll_strategy=HighestVolumeRoll(),
             feed_spec=contract_feed(),
         )
+
+
+def test_actual_dated_notice_is_not_replaced_with_an_expiry_offset_estimate(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    first = futures.prepare_futures_inputs(
+        bars,
+        definitions,
+        as_of=datetime(2025, 7, 8, 21, 30, tzinfo=UTC),
+        roll_strategy=FirstNoticeDateRoll(1),
+        feed_spec=contract_feed(),
+    )
+    second = futures.prepare_futures_inputs(
+        bars,
+        definitions,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=FirstNoticeDateRoll(1),
+        feed_spec=contract_feed(),
+    )
+    assert first.selections["selected_instrument_id"].to_list() == [17]
+    assert second.selections["selected_instrument_id"].to_list() == [23]
+    assert second.metadata["notice_method"] == "source_dates"
+
+
+@pytest.mark.parametrize("calendar,expected", [("NYSE", 23), ("24/7", 17)])
+def test_calendar_argument_binds_the_strategy_without_mutating_its_original_configuration(
+    tmp_path, calendar, expected
+):
+    bars, definitions = captured_contract_files(tmp_path)
+    strategy = TimeBasedRoll(5)
+    result = futures.prepare_futures_inputs(
+        bars,
+        definitions,
+        as_of=datetime(2025, 7, 8, 21, 30, tzinfo=UTC),
+        roll_strategy=strategy,
+        feed_spec=contract_feed(),
+        calendar=calendar,
+    )
+    assert result.selections["selected_instrument_id"].to_list() == [expected]
+    assert result.metadata["calendar"] == calendar
+    assert strategy.calendar == "NYSE"
+
+
+def test_calendar_none_does_not_silently_leave_a_scheduled_expiry_strategy_enabled(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    with pytest.raises(ValueError, match="row-based"):
+        futures.prepare_futures_inputs(
+            bars,
+            definitions,
+            as_of=datetime(2025, 7, 8, 21, 30, tzinfo=UTC),
+            roll_strategy=TimeBasedRoll(5),
+            feed_spec=contract_feed(),
+            calendar=None,
+        )
+
+
+def test_cents_normalization_preserves_raw_quotes_and_currency_per_declared_quote_unit(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    raw = bars.with_columns(pl.lit("cents").alias("price_quote_unit"))
+    terms = definitions.with_columns(pl.lit("cents").alias("price_quote_unit"))
+    result = futures.prepare_futures_inputs(
+        raw,
+        terms,
+        as_of=datetime(2025, 7, 9, 21, 30, tzinfo=UTC),
+        roll_strategy=HighestVolumeRoll(),
+        feed_spec=contract_feed(),
+        price_quote_unit="dollars",
+    )
+    a = result.bars.filter(pl.col("asset") == 17)
+    assert a["close"].to_list() == [4000, 4010, 4020]
+    assert a["normalized_close"].to_list() == pytest.approx([40, 40.1, 40.2])
+    assert a["normalized_multiplier"].to_list() == [5000] * 3
+    assert a["normalized_tick_size"].to_list() == [0.0025] * 3
+    pnl = (a["normalized_close"][1] - a["normalized_close"][0]) * a["normalized_multiplier"][0]
+    assert pnl == pytest.approx(500)
+    assert result.rolls["old_mark"].to_list() == [4020]
+    assert result.rolls["old_price_quote_unit"].to_list() == ["cents"]
+    assert_frame_equal(raw, bars.with_columns(pl.lit("cents").alias("price_quote_unit")))
+
+
+def test_an_explicit_zero_legacy_notice_offset_is_not_replaced_with_twenty_five_days(tmp_path):
+    bars, definitions = captured_contract_files(tmp_path)
+    data = bars.rename({"timestamp": "date"}).join(
+        definitions.select("asset", "expiration"), on="asset", how="left"
+    )
+    spec = ContractSpec(
+        ticker="TEST",
+        name="Captured contract",
+        exchange="CME",
+        asset_class=FuturesAssetClass.EQUITY_INDEX,
+        multiplier=50,
+        tick_size=0.25,
+        tick_value=12.5,
+        price_quote_unit="index_points",
+        settlement_type=SettlementType.PHYSICAL,
+        contract_months="NU",
+        first_notice_days=0,
+    )
+    selected = FirstNoticeDateRoll(1, feed_spec=contract_feed()).select_contracts(data, spec)
+    assert selected["symbol"].to_list() == ["TESTN2025"] * 3

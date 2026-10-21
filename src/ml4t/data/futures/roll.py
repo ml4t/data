@@ -182,7 +182,11 @@ class TimeBasedRoll(RollStrategy):
 
 
 class FirstNoticeDateRoll(RollStrategy):
-    """Select physical contracts before the configured first-notice interval."""
+    """Select contracts before supplied dated notice facts,or a legacy root-offset estimate.
+
+    A first_notice_date column takes precedence over root estimates. Without actual dates,the
+    existing ContractSpec fallback remains;zero notice days is distinct from an unknown offset.
+    """
 
     def __init__(
         self,
@@ -199,9 +203,45 @@ class FirstNoticeDateRoll(RollStrategy):
     def select_contracts(
         self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
     ) -> pl.DataFrame:
+        if "first_notice_date" in data.columns and data["first_notice_date"].is_not_null().any():
+            _require_columns(data, "date", "symbol", "expiration")
+            if data.schema["first_notice_date"] != pl.Date:
+                raise ValueError("first_notice_date must contain explicit civil dates")
+            expirations = dict(_contract_expirations(data))
+            notice_offset = TimeBasedRoll(
+                self.days_before_first_notice,
+                calendar=self._time_roll.calendar,
+                feed_spec=self._time_roll.feed_spec,
+            )
+            triggers = {}
+            for symbol, expiration in expirations.items():
+                notices = data.filter(pl.col("symbol") == symbol)["first_notice_date"].unique()
+                if len(notices) != 1:
+                    raise ValueError(f"Contract {symbol} has conflicting first-notice dates")
+                notice = notices[0]
+                triggers[symbol] = (
+                    self._time_roll._calculate_roll_date(expiration)
+                    if notice is None
+                    else notice_offset._calculate_roll_date(notice)
+                )
+            available = _available_symbols_by_date(data)
+            records = []
+            for observation_date in _dates(data):
+                eligible = [
+                    symbol
+                    for symbol in available[observation_date]
+                    if symbol in triggers and observation_date < triggers[symbol]
+                ]
+                if eligible:
+                    selected = min(eligible, key=lambda symbol: (expirations[symbol], symbol))
+                    records.append({"date": observation_date, "symbol": selected})
+            return _selection_frame(records)
         if contract_spec is None or contract_spec.is_cash_settled:
             return self._time_roll.select_contracts(data, contract_spec)
-        days = (contract_spec.first_notice_days or 25) + self.days_before_first_notice
+        notice_days = (
+            25 if contract_spec.first_notice_days is None else contract_spec.first_notice_days
+        )
+        days = notice_days + self.days_before_first_notice
         return TimeBasedRoll(
             days_before_expiration=days,
             calendar=self._time_roll.calendar,
