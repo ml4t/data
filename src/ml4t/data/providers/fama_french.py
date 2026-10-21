@@ -1055,8 +1055,8 @@ class FamaFrenchProvider(BaseProvider):
                 for v in values:
                     try:
                         val = float(v)
-                        # Handle missing value indicators (-99 etc) and convert to decimal
-                        parsed_val = None if val < -90 else val / 100
+                        # Only the published source sentinels mean missing,not extreme returns.
+                        parsed_val = None if val in {-99.99, -999} else val / 100
                         parsed_values.append(parsed_val)
                     except ValueError:
                         parsed_values.append(None)

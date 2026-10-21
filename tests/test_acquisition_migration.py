@@ -1,7 +1,9 @@
 """Exercise captured acquisition, disk cache and scalar-series contracts without live services."""
 
+import io
 import json
 import os
+import zipfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -18,6 +20,32 @@ from ml4t.data.providers.fama_french import FamaFrenchProvider
 from ml4t.data.providers.fred import FREDProvider
 
 CAPTURES = Path(__file__).parent / "fixtures" / "acquisition"
+
+
+def test_official_missing_markers_do_not_turn_a_valid_extreme_factor_return_into_a_gap(
+    french_http, monkeypatch
+):
+    with zipfile.ZipFile(CAPTURES / "F-F_Momentum_Factor_daily_CSV.zip") as archive:
+        lines = archive.read(archive.namelist()[0]).decode().splitlines()
+    header = lines[: lines.index(",Mom") + 1]
+    content = "\n".join(header + ["20240102,-95", "20240103,-99.99", "20240104,-999", "20240105,0"])
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr("momentum.csv", content)
+    original = httpx.Client.get
+
+    def get(client, url, **kwargs):
+        if "F-F_Momentum_Factor_daily" not in url:
+            return original(client, url, **kwargs)
+        return httpx.Response(200, content=payload.getvalue(), request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.Client, "get", get)
+    with FamaFrenchProvider(use_cache=False) as provider:
+        native = provider.fetch("mom", "daily", "2024-01-02", "2024-01-05")
+    assert native["MOM"].to_list() == [-0.95, None, None, 0.0]
+    result = compat.get_fama_french("2024-01-02", "2024-01-05")
+    assert result.index.to_list() == list(pd.to_datetime(["2024-01-02", "2024-01-05"], utc=True))
+    assert result["Mom"].to_list() == [-0.95, 0.0]
 
 
 @pytest.fixture
