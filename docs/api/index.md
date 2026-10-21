@@ -567,3 +567,40 @@ shows symbol normalization,pre-entry observations and actual source revisions.
     options:
       show_source: false
       heading_level: 3
+
+## Portable input capture
+
+Capture selected tables and caller-declared effective configuration, then verify all members before
+returning reconstructed native frames. See the [storage contract](../user-guide/storage.md#portable-input-snapshots)
+and [migration recipe](../getting-started/migration.md#reconstruct-inputs-after-source-pruning).
+Optional bundle exchange uses standard Zipline readers/writers only in the conversion environment.
+
+::: ml4t.data.storage.SnapshotTable
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.storage.InputSnapshot
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.storage.export_snapshot
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.storage.read_snapshot
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.compat.zipline.export_bundle
+    options:
+      show_source: false
+      heading_level: 3
+
+::: ml4t.data.compat.zipline.make_bundle_ingest
+    options:
+      show_source: false
+      heading_level: 3

@@ -1,12 +1,15 @@
 """A real offline bundle producer using Zipline's normal ingestion mechanism."""
 
+from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 
-def produce_bundle(root: Path, name: str):
+def produce_bundle(root: Path, name: str, *, minute_scale: int | None = None):
     from zipline.data import bundles
 
     start, end = pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-04")
@@ -89,6 +92,8 @@ def produce_bundle(root: Path, name: str):
         minutes = []
         for sid, close in prices.items():
             values = np.array([close[0], close[0] + 0.25, close[0] + 0.5])
+            if minute_scale is not None and sid == 1:
+                values = np.array([1.0001, 1.0002, 1.0003])
             frame = pd.DataFrame(
                 {
                     "open": values,
@@ -132,7 +137,18 @@ def produce_bundle(root: Path, name: str):
 
     bundles.register(name, ingest, calendar_name="XNYS", start_session=start, end_session=end)
     environ = {"ZIPLINE_ROOT": str(root)}
-    bundles.ingest(name, environ=environ, timestamp=pd.Timestamp("2024-02-01", tz="UTC"))
+    from zipline.data.bcolz_minute_bars import BcolzMinuteBarWriter
+
+    configured = (
+        nullcontext()
+        if minute_scale is None
+        else patch(
+            "zipline.data.bundles.core.BcolzMinuteBarWriter",
+            partial(BcolzMinuteBarWriter, default_ohlc_ratio=minute_scale),
+        )
+    )
+    with configured:
+        bundles.ingest(name, environ=environ, timestamp=pd.Timestamp("2024-02-01", tz="UTC"))
     return (
         bundles.load(name, environ=environ, timestamp=pd.Timestamp("2024-02-02", tz="UTC")),
         source,

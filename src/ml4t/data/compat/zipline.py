@@ -485,6 +485,20 @@ def make_bundle_ingest(snapshot: str | Path) -> Callable[..., None]:
                 frame = group.set_index(pd.DatetimeIndex(group["timestamp"]))[_FIELDS].copy()
                 if name == "daily_bars":
                     frame.index = frame.index.tz_localize(None)
+                scale = 1000 if name == "daily_bars" else writer.ohlc_ratio_for_sid(int(sid))
+                prices = frame[_FIELDS[:4]].to_numpy()
+                present = ~np.isnan(prices)
+                encoded = np.rint(prices[present] * scale)
+                if (
+                    not np.isfinite(encoded).all()
+                    or (encoded <= 0).any()
+                    or (encoded >= np.iinfo(np.uint32).max).any()
+                    or not np.array_equal(encoded * (1.0 / scale), prices[present])
+                ):
+                    raise ValueError(
+                        f"The {name} writer cannot preserve price precision for sid {sid}; "
+                        "configure a compatible minute price scale or retain the native snapshot"
+                    )
                 chunks.append((int(sid), frame))
             prepared_bars.append((writer, chunks))
         prepared_adjustments = {}

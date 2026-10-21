@@ -40,6 +40,89 @@ def source_bundle(tmp_path):
         bundles.unregister(name)
 
 
+@pytest.mark.parametrize("target_scale", [1000, 10000])
+def test_minute_precision_is_rejected_before_writes_or_preserved_by_configured_writer(
+    tmp_path, target_scale
+):
+    from functools import partial
+    from unittest.mock import patch
+
+    from zipline.data.bcolz_minute_bars import BcolzMinuteBarWriter
+
+    source_name, target_name = "precise-source-" + uuid4().hex, "precise-target-" + uuid4().hex
+    bundle, original, _ = produce_bundle(tmp_path / "source", source_name, minute_scale=10000)
+    writes = []
+    try:
+        minutes = original["minute_dates"]
+        export_bundle(
+            bundle,
+            tmp_path / "snapshot",
+            namespace="precise-source",
+            source_revision="precision-v1",
+            sids=[1],
+            start=minutes[0],
+            end=minutes[-1],
+            frequencies=("minute",),
+        )
+        callback = make_bundle_ingest(tmp_path / "snapshot")
+
+        def ingest(*args):
+            args = list(args)
+            asset_writer = args[1]
+            original_write = asset_writer.write_direct
+
+            def record_write(**kwargs):
+                writes.append("assets")
+                return original_write(**kwargs)
+
+            asset_writer.write_direct = record_write
+            callback(*args)
+
+        bundles.register(
+            target_name,
+            ingest,
+            calendar_name="XNYS",
+            start_session=pd.Timestamp("2024-01-02"),
+            end_session=pd.Timestamp("2024-01-04"),
+        )
+        environment = {"ZIPLINE_ROOT": str(tmp_path / "target")}
+        with patch(
+            "zipline.data.bundles.core.BcolzMinuteBarWriter",
+            partial(BcolzMinuteBarWriter, ohlc_ratios_per_sid={1: target_scale}),
+        ):
+            if target_scale == 1000:
+                with pytest.raises(ValueError, match="price precision"):
+                    bundles.ingest(
+                        target_name,
+                        environ=environment,
+                        timestamp=pd.Timestamp("2024-02-03", tz="UTC"),
+                    )
+                assert writes == []
+            else:
+                bundles.ingest(
+                    target_name, environ=environment, timestamp=pd.Timestamp("2024-02-03", tz="UTC")
+                )
+        if target_scale != 1000:
+            with bundles.load(
+                target_name, environ=environment, timestamp=pd.Timestamp("2024-02-04", tz="UTC")
+            ) as restored:
+                for before, after in zip(
+                    bundle.equity_minute_bar_reader.load_raw_arrays(
+                        ["open", "high", "low", "close", "volume"], minutes[0], minutes[-1], [1]
+                    ),
+                    restored.equity_minute_bar_reader.load_raw_arrays(
+                        ["open", "high", "low", "close", "volume"], minutes[0], minutes[-1], [1]
+                    ),
+                    strict=True,
+                ):
+                    np.testing.assert_array_equal(after, before)
+    finally:
+        bundle.close()
+        bundles.unregister(source_name)
+        if target_name in bundles.bundles:
+            bundles.unregister(target_name)
+
+
 def test_real_bundle_export_preserves_source_and_reingests_daily_minute_actions_and_contracts(
     tmp_path,
 ):
