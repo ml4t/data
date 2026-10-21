@@ -79,7 +79,7 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
     "ml4t-specs>=0.2.0",
     # Data processing
-    "polars>=0.20.0",
+    "polars>=1.36.1",
     "pandas>=2.0.0",
     "numpy>=1.24.0",
     # HTTP and networking
@@ -100,7 +100,7 @@ dependencies = [
     "rich>=13.0.0",
     "aiofiles>=23.0.0", # Async file I/O for async storage backends
     # Exchange calendars for session-aware operations
-    "pandas-market-calendars>=4.3.0",
+    "pandas-market-calendars>=5.4.0",
     "openpyxl>=3.1.5",
 ]
 

@@ -67,6 +67,8 @@ class VolumeBasedRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         return _lagged_rank_selections(
             data,
@@ -75,6 +77,7 @@ class VolumeBasedRoll(RollStrategy):
             minimum=0,
             confirmation=self.lookback_days,
             min_days_between_rolls=self.min_days_between_rolls,
+            tie_breaker_col=tie_breaker_col,
         )
 
 
@@ -90,6 +93,8 @@ class OpenInterestBasedRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         return _lagged_rank_selections(
             data,
@@ -98,6 +103,7 @@ class OpenInterestBasedRoll(RollStrategy):
             minimum=0,
             confirmation=self.lookback_days,
             min_days_between_rolls=0,
+            tie_breaker_col=tie_breaker_col,
         )
 
 
@@ -109,6 +115,7 @@ class TimeBasedRoll(RollStrategy):
     select a calendar. A missing target session never moves the trigger to an earlier observation.
     ``use_business_days=False`` selects elapsed civil days, not an observation count.
     Calendar-free row-based expiry offsets are unsupported in session-count mode.
+    Equal expirations use the declared tie_breaker_col,then contract identity;the default is symbol.
     """
 
     def __init__(
@@ -135,8 +142,11 @@ class TimeBasedRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         _require_columns(data, "date", "symbol", "expiration")
+        ties = _tie_values(data, tie_breaker_col)
         dates = _dates(data)
         if not dates:
             return _empty_selections()
@@ -155,7 +165,13 @@ class TimeBasedRoll(RollStrategy):
             ]
             if eligible:
                 records.append(
-                    {"date": observation_date, "symbol": min(eligible, key=lambda item: item[1])[0]}
+                    {
+                        "date": observation_date,
+                        "symbol": min(
+                            eligible,
+                            key=lambda item: (item[1], ties[(observation_date, item[0])], item[0]),
+                        )[0],
+                    }
                 )
         return _selection_frame(records)
 
@@ -182,7 +198,11 @@ class TimeBasedRoll(RollStrategy):
 
 
 class FirstNoticeDateRoll(RollStrategy):
-    """Select physical contracts before the configured first-notice interval."""
+    """Select contracts before supplied dated notice facts,or a legacy root-offset estimate.
+
+    A first_notice_date column takes precedence over root estimates. Without actual dates,the
+    existing ContractSpec fallback remains;zero notice days is distinct from an unknown offset.
+    """
 
     def __init__(
         self,
@@ -197,16 +217,66 @@ class FirstNoticeDateRoll(RollStrategy):
         self._time_roll = TimeBasedRoll(calendar=calendar, feed_spec=feed_spec)
 
     def select_contracts(
-        self, data: pl.DataFrame, contract_spec: ContractSpec | None = None
+        self,
+        data: pl.DataFrame,
+        contract_spec: ContractSpec | None = None,
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
+        if "first_notice_date" in data.columns and data["first_notice_date"].is_not_null().any():
+            _require_columns(data, "date", "symbol", "expiration")
+            if data.schema["first_notice_date"] != pl.Date:
+                raise ValueError("first_notice_date must contain explicit civil dates")
+            expirations = dict(_contract_expirations(data))
+            ties = _tie_values(data, tie_breaker_col)
+            notice_offset = TimeBasedRoll(
+                self.days_before_first_notice,
+                calendar=self._time_roll.calendar,
+                feed_spec=self._time_roll.feed_spec,
+            )
+            triggers = {}
+            for symbol, expiration in expirations.items():
+                notices = data.filter(pl.col("symbol") == symbol)["first_notice_date"].unique()
+                if len(notices) != 1:
+                    raise ValueError(f"Contract {symbol} has conflicting first-notice dates")
+                notice = notices[0]
+                triggers[symbol] = (
+                    self._time_roll._calculate_roll_date(expiration)
+                    if notice is None
+                    else notice_offset._calculate_roll_date(notice)
+                )
+            available = _available_symbols_by_date(data)
+            records = []
+            for observation_date in _dates(data):
+                eligible = [
+                    symbol
+                    for symbol in available[observation_date]
+                    if symbol in triggers and observation_date < triggers[symbol]
+                ]
+                if eligible:
+                    selected = min(
+                        eligible,
+                        key=lambda symbol: (
+                            expirations[symbol],
+                            ties[(observation_date, symbol)],
+                            symbol,
+                        ),
+                    )
+                    records.append({"date": observation_date, "symbol": selected})
+            return _selection_frame(records)
         if contract_spec is None or contract_spec.is_cash_settled:
-            return self._time_roll.select_contracts(data, contract_spec)
-        days = (contract_spec.first_notice_days or 25) + self.days_before_first_notice
+            return self._time_roll.select_contracts(
+                data, contract_spec, tie_breaker_col=tie_breaker_col
+            )
+        notice_days = (
+            25 if contract_spec.first_notice_days is None else contract_spec.first_notice_days
+        )
+        days = notice_days + self.days_before_first_notice
         return TimeBasedRoll(
             days_before_expiration=days,
             calendar=self._time_roll.calendar,
             feed_spec=self._time_roll.feed_spec,
-        ).select_contracts(data, contract_spec)
+        ).select_contracts(data, contract_spec, tie_breaker_col=tie_breaker_col)
 
 
 class CalendarRoll(RollStrategy):
@@ -221,8 +291,11 @@ class CalendarRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         _require_columns(data, "date", "symbol", "expiration")
+        tie_columns = _tie_columns(data, tie_breaker_col)
         records = []
         for observation_date in _dates(data):
             ranked = (
@@ -231,7 +304,7 @@ class CalendarRoll(RollStrategy):
                     & pl.col("expiration").is_not_null()
                     & (pl.col("expiration") > observation_date)
                 )
-                .sort(["expiration", "symbol"])
+                .sort(["expiration", *tie_columns])
                 .select("symbol")
             )
             if ranked.height > self.rank:
@@ -254,6 +327,8 @@ class HighestVolumeRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         return _lagged_rank_selections(
             data,
@@ -262,6 +337,7 @@ class HighestVolumeRoll(RollStrategy):
             minimum=self.min_volume,
             confirmation=1,
             min_days_between_rolls=0,
+            tie_breaker_col=tie_breaker_col,
         )
 
 
@@ -280,6 +356,8 @@ class HighestOpenInterestRoll(RollStrategy):
         self,
         data: pl.DataFrame,
         contract_spec: ContractSpec | None = None,  # noqa: ARG002
+        *,
+        tie_breaker_col: str = "symbol",
     ) -> pl.DataFrame:
         return _lagged_rank_selections(
             data,
@@ -288,7 +366,26 @@ class HighestOpenInterestRoll(RollStrategy):
             minimum=self.min_oi,
             confirmation=1,
             min_days_between_rolls=0,
+            tie_breaker_col=tie_breaker_col,
         )
+
+
+def _tie_columns(data: pl.DataFrame, column: str) -> list[str]:
+    _require_columns(data, column)
+    if data[column].null_count():
+        raise ValueError("Contract tie-breaker values must be known")
+    return list(dict.fromkeys([column, "symbol"]))
+
+
+def _tie_values(data: pl.DataFrame, column: str) -> dict[tuple[date, str], Any]:
+    _require_columns(data, "date", "symbol")
+    _tie_columns(data, column)
+    facts = data.select("date", "symbol", pl.col(column).alias("__tie_breaker")).unique()
+    if facts.select("date", "symbol").is_duplicated().any():
+        raise ValueError("Conflicting tie-breaker facts for one contract observation")
+    return {
+        (observation_date, symbol): value for observation_date, symbol, value in facts.iter_rows()
+    }
 
 
 def _lagged_rank_selections(
@@ -299,8 +396,10 @@ def _lagged_rank_selections(
     minimum: float,
     confirmation: int,
     min_days_between_rolls: int,
+    tie_breaker_col: str,
 ) -> pl.DataFrame:
     _require_columns(data, "date", "symbol", metric)
+    tie_columns = _tie_columns(data, tie_breaker_col)
     non_null = data.filter(pl.col(metric).is_not_null())
     if non_null.is_empty() and metric == "open_interest":
         raise ValueError("No open interest data available")
@@ -310,7 +409,9 @@ def _lagged_rank_selections(
 
     observation_dates = _dates(data)
     ranked = (
-        valid.sort(["date", metric, "symbol"], descending=[False, True, False])
+        valid.sort(
+            ["date", metric, *tie_columns], descending=[False, True, *[False] * len(tie_columns)]
+        )
         .group_by("date", maintain_order=True)
         .agg(pl.col("symbol"))
     )

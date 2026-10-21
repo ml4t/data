@@ -162,6 +162,7 @@ class InstrumentRegistry:
         feed: FeedSpec,
         as_of: datetime | str | None,
         mode: Literal["stable_id", "symbol"],
+        include_fields: tuple[str, ...] = (),
     ) -> tuple[pl.DataFrame, pl.DataFrame, str]:
         asset = FeedSpec._coerce_entity_col(self._feed.entity_col) or "asset"
         entity = FeedSpec._coerce_entity_col(feed.entity_col) or "asset"
@@ -224,6 +225,11 @@ class InstrumentRegistry:
         output = matched.select(frame.columns)
         if asset != entity:
             output = output.with_columns(matched[prefix + asset].alias(asset))
+        for name in include_fields:
+            target = "instrument_" + name
+            if target in output.columns:
+                raise ValueError("Instrument metadata would collide with a captured source column")
+            output = output.with_columns(matched[prefix + name].alias(target))
         return output, used, asset
 
     def lifetimes(

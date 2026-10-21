@@ -299,3 +299,105 @@ failing validation.
 Remove the `garch_omega` argument from `SyntheticProvider`. The provider derives the per-period
 constant from `annual_volatility`, the requested frequency, `garch_alpha`, and `garch_beta` so the
 configured unconditional variance is preserved.
+
+## Prepare individual futures inputs
+
+Keep the existing `ContinuousContractBuilder` for continuous research prices. To prepare the
+individual contracts needed by a simulation, load saved observations and captured dated definitions,
+then request the source facts known at each actual decision cutoff:
+
+```python
+from ml4t.data.futures import HighestVolumeRoll, prepare_futures_inputs
+
+prepared = prepare_futures_inputs(
+    bars, definitions, as_of="2025-07-09T21:30:00Z",
+    roll_strategy=HighestVolumeRoll(), feed_spec=feed,
+)
+```
+
+Run the complete offline file-loader, continuous-builder and prepared-input comparison:
+
+```bash
+uv run python examples/futures_input_migration.py
+```
+
+The fictional TEST contracts use the CME Equity schedule, not a claim about a real contract's
+specification. The earlier cutoff selects ID17. Previous-observation volume later selects ID23;
+actual paired marks are4020/4030. Delayed ID23 open interest does not qualify the same decision,
+so the OI method still selects17. Source files and caller tables remain unchanged. Neither route
+fills missing observations. The legacy continuous builder does not itself certify historical
+field-publication times.
+
+Stable IDs identify contracts; they do not replace source names in financial tie ordering.
+Prepared selections use each observation's dated definition symbol for ties, with the stable ID
+string as a final disambiguator. Native `select_contracts(..., tie_breaker_col=...)` exposes this
+mapping explicitly; its default remains `symbol`. Equal-expiry time selections now use a
+deterministic symbol tie rather than interpreter-dependent set order. A rename alone is not a
+contract switch, and a current alias does not replace an earlier ranking observation's name.
+
+Input bars need declared timestamp/entity mappings, raw reference prices, `source`, `revision_id`,
+`available_at`, `currency`, `price_quote_unit` and nonempty `mark_kind`. Ranking metrics need their
+units in the definitions. Volume defaults to the bar's publication time unless
+`volume_available_at` is supplied. OI needs its own `open_interest_available_at` for causal ranking;
+do not copy a price's time into it. Supply `<metric>_revision_id` when metric revisions have their
+own identities. Repeated unchanged metrics retain their original capture; indistinguishable
+publication ties fail. `metrics` contains eligible field vintages. Raw `bars` deliberately retain
+captured OI values even when that field was published later; do not use them as causal OI features.
+
+Definitions extend the dated identity contract with root, venue, future instrument type, currency,
+multiplier, tick size, quote unit, settlement type and expiration. First-notice, last-trade and
+auto-close facts stay unknown unless supplied. Lifecycle fields retain Date versus Datetime
+semantics and precision. Known expiration/last-trade instants end eligibility at that instant;
+Date facts do not invent an intraday cutoff. A current selection also requires a currently valid
+identity interval. Stale bars cannot backdate a time/notice trigger. The request fails rather than
+guessing an unobserved replacement contract or an execution.
+
+Unknown contract terms are checked only for definitions actually used by observations or the
+current selected contract. An unrelated or future-effective definition cannot block an earlier
+valid request. For instant-labelled bars, both observation and publication must be at or before
+the cutoff. Publishing a preliminary end-labelled bar early does not make its future close visible.
+
+Use `definitions_feed_spec` when definitions use different identity/temporal mappings, and
+`identity_mode="symbol"` for explicit dated symbol-to-ID resolution. Calendar precedence remains
+explicit `calendar`, declared feed, then NYSE. Explicit `None` disables scheduling; it does not
+enable a session-count expiry policy without a schedule. Daily period-open/close instants use the
+selected authoritative session, including CME overnight trading. This preparation accepts one
+declared observation per contract/session; it is not an intraday execution engine.
+
+`definitions` and `chain` retain the facts used for observations and current decisions. Selection
+`definition_*` fields identify the current facts separately from each bar's `instrument_*` facts.
+Roll rows retain both raw marks, timestamps, publication/source/revision IDs, currencies and
+normalized marks/multipliers. Missing paired marks or conflicting mark kinds/currencies fail.
+`coverage` counts observed rows, not proof of a complete source chain or a calendar-complete price
+history. Use the calendar gap report for missing observations.
+
+Raw prices and volumes stay unchanged. With no conversion requested, normalized prices preserve
+their source dtype, including large integers. Explicit `price_quote_unit` conversion creates
+floating-point price fields with declared factors and adjusted multipliers/ticks; it performs no
+FX conversion. Read `metadata['normalized_feed_spec']` to consume those fields and
+`metadata['feed_spec']` for raw fields. A multiplier50 and price change10 imply USD500 per contract.
+The same calculation after cents-to-dollars conversion uses price change0.1 and multiplier5000.
+Neither notional value nor these marks establish cash settlement, margin or fills.
+
+These are unreleased source APIs. Isolated wheel and sdist checks qualified Data
+`0.2.2.dev57+ge83e6b086`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
+[`12a2c483f`](https://github.com/ml4t/backtest/commit/12a2c483f8f1fda54244af187db8bf44e6f85fc9)
+(`0.1.13.dev22+g12a2c483f`) on Python `3.12.11`. Actual Backtest `ContractSpec` and `Position`
+consumed the produced raw and converted fields, retaining IDs, paired marks and units; both
+produced the independently expected USD500 price P&L. These checks do not qualify simulated
+roll fills, settlement, margin or a complete released-package migration.
+Data does not replace Backtest's runtime history, account, roll execution or auto-close policy.
+The recipe needs no credentials, network, Reloaded package or Backtest installation.
+
+This source candidate requires Polars `>=1.36.1` and pandas-market-calendars `>=5.4.0`.
+Isolated runs using the former advertised minima failed during ordinary Data import or calendar
+construction. The saved-file recipe passes with Polars `1.36.1`, pandas-market-calendars `5.4.0`
+and pandas `2.3.3`; those checks do not certify every possible dependency-version combination.
+The installed minimum pair passed 415 input/calendar/conversion cases with Arrow and 405 with 10
+optional Arrow skips without it. Captured Arrow Parquet timestamps retain adjacent nanoseconds;
+Arrow Date32/64 values, including nullable/empty inputs, remain civil dates.
+
+Built-in selectors use the dated source symbol to break ties, then stable ID strings. Identity
+does not change when a source symbol changes. Custom strategy subclasses retain the original
+`select_contracts(data, contract_spec=None)` call contract and their own tie policy; they are not
+required to accept the built-in selectors' optional `tie_breaker_col` keyword.

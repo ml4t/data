@@ -460,6 +460,23 @@ elapsed days into row counts.
         - __init__
         - select_contracts
 
+## Versioned individual-contract inputs
+
+`prepare_futures_inputs` prepares individual bars, dated definitions, independently available
+volume/OI facts, one current selection per root/venue and paired source roll marks. It does not
+execute a continuous series or infer fills, margin or settlement. See the
+[offline migration recipe](../getting-started/migration.md#prepare-individual-futures-inputs).
+
+::: ml4t.data.futures.prepare_futures_inputs
+    options:
+      show_source: false
+      heading_level: 4
+
+::: ml4t.data.futures.FuturesInputs
+    options:
+      show_source: false
+      heading_level: 4
+
 ## Price-table representations
 
 Convert one price field between native long observations and a pandas clock-by-asset panel.
