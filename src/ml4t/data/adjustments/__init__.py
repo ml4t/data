@@ -15,6 +15,7 @@ from .core import (
     apply_dividends,
     apply_splits,
 )
+from .history import AdjustedHistory, prepare_adjusted_history
 from .inputs import apply_adjustment_factors, prepare_action_inputs
 
 __all__ = [
@@ -23,4 +24,6 @@ __all__ = [
     "apply_corporate_actions",
     "apply_adjustment_factors",
     "prepare_action_inputs",
+    "AdjustedHistory",
+    "prepare_adjusted_history",
 ]
