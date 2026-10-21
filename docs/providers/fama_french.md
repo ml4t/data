@@ -23,8 +23,8 @@ from ml4t.data.providers import FamaFrenchProvider
 provider = FamaFrenchProvider()
 
 # Core factors
-ff3 = provider.fetch("ff3", frequency="monthly")   # Mkt-RF, SMB, HML
-ff5 = provider.fetch("ff5", frequency="daily")     # +RMW, CMA
+ff3 = provider.fetch("ff3", frequency="monthly")   # Mkt-RF, SMB, HML, RF
+ff5 = provider.fetch("ff5", frequency="daily")     # +RMW, CMA, RF
 mom = provider.fetch("mom", frequency="monthly")   # Momentum
 
 # Combined (Carhart 4-Factor)
@@ -41,8 +41,8 @@ provider.close()
 
 | Dataset | Factors | Frequency |
 |---------|---------|-----------|
-| `ff3` | Mkt-RF, SMB, HML | Daily, Monthly |
-| `ff5` | Mkt-RF, SMB, HML, RMW, CMA | Daily, Monthly |
+| `ff3` | Mkt-RF, SMB, HML, RF | Daily, Monthly |
+| `ff5` | Mkt-RF, SMB, HML, RMW, CMA, RF | Daily, Monthly |
 | `mom` | MOM (Momentum) | Daily, Monthly |
 | `st_rev` | Short-Term Reversal | Monthly |
 | `lt_rev` | Long-Term Reversal | Monthly |
@@ -74,7 +74,7 @@ provider.close()
 | `ff3_developed` | Developed Markets |
 | `ff3_europe` | Europe |
 | `ff3_japan` | Japan |
-| `ff3_asia_ex_japan` | Asia Pacific ex Japan |
+| `ff3_asia_pacific` | Asia Pacific ex Japan |
 
 ---
 
@@ -99,6 +99,33 @@ ff5_mom = provider.fetch_combined(["ff5", "mom"])
 ```
 
 ---
+
+## Cache policy and source missingness
+
+The existing default remains an unbounded cache read, not a guarantee of source freshness.
+Choose a maximum age when freshness matters:
+
+```python
+from datetime import timedelta
+
+with FamaFrenchProvider(cache_path="./factor-cache") as provider:
+    fresh = provider.fetch("ff3_mom", frequency="daily", refresh=True)
+    cached = provider.fetch(
+        "ff3_mom", frequency="daily", offline=True, max_age=timedelta(days=1)
+    )
+```
+
+Offline calls never request the source. Under the declared age policy, stale or absent caches fail;
+`allow_stale=True` explicitly accepts stale data and labels it in `last_fetch_metadata`.
+`refresh=True` cannot be combined with `offline=True`. Downloads and cache contents are validated
+before atomic single-file replacement. A failed download or interrupted write preserves the last
+valid cache. Combined datasets retain separate capture metadata, not a fabricated common vintage.
+
+Source sentinels `-99.99` and `-999` mean missing. Other extreme returns remain observed values;
+a valid `-95%` is not a missing cell. Native tables retain nulls. The optional
+[Empyrical acquisition adapter](../getting-started/migration.md#empyrical-acquisition-utilities)
+uses the legacy complete-case sample, `Mom` spelling and pandas presentation without changing
+native `MOM` columns or date filters.
 
 ## Academic Citations
 

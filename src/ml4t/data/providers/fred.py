@@ -32,6 +32,7 @@ Example:
     >>> provider.close()
 """
 
+import io
 import os
 from typing import Any, ClassVar
 
@@ -73,6 +74,14 @@ class FREDProvider(BaseProvider):
 
     # FRED API base URL
     BASE_URL: ClassVar[str] = "https://api.stlouisfed.org/fred"
+    TREASURY_SERIES: ClassVar[dict[str, str]] = {
+        "1MO": "DGS1MO",
+        "3MO": "DGS3MO",
+        "6MO": "DGS6MO",
+        "1": "DGS1",
+        "5": "DGS5",
+        "10": "DGS10",
+    }
 
     # Map common frequency names to FRED frequency codes
     FREQUENCY_MAP: ClassVar[dict[str, str]] = {
@@ -98,19 +107,24 @@ class FREDProvider(BaseProvider):
         self,
         api_key: str | None = None,
         rate_limit: tuple[int, float] | None = None,
-    ):
+        *,
+        anonymous: bool = False,
+    ) -> None:
         """Initialize FRED provider.
 
         Args:
             api_key: FRED API key (or set FRED_API_KEY env var).
                      Get free key at: https://fred.stlouisfed.org/docs/api/api_key.html
             rate_limit: Optional custom rate limit (calls, period_seconds)
+            anonymous: Use the public scalar CSV route without API credentials. No vintage,
+                aggregation or API metadata requests are available through that route.
 
         Raises:
             AuthenticationError: If API key is not provided
         """
         self.api_key = api_key or os.getenv("FRED_API_KEY")
-        if not self.api_key:
+        self.anonymous = anonymous
+        if not self.api_key and not anonymous:
             raise AuthenticationError(
                 provider="fred",
                 message="FRED API key required. Set FRED_API_KEY "
@@ -127,12 +141,49 @@ class FREDProvider(BaseProvider):
         """Return provider name."""
         return "fred"
 
+    def _require_api(self) -> None:
+        if self.anonymous:
+            raise AuthenticationError(
+                "fred",
+                "API operations require credentials; anonymous mode supports scalar CSV only",
+            )
+
+    def _fetch_public_series(
+        self, series_id: str, start: str, end: str
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        response = self._request(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv",
+            resource=series_id,
+            params={"id": series_id.upper(), "cosd": start, "coed": end},
+        )
+        try:
+            frame = pl.read_csv(
+                io.StringIO(response.text), schema_overrides={series_id.upper(): pl.String}
+            )
+            if (
+                len(frame.columns) != 2
+                or frame.columns[0] not in {"observation_date", "DATE"}
+                or frame.columns[1] != series_id.upper()
+            ):
+                raise ValueError("Public CSV does not identify the requested scalar series")
+            records = frame.select(
+                pl.col(frame.columns[0]).alias("date"), pl.col(series_id.upper()).alias("value")
+            ).to_dicts()
+        except Exception as error:
+            raise DataValidationError("fred", f"Malformed public CSV for {series_id}") from error
+        treasury = series_id.upper() in self.TREASURY_SERIES.values()
+        return records, {
+            "units": "Percent" if treasury else None,
+            "frequency": "Daily" if treasury else None,
+            "units_source": "FRED_series_definition" if treasury else "unknown",
+        }
+
     def _fetch_raw_data(
         self,
         symbol: str,
         start: str,
         end: str,
-        frequency: str = "daily",
+        frequency: str | None = "daily",
         vintage_date: str | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch raw data from FRED API.
@@ -148,11 +199,12 @@ class FREDProvider(BaseProvider):
         Returns:
             List of observation dictionaries from FRED API
         """
+        self._require_api()
         series_id = symbol.upper()
 
         # Map frequency if provided
-        freq_code = self.FREQUENCY_MAP.get(frequency.lower())
-        if not freq_code:
+        freq_code = None if frequency is None else self.FREQUENCY_MAP.get(frequency.lower())
+        if frequency is not None and not freq_code:
             raise DataValidationError(
                 provider="fred",
                 message=f"Unsupported frequency '{frequency}'. "
@@ -169,8 +221,9 @@ class FREDProvider(BaseProvider):
             "file_type": "json",
             "observation_start": start,
             "observation_end": end,
-            "frequency": freq_code,
         }
+        if freq_code is not None:
+            params["frequency"] = freq_code
 
         # Point-in-time support via realtime_start/end
         if vintage_date:
@@ -339,6 +392,86 @@ class FREDProvider(BaseProvider):
 
         return df
 
+    def fetch_series(
+        self,
+        series_id: str,
+        start: str,
+        end: str,
+        *,
+        frequency: str | None = None,
+        vintage_date: str | None = None,
+    ) -> pl.DataFrame:
+        """Return scalar observations,including reported missing cells and source units.
+
+        The default omits API frequency aggregation and retains the series' native cadence.
+        Observation and realtime dates are labels,not historical publication instants. Even
+        a vintage request does not establish available_at;that field remains explicitly null.
+        """
+        self._validate_inputs(series_id, start, end, frequency or "daily")
+        if vintage_date is not None:
+            from datetime import date
+
+            date.fromisoformat(vintage_date)
+        if self.anonymous:
+            if frequency is not None or vintage_date is not None:
+                raise AuthenticationError(
+                    "fred", "Vintage/aggregation requests require API credentials"
+                )
+            records, metadata = self._fetch_public_series(series_id, start, end)
+            source_route = "fredgraph_csv"
+        else:
+            self._acquire_rate_limit()
+            records = self._fetch_raw_data(
+                series_id, start, end, frequency, vintage_date=vintage_date
+            )
+            metadata = self.fetch_series_metadata(series_id, vintage_date=vintage_date)
+            source_route = "fred_api"
+        schema = {
+            "timestamp": pl.Date,
+            "series_id": pl.String,
+            "value": pl.Float64,
+            "units": pl.String,
+            "frequency": pl.String,
+            "source": pl.String,
+            "source_route": pl.String,
+            "units_source": pl.String,
+            "realtime_start": pl.Date,
+            "realtime_end": pl.Date,
+            "vintage_date": pl.Date,
+            "available_at": pl.Datetime("ns", "UTC"),
+        }
+        if not records:
+            return pl.DataFrame(schema=schema)
+        try:
+            frame = pl.DataFrame(records)
+            frame = frame.select(
+                pl.col("date").str.to_date().alias("timestamp"),
+                pl.lit(series_id.upper()).alias("series_id"),
+                pl.col("value").replace(".", None).cast(pl.Float64),
+                pl.lit(metadata.get("units"), dtype=pl.String).alias("units"),
+                pl.lit(frequency or metadata.get("frequency"), dtype=pl.String).alias("frequency"),
+                pl.lit("FRED").alias("source"),
+                pl.lit(source_route).alias("source_route"),
+                pl.lit(metadata.get("units_source", "FRED_API_metadata")).alias("units_source"),
+                *[
+                    pl.col(name).str.to_date()
+                    if name in frame.columns
+                    else pl.lit(None, dtype=pl.Date).alias(name)
+                    for name in ("realtime_start", "realtime_end")
+                ],
+                pl.lit(vintage_date, dtype=pl.String).str.to_date().alias("vintage_date"),
+                pl.lit(None, dtype=pl.Datetime("ns", "UTC")).alias("available_at"),
+            )
+            if frame["timestamp"].null_count() or frame["timestamp"].is_duplicated().any():
+                raise ValueError("Scalar observations require known unique dates")
+            if frame.filter(pl.col("value").is_not_null() & ~pl.col("value").is_finite()).height:
+                raise ValueError("Known scalar observations must be finite")
+            return frame.sort("timestamp")
+        except Exception as error:
+            raise DataValidationError(
+                "fred", f"Malformed scalar observations for {series_id}"
+            ) from error
+
     def fetch_ohlcv(
         self,
         symbol: str,
@@ -403,7 +536,9 @@ class FREDProvider(BaseProvider):
 
         return df
 
-    def fetch_series_metadata(self, series_id: str) -> dict[str, Any]:
+    def fetch_series_metadata(
+        self, series_id: str, *, vintage_date: str | None = None
+    ) -> dict[str, Any]:
         """Fetch metadata for a FRED series.
 
         Args:
@@ -428,6 +563,7 @@ class FREDProvider(BaseProvider):
             >>> print(meta['frequency'])
             'Daily, Close'
         """
+        self._require_api()
         series_id = series_id.upper()
 
         endpoint = f"{self.BASE_URL}/series"
@@ -437,6 +573,9 @@ class FREDProvider(BaseProvider):
             "file_type": "json",
         }
 
+        if vintage_date is not None:
+            params["realtime_start"] = vintage_date
+            params["realtime_end"] = vintage_date
         self._acquire_rate_limit()
 
         try:

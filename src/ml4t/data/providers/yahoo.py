@@ -151,11 +151,88 @@ class YahooFinanceProvider(BaseProvider):
             )
         super().__init__(rate_limit=rate_limit)
         self.enable_progress = enable_progress
+        self.last_fetch_metadata: dict[str, Any] = {}
 
     @property
     def name(self) -> str:
         """Return the provider name."""
         return "yahoo"
+
+    def _download_prices(
+        self, symbol: str, start: Any, end: Any, frequency: str, *, keepna: bool = False
+    ) -> pd.DataFrame:
+        interval = self.FREQUENCY_MAP.get(frequency.lower(), "1d")
+        missing_policy = {"keepna": True} if keepna else {}
+        try:
+            result = yf.download(
+                symbol,
+                start=start,
+                end=end,
+                interval=interval,
+                progress=self.enable_progress,
+                auto_adjust=True,
+                actions=False,
+                **missing_policy,
+            )
+            if result.empty:
+                result = self._resolve_empty_download(
+                    symbol, start, end, interval, frequency, **missing_policy
+                )
+            return result
+        except (DataNotAvailableError, SymbolNotFoundError, NetworkError):
+            raise
+        except OSError as error:
+            raise NetworkError("yahoo", f"Failed to fetch {symbol}: {error}") from error
+        except Exception as error:
+            raise DataValidationError("yahoo", f"Failed to fetch {symbol}: {error}") from error
+
+    def fetch_adjusted_close(self, symbol: str, start: Any = None, end: Any = None) -> pl.DataFrame:
+        """Keep source daily adjusted-close rows and upstream exclusive datetime bounds.
+
+        Unlike the OHLCV endpoint this accepts the SDK's date/datetime bounds unchanged and
+        retains reported missing prices. No close filling,return calculation or dividend
+        subtraction is performed. Native fetch_ohlcv continues using inclusive date ends.
+        """
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise ValueError("A known Yahoo symbol is required")
+        for bound in (start, end):
+            if bound is not None and pd.isna(pd.Timestamp(bound)):
+                raise ValueError("Yahoo date bounds must be known")
+        self._acquire_rate_limit()
+
+        def fetch() -> pl.DataFrame:
+            from ml4t.data.utils.conversion import pandas_to_polars
+
+            frame = self._download_prices(symbol, start, end, "daily", keepna=True)
+            if isinstance(frame.columns, pd.MultiIndex):
+                if symbol.upper() not in frame.columns.get_level_values(1):
+                    raise DataValidationError(self.name, "Response lacks the requested symbol")
+                frame = frame.xs(symbol.upper(), axis=1, level=1)
+            if "Close" not in frame or not isinstance(frame.index, pd.DatetimeIndex):
+                raise DataValidationError(self.name, "Response lacks dated adjusted closes")
+            if frame.index.hasnans or not frame.index.is_unique:
+                raise DataValidationError(self.name, "Adjusted closes require known unique dates")
+            prices = pd.to_numeric(frame["Close"], errors="raise")
+            result = pandas_to_polars(
+                pd.DataFrame(
+                    {
+                        "timestamp": pd.to_datetime(frame.index, utc=True),
+                        "symbol": symbol.upper(),
+                        "close": prices.to_numpy(),
+                    }
+                )
+            )
+            if result.filter(pl.col("close").is_not_null() & ~pl.col("close").is_finite()).height:
+                raise DataValidationError(self.name, "Known adjusted closes must be finite")
+            self.last_fetch_metadata = {
+                "source_index_name": frame.index.name,
+                "source_index_unit": frame.index.unit,
+                "price_basis": "yahoo_auto_adjusted",
+                "source_package_version": str(getattr(yf, "__version__", "unknown")),
+            }
+            return result.sort("timestamp")
+
+        return self._with_circuit_breaker(fetch)
 
     def _fetch_and_transform_data(
         self, symbol: str, start: str, end: str, frequency: str
@@ -194,20 +271,7 @@ class YahooFinanceProvider(BaseProvider):
         )
 
         try:
-            df_pandas = yf.download(
-                symbol,
-                start=start,
-                end=end_str,
-                interval=interval,
-                progress=self.enable_progress,
-                auto_adjust=True,
-                actions=False,
-            )
-
-            if df_pandas.empty:
-                df_pandas = self._resolve_empty_download(
-                    symbol, start, end_str, interval, frequency
-                )
+            df_pandas = self._download_prices(symbol, start, end_str, frequency)
 
             # Convert to Polars with symbol column
             df = self._convert_to_polars(df_pandas, symbol)
@@ -243,7 +307,14 @@ class YahooFinanceProvider(BaseProvider):
             ) from e
 
     def _resolve_empty_download(
-        self, symbol: str, start: str, end: str, interval: str, frequency: str
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        interval: str,
+        frequency: str,
+        *,
+        keepna: bool = False,
     ) -> pd.DataFrame:
         """Return the data an empty ``yf.download`` missed, or raise what actually went wrong.
 
@@ -295,6 +366,7 @@ class YahooFinanceProvider(BaseProvider):
                 auto_adjust=True,
                 actions=False,
                 raise_errors=True,
+                **({"keepna": True} if keepna else {}),
             )
         except YFRateLimitError as e:
             logger.warning("Yahoo rate limited the request", symbol=symbol, error=str(e))
