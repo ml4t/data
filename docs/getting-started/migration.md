@@ -419,6 +419,8 @@ analysis does not import Data or fetch data unless the caller explicitly selects
 The Yahoo path needs the optional `ml4t-data[yahoo]` dependency. Factor downloads need no key;
 Treasury acquisition can use public FRED CSV without a key. When `FRED_API_KEY` is configured,
 API errors propagate rather than silently falling back to anonymous access.
+Yahoo acquisition failures retain Data's provider exception types and emit the legacy
+`Yahoo Finance read failed` warning. An unavailable Yahoo extra raises an actionable import error.
 
 | Helper | Retained behavior and material differences |
 |---|---|

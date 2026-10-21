@@ -202,7 +202,11 @@ def get_symbol_returns_from_yahoo(symbol: str, start: Any = None, end: Any = Non
     from ml4t.data.providers.yahoo import YahooFinanceProvider
 
     with YahooFinanceProvider() as provider:
-        native = provider.fetch_adjusted_close(symbol, start=start, end=end)
+        try:
+            native = provider.fetch_adjusted_close(symbol, start=start, end=end)
+        except Exception as error:
+            warnings.warn(f"Yahoo Finance read failed: {error}", UserWarning, stacklevel=2)
+            raise
         index_name = provider.last_fetch_metadata["source_index_name"]
         index_unit = provider.last_fetch_metadata["source_index_unit"]
     prices = polars_to_pandas(native).set_index("timestamp")["close"]
