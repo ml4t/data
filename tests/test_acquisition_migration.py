@@ -242,10 +242,11 @@ def test_legacy_factor_import_consumes_actual_zip_parser_without_a_stale_inner_c
             pd.DataFrame(
                 record["data"],
                 columns=record["columns"],
-                index=pd.to_datetime(record["index"], utc=True),
+                index=pd.PeriodIndex(record["index"], freq="D"),
             ).div(100)
         )
     expected = pd.concat(parts, axis=1).dropna().rename(columns=str.strip)
+    expected.index = expected.index.to_timestamp().tz_localize("UTC")
     assert_frame_equal(actual, expected, check_freq=False, check_dtype=False)
     assert actual.columns.to_list() == ["Mkt-RF", "SMB", "HML", "RF", "Mom"]
     assert actual.iloc[0]["RF"] == 0.0002
@@ -277,6 +278,33 @@ def test_monthly_factor_names_keep_month_labels_decimal_rf_and_native_column_map
     )
     assert actual.attrs["frequency"] == "monthly"
     assert actual.attrs["timestamp_semantics"] == "session_label"
+
+
+@pytest.mark.parametrize(
+    "datasets,start,end,expected_dates",
+    [
+        (
+            ("F-F_Research_Data_Factors", "F-F_Momentum_Factor"),
+            "2024-01-15",
+            "2024-01-20",
+            ["2024-01-01"],
+        ),
+        (
+            ("F-F_Research_Data_Factors_daily", "F-F_Momentum_Factor_daily"),
+            "2024-01-02T12:00",
+            "2024-01-04T12:00",
+            ["2024-01-02", "2024-01-03", "2024-01-04"],
+        ),
+    ],
+)
+def test_factor_bounds_preserve_actual_legacy_period_selection_and_index_precision(
+    french_http, datasets, start, end, expected_dates
+):
+    # Immutable Empyrical0.7.0/pandas-datareader0.11.1 replay of these ZIPs includes the
+    # whole labeled period,not only a midnight instant falling inside the date bounds.
+    actual = compat.get_fama_french(start, end, datasets)
+    assert actual.index.to_list() == list(pd.to_datetime(expected_dates, utc=True))
+    assert str(actual.index.dtype) == "datetime64[ns, UTC]"
 
 
 def test_a_valid_factor_file_in_the_wrong_dataset_cache_is_not_silently_accepted(

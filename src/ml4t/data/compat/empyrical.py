@@ -55,7 +55,7 @@ def get_fama_french(
     datasets: Sequence[str] = ("F-F_Research_Data_Factors_daily", "F-F_Momentum_Factor_daily"),
 ) -> pd.DataFrame:
     """Return decimal factors/RF on the legacy complete-case UTC date sample."""
-    from ml4t.data.providers.fama_french import FamaFrenchProvider
+    from ml4t.data.providers.fama_french import FF_CATEGORIES, FamaFrenchProvider
 
     if isinstance(datasets, str) or not datasets or len(set(datasets)) != len(datasets):
         raise ValueError("Specify distinct Fama-French dataset names")
@@ -70,16 +70,28 @@ def get_fama_french(
     if len({frequency for _, frequency in selected}) != 1:
         raise ValueError("Do not combine different factor frequencies in one table")
     frequency = selected[0][1]
+    lower = _date(start)
+    if frequency == "monthly" and start is not None:
+        lower = pd.Timestamp(start).replace(day=1).date().isoformat()
+    upper = _date(pd.Timestamp.now() if end is None else end)
     with FamaFrenchProvider(use_cache=False) as provider:
-        native = provider.fetch_combined(
-            [name for name, _ in selected], frequency=frequency, start=_date(start), end=_date(end)
-        )
-    result = polars_to_pandas(native).set_index("timestamp").dropna().rename(columns={"MOM": "Mom"})
-    result.index = pd.DatetimeIndex(pd.to_datetime(result.index, utc=True)).rename(None)
+        parts = [
+            polars_to_pandas(
+                provider.fetch(name, frequency=frequency, start=lower, end=upper)
+            ).set_index("timestamp")
+            for name, _ in selected
+        ]
+    result = pd.concat(parts, axis=1).dropna().rename(columns={"MOM": "Mom"})
+    result.index = (
+        pd.DatetimeIndex(pd.to_datetime(result.index, utc=True)).as_unit("ns").rename(None)
+    )
     result.attrs.update(
         source="Kenneth R. French Data Library",
         frequency=frequency,
-        units="decimal_returns",
+        units=None
+        if any(name in FF_CATEGORIES["breakpoints"] for name, _ in selected)
+        else "decimal_returns",
+        source_value_conversion="divide_by_100",
         risk_free_column="RF" if "RF" in result else None,
         timestamp_semantics="session_label",
         missingness_policy="legacy_complete_case",
