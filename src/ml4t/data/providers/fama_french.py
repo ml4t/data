@@ -40,9 +40,11 @@ https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 from calendar import monthrange
-from datetime import datetime
+from contextlib import nullcontext
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -53,6 +55,8 @@ import structlog
 from ml4t.data.core.config import resolve_storage_path
 from ml4t.data.core.exceptions import DataNotAvailableError, NetworkError
 from ml4t.data.providers.base import BaseProvider
+from ml4t.data.utils.atomic import atomic_write
+from ml4t.data.utils.locking import file_lock
 
 logger = structlog.get_logger()
 _DEFAULT_CACHE_SUBPATH = Path("factors/fama-french")
@@ -583,6 +587,7 @@ class FamaFrenchProvider(BaseProvider):
             else self.default_cache_path()
         )
         self.use_cache = use_cache
+        self.last_fetch_metadata: dict[str, Any] = {}
 
         if use_cache:
             self.cache_path.mkdir(parents=True, exist_ok=True)
@@ -670,6 +675,11 @@ class FamaFrenchProvider(BaseProvider):
         frequency: FFFrequency = "monthly",
         start: str | None = None,
         end: str | None = None,
+        *,
+        refresh: bool = False,
+        offline: bool = False,
+        max_age: timedelta | None = None,
+        allow_stale: bool = False,
     ) -> pl.DataFrame:
         """
         Fetch Fama-French data.
@@ -690,11 +700,27 @@ class FamaFrenchProvider(BaseProvider):
             >>> ff5_daily = provider.fetch("ff5", frequency="daily")
             >>> port = provider.fetch("port_size_bm_25")
         """
+        if refresh and offline:
+            raise ValueError("refresh and offline cannot both be true")
+        if max_age is not None and (
+            not isinstance(max_age, timedelta) or max_age.total_seconds() < 0
+        ):
+            raise ValueError("max_age must be a nonnegative timedelta or None")
+        cache_policy = {
+            "refresh": refresh,
+            "offline": offline,
+            "max_age": max_age,
+            "allow_stale": allow_stale,
+        }
         # Handle combined datasets
         if dataset == "ff3_mom":
-            return self.fetch_combined(["ff3", "mom"], frequency=frequency, start=start, end=end)
+            return self.fetch_combined(
+                ["ff3", "mom"], frequency=frequency, start=start, end=end, **cache_policy
+            )
         if dataset == "ff5_mom":
-            return self.fetch_combined(["ff5", "mom"], frequency=frequency, start=start, end=end)
+            return self.fetch_combined(
+                ["ff5", "mom"], frequency=frequency, start=start, end=end, **cache_policy
+            )
 
         if dataset not in self.FILES:
             raise ValueError(f"Unknown dataset '{dataset}'. Use list_datasets() to see available.")
@@ -708,19 +734,7 @@ class FamaFrenchProvider(BaseProvider):
                 f"Frequency '{frequency}' not available for {dataset}. Available: {available}"
             )
 
-        # Check cache first
-        cache_file = self._get_cache_path(dataset, frequency)
-        if self.use_cache and cache_file.exists():
-            self.logger.debug("Loading from cache", file=str(cache_file))
-            df = pl.read_parquet(cache_file)
-        else:
-            # Download from Ken French website
-            df = self._download_dataset(dataset, frequency)
-
-            # Cache if enabled
-            if self.use_cache:
-                df.write_parquet(cache_file)
-                self.logger.info("Cached data", file=str(cache_file))
+        df = self._fetch_cached(dataset, frequency, **cache_policy)
 
         # Filter by date range (convert strings to date for comparison)
         if start:
@@ -748,12 +762,88 @@ class FamaFrenchProvider(BaseProvider):
 
         return df.sort("timestamp")
 
+    def _fetch_cached(
+        self,
+        dataset: str,
+        frequency: str,
+        *,
+        refresh: bool,
+        offline: bool,
+        max_age: timedelta | None,
+        allow_stale: bool,
+    ) -> pl.DataFrame:
+        cache = self._get_cache_path(dataset, frequency)
+        if offline and not self.use_cache:
+            error = DataNotAvailableError(
+                self.name, dataset, details={"reason": "Offline cache is disabled"}
+            )
+            error.add_note("Offline cache is disabled")
+            raise error
+        with file_lock(cache) if self.use_cache else nullcontext():
+            exists = self.use_cache and cache.exists()
+            modified = cache.stat().st_mtime if exists else None
+            stale = (
+                modified is not None
+                and max_age is not None
+                and time.time() - modified > max_age.total_seconds()
+            )
+            hit = exists and not refresh and (not stale or allow_stale)
+            if hit:
+                frame = pl.read_parquet(cache)
+            elif offline:
+                reason = "Offline cache is stale" if stale else "Offline cache is unavailable"
+                error = DataNotAvailableError(self.name, dataset, details={"reason": reason})
+                error.add_note(reason)
+                raise error
+            else:
+                frame = self._download_dataset(dataset, frequency)
+            if "timestamp" not in frame or (
+                frame.schema["timestamp"] != pl.Date
+                and not isinstance(frame.schema["timestamp"], pl.Datetime)
+            ):
+                raise ValueError("Factor input requires source date labels")
+            if frame["timestamp"].null_count() or frame["timestamp"].is_duplicated().any():
+                raise ValueError("Factor input requires known unique dates")
+            required = self.FILES[dataset].get("columns", [])
+            if missing := set(required).difference(frame.columns):
+                raise ValueError(f"Missing factor columns for {dataset}: {sorted(missing)}")
+            frame = frame.with_columns(
+                pl.col(name).cast(pl.Float64)
+                for name in frame.columns
+                if name != "timestamp" and frame.schema[name] == pl.Null
+            )
+            for name in frame.columns:
+                if name != "timestamp" and (
+                    not frame.schema[name].is_numeric()
+                    or frame.filter(pl.col(name).is_not_null() & ~pl.col(name).is_finite()).height
+                ):
+                    raise ValueError("Known factor values must be finite numeric returns")
+            if self.use_cache and not hit:
+                atomic_write(cache, frame.write_parquet)
+                modified = cache.stat().st_mtime
+            self.last_fetch_metadata = {
+                "dataset": dataset,
+                "frequency": frequency,
+                "source": "Kenneth R. French Data Library",
+                "cache_hit": bool(hit),
+                "cache_modified_unix": modified,
+                "max_age_seconds": None if max_age is None else max_age.total_seconds(),
+                "stale_accepted": bool(hit and stale),
+                "availability": "unknown; cache mtime is not historical publication",
+            }
+            return frame
+
     def fetch_combined(
         self,
         datasets: list[str],
         frequency: FFFrequency = "monthly",
         start: str | None = None,
         end: str | None = None,
+        *,
+        refresh: bool = False,
+        offline: bool = False,
+        max_age: timedelta | None = None,
+        allow_stale: bool = False,
     ) -> pl.DataFrame:
         """
         Fetch and merge multiple datasets on timestamp.
@@ -778,13 +868,22 @@ class FamaFrenchProvider(BaseProvider):
             raise ValueError("Must provide at least one dataset")
 
         # Fetch first dataset
-        result = self.fetch(datasets[0], frequency=frequency, start=start, end=end)
+        policy = {
+            "refresh": refresh,
+            "offline": offline,
+            "max_age": max_age,
+            "allow_stale": allow_stale,
+        }
+        result = self.fetch(datasets[0], frequency=frequency, start=start, end=end, **policy)
+        captures = [self.last_fetch_metadata.copy()]
 
         # Join additional datasets
         for dataset in datasets[1:]:
-            df = self.fetch(dataset, frequency=frequency, start=start, end=end)
+            df = self.fetch(dataset, frequency=frequency, start=start, end=end, **policy)
+            captures.append(self.last_fetch_metadata.copy())
             result = result.join(df, on="timestamp", how="full", coalesce=True)
 
+        self.last_fetch_metadata = {"datasets": captures}
         return result.sort("timestamp")
 
     # Backward compatibility aliases
@@ -956,8 +1055,8 @@ class FamaFrenchProvider(BaseProvider):
                 for v in values:
                     try:
                         val = float(v)
-                        # Handle missing value indicators (-99 etc) and convert to decimal
-                        parsed_val = None if val < -90 else val / 100
+                        # Only the published source sentinels mean missing,not extreme returns.
+                        parsed_val = None if val in {-99.99, -999} else val / 100
                         parsed_values.append(parsed_val)
                     except ValueError:
                         parsed_values.append(None)

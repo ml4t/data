@@ -1,0 +1,21 @@
+{
+  "purpose": "Offline replay of public provider response bytes and independent legacy captures. Downloads are not historical availability evidence.",
+  "official_french_captures_utc": "2026-10-21",
+  "official_french": [
+    {"file": "F-F_Research_Data_5_Factors_2x3_daily_CSV.zip", "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip", "sha256": "7881223b51929ee0d6d23b8a28524aaec478a2c3d4eeca47224955cc845c5186"},
+    {"file": "F-F_Research_Data_Factors_daily_CSV.zip", "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip", "sha256": "2f29e22546069914890a712680a6f81f3680ebc3543b52864484d209ca13a7db"},
+    {"file": "F-F_Momentum_Factor_daily_CSV.zip", "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_daily_CSV.zip", "sha256": "ecf82b116e6ec56d2b79a2f27bd1d1598c217b5c6c25caa55b945bdd8a2c0b78"},
+    {"file": "F-F_Research_Data_Factors_CSV.zip", "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_CSV.zip", "sha256": "593f4fbef03181bc0b22ff6292f217689dd1fb79355049ca905d95b262040a66"},
+    {"file": "F-F_Momentum_Factor_CSV.zip", "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Momentum_Factor_CSV.zip", "sha256": "c06d1c2e9a5e4f6985879722f23c6bb585f46b34eaf3fcb681d4de887e353f3e"}
+  ],
+  "legacy_captures": [
+    {"file": "famafrench-provider-response.json", "source": "https://github.com/stefan-jansen/empyrical-reloaded/blob/a54620df2077f56e8ef126d9b230b2ec2e1fadf6/tests/test_data/famafrench-provider-response.json", "sha256": "e26ccd0d43084c4ed20e8b7d708265c1b41d61d5f07a3569f75796c8df060e43"},
+    {"file": "yahoo-adjustment-provider.json", "source": "https://github.com/stefan-jansen/empyrical-reloaded/blob/a54620df2077f56e8ef126d9b230b2ec2e1fadf6/tests/test_data/yahoo-adjustment-provider.json", "sha256": "5ea30605795e522f3d1f8f6b744259227780eacc19f5845f8bd875516218db10"}
+  ],
+  "independent_oracles": {"daily_20240102_percent": {"Mkt-RF": -0.70, "SMB": -0.55, "HML": 0.79, "RF": 0.02, "Mom": -2.11}, "monthly_202401_percent": {"Mkt-RF": 0.73, "SMB": -5.04, "HML": -2.37, "RF": 0.47, "Mom": 5.46}},
+  "additional_public_captures": [
+    {"file": "yahoo-dst-provider.json", "source": "Yahoo Finance through yfinance1.5.2/pandas3.0.5", "captured_utc": "2026-10-21T03:03:52.339359Z", "sha256": "fa9e23a88669369b9f3dbd228301df13b4a6a34e9c76ba7c43ab5f3bf8d56cfc", "purpose": "Paired adjusted/unadjusted source responses for timezone-aware exclusive bounds across a daylight-saving transition;actual source clock unit is seconds."},
+    {"file": "fred-dgs3mo.csv", "source": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS3MO&cosd=2024-01-02&coed=2024-01-04", "captured_utc_date": "2026-10-21", "sha256": "922b008684895c936e997c3713c05bef68ce412b423510d723553dd5b37ed0f2", "purpose": "Actual anonymous public Treasury observations,annual percent units;not point-in-time publication evidence."}
+  ],
+  "attribution": "Kenneth R. French Data Library; Federal Reserve Bank of St. Louis FRED; Yahoo Finance through yfinance, with capture versions/times retained in the JSON. Public-data fixtures only, no credentials, private account data or paid requests."
+}

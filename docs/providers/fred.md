@@ -2,7 +2,7 @@
 
 **Provider**: `FREDProvider`
 **Website**: [fred.stlouisfed.org](https://fred.stlouisfed.org)
-**API Key**: Required (free)
+**API Key**: Required for the API; optional for public scalar CSV access
 **Free Tier**: 120 requests/minute
 
 ---
@@ -23,19 +23,38 @@ os.environ["FRED_API_KEY"] = "your_key_here"
 
 from ml4t.data.providers import FREDProvider
 
-provider = FREDProvider()
-
-# Interest rates
-df = provider.fetch_ohlcv("DGS10", "2020-01-01", "2024-12-01")  # 10-Year Treasury
-
-# Economic indicators
-df = provider.fetch_ohlcv("UNRATE", "2020-01-01", "2024-12-01")  # Unemployment
-df = provider.fetch_ohlcv("CPIAUCSL", "2020-01-01", "2024-12-01")  # CPI
-
-provider.close()
+with FREDProvider() as provider:
+    unemployment = provider.fetch_series("UNRATE", "2020-01-01", "2024-12-01")
+    vintage = provider.fetch_series(
+        "UNRATE", "2020-01-01", "2024-12-01", vintage_date="2025-01-15"
+    )
 ```
 
 ---
+
+## Scalar observations and public access
+
+`fetch_series` returns source date labels, `series_id`, `value`, units, frequency, source route
+and realtime/vintage declarations. Reported missing values remain null. The default requests the
+native cadence; it does not ask FRED to upsample a monthly series to daily observations.
+Dates are inclusive. An annual percent yield is not a daily return.
+
+```python
+with FREDProvider(anonymous=True) as provider:
+    yields = provider.fetch_series("DGS3MO", "2024-01-02", "2024-01-04")
+```
+
+Public CSV access has no API key requirement. It does not support vintage, aggregation or API
+metadata requests. The six documented Treasury maturities have known Percent units and daily
+cadence; generic CSV series retain unknown units/frequency rather than infer them from values.
+`units_source` distinguishes series definitions from API metadata. Both routes leave
+`available_at` unknown: an observation date or realtime date does not establish an intraday
+publication timestamp. A configured API authentication failure is not retried anonymously.
+
+Existing `fetch_ohlcv` remains available in API mode. Its replicated prices and placeholder volume
+are economic-series packaging, not tradable OHLCV or actual volume; its null-price dropping differs
+from the scalar route. See [acquisition migration](../getting-started/migration.md#empyrical-acquisition-utilities)
+for the opt-in pandas compatibility helpers.
 
 ## Popular Series
 

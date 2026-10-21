@@ -1,0 +1,123 @@
+{
+  "captured_utc": "2026-10-21T03:03:52.339359+00:00",
+  "versions": {
+    "yfinance": "1.5.2",
+    "pandas": "3.0.5"
+  },
+  "request": {
+    "symbol": "SPY",
+    "start": "2025-03-07T00:00:00-05:00",
+    "end": "2025-03-11T00:00:00-04:00",
+    "frequency": "daily",
+    "end_boundary": "exclusive"
+  },
+  "records": {
+    "False": {
+      "index": [
+        "2025-03-07T00:00:00",
+        "2025-03-10T00:00:00"
+      ],
+      "index_dtype": "datetime64[s]",
+      "index_name": "Date",
+      "columns": [
+        [
+          "Adj Close",
+          "SPY"
+        ],
+        [
+          "Close",
+          "SPY"
+        ],
+        [
+          "High",
+          "SPY"
+        ],
+        [
+          "Low",
+          "SPY"
+        ],
+        [
+          "Open",
+          "SPY"
+        ],
+        [
+          "Volume",
+          "SPY"
+        ]
+      ],
+      "column_names": [
+        "Price",
+        "Ticker"
+      ],
+      "data": [
+        [
+          564.8236694335938,
+          575.9199829101562,
+          577.3900146484375,
+          565.6300048828125,
+          570.9000244140625,
+          81158800.0
+        ],
+        [
+          549.7793579101562,
+          560.5800170898438,
+          569.5399780273438,
+          555.5900268554688,
+          567.5900268554688,
+          99326600.0
+        ]
+      ]
+    },
+    "True": {
+      "index": [
+        "2025-03-07T00:00:00",
+        "2025-03-10T00:00:00"
+      ],
+      "index_dtype": "datetime64[s]",
+      "index_name": "Date",
+      "columns": [
+        [
+          "Close",
+          "SPY"
+        ],
+        [
+          "High",
+          "SPY"
+        ],
+        [
+          "Low",
+          "SPY"
+        ],
+        [
+          "Open",
+          "SPY"
+        ],
+        [
+          "Volume",
+          "SPY"
+        ]
+      ],
+      "column_names": [
+        "Price",
+        "Ticker"
+      ],
+      "data": [
+        [
+          564.8236694335938,
+          566.2653779091431,
+          554.7319495414885,
+          559.9004310284239,
+          81158800.0
+        ],
+        [
+          549.7793579101562,
+          558.566687855828,
+          544.8855094970885,
+          556.654306267924,
+          99326600.0
+        ]
+      ]
+    }
+  },
+  "boundary": "Anonymous public Yahoo Finance/yfinance daily responses,not account data or historical availability. Both price bases captured in one process;tests replay bytes offline."
+}
