@@ -29,6 +29,7 @@ from .legacy_migration import (
     find_legacy_storage_entries,
     migrate_legacy_storage,
 )
+from .snapshot import InputSnapshot, SnapshotTable, export_snapshot, read_snapshot
 
 
 def create_storage(
@@ -74,6 +75,7 @@ __all__ = [
     "DatasetProfile",
     "FlatStorage",
     "HiveStorage",
+    "InputSnapshot",
     "LegacyStorageEntry",
     "LegacyStorageMigration",
     "LegacyStorageMigrationError",
@@ -83,11 +85,14 @@ __all__ = [
     "StorageBackend",
     "StorageConfig",
     "StorageStrategy",
+    "SnapshotTable",
     "create_storage",
     "find_legacy_storage_entries",
+    "export_snapshot",
     "generate_profile",
     "get_profile_path",
     "load_profile",
     "migrate_legacy_storage",
+    "read_snapshot",
     "save_profile",
 ]
