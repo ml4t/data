@@ -554,3 +554,13 @@ with renamed equities, two venues, two futures, missing quotes, split/cash/stock
 and minute observations, then compare native preparation and standard re-ingestion. The native
 recipe requires no legacy runtime. This is unreleased source functionality; it does not claim that
 published Data `0.2.1` provides these APIs or that Data replaces Zipline's runtime or broker.
+
+Clean wheel and source-distribution installs qualified Data `0.2.2.dev27+g90c06ba9c` for native
+reconstruction, the optional conversion and the selected dependency floors. Reconstructed tables
+also passed actual Engineer labeling, Diagnostic forward returns and Backtest contract/position
+checks using Engineer `0.1.7.dev29+gc69e7bada`, Diagnostic `0.1.9` and Backtest
+`0.1.13.dev22+g12a2c483f`. That Backtest check verifies a USD500 marked position result, not
+cash settlement or corporate-action account execution. The source recipes and input contracts
+remain usable without any of those consumers. CI's separate `Installed bundle migration` job
+keeps the optional conversion qualified against the pinned Zipline source without adding it to
+Data's production dependencies.

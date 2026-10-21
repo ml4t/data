@@ -98,6 +98,39 @@ jobs:
           uv export --locked --all-extras --all-groups --no-emit-project --no-hashes --output-file requirements-audit.txt
           uv run pip-audit --requirement requirements-audit.txt
 
+  bundle-migration:
+    name: Installed bundle migration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Build immutable Data wheel
+        run: uv build --wheel
+
+      - name: Qualify optional standard bundle conversion
+        run: |
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          uv run --isolated --no-project --python 3.12 \
+            --with "${wheels[0]}" \
+            --with 'zipline-reloaded @ git+https://github.com/stefan-jansen/zipline-reloaded@cf649ac06fddce76f6caa2403cd8494ac84f72ad' \
+            --with pandas==2.3.3 --with pytest --with pytest-timeout \
+            python scripts/verify_bundle_migration.py
+
   compatibility:
     name: Supported Platforms
     uses: ./.github/workflows/compatibility.yml

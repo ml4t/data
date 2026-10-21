@@ -307,8 +307,10 @@ prices = restored.tables["prices"]
 ```
 
 The seven metadata fields shown above are required. Use `None` for unavailable facts, rather than
-inferring publication times, currencies or adjustment rules. `source_revision` and
-`identity_namespace` must be nonempty strings; `units` and `revisions` are mappings. All declarations,
+inferring publication times, currencies or adjustment rules. `source_revision` must be a nonempty
+string. A known `identity_namespace` is also a nonempty string; explicit `None` records that the
+namespace is unknown and does not establish stable cross-source identity. `units` and `revisions`
+are mappings. All declarations,
 effective configuration and artifact descriptions must contain finite JSON values. Machine paths
 and credential-bearing keys or URLs are rejected. This check cannot identify arbitrary secrets
 hidden inside ordinary strings; supply public provenance only.
