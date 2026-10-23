@@ -221,10 +221,16 @@ prices = provider.fetch_candles(
 ## Trade History
 
 `fetch_trades(condition_id, start=None, end=None)` reads the data API's
-`GET /trades?market=<condition id>`, which returns taker trades newest first, takes inclusive
-`start`/`end` bounds in Unix seconds, serves at most 10,000 trades per request and rejects offsets
-above 10,000. Beyond that depth the provider moves `end` to the oldest second seen and continues,
-skipping the trades of that second it already returned.
+`GET /v2/trades?condition=<condition id>`, which returns taker trades newest first in a
+`data`/`pagination` envelope. The provider follows opaque cursors, including after short or empty
+pages, and clamps `page_size` to 1-1000. Market history is limited to the server's rolling
+three-year window. The server ignores `start`/`end` for market requests, so the provider enforces
+these inclusive Unix-second bounds locally; older requested history is not guaranteed available.
+`max_pages` limits requests for sampling and does not guarantee full coverage.
+
+`iter_trades()` yields raw snake_case v2 dictionaries. `fetch_trades()` preserves the normalized
+columns below and the existing trade identifiers. The CLOB price-history and Gamma market APIs
+remain separate from this [Data API migration](https://docs.polymarket.com/migrate/data-api-v1-to-v2).
 
 | Column | Meaning |
 |--------|---------|

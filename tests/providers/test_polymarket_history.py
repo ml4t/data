@@ -6,7 +6,8 @@ fields trimmed. The fake servers below implement the behaviour verified against 
 endpoints that day: ``/markets/keyset`` pages by ``after_cursor`` (any other name returns page 1
 again), ``/prices-history`` rejects spans over 15 days with HTTP 400 and returns an empty
 history for ``interval`` ranges of resolved markets, and ``/trades`` returns trades newest first
-with inclusive ``start``/``end`` bounds and rejects ``offset`` above its cap.
+with inclusive ``start``/``end`` bounds. Trade fixtures are translated to the v2 field casing;
+``test_polymarket_v2.py`` additionally exercises captured live v2 envelopes and cursors.
 """
 
 from __future__ import annotations
@@ -33,7 +34,17 @@ from ml4t.data.providers.polymarket import (
 FIXTURES = Path(__file__).parent / "fixtures" / "polymarket"
 KEYSET = json.loads((FIXTURES / "gamma_keyset_closed.json").read_text())["pages"]
 KEYSET_ACTIVE = json.loads((FIXTURES / "gamma_keyset_active.json").read_text())["pages"]
-TRADES = json.loads((FIXTURES / "data_api_trades.json").read_text())["trades"]
+_V2_FIELDS = {
+    "transactionHash": "transaction_hash",
+    "asset": "token_id",
+    "proxyWallet": "proxy_wallet",
+    "conditionId": "condition_id",
+    "outcomeIndex": "outcome_index",
+}
+TRADES = [
+    {_V2_FIELDS.get(key, key): value for key, value in trade.items()}
+    for trade in json.loads((FIXTURES / "data_api_trades.json").read_text())["trades"]
+]
 PRICES = json.loads((FIXTURES / "clob_prices_history.json").read_text())
 CURSOR = KEYSET[0]["next_cursor"]
 CONDITION_ID = "0x8ee2f1640386310eb5e7ffa596ba9335f2d324e303d21b0dfea6998874445791"
@@ -306,30 +317,35 @@ class TestFetchOhlcvPastRanges:
         assert int(requests[0].url.params["startTs"]) == 1748736000  # 2025-06-01T00:00Z
 
 
-def _trades_server(trades: list[dict[str, Any]], max_offset: int, ignore_offset: bool = False):
-    """Serve trades newest first with inclusive start/end and an offset cap, like the data API."""
+def _trades_server(trades: list[dict[str, Any]], ignore_cursor: bool = False):
+    """Serve recorded trades with opaque cursors and deliberately ignored time bounds."""
     ordered = sorted(trades, key=lambda trade: -trade["timestamp"])
-    calls = {"n": 0}
+    cursors = {f"page-{i}": i for i in range(1, len(ordered) + 1)}
+    calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
-        calls["n"] += 1
-        if calls["n"] > 50:
+        nonlocal calls
+        calls += 1
+        if calls > 50:
             raise CallLimitExceeded("more than 50 trade requests")
+        assert request.url.path == "/v2/trades"
         params = request.url.params
-        assert params["market"] == CONDITION_ID
-        limit, offset = int(params["limit"]), int(params.get("offset", 0))
-        if offset > max_offset:
-            return httpx.Response(
-                400, json={"error": f"max historical trades offset of {max_offset} exceeded"}
-            )
-        rows = [
-            trade
-            for trade in ordered
-            if ("start" not in params or trade["timestamp"] >= int(params["start"]))
-            and ("end" not in params or trade["timestamp"] <= int(params["end"]))
-        ]
-        first = 0 if ignore_offset else offset
-        return httpx.Response(200, json=rows[first : first + limit])
+        assert params["condition"] == CONDITION_ID
+        assert "market" not in params and "offset" not in params
+        limit = int(params["limit"])
+        first = 0 if ignore_cursor else cursors.get(params.get("cursor"), 0)
+        rows = ordered[first : first + limit]
+        more = first + limit < len(ordered)
+        return httpx.Response(
+            200,
+            json={
+                "data": rows,
+                "pagination": {
+                    "has_more": more,
+                    "next_cursor": f"page-{first + limit}" if more else None,
+                },
+            },
+        )
 
     return handler
 
@@ -337,7 +353,7 @@ def _trades_server(trades: list[dict[str, Any]], max_offset: int, ignore_offset:
 class TestTrades:
     def test_yes_price_and_taker_side_from_outcome_and_side(self, provider, use_transport):
         """Prevents: a NO-token price reported as the YES price, or the taker side inverted."""
-        use_transport(provider, _trades_server(TRADES, max_offset=10_000))
+        use_transport(provider, _trades_server(TRADES))
 
         trades = provider.fetch_trades(CONDITION_ID)
 
@@ -354,22 +370,19 @@ class TestTrades:
         assert trades["timestamp"].is_sorted()
         assert trades["ticker"].unique().to_list() == [CONDITION_ID]
 
-    def test_paging_past_the_offset_cap_moves_the_end_bound(self, provider, use_transport):
-        """Prevents: HTTP 400 past the offset cap, or trades lost/duplicated at the boundary."""
-        requests = use_transport(provider, _trades_server(TRADES, max_offset=8))
-        provider.TRADES_MAX_OFFSET = 8
+    def test_cursors_reach_deep_history_without_offset_windows(self, provider, use_transport):
+        """Prevents: lost or duplicated trades when following more than one cursor."""
+        requests = use_transport(provider, _trades_server(TRADES))
 
         trades = provider.fetch_trades(CONDITION_ID, page_size=4)
 
-        expected = {provider._trade_key(trade) for trade in TRADES}
         assert trades.height == len(TRADES)
-        assert set(trades["trade_id"].to_list()) == expected
-        assert any("end" in request.url.params for request in requests)
-        assert max(int(request.url.params["offset"]) for request in requests) <= 8
+        assert trades["trade_id"].n_unique() == len(TRADES)
+        assert len(requests) == (len(TRADES) + 3) // 4
 
     def test_start_and_end_are_sent_and_enforced(self, provider, use_transport):
         """Prevents: trades outside the requested window, or bounds not passed to the API."""
-        requests = use_transport(provider, _trades_server(TRADES, max_offset=10_000))
+        requests = use_transport(provider, _trades_server(TRADES))
         start, end = 1767245799, 1767245803
 
         trades = provider.fetch_trades(CONDITION_ID, start=start, end=end)
@@ -380,29 +393,27 @@ class TestTrades:
         assert trades.height == len(inside) == 18
 
     def test_repeated_page_raises_instead_of_looping(self, provider, use_transport):
-        """Prevents: an endless loop when the server ignores offset and repeats one page."""
-        use_transport(provider, _trades_server(TRADES, max_offset=10_000, ignore_offset=True))
+        """Prevents: an endless loop when the server ignores cursor and repeats one page."""
+        use_transport(provider, _trades_server(TRADES, ignore_cursor=True))
 
-        with pytest.raises(DataValidationError, match="ignored offset"):
+        with pytest.raises(DataValidationError, match="cursor repeated"):
             provider.fetch_trades(CONDITION_ID, page_size=4)
 
-    def test_one_second_with_more_trades_than_a_window_raises(self, provider, use_transport):
-        """Prevents: an endless loop when one second holds more trades than offsets can reach."""
+    def test_same_second_fills_can_cross_many_pages(self, provider, use_transport):
+        """Prevents: the old offset-window cap discarding dense same-second fills."""
         same_second = []
         for index in range(12):
             trade = copy.deepcopy(TRADES[6])
-            trade["transactionHash"] = f"0x{index:064x}"
+            trade["transaction_hash"] = f"0x{index:064x}"
             same_second.append(trade)
-        use_transport(provider, _trades_server(same_second, max_offset=4))
-        provider.TRADES_MAX_OFFSET = 4
+        use_transport(provider, _trades_server(same_second))
 
-        with pytest.raises(DataValidationError, match="cannot page past"):
-            provider.fetch_trades(CONDITION_ID, page_size=2)
+        assert provider.fetch_trades(CONDITION_ID, page_size=2).height == 12
 
     def test_malformed_trade_raises(self, provider, use_transport):
         """Prevents: a trade with an unknown outcome index being priced as YES or NO."""
-        bad = dict(TRADES[0], outcomeIndex=2)
-        use_transport(provider, _trades_server([bad], max_offset=10_000))
+        bad = dict(TRADES[0], outcome_index=999)
+        use_transport(provider, _trades_server([bad]))
 
-        with pytest.raises(DataValidationError, match="outcomeIndex"):
+        with pytest.raises(DataValidationError, match="outcome_index"):
             provider.fetch_trades(CONDITION_ID)
