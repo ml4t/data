@@ -2,6 +2,9 @@
 
 import copy
 import json
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -281,3 +284,42 @@ def test_invalid_continuation_url_is_typed_validation_error(provider, use_transp
     )
     with pytest.raises(DataValidationError):
         provider.fetch_ohlcv_range(MARKET, START, END, "5min")
+
+
+@pytest.mark.parametrize("explicit_close", [True, False])
+def test_provider_error_and_instrumented_session_do_not_segfault_at_interpreter_exit(
+    tmp_path, explicit_close
+):
+    """Prevent destructor logging into torn-down datetime state after a real API error."""
+    script = """
+import httpx
+from datetime import UTC, datetime, timedelta
+from ml4t.data.providers import CoinMetricsProvider
+from ml4t.data.core.exceptions import AuthenticationError
+
+events = []
+provider = CoinMetricsProvider(api_key="offline-unit-test-key")
+provider.session.close()
+provider.session = httpx.Client(transport=httpx.MockTransport(
+    lambda request: httpx.Response(403, json={"error": "forbidden"})))
+provider.session.event_hooks["response"] = [lambda response: events.append(response.status_code)]
+start = datetime(2020, 6, 8, 20, 45, tzinfo=UTC)
+try:
+    provider.fetch_ohlcv_range("coinbase-btc-usd-spot", start, start+timedelta(minutes=5), "5min")
+except AuthenticationError:
+    print("expected account error", events)
+else:
+    raise AssertionError("HTTP403 did not produce the account error")
+"""
+    if explicit_close:
+        script += "provider.close()\nassert provider.session.is_closed\n"
+    result = subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", script],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src")},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "expected account error [403]" in result.stdout

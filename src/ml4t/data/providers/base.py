@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
@@ -213,9 +214,14 @@ class BaseProvider(
             self.logger.debug(message)
 
     def __del__(self) -> None:
-        """Best-effort session cleanup for leaked provider instances."""
+        """Clean up sessions without logging callbacks during interpreter teardown."""
         try:
-            self.close()
+            if sys.is_finalizing():
+                session = getattr(self, "session", None)
+                if session is not None:
+                    session.close()
+            else:
+                self.close()
         except Exception:
             pass
 
