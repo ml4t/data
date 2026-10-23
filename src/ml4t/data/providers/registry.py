@@ -250,6 +250,15 @@ _SPECS = (
     ),
     _spec("binance", "binance", "BinanceProvider", "Binance spot markets", "ohlcv"),
     _spec(
+        "coinmetrics",
+        "coinmetrics",
+        "CoinMetricsProvider",
+        "Coin Metrics spot-market candles",
+        "ohlcv",
+        "timestamp_range",
+        credentials=(_credential("api_key", "COINMETRICS_API_KEY"),),
+    ),
+    _spec(
         "binance_public",
         "binance_public",
         "BinancePublicProvider",

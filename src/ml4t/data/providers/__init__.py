@@ -86,6 +86,7 @@ except ImportError:
 
 # Crypto providers
 from ml4t.data.providers.coingecko import CoinGeckoProvider
+from ml4t.data.providers.coinmetrics import CoinMetricsProvider
 
 try:
     from ml4t.data.providers.binance import BinanceProvider
@@ -165,6 +166,7 @@ __all__ = [
     "ForecastExProvider",
     # Crypto providers
     "CoinGeckoProvider",
+    "CoinMetricsProvider",
     "BinanceProvider",
     "BinancePublicProvider",
     "OKXProvider",
