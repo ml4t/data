@@ -2,9 +2,11 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
+import ml4t.data.utils.async_rate_limit as rate_limit
 from ml4t.data.utils.async_rate_limit import (
     AsyncAdaptiveRateLimiter,
     AsyncRateLimiter,
@@ -165,22 +167,24 @@ async def test_concurrent_access():
 
 
 @pytest.mark.asyncio
-async def test_time_until_reset():
-    """Test time until reset calculation."""
+async def test_time_until_reset_tracks_elapsed_time_and_expiration(monkeypatch):
+    """Prevent countdown errors without assuming an event-loop wake-up deadline."""
+    now = 100.0
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: now))
     limiter = AsyncRateLimiter(max_calls=2, period=1.0)
 
-    # Initially should be 0
     assert limiter.time_until_reset() == 0.0
-
-    # After acquiring
     await limiter.acquire()
-    time_remaining = limiter.time_until_reset()
-    assert 0.9 < time_remaining <= 1.0
+    assert limiter.time_until_reset() == pytest.approx(1.0)
 
-    # Wait a bit
-    await asyncio.sleep(0.5)
-    time_remaining = limiter.time_until_reset()
-    assert 0.4 < time_remaining <= 0.5
+    now = 100.5
+    assert limiter.time_until_reset() == pytest.approx(0.5)
+    now = 100.625
+    assert limiter.time_until_reset() == pytest.approx(0.375)
+    now = 101.0
+    assert limiter.time_until_reset() == 0.0
+    now = 101.5
+    assert limiter.time_until_reset() == 0.0
 
 
 @pytest.mark.asyncio
