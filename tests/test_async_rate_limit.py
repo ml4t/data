@@ -1,10 +1,11 @@
 """Tests for async rate limiting utilities."""
 
 import asyncio
-import time
+from types import SimpleNamespace
 
 import pytest
 
+import ml4t.data.utils.async_rate_limit as rate_limit
 from ml4t.data.utils.async_rate_limit import (
     AsyncAdaptiveRateLimiter,
     AsyncRateLimiter,
@@ -36,21 +37,26 @@ async def test_async_rate_limiter_basic():
 
 
 @pytest.mark.asyncio
-async def test_async_rate_limiter_blocking():
-    """Test blocking behavior of async rate limiter."""
+async def test_async_rate_limiter_blocking_waits_for_window_expiration(monkeypatch):
+    """Prevent early admission or incorrect wait calculation without scheduler timing."""
+    now = 100.0
+    waits = []
+
+    async def advance(delay):
+        nonlocal now
+        waits.append(delay)
+        now += delay
+
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: now))
+    monkeypatch.setattr(rate_limit, "asyncio", SimpleNamespace(Lock=asyncio.Lock, sleep=advance))
     limiter = AsyncRateLimiter(max_calls=2, period=0.5)
 
-    # Fill up the limiter
     await limiter.acquire()
     await limiter.acquire()
-
-    # This should block for ~0.5 seconds
-    start = time.time()
-    result = await limiter.acquire(blocking=True)
-    elapsed = time.time() - start
-
-    assert result is True
-    assert 0.4 < elapsed < 0.7  # Allow some timing variance
+    assert await limiter.acquire(blocking=False) is False
+    assert await limiter.acquire(blocking=True) is True
+    assert waits == [pytest.approx(0.5)]
+    assert limiter.remaining_calls() == 1
 
 
 @pytest.mark.asyncio
@@ -165,22 +171,24 @@ async def test_concurrent_access():
 
 
 @pytest.mark.asyncio
-async def test_time_until_reset():
-    """Test time until reset calculation."""
+async def test_time_until_reset_tracks_elapsed_time_and_expiration(monkeypatch):
+    """Prevent countdown errors without assuming an event-loop wake-up deadline."""
+    now = 100.0
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: now))
     limiter = AsyncRateLimiter(max_calls=2, period=1.0)
 
-    # Initially should be 0
     assert limiter.time_until_reset() == 0.0
-
-    # After acquiring
     await limiter.acquire()
-    time_remaining = limiter.time_until_reset()
-    assert 0.9 < time_remaining <= 1.0
+    assert limiter.time_until_reset() == pytest.approx(1.0)
 
-    # Wait a bit
-    await asyncio.sleep(0.5)
-    time_remaining = limiter.time_until_reset()
-    assert 0.4 < time_remaining <= 0.5
+    now = 100.5
+    assert limiter.time_until_reset() == pytest.approx(0.5)
+    now = 100.625
+    assert limiter.time_until_reset() == pytest.approx(0.375)
+    now = 101.0
+    assert limiter.time_until_reset() == 0.0
+    now = 101.5
+    assert limiter.time_until_reset() == 0.0
 
 
 @pytest.mark.asyncio
