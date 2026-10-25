@@ -108,3 +108,17 @@ def test_trade_ids_remain_stable_across_v1_v2_casing(provider):
     ):
         v1[old] = v1.pop(new)
     assert provider._trade_key(row) == provider._trade_key(v1)
+
+
+def test_v2_whole_quantities_preserve_published_v1_trade_ids(provider, use_transport):
+    """Prevent re-downloaded trades becoming duplicates when v2 encodes 38 as 38.0."""
+    pages = copy.deepcopy(CAPTURE["pages"])
+    pages[-1]["pagination"].update(has_more=False, next_cursor=None)
+    use_transport(provider, lambda _: httpx.Response(200, json=pages.pop(0)))
+
+    trades = provider.fetch_trades(CONDITION, page_size=4)
+
+    assert (
+        dict(zip(trades["transaction_hash"], trades["trade_id"]))
+        == CAPTURE["legacy_trade_ids_by_transaction"]
+    )

@@ -1502,10 +1502,14 @@ class PolymarketProvider(BaseProvider):
             ("price", "price"),
             ("timestamp", "timestamp"),
         )
-        return hashlib.sha1(
-            "|".join(str(trade.get(field, trade.get(legacy))) for field, legacy in fields).encode(),
-            usedforsecurity=False,
-        ).hexdigest()
+        values = []
+        for field, legacy in fields:
+            value = trade.get(field, trade.get(legacy))
+            # V1 encodes whole quantities as integers; v2 uses floats for the same trades.
+            if field in ("size", "price") and isinstance(value, float) and value.is_integer():
+                value = int(value)
+            values.append(str(value))
+        return hashlib.sha1("|".join(values).encode(), usedforsecurity=False).hexdigest()
 
     def iter_trades(
         self,
