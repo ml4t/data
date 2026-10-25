@@ -96,7 +96,7 @@ dependencies = [
     # Utilities
     "structlog>=23.0.0",
     "platformdirs>=4.0.0",
-    "filelock>=3.19.1",
+    "filelock>=4.2.1",
     "rich>=13.0.0",
     "aiofiles>=23.0.0", # Async file I/O for async storage backends
     # Exchange calendars for session-aware operations
