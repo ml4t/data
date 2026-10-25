@@ -272,10 +272,16 @@ the residual report still reflects disk. A failed operation that cannot establis
 validation concern, not permission to overwrite a source observation. `identify_candidates(min_gap_bars=...)` uses bar counts for
 intraday data; its daily `min_gap_days` remains a session count.
 
-Coin Metrics is not currently a Data provider. Its candle and metric endpoints use different
-identities and schemas; this Databento workflow does not claim to download them. See the
-[Databento range contract](../providers/databento.md#exact-timestamp-ranges) before selecting a
-continuous symbol or price convention.
+[Coin Metrics spot-market candles](../providers/coinmetrics.md) also support exact timestamp
+recovery. Record `provider="coinmetrics"` and the exact `source_symbol`, such as
+`coinbase-btc-usd-spot`, in dataset metadata, or pass that source symbol explicitly. Use a declared
+24/7 UTC left-labeled candle grid and the stored native frequency. Supply `CoinMetricsProvider`
+to the same `execute_backfill()` operation above; selected missing ranges are rechecked against
+disk, requested from that market, and filtered before merging. Empty no-trade intervals and
+partially recovered ranges remain in `remaining_gaps`; source observations are never synthesized.
+Coin Metrics asset metrics and reference rates are different schemas and are not this OHLCV
+adapter's contract. See the [Databento range contract](../providers/databento.md#exact-timestamp-ranges)
+before selecting a continuous futures symbol or price convention.
 
 ### Daily Range Compatibility
 

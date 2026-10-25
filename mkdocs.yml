@@ -141,6 +141,7 @@ nav:
     - Yahoo Finance: providers/yahoo.md
     - Alpaca: providers/alpaca.md
     - CoinGecko: providers/coingecko.md
+    - Coin Metrics: providers/coinmetrics.md
     - FRED: providers/fred.md
     - FXMacroData: providers/fxmacrodata.md
     - Fama-French: providers/fama_french.md
