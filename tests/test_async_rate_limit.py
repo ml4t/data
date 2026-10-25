@@ -1,7 +1,6 @@
 """Tests for async rate limiting utilities."""
 
 import asyncio
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -38,21 +37,26 @@ async def test_async_rate_limiter_basic():
 
 
 @pytest.mark.asyncio
-async def test_async_rate_limiter_blocking():
-    """Test blocking behavior of async rate limiter."""
+async def test_async_rate_limiter_blocking_waits_for_window_expiration(monkeypatch):
+    """Prevent early admission or incorrect wait calculation without scheduler timing."""
+    now = 100.0
+    waits = []
+
+    async def advance(delay):
+        nonlocal now
+        waits.append(delay)
+        now += delay
+
+    monkeypatch.setattr(rate_limit, "time", SimpleNamespace(time=lambda: now))
+    monkeypatch.setattr(rate_limit, "asyncio", SimpleNamespace(Lock=asyncio.Lock, sleep=advance))
     limiter = AsyncRateLimiter(max_calls=2, period=0.5)
 
-    # Fill up the limiter
     await limiter.acquire()
     await limiter.acquire()
-
-    # This should block for ~0.5 seconds
-    start = time.time()
-    result = await limiter.acquire(blocking=True)
-    elapsed = time.time() - start
-
-    assert result is True
-    assert 0.4 < elapsed < 0.7  # Allow some timing variance
+    assert await limiter.acquire(blocking=False) is False
+    assert await limiter.acquire(blocking=True) is True
+    assert waits == [pytest.approx(0.5)]
+    assert limiter.remaining_calls() == 1
 
 
 @pytest.mark.asyncio
