@@ -20,6 +20,7 @@ from ml4t.data.core.exceptions import (
     NetworkError,
     RateLimitError,
 )
+from ml4t.data.core.models import Frequency
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.registry import get_provider_spec
 from ml4t.data.storage.config import StorageConfig
@@ -54,6 +55,32 @@ def test_public_manager_can_acquire_coinmetrics_market_candles(use_transport):
     assert result["symbol"].to_list() == [MARKET.upper()] * 2
     assert requests[0].url.params["end_time"].startswith("2020-06-09T00:00:00")
     assert provider.session.is_closed
+
+
+@pytest.mark.parametrize(
+    "frequency,native_frequency",
+    [
+        (Frequency.FIVE_MINUTE, "5m"),
+        (Frequency.FIFTEEN_MINUTE, "15m"),
+        (Frequency.THIRTY_MINUTE, "30m"),
+        (Frequency.HOUR, "1h"),
+        ("10min", "10m"),
+    ],
+)
+def test_manager_frequency_values_reach_native_candle_intervals(
+    use_transport, frequency, native_frequency
+):
+    """Prevent supported Data frequencies failing before a valid candle request."""
+    with DataManager(providers={"coinmetrics": {"api_key": "offline-unit-test-key"}}) as manager:
+        provider = manager._get_provider("coinmetrics")
+        requests = use_transport(provider, lambda _: httpx.Response(200, json={"data": []}))
+
+        result = manager.fetch(
+            MARKET, "2020-06-08", "2020-06-08", frequency=frequency, provider="coinmetrics"
+        )
+
+    assert result.is_empty()
+    assert requests[0].url.params["frequency"] == native_frequency
 
 
 def test_exact_range_pages_without_losing_filters_or_keeping_end_bar(provider, use_transport):

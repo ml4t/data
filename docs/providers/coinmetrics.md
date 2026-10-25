@@ -37,6 +37,8 @@ The provider reuses shared HTTP retries for transient failures and rate limits. 
 duplicate candles and malformed or mismatched source records fail validation. Account errors
 are reported without echoing credentials. Exact and daily range semantics also apply when using
 `DataManager` with `provider="coinmetrics"`.
+The shared `Frequency` values `5minute`, `15minute`, `30minute` and `hour`, and the `10min`
+metadata spelling, map to the corresponding native candle intervals.
 
 Coin Metrics generates candles only for intervals containing trades. A calendar gap therefore
 identifies an absent scheduled observation for investigation; it does not prove a recoverable
