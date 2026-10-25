@@ -1,0 +1,33 @@
+{
+  "source": "https://docs.coinmetrics.io/api/v4/#operation/getTimeseriesMarketCandles",
+  "response": {
+    "data": [
+      {
+        "time": "2020-06-08T20:45:00.000000000Z",
+        "market": "coinbase-btc-usd-spot",
+        "price_open": "9705.07999999999993",
+        "price_close": "9705.01000000000022",
+        "price_high": "9706.19000000000051",
+        "price_low": "9705",
+        "vwap": "9705.1686505895068",
+        "volume": "16.8066639099999975",
+        "candle_usd_volume": "16.806663910",
+        "candle_trades_count": "212"
+      },
+      {
+        "time": "2020-06-08T20:50:00.000000000Z",
+        "market": "coinbase-btc-usd-spot",
+        "price_open": "9705",
+        "price_close": "9696.27000000000044",
+        "price_high": "9705",
+        "price_low": "9695.71999999999935",
+        "vwap": "9698.38894423754937",
+        "volume": "14.7672128699999963",
+        "candle_usd_volume": "14.767212870",
+        "candle_trades_count": "215"
+      }
+    ],
+    "next_page_token": "0.MjAyMC0wNi0wOFQyMDo0NTowMFo",
+    "next_page_url": "https://api.coinmetrics.io/v4/timeseries/market-candles?markets=coinbase-btc-usd-spot&api_key=<your_key>&pretty=true&page_size=2&frequency=5m&next_page_token=0.MjAyMC0wNi0wOFQyMDo0NTowMFo"
+  }
+}

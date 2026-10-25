@@ -58,6 +58,7 @@ class ProviderType(StrEnum):
     POLYMARKET_US = "polymarket_us"
     FORECASTEX = "forecastex"
     COINGECKO = "coingecko"
+    COINMETRICS = "coinmetrics"
     BINANCE = "binance"
     BINANCE_PUBLIC = "binance_public"
     OKX = "okx"

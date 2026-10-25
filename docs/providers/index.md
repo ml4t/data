@@ -16,6 +16,7 @@ For the wider vendor landscape, including sources the library does not wrap, sta
 |----------|-------------|--------|-------|---------|
 | [Yahoo Finance](yahoo.md) | Stocks, ETFs, Crypto | Unlimited | Thread | No |
 | [CoinGecko](coingecko.md) | Crypto | 10K+ coins | Native | No |
+| [Coin Metrics](coinmetrics.md) | Crypto spot-market candles | Account entitlement | Thread | Yes |
 | [FRED](fred.md) | Economic Data | 120/min | Thread | Yes |
 | FXMacroData | FX Macro, Forex Context | Public USD/free endpoints | Thread | Optional |
 | [Fama-French](fama_french.md) | Factors | Unlimited | Thread | No |
