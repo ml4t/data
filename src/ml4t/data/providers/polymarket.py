@@ -174,9 +174,8 @@ class PolymarketProvider(BaseProvider):
     # GET /prices-history rejects a startTs..endTs span longer than 15 days (HTTP 400).
     PRICE_HISTORY_MAX_WINDOW_SECONDS: ClassVar[int] = 15 * 86_400
 
-    # GET /trades serves up to 10000 trades per request and rejects offset > 10000 (HTTP 400).
-    TRADES_MAX_LIMIT: ClassVar[int] = 10_000
-    TRADES_MAX_OFFSET: ClassVar[int] = 10_000
+    # Data API v2 trades use opaque cursors and at most 1000 rows per page.
+    TRADES_MAX_LIMIT: ClassVar[int] = 1_000
     TRADES_PAGE_SIZE: ClassVar[int] = 1_000
 
     # Map common frequency names to Polymarket interval values
@@ -1494,10 +1493,23 @@ class PolymarketProvider(BaseProvider):
 
     @staticmethod
     def _trade_key(trade: dict[str, Any]) -> str:
-        fields = ("transactionHash", "asset", "proxyWallet", "side", "size", "price", "timestamp")
-        return hashlib.sha1(
-            "|".join(str(trade.get(field)) for field in fields).encode(), usedforsecurity=False
-        ).hexdigest()
+        fields = (
+            ("transaction_hash", "transactionHash"),
+            ("token_id", "asset"),
+            ("proxy_wallet", "proxyWallet"),
+            ("side", "side"),
+            ("size", "size"),
+            ("price", "price"),
+            ("timestamp", "timestamp"),
+        )
+        values = []
+        for field, legacy in fields:
+            value = trade.get(field, trade.get(legacy))
+            # V1 encodes whole quantities as integers; v2 uses floats for the same trades.
+            if field in ("size", "price") and isinstance(value, float) and value.is_integer():
+                value = int(value)
+            values.append(str(value))
+        return hashlib.sha1("|".join(values).encode(), usedforsecurity=False).hexdigest()
 
     def iter_trades(
         self,
@@ -1509,118 +1521,101 @@ class PolymarketProvider(BaseProvider):
     ) -> Iterator[dict[str, Any]]:
         """Iterate over the taker trades of one market, newest first.
 
-        ``GET https://data-api.polymarket.com/trades`` returns trades newest first, takes
-        inclusive ``start``/``end`` bounds in Unix seconds, serves up to 10000 trades per
-        request and rejects ``offset`` above 10000. To reach older trades this method pages
-        by offset until the cap, then moves ``end`` to the oldest second seen and starts
-        again at offset 0, dropping the trades of that boundary second it already yielded.
-        Records carry no trade id; a trade is identified by its transaction hash, token,
-        wallet, side, size, price and time, so two otherwise identical fills in one
-        transaction are yielded once.
+        ``GET /v2/trades`` returns snake_case records in a cursor-paginated envelope.
+        Market history is limited to the server's rolling three-year window. The server
+        ignores time bounds for market requests, so inclusive bounds are also enforced
+        locally. Short or empty pages can still carry a continuation cursor.
 
         Args:
             condition_id: Market condition id (``ticker`` of ``fetch_markets``).
             start: Keep trades at or after this time (Unix seconds, ISO string, date or
                 datetime; naive is UTC).
             end: Keep trades at or before this time.
-            page_size: Trades per request (1-10000).
-            max_pages: Optional cap on the number of requests, for sampling.
+            page_size: First-page size (clamped to 1-1000).
+            max_pages: Optional positive request cap for sampling, not full coverage.
 
         Yields:
-            Raw data-api trade dictionaries.
+            Raw snake_case Data API v2 trade dictionaries. Identical fills with the same
+            transaction, token, wallet, side, size, price and time are yielded once.
 
         Raises:
-            DataValidationError: The server repeated a page (offset ignored) or one second
-                holds more trades than one offset window can reach.
+            DataValidationError: Malformed records/envelope or a repeated cursor.
         """
+        if max_pages is not None and max_pages < 1:
+            raise ValueError("max_pages must be positive")
         limit = max(1, min(int(page_size), self.TRADES_MAX_LIMIT))
-        start_seconds = to_unix_seconds(start)
-        window_end = to_unix_seconds(end)
+        start_seconds, end_seconds = to_unix_seconds(start), to_unix_seconds(end)
+        if start_seconds is not None and end_seconds is not None and start_seconds > end_seconds:
+            raise ValueError("start must be at or before end")
         resource = f"trades for {condition_id}"
-        boundary_keys: set[str] = set()
+        params: dict[str, Any] = {"condition": condition_id, "limit": limit}
+        if start_seconds is not None:
+            params["start"] = start_seconds
+        if end_seconds is not None:
+            params["end"] = end_seconds
+        seen_cursors: set[str] = set()
+        seen_keys: set[str] = set()
         pages = 0
         while True:
-            offset = 0
-            window_keys = set(boundary_keys)
-            oldest: int | None = None
-            oldest_keys: set[str] = set()
-            previous_page: list[str] | None = None
-            while True:
-                params: dict[str, Any] = {"market": condition_id, "limit": limit, "offset": offset}
-                if start_seconds is not None:
-                    params["start"] = start_seconds
-                if window_end is not None:
-                    params["end"] = window_end
-                response = self._request(
-                    f"{self.DATA_API_URL}/trades", resource=resource, params=params
-                )
-                try:
-                    trades = response.json()
-                except ValueError as err:
-                    raise DataValidationError(
-                        provider="polymarket", message=f"Malformed JSON response for {resource}"
-                    ) from err
-                if not isinstance(trades, list):
-                    raise DataValidationError(
-                        provider="polymarket",
-                        message=f"Expected a JSON list for {resource}, got {type(trades).__name__}",
-                    )
-                pages += 1
-                page_keys: list[str] = []
-                for trade in trades:
-                    if not isinstance(trade, dict) or isinstance(trade.get("timestamp"), bool):
-                        raise DataValidationError(
-                            provider="polymarket",
-                            message=f"Malformed trade entry for {resource}: {trade!r}",
-                            field="trades",
-                        )
-                    try:
-                        seconds = int(trade["timestamp"])
-                    except (KeyError, TypeError, ValueError) as err:
-                        raise DataValidationError(
-                            provider="polymarket",
-                            message=f"Trade without a timestamp for {resource}: {trade!r}",
-                            field="timestamp",
-                        ) from err
-                    key = self._trade_key(trade)
-                    page_keys.append(key)
-                    if oldest is None or seconds < oldest:
-                        oldest, oldest_keys = seconds, {key}
-                    elif seconds == oldest:
-                        oldest_keys.add(key)
-                    if key in window_keys:
-                        continue
-                    window_keys.add(key)
-                    if start_seconds is not None and seconds < start_seconds:
-                        continue
-                    if window_end is not None and seconds > window_end:
-                        continue
-                    yield trade
-                if len(trades) < limit or (max_pages is not None and pages >= max_pages):
-                    return
-                if offset > 0 and page_keys == previous_page:
-                    raise DataValidationError(
-                        provider="polymarket",
-                        message=f"Trade page repeated for {resource}; the server ignored offset",
-                        field="offset",
-                        value=offset,
-                    )
-                previous_page = page_keys
-                offset += len(trades)
-                if offset > self.TRADES_MAX_OFFSET:
-                    break
-            if oldest is None or (window_end is not None and oldest >= window_end):
+            response = self._request(
+                f"{self.DATA_API_URL}/v2/trades", resource=resource, params=params
+            )
+            try:
+                payload = response.json()
+            except ValueError as err:
                 raise DataValidationError(
-                    provider="polymarket",
-                    message=(
-                        f"More than {self.TRADES_MAX_OFFSET + limit} trades at second "
-                        f"{window_end} for {resource}; cannot page past it"
-                    ),
-                    field="end",
-                    value=window_end,
+                    provider="polymarket", message=f"Malformed JSON response for {resource}"
+                ) from err
+            pagination = payload.get("pagination") if isinstance(payload, dict) else None
+            trades = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(trades, list) or not isinstance(pagination, dict):
+                raise DataValidationError(
+                    provider="polymarket", message=f"Expected v2 data/pagination for {resource}"
                 )
-            window_end = oldest
-            boundary_keys = oldest_keys
+            has_more, cursor = pagination.get("has_more"), pagination.get("next_cursor")
+            if (
+                not isinstance(has_more, bool)
+                or (has_more and (not isinstance(cursor, str) or not cursor))
+                or (not has_more and cursor is not None)
+            ):
+                raise DataValidationError(
+                    provider="polymarket", message=f"Malformed v2 pagination for {resource}"
+                )
+            if cursor is not None and cursor in seen_cursors:
+                raise DataValidationError(
+                    provider="polymarket", message=f"Trade cursor repeated for {resource}"
+                )
+            pages += 1
+            newest: int | None = None
+            for trade in trades:
+                try:
+                    if not isinstance(trade, dict) or isinstance(trade.get("timestamp"), bool):
+                        raise ValueError("trade must contain an integer timestamp")
+                    seconds = int(trade["timestamp"])
+                    if isinstance(trade["timestamp"], float) and seconds != trade["timestamp"]:
+                        raise ValueError("non-integer timestamp")
+                except (KeyError, TypeError, ValueError) as err:
+                    raise DataValidationError(
+                        provider="polymarket",
+                        message=f"Malformed trade timestamp for {resource}: {trade!r}",
+                        field="timestamp",
+                    ) from err
+                newest = seconds if newest is None else max(newest, seconds)
+                key = self._trade_key(trade)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                if start_seconds is not None and seconds < start_seconds:
+                    continue
+                if end_seconds is not None and seconds > end_seconds:
+                    continue
+                yield trade
+            if not has_more or (max_pages is not None and pages >= max_pages):
+                return
+            if start_seconds is not None and newest is not None and newest < start_seconds:
+                return
+            seen_cursors.add(cursor)
+            params["cursor"] = cursor
 
     def fetch_trades(
         self,
@@ -1667,13 +1662,13 @@ class PolymarketProvider(BaseProvider):
 
     def _normalize_trade(self, trade: dict[str, Any], condition_id: str) -> tuple[Any, ...]:
         try:
-            outcome_index = trade["outcomeIndex"]
+            outcome_index = trade["outcome_index"]
             outcome_price = float(trade["price"])
             size = float(trade["size"])
             side = str(trade["side"]).upper()
             timestamp = datetime.fromtimestamp(int(trade["timestamp"]), UTC)
             if isinstance(outcome_index, bool) or outcome_index not in (0, 1):
-                raise ValueError(f"outcomeIndex {outcome_index!r} is not 0 or 1")
+                raise ValueError(f"outcome_index {outcome_index!r} is not 0 or 1")
             if side not in ("BUY", "SELL"):
                 raise ValueError(f"side {side!r} is not BUY or SELL")
         except (KeyError, TypeError, ValueError) as err:
@@ -1687,7 +1682,7 @@ class PolymarketProvider(BaseProvider):
         taker_yes = first_outcome == (side == "BUY")
         return (
             self._trade_key(trade),
-            trade.get("conditionId") or condition_id,
+            trade.get("condition_id") or condition_id,
             timestamp,
             yes_price,
             size,
@@ -1697,9 +1692,9 @@ class PolymarketProvider(BaseProvider):
             int(outcome_index),
             side,
             outcome_price,
-            None if trade.get("asset") is None else str(trade["asset"]),
-            trade.get("proxyWallet"),
-            trade.get("transactionHash"),
+            None if trade.get("token_id") is None else str(trade["token_id"]),
+            trade.get("proxy_wallet"),
+            trade.get("transaction_hash"),
         )
 
     def close(self) -> None:
