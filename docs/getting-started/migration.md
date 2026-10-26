@@ -1,5 +1,29 @@
 # Migrate existing data workflows
 
+The inputs and adapters on this page are available in
+[Data 0.3.0](https://pypi.org/project/ml4t-data/0.3.0/) on Python 3.12 through 3.14.
+Install the released package with `uv add ml4t-data`. Native preparation needs no Reloaded runtime.
+The optional Zipline bridge runs once in a separate environment with the original bundle runtime.
+
+Run the maintained examples from the matching
+[release checkout](https://github.com/ml4t/data/tree/db9cda776b5b346f536b0e8ceb855b9fd60b6ec8/examples).
+Clean published-wheel installation checks passed all six native examples; the optional conversion
+passed 13 checks using the real Zipline readers and writers. The pinned legacy environment and
+historical cross-library checks are described in the relevant sections below. They do not qualify
+every version of a consuming library.
+
+| Input needed by a consumer | Released Data API | Boundary |
+|---|---|---|
+| A pandas price panel or native long price table for Diagnostic | `to_price_panel`, `from_price_panel` | Diagnostic computes returns, factor statistics and analytical fill views. Data retains missing quotes and stable IDs. |
+| Captured action facts and dated adjusted research prices | `prepare_action_inputs`, `prepare_adjusted_history`, `InstrumentRegistry` | Backtest owns runtime history, orders, entitlement, payments and positions. Adjusted research prices do not establish broker accounting. |
+| Individual futures definitions, eligible fields and paired roll marks | `prepare_futures_inputs` | Backtest owns roll execution, settlement and margin. Data does not infer missing execution marks. |
+| Portable captured tables and declarations | `export_snapshot`, `read_snapshot` | Each consumer supplies its own effective configuration and runtime policy. |
+| Legacy acquisition imports or a saved Zipline bundle | `ml4t.data.compat.empyrical`, `ml4t.data.compat.zipline` | These adapters preserve the bounded data workflow, not the legacy analytics or execution engine. |
+
+The examples qualify Data's producer contracts. For a combined environment, also use the
+consumer's published migration guide and qualification evidence. The historical source checks
+below remain limited to their named revisions; they are not current installation requirements.
+
 ## Move a long price table to a pandas analytical panel
 
 Keep source observations in Data storage. Use `to_price_panel` when an analytical consumer needs
@@ -56,7 +80,7 @@ the declared label clock; instant bounds use UTC. Read ranges are start-inclusiv
 Calendar omission, explicit `None` and a named `24/7` schedule remain distinct. Panel conversion
 does not invoke a calendar resolver or create an expected clock.
 
-These adapters are unreleased source functionality. Isolated wheel and source-distribution checks
+Before the 0.3.0 release, isolated wheel and source-distribution integration checks
 qualified Data `0.2.2.dev14+gbe73c5d86`, Specs `0.2.0`, Diagnostic `0.1.9` and Engineer
 `0.1.7.dev29+gc69e7bada` from immutable source
 [`c69e7bada`](https://github.com/ml4t/engineer/commit/c69e7badaac012ad98b1c4b8aa9a67a952b08f5c).
@@ -65,11 +89,10 @@ The checks used pandas `3.0.6` and Polars `2.0.0`. Diagnostic's public
 B's missing quote. Engineer's public `labeling.fixed_time_horizon_labels` consumed A's complete
 price history. Both produced the independently expected one-observation outcomes.
 
-Engineer `0.1.7` is not yet a published release; published `0.1.6` requires Specs `<0.2` and
-cannot be installed alongside current Data. Use the qualified immutable Engineer source for this
-integration until a compatible Engineer release is available. This is source integration evidence,
-not a claim of released-package migration compatibility. Neither consumer nor any Reloaded package
-is required for the Data-only example.
+Engineer `0.1.6` required Specs `<0.2`; that historical combination is incompatible with Data
+0.3.0. Engineer has since published `0.2.0` with Specs `>=0.2.0,<0.3.0`. The source checks above
+do not certify that newer consumer's behavior. Neither consumer nor any Reloaded package is
+required for the Data-only example.
 
 ## Import corporate-action facts without changing their financial definition
 
@@ -117,13 +140,14 @@ Factor keys must exactly cover the raw observations. Volume is adjusted only whe
 is supplied. Raw prices, volume and factor provenance remain available; known conflicting currency
 units, reserved output fields and incomplete or duplicate keys fail without input mutation.
 
-These are unreleased source APIs. The Data-only recipe needs no Reloaded, Engineer or Backtest
-dependency. Prepared adjusted research prices are not execution marks with an additional copy of
+These APIs are included in Data 0.3.0. The Data-only recipe needs no Reloaded, Engineer or
+Backtest dependency. Prepared adjusted research prices are not execution marks with an additional copy of
 the same dividend cash event. The consuming broker owns entitlement, payment, orders and positions.
 Source availability remains separate from effective time; this preparation step makes no causal
 as-of claim.
 
-Isolated wheel and source-distribution checks qualified Data `0.2.2.dev23+g0917c8401`,
+Pre-release wheel and source-distribution integration checks qualified Data
+`0.2.2.dev23+g0917c8401`,
 Specs `0.2.0`, Diagnostic `0.1.9` and the immutable Engineer source candidate identified above.
 The installed Data recipe produced two versioned event facts. Both consumers' public return/label
 APIs produced `0.01` for native adjusted prices and `1/97` for the supplied-factor prices, while
@@ -219,8 +243,8 @@ The recipe retains July1/2 warmup prices `198,200` at the July2 cutoff. A later 
 does not change that input. The July3 split/cash facts produce the independent native shareholder
 return `1.01`; a July7 symbol rename retains ID17. July4 is an exchange closure,not a missing
 observation. The example needs no Reloaded,Engineer,Diagnostic or Backtest runtime dependency.
-These are unreleased source APIs. Isolated wheel and source-distribution checks qualified Data
-`0.2.2.dev35+g2c4ff2050`, Specs `0.2.0`, Diagnostic `0.1.9` and the immutable Engineer source
+These APIs are included in Data 0.3.0. Pre-release wheel and source-distribution integration
+checks qualified Data `0.2.2.dev35+g2c4ff2050`, Specs `0.2.0`, Diagnostic `0.1.9` and the immutable Engineer source
 candidate identified above, with pandas `3.0.6` and Polars `2.0.0`. The installed Engineer public
 `features.trend.sma` consumed Data's two pre-entry observations and produced `null,199`; the
 price-sensitive decision `200 > 199` remained true after the future correction. Engineer's public
@@ -379,8 +403,8 @@ FX conversion. Read `metadata['normalized_feed_spec']` to consume those fields a
 The same calculation after cents-to-dollars conversion uses price change0.1 and multiplier5000.
 Neither notional value nor these marks establish cash settlement, margin or fills.
 
-These are unreleased source APIs. Isolated wheel and sdist checks qualified Data
-`0.2.2.dev57+ge83e6b086`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
+These APIs are included in Data 0.3.0. Pre-release wheel and source-distribution integration
+checks qualified Data `0.2.2.dev57+ge83e6b086`, Specs `0.2.0`, pandas `3.0.6`, Polars `2.0.0` and immutable Backtest
 [`12a2c483f`](https://github.com/ml4t/backtest/commit/12a2c483f8f1fda54244af187db8bf44e6f85fc9)
 (`0.1.13.dev22+g12a2c483f`) on Python `3.12.11`. Actual Backtest `ContractSpec` and `Position`
 consumed the produced raw and converted fields, retaining IDs, paired marks and units; both
@@ -389,7 +413,7 @@ roll fills, settlement, margin or a complete released-package migration.
 Data does not replace Backtest's runtime history, account, roll execution or auto-close policy.
 The recipe needs no credentials, network, Reloaded package or Backtest installation.
 
-This source candidate requires Polars `>=1.36.1` and pandas-market-calendars `>=5.4.0`.
+Data 0.3.0 requires Polars `>=1.36.1` and pandas-market-calendars `>=5.4.0`.
 Isolated runs using the former advertised minima failed during ordinary Data import or calendar
 construction. The saved-file recipe passes with Polars `1.36.1`, pandas-market-calendars `5.4.0`
 and pandas `2.3.3`; those checks do not certify every possible dependency-version combination.
@@ -457,12 +481,13 @@ from ml4t.data.compat.empyrical import default_returns_func
 register_return_func(default_returns_func)
 ```
 
-The offline [acquisition migration example](https://github.com/ml4t/data/blob/3dd71cb394c390316ff0bb36ad1d7d0f3dd6aefc/examples/acquisition_migration.py)
+The offline [acquisition migration example](https://github.com/ml4t/data/blob/db9cda776b5b346f536b0e8ceb855b9fd60b6ec8/examples/acquisition_migration.py)
 replays retained public response captures through actual parsers, providers and CSV files. It runs
-without credentials or network and does not require any Reloaded package. This is an unreleased
-source workflow, not a claim that a released successor stack already replaces every legacy option.
+without credentials or network and does not require any Reloaded package. This workflow is
+included in Data 0.3.0; it does not establish replacement of every legacy option.
 
-Isolated wheel and source-distribution checks qualified Data `0.2.2.dev27+g5ff44e4ac`,
+Pre-release wheel and source-distribution integration checks qualified Data
+`0.2.2.dev27+g5ff44e4ac`,
 Specs `0.2.0`, Diagnostic `0.1.9`, Pyfolio Reloaded `0.10.0` at immutable commit
 `365e649f591c39cef5d0170958280e49b8eeb953`, and Alphalens Reloaded `0.5.0` at
 `1bc181de4aafbe33437ed0e362ff96aa7ce20acd`. The checks exercised actual Diagnostic
@@ -476,7 +501,7 @@ the Yahoo extra now requires the qualified `>=1.5.2` range.
 ## Reconstruct inputs after source pruning
 
 Retain the input tables and declarations instead of referring to mutable source paths. Run the
-offline [portable snapshot example](https://github.com/ml4t/data/blob/a98cede0a36ba6856a010456f302e3e987d255de/examples/portable_snapshot_migration.py)
+offline [portable snapshot example](https://github.com/ml4t/data/blob/db9cda776b5b346f536b0e8ceb855b9fd60b6ec8/examples/portable_snapshot_migration.py)
 from a source checkout:
 
 ```bash
@@ -552,10 +577,10 @@ The actual optional conversion checks use immutable Zipline Reloaded `3.2.0` sou
 Python `3.12`, pandas `2.3.3`, Specs `0.2.0` and Polars `2.0.0`. They construct a real bundle
 with renamed equities, two venues, two futures, missing quotes, split/cash/stock actions and daily
 and minute observations, then compare native preparation and standard re-ingestion. The native
-recipe requires no legacy runtime. This is unreleased source functionality; it does not claim that
-published Data `0.2.1` provides these APIs or that Data replaces Zipline's runtime or broker.
+recipe requires no legacy runtime. These APIs are included in Data 0.3.0. Data does not replace
+Zipline's runtime or broker.
 
-Clean wheel and source-distribution installs qualified Data `0.2.2.dev27+g90c06ba9c` for native
+Pre-release wheel and source-distribution installs qualified Data `0.2.2.dev27+g90c06ba9c` for native
 reconstruction, the optional conversion and the selected dependency floors. Reconstructed tables
 also passed actual Engineer labeling, Diagnostic forward returns and Backtest contract/position
 checks using Engineer `0.1.7.dev29+gc69e7bada`, Diagnostic `0.1.9` and Backtest
