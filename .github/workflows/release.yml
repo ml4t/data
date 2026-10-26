@@ -289,40 +289,9 @@ jobs:
   post-publication:
     name: Verify Package, Release, and Documentation
     needs: [preflight, github-release]
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.preflight.outputs.commit }}
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          version: ${{ env.UV_VERSION }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-candidate-${{ needs.preflight.outputs.commit }}
-          path: candidate/
-      - name: Verify PyPI metadata and GitHub release digests
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          python scripts/verify_published_release.py
-          --manifest candidate/candidate.json
-          --repository "${{ github.repository }}"
-      - name: Install the published wheel and execute the README quick start
-        run: |
-          uv venv --python 3.12 .release-venv
-          uv pip install --python .release-venv/bin/python "ml4t-data==${{ needs.preflight.outputs.version }}"
-          .release-venv/bin/python scripts/run_readme_quickstart.py
-      - name: Recheck deployed documentation identity
-        run: >-
-          python scripts/verify_documentation_identity.py
-          --url https://www.ml4trading.io/docs/data/
-          --url https://www.ml4trading.io/docs/data/api/
-          --expected-library data
-          --expected-version "${{ needs.preflight.outputs.version }}"
-          --expected-commit "${{ needs.preflight.outputs.commit }}"
-          --attempts 6
-          --delay 10
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      candidate-sha: ${{ needs.preflight.outputs.commit }}

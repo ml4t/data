@@ -1,0 +1,102 @@
+name: Verify Published Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      candidate-sha:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing published version without the v prefix
+        required: true
+        type: string
+      candidate-sha:
+        description: Full source SHA recorded in the published release manifest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.10.9"
+  UV_NO_MANAGED_PYTHON: "1"
+  NO_MKDOCS_2_WARNING: "1"
+
+jobs:
+  verify:
+    name: Verify Published Artifacts and Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Verify the original source and immutable tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse "refs/tags/v${RELEASE_VERSION}^{commit}")" = "$CANDIDATE_SHA"
+      - name: Download the published candidate without modifying the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          gh release download "v${RELEASE_VERSION}" --pattern candidate.json --dir candidate
+          gh release download "v${RELEASE_VERSION}" --pattern '*.whl' --pattern '*.tar.gz' --dir candidate/dist
+      - name: Install locked verification dependencies
+        run: uv sync --locked --only-group dev --python "$PYTHON_VERSION"
+      - name: Verify published artifacts against the source-bound manifest
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        run: >-
+          uv run --no-sync python scripts/release_candidate.py verify candidate
+          --expected-commit "$CANDIDATE_SHA"
+          --expected-tree "$(git rev-parse 'HEAD^{tree}')"
+          --expected-tag "v${RELEASE_VERSION}"
+      - name: Verify PyPI metadata and GitHub release digests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          uv run --no-sync python scripts/verify_published_release.py
+          --manifest candidate/candidate.json
+          --repository "${{ github.repository }}"
+      - name: Install the published wheel and execute the README quick start
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          uv venv --python "$PYTHON_VERSION" .release-venv
+          uv pip install --python .release-venv/bin/python "ml4t-data==${RELEASE_VERSION}"
+          .release-venv/bin/python -I scripts/run_readme_quickstart.py
+      - name: Recheck deployed documentation identity
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          CANDIDATE_SHA: ${{ inputs.candidate-sha }}
+        run: >-
+          python scripts/verify_documentation_identity.py
+          --url https://www.ml4trading.io/docs/data/
+          --url https://www.ml4trading.io/docs/data/api/
+          --url https://www.ml4trading.io/docs/data/providers/
+          --url https://www.ml4trading.io/docs/data/getting-started/migration/
+          --expected-library data
+          --expected-version "$RELEASE_VERSION"
+          --expected-commit "$CANDIDATE_SHA"
+          --attempts 6
+          --delay 10
