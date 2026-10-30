@@ -174,6 +174,59 @@ this native minute completer; they are not silently approximated by its legacy m
 whether or not storage is configured. Feed declarations are accepted through the facade's
 `feed_spec` keyword with the same precedence as the low-level classes.
 
+## Run the NASDAQ Futures Bar Example
+
+From a repository checkout with the package installed, run:
+
+```bash
+uv run python examples/nasdaq_bars_sessions.py
+```
+
+The command reads `examples/data/nasdaq_bars_sample.csv`, resolved relative to the script, and
+writes `nasdaq_bars_with_sessions.parquet` in the working directory. It needs no credentials,
+network access, or client files. The CSV is hand-authored teaching data distributed under this
+repository's MIT license. Its prices, volumes, and trade counts are illustrative, with no vendor
+or real contract identity. It is not a substitute for historical NQU25 observations.
+
+The sample contains nine irregular, close-labeled bars across the March 7 and March 10, 2025
+`CME_Equity` sessions, including Sunday evening trading after the US daylight-saving change.
+All `datetime` values explicitly use UTC (`Z`). Friday's 16:00 Chicago close is 22:00 UTC;
+Monday's is 21:00 UTC. A close-labeled observation at the session close or break start belongs to
+the preceding open interval. The sample includes those boundaries and observations after the
+scheduled break. The selected calendar supplies the actual intervals; a fixed UTC offset or
+weekday rule does not determine the session date.
+
+These rows illustrate an already aggregated input. They are not generated from ticks, and no
+volume or trade-count threshold, partial-bar policy, or cleaning pipeline is claimed. The example
+only adds session dates: it does not aggregate, complete a grid, fill values, or drop observations.
+It rejects observations outside the selected schedule. Irregular bar timestamps alone do not
+establish that a dataset has no missing bars.
+
+### Supply Your Own Bars
+
+An external Parquet file must contain `datetime` as a non-null Polars Datetime, plus `Open`, `High`,
+`Low`, `Last`, `Volume`, and `# of Trades`. Preserve the export's timezone, aggregation threshold,
+contract identifier, date range, session-boundary rules, partial-bar policy, and cleaning provenance
+alongside the file. Prepare these fields using your licensed source's documented export or
+aggregation process; this example does not reconstruct a vendor-specific preprocessing pipeline.
+
+```bash
+uv run python examples/nasdaq_bars_sessions.py --input bars.parquet --output assigned.parquet --timezone America/Chicago --bar-label close
+```
+
+Naive external timestamps require `--timezone`; use the source timezone rather than guessing.
+Aware timestamps retain their instants and need no timezone option. Confirm the source's label
+convention: `--bar-label close` is the default and uses `(open, close]` intervals, while
+`--bar-label open` uses `[open, close)`. The same convention applies to breaks. The example selects
+`CME_Equity` explicitly, not the CME crypto calendar. Use another authoritative product calendar
+when the input is from a different market.
+
+The earlier example referenced a private `nqu25_processed.parquet` input. Its original vendor,
+contract/date range, timestamp convention, aggregation threshold, filtering, and partial-bar
+handling have not been established from public repository history. Neither that input nor its
+client preprocessing pipeline is distributed here. The bundled CSV is the runnable alternative;
+it does not assert or reproduce the original pipeline's parameters.
+
 ## Use Session Dates in Validation
 
 With scikit-learn installed, group observations by `session_date` when a split must not divide one
