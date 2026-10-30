@@ -108,3 +108,12 @@ def test_example_never_overwrites_its_input(tmp_path):
     assert result.returncode == 2
     assert "--output must differ from --input" in result.stderr
     assert_frame_equal(pl.read_parquet(source), bars)
+
+
+def test_example_prints_session_totals_on_windows_cp1252_console(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    result = run_example(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "session_date,n_bars,total_volume,total_trades\n" in result.stdout
+    assert "2025-03-07,4,900,70\n" in result.stdout
+    assert "2025-03-10,5,990,73\n" in result.stdout

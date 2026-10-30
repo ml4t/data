@@ -78,7 +78,7 @@ def main() -> None:
         .sort("session_date")
     )
     assigned.write_parquet(args.output)
-    print(stats)
+    print(stats.write_csv(), end="")
     print(f"Saved {len(assigned)} unchanged bars with session dates to {args.output}")
     print(
         "Session groups preserve session boundaries; chronological validation needs a time-ordered split."
