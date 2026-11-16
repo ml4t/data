@@ -1670,6 +1670,8 @@ dev = [
     { name = "yfinance" },
 ]
 test = [
+    { name = "databento", version = "0.83.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.15'" },
+    { name = "databento", version = "0.90.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.15'" },
     { name = "hypothesis" },
     { name = "oandapyv20" },
     { name = "pytest" },
@@ -1681,6 +1683,7 @@ test = [
     { name = "six" },
     { name = "ty" },
     { name = "xlsxwriter" },
+    { name = "yfinance" },
 ]
 
 [package.metadata]
@@ -1794,6 +1797,8 @@ dev = [
     { name = "yfinance", specifier = ">=1.5.2" },
 ]
 test = [
+    { name = "databento", specifier = ">=0.38.0" },
+    { name = "databento", marker = "python_full_version >= '3.15'", specifier = ">=0.90.0" },
     { name = "hypothesis", specifier = ">=6.80.0" },
     { name = "oandapyv20", specifier = ">=0.7.0" },
     { name = "pytest", specifier = ">=7.4.0" },
@@ -1805,6 +1810,7 @@ test = [
     { name = "six", specifier = ">=1.17.0" },
     { name = "ty" },
     { name = "xlsxwriter", specifier = ">=3.1.0" },
+    { name = "yfinance", specifier = ">=1.5.2" },
 ]
 
 [[package]]
