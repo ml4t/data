@@ -1,7 +1,7 @@
 # Coin Metrics spot-market candles
 
 `CoinMetricsProvider` acquires OHLCV candles for one explicit Coin Metrics spot market through
-[`/v4/timeseries/market-candles`](https://docs.coinmetrics.io/api/v4/#operation/getTimeseriesMarketCandles).
+[`/v4/timeseries/market-candles`](https://docs.coinmetrics.io/market-data/market-data-overview/market-candles#historical-candles-http).
 It implements the standard provider API and the exact `TimestampRangeProvider` capability used by
 [stored-gap recovery](../user-guide/incremental-updates.md#download-real-observations-for-a-selected-report).
 
