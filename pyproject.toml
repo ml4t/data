@@ -103,7 +103,8 @@ dependencies = [
     "rich>=13.0.0",
     "aiofiles>=23.0.0", # Async file I/O for async storage backends
     # Exchange calendars for session-aware operations
-    "pandas-market-calendars>=5.4.0",
+    "pandas-market-calendars>=5.5.0",
+    "pandas-market-calendars>=5.6.0; python_version >= '3.15'",
     "openpyxl>=3.1.5",
 ]
 

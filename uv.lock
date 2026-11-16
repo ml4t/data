@@ -1721,7 +1721,8 @@ requires-dist = [
     { name = "oandapyv20", marker = "extra == 'oanda'", specifier = ">=0.7.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.0.0" },
-    { name = "pandas-market-calendars", specifier = ">=5.4.0" },
+    { name = "pandas-market-calendars", specifier = ">=5.5.0" },
+    { name = "pandas-market-calendars", marker = "python_full_version >= '3.15'", specifier = ">=5.6.0" },
     { name = "platformdirs", specifier = ">=4.0.0" },
     { name = "polars", specifier = ">=1.36.1" },
     { name = "polars", marker = "python_full_version >= '3.15'", specifier = ">=2.0.0" },
@@ -2260,15 +2261,15 @@ wheels = [
 
 [[package]]
 name = "pandas-market-calendars"
-version = "5.4.0"
+version = "5.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "exchange-calendars" },
     { name = "pandas" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/38/4c/98067cb91b37a137389f978f52410975915268d394c09cf941c490565297/pandas_market_calendars-5.4.0.tar.gz", hash = "sha256:b02f3a0e9bcb4b9e82a5060bf260ef0060ccd398f989b5e6f8208f4352967806", size = 175213, upload-time = "2026-05-27T02:42:05.249Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/77/f9e14d25a1a9fc0d87ca4419613052bf218008052066c558e10a36e139aa/pandas_market_calendars-5.6.1.tar.gz", hash = "sha256:72ae3d3da7cc62cccca1a899d957a220b8448bc488bc29d4ee84d7992d380589", size = 201602, upload-time = "2026-11-14T03:03:23.112Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/d3/59b999f7f6a1d173572d3e8f8b07ded7e256c691d02b3b5cacb26479895a/pandas_market_calendars-5.4.0-py3-none-any.whl", hash = "sha256:bb2b93b28d496cab173b41c7d120fd5cd9d506b31f3bb0ad3d1d9f2b60d9d9e3", size = 134904, upload-time = "2026-05-27T02:42:06.35Z" },
+    { url = "https://files.pythonhosted.org/packages/20/2c/5521bf94c87a0b932a3dc3186a95dc1f5884f6b5a931bd5e00bf86e2088c/pandas_market_calendars-5.6.1-py3-none-any.whl", hash = "sha256:481056fa8c7630b97d485fc7e1e58b0a19a0916fcbe8734f91a1afec126f49ba", size = 148630, upload-time = "2026-11-14T03:03:21.662Z" },
 ]
 
 [[package]]
