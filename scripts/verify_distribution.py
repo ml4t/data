@@ -102,8 +102,8 @@ def validate_distributions(
         for field, expected in expected_scalars.items():
             if item[field] != expected:
                 raise ValueError(f"{field} is {item[field]!r}, expected {expected!r}")
-        if SpecifierSet(str(item["Requires-Python"])) != SpecifierSet(">=3.12,<3.15"):
-            raise ValueError("Requires-Python differs from >=3.12,<3.15")
+        if SpecifierSet(str(item["Requires-Python"])) != SpecifierSet(">=3.12,<3.16"):
+            raise ValueError("Requires-Python differs from >=3.12,<3.16")
         project_urls = {}
         for value in item.get_all("Project-URL", []):
             label, separator, url = value.partition(", ")

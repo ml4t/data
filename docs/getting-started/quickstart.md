@@ -5,7 +5,7 @@ locally generated data.
 
 ## Install the package
 
-Use CPython 3.12, 3.13, or 3.14.
+Use CPython 3.12 through 3.15.
 
 ```bash
 pip install ml4t-data
