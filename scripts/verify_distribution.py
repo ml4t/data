@@ -176,6 +176,14 @@ def verify_install(archive: Path, version: str) -> None:
         subprocess.run(
             [str(python), str(Path(__file__).with_name("run_readme_quickstart.py"))], check=True
         )
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python), f"{archive}[oanda]"],
+            check=True,
+        )
+        subprocess.run(
+            [str(python), "-I", "-c", "from ml4t.data.providers.oanda import OandaProvider"],
+            check=True,
+        )
 
 
 def main() -> None:
