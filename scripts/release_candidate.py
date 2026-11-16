@@ -28,6 +28,7 @@ EXPECTED_URLS = {
     "Issues": "https://github.com/ml4t/data/issues",
     "Changelog": "https://github.com/ml4t/data/releases",
 }
+EXPECTED_PYTHON = ">=3.12,<3.16"
 EXPECTED_KEYWORDS = {"finance", "quantitative-finance", "algorithmic-trading", "market-data"}
 EXPECTED_CLASSIFIERS = {
     "Development Status :: 5 - Production/Stable",
@@ -35,6 +36,7 @@ EXPECTED_CLASSIFIERS = {
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Typing :: Typed",
 }
 
@@ -97,8 +99,8 @@ def metadata_failures(metadata: Message, *, expected_version: str) -> list[str]:
     for field, expected in expected_scalars.items():
         if metadata.get(field) != expected:
             failures.append(f"{field} is {metadata.get(field)!r}, expected {expected!r}")
-    if SpecifierSet(str(metadata.get("Requires-Python", ""))) != SpecifierSet(">=3.12,<3.15"):
-        failures.append("Requires-Python differs from >=3.12,<3.15")
+    if SpecifierSet(str(metadata.get("Requires-Python", ""))) != SpecifierSet(EXPECTED_PYTHON):
+        failures.append(f"Requires-Python differs from {EXPECTED_PYTHON}")
     project_urls = {}
     for value in metadata.get_all("Project-URL", []):
         label, separator, url = value.partition(", ")
