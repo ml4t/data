@@ -50,6 +50,15 @@ Price adjustment (stocks):
   ``"dividend"``, or ``"all"`` at construction for adjusted bars. Crypto bars
   have no adjustment concept.
 
+Symbol mapping (stocks):
+- Alpaca maps a ticker to the company that holds it on the ``asof`` date,
+  today by default, and returns that company's whole history. A renamed
+  company's history then appears under both its tickers (META includes the FB
+  years), and the multi-symbol endpoint drops the old ticker (FB). ``asof="-"``
+  turns the mapping off, so each ticker returns the bars traded under it,
+  whoever traded them; ``asof="YYYY-MM-DD"`` maps as of that date. Left unset,
+  Alpaca's default applies.
+
 Rate limiting:
 - ``DEFAULT_RATE_LIMIT`` is a conservative client-side throttle of 200 calls per
   minute, reflecting the Basic (free) plan figure documented at
@@ -211,6 +220,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         adjustment: str = "raw",
         rate_limit: tuple[int, float] | None = None,
         sip_delay_minutes: int = 15,
+        asof: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the Alpaca data provider.
@@ -230,6 +240,9 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             sip_delay_minutes: With ``feed="sip"``, a stock request ends at least
                 this many minutes before now, the window the free plan refuses.
                 ``0`` sends ``end`` unchanged. Ignored for other feeds and crypto.
+            asof: Stock symbol mapping date, ``"YYYY-MM-DD"``, or ``"-"`` for
+                none: each ticker then returns the bars traded under it. ``None``
+                leaves Alpaca's default, a mapping as of today. Ignored for crypto.
             **kwargs: Additional arguments forwarded to BaseProvider.
 
         Raises:
@@ -268,6 +281,17 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 value=sip_delay_minutes,
             )
         self.sip_delay = timedelta(minutes=sip_delay_minutes)
+        if asof is not None and asof != "-":
+            try:
+                datetime.strptime(asof, "%Y-%m-%d")
+            except ValueError as err:
+                raise DataValidationError(
+                    provider="alpaca",
+                    message=f"Invalid asof '{asof}': expected YYYY-MM-DD or '-'",
+                    field="asof",
+                    value=asof,
+                ) from err
+        self.asof = asof
         self.base_url = "https://data.alpaca.markets"
 
         # Built once, reused for both the sync and async sessions so the two
@@ -459,7 +483,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             The query parameter mapping, including the configured data feed and
             price adjustment.
         """
-        return {
+        params = {
             "timeframe": self._map_frequency(frequency),
             "start": start,
             "end": self._stock_end(end),
@@ -467,6 +491,9 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             "feed": self.feed,
             "adjustment": self.adjustment,
         }
+        if self.asof is not None:
+            params["asof"] = self.asof
+        return params
 
     def _stock_end(self, end: str) -> str:
         """Cut a SIP request's end to before the window the plan refuses.

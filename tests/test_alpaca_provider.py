@@ -302,6 +302,35 @@ class TestFetchRawDataStock:
 
         assert mock_get.call_args.kwargs["params"]["feed"] == "sip"
 
+    @pytest.mark.parametrize("asof", ["-", "2020-01-01"])
+    def test_asof_sent_for_stock_and_batch(self, asof):
+        """The symbol-mapping date reaches both stock endpoints; unset, Alpaca's default applies."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", asof=asof)
+
+        with (
+            patch.object(provider.session, "get", return_value=_page_response({})) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("FB", "2016-01-01", "2024-01-05", "daily")
+            provider.fetch_batch_ohlcv(["FB", "BBBY"], "2016-01-01", "2024-01-05")
+
+        assert [call.kwargs["params"]["asof"] for call in mock_get.call_args_list] == [asof, asof]
+
+    def test_asof_unset_not_sent(self, provider):
+        """Without asof the request carries none, so Alpaca maps as of today."""
+        with (
+            patch.object(provider.session, "get", return_value=_page_response([])) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("FB", "2016-01-01", "2024-01-05", "daily")
+
+        assert "asof" not in mock_get.call_args.kwargs["params"]
+
+    def test_invalid_asof_raises(self):
+        """A malformed date would be rejected by Alpaca only at request time."""
+        with pytest.raises(DataValidationError):
+            AlpacaDataProvider(api_key="k", api_secret="s", asof="2020/01/01")
+
     @pytest.mark.parametrize(
         ("feed", "delay", "end", "cut"),
         [

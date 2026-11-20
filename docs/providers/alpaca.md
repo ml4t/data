@@ -113,6 +113,26 @@ incremental refreshes.
 
 ---
 
+## Renamed and Reused Tickers
+
+Alpaca maps a stock ticker to the company that holds it on an `asof` date,
+today by default, and returns that company's whole history. Measured on daily
+and monthly bars since 2016:
+
+| Request | Default (`asof` today) | `asof="-"` | `asof="2020-01-01"` |
+|---|---|---|---|
+| `META` | Meta's whole history, FB years included | a fund from 2021-06, then Meta from 2022-06 | as `"-"` |
+| `FB` | absent from the multi-symbol endpoint; the single-symbol endpoint returns the `"-"` bars | Meta until 2022-06, then the next holder of FB | Meta's whole history, META years included |
+| `BBBY` | as `"-"` | Bed Bath & Beyond to 2023-05, then a later holder from 2025 | Bed Bath & Beyond only |
+
+With the default, a renamed company's history appears twice, under both its
+tickers, and the multi-symbol endpoint drops the old ticker. With `asof="-"`
+each bar appears once, under the ticker it traded as, whoever traded it; joining
+a company's tickers across a rename, and splitting a reused ticker, is then the
+job of an `InstrumentRegistry`.
+
+---
+
 ## Feeds and Adjustment
 
 - `feed="iex"` (default): the free feed, real-time but served from a single
