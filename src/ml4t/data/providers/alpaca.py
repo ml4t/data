@@ -2,8 +2,10 @@
 
 Alpaca provides long-history, high-frequency market data across multiple asset
 classes including US equities and crypto, served over a historical REST API.
-Daily, hourly, and minute OHLCV bars (1/5/15/30-minute) are supported for both
-asset classes from a single symbol-routed provider.
+Monthly, weekly, daily, hourly, and minute OHLCV bars (1/5/15/30-minute) are
+supported for both asset classes from a single symbol-routed provider.
+``fetch_batch_ohlcv`` loads many stocks per request through the multi-symbol
+stock endpoint.
 
 API Documentation: https://docs.alpaca.markets/us/docs/about-market-data-api
 
@@ -186,7 +188,20 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         "15minute": "15Min",
         "30m": "30Min",
         "30minute": "30Min",
+        "weekly": "1Week",
+        "week": "1Week",
+        "1w": "1Week",
+        "1week": "1Week",
+        "monthly": "1Month",
+        "month": "1Month",
+        "1mo": "1Month",
+        "1month": "1Month",
     }
+
+    # Symbols per multi-symbol stock request in fetch_batch_ohlcv. The page limit
+    # is shared by all symbols of a request, so a larger chunk costs no extra
+    # pages; the bound keeps the query string short.
+    BATCH_CHUNK_SIZE: ClassVar[int] = 1000
 
     def __init__(
         self,
@@ -767,7 +782,20 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         """
         resolved = self._resolve_asset_class(symbol, asset_class)
         endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
+        return self._paginate(endpoint, params, symbol)
 
+    def _paginate(self, endpoint: str, params: dict[str, Any], label: str) -> dict[str, Any]:
+        """Request every page of one bars query and merge the pages.
+
+        Args:
+            endpoint: The bars endpoint URL.
+            params: The query parameters of the first page.
+            label: The requested symbol or symbols, for error context.
+
+        Returns:
+            ``{"bars": merged}``: a list for the single-symbol endpoint, a
+            per-symbol dict for the multi-symbol endpoints.
+        """
         accumulated: Any = None
         token: str | None = None
         seen_tokens: set[str] = set()
@@ -777,7 +805,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             # mutating one shared dict would otherwise rewrite the token on
             # earlier requests that already went out.
             page_params = {**params, "page_token": token} if token else params
-            payload = self._get_page(endpoint, page_params, symbol)
+            payload = self._get_page(endpoint, page_params, label)
             page_count += 1
             accumulated = self._merge_bars(accumulated, payload.get("bars"))
             token = self._next_page_token(payload, seen_tokens, page_count)
@@ -1078,3 +1106,93 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         )
 
         return validated_data
+
+    def fetch_batch_ohlcv(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        frequency: str = "daily",
+        chunk_size: int | None = None,
+    ) -> pl.DataFrame:
+        """Fetch OHLCV bars of many stocks through the multi-symbol endpoint.
+
+        One request carries up to ``chunk_size`` symbols, and they share each
+        page of up to ``PAGE_LIMIT`` bars, so a bulk load needs about one
+        request per ``PAGE_LIMIT`` bars instead of one per symbol. A ticker
+        with no bars in the range is absent from the result, which makes this
+        also the cheap way to probe which tickers traded. A string that is not
+        a valid ticker fails its whole chunk with HTTP 400.
+
+        Use ``fetch_ohlcv`` for incremental updates through ``DataManager``.
+
+        Args:
+            symbols: Stock tickers, case-insensitive. Crypto pairs are refused.
+            start: Inclusive start, ``YYYY-MM-DD`` or RFC-3339 datetime.
+            end: Inclusive end, ``YYYY-MM-DD`` or RFC-3339 datetime.
+            frequency: Canonical frequency key or alias.
+            chunk_size: Symbols per request; ``BATCH_CHUNK_SIZE`` when ``None``.
+
+        Returns:
+            One long DataFrame in the canonical OHLCV schema
+            ``[timestamp, symbol, open, high, low, close, volume]``, sorted by
+            timestamp and symbol.
+
+        Raises:
+            ValueError: If a symbol is empty, a date bound is malformed, start
+                is after end, or ``chunk_size`` is not positive.
+            DataValidationError: If a symbol is a crypto pair, the frequency is
+                unsupported, or a response cannot be transformed or validated.
+            AuthenticationError: If the credentials are rejected (HTTP 401/403).
+            RateLimitError: If HTTP 429 persists past the per-page retries.
+            NetworkError: On other HTTP, transport, or JSON-decoding failures.
+            CircuitBreakerOpenError: If repeated failures have opened the
+                circuit breaker.
+        """
+        size = self.BATCH_CHUNK_SIZE if chunk_size is None else chunk_size
+        if size < 1:
+            raise ValueError("chunk_size must be positive")
+        tickers = list(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
+        for ticker in tickers:
+            if not ticker:
+                raise ValueError("Symbol cannot be empty")
+            if "/" in ticker:
+                raise DataValidationError(
+                    provider="alpaca",
+                    message="fetch_batch_ohlcv serves stocks; fetch crypto with fetch_ohlcv",
+                    field="symbols",
+                    value=ticker,
+                )
+        if not tickers:
+            return self._create_empty_dataframe()
+        self._validate_inputs(tickers[0], start, end, frequency)
+        endpoint = f"{self.base_url}/v2/stocks/bars"
+        params = self._stock_bars_params(frequency, start, end)
+
+        def _fetch_and_process() -> pl.DataFrame:
+            frames = []
+            for first in range(0, len(tickers), size):
+                chunk = tickers[first : first + size]
+                raw = self._paginate(
+                    endpoint, {**params, "symbols": ",".join(chunk)}, f"{chunk[0]}..{chunk[-1]}"
+                )
+                bars = raw["bars"] if isinstance(raw["bars"], dict) else {}
+                # The OHLCV contract is per symbol, so each ticker is validated alone.
+                frames.extend(
+                    self._validate_ohlcv(
+                        self._bars_to_dataframe(rows, ticker, ticker), self.name, ticker
+                    )
+                    for ticker, rows in bars.items()
+                    if rows
+                )
+                self.logger.info(
+                    "Fetched batch chunk",
+                    done=first + len(chunk),
+                    total=len(tickers),
+                    provider=self.name,
+                )
+            if not frames:
+                return self._create_empty_dataframe()
+            return pl.concat(frames).sort(["timestamp", "symbol"])
+
+        return self._with_circuit_breaker(_fetch_and_process)

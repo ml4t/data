@@ -212,6 +212,10 @@ class TestFrequencyMapping:
             ("15minute", "15Min"),
             ("30m", "30Min"),
             ("30minute", "30Min"),
+            ("weekly", "1Week"),
+            ("1w", "1Week"),
+            ("monthly", "1Month"),
+            ("1mo", "1Month"),
         ],
     )
     def test_frequency_maps_to_timeframe(self, provider, frequency, expected):
@@ -1365,3 +1369,78 @@ class TestRegistryCaching:
 
         assert first is second
         assert "alpaca" in first
+
+
+class TestFetchBatchStocks:
+    """Tests for the multi-symbol stock fetch."""
+
+    def _call(self, provider, responses, symbols, **kwargs):
+        with (
+            patch.object(provider.session, "get", side_effect=responses) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            df = provider.fetch_batch_ohlcv(symbols, "2024-01-01", "2024-01-31", **kwargs)
+        return df, mock_get.call_args_list
+
+    def test_chunks_symbols_and_merges_pages(self, provider):
+        """Symbols go out in chunks; a chunk's pages merge per symbol into one long frame."""
+        responses = [
+            _page_response({"AAPL": STOCK_BARS[:1], "MSFT": STOCK_BARS[:1]}, token="p2"),
+            _page_response({"MSFT": STOCK_BARS[1:]}),
+            _page_response({"TWTR": STOCK_BARS}),
+        ]
+
+        df, calls = self._call(provider, responses, ["aapl", "MSFT", "AAPL", "TWTR"], chunk_size=2)
+
+        assert [call.args[0] for call in calls] == [
+            "https://data.alpaca.markets/v2/stocks/bars"
+        ] * 3
+        sent = [call.kwargs["params"] for call in calls]
+        assert [params["symbols"] for params in sent] == ["AAPL,MSFT", "AAPL,MSFT", "TWTR"]
+        assert sent[1]["page_token"] == "p2"
+        assert sent[0]["feed"] == "iex"
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+        assert df.group_by("symbol").len().sort("symbol").rows() == [
+            ("AAPL", 1),
+            ("MSFT", 2),
+            ("TWTR", 2),
+        ]
+        assert df.select(pl.col("timestamp").is_sorted()).item()
+
+    def test_tickers_without_bars_are_absent(self, provider):
+        """A ticker that never traded is missing from the result, not an error."""
+        df, _ = self._call(provider, [_page_response({"AAPL": STOCK_BARS})], ["AAPL", "ZZZZQ"])
+
+        assert df["symbol"].unique().to_list() == ["AAPL"]
+
+    def test_no_bars_returns_canonical_empty_frame(self, provider):
+        """No bars at all yields the canonical empty schema."""
+        df, _ = self._call(provider, [_page_response({})], ["ZZZZQ"])
+
+        assert df.is_empty()
+        assert "close" in df.columns
+
+    def test_monthly_frequency_sent(self, provider):
+        """Monthly bars, the cheap probe for which tickers traded, map to 1Month."""
+        _, calls = self._call(provider, [_page_response({})], ["AAPL"], frequency="monthly")
+
+        assert calls[0].kwargs["params"]["timeframe"] == "1Month"
+
+    def test_crypto_pair_refused(self, provider):
+        """Crypto has its own endpoint; the stock batch refuses a pair before any request."""
+        with pytest.raises(DataValidationError):
+            self._call(provider, [], ["AAPL", "BTC/USD"])
+
+    def test_nonpositive_chunk_size_refused(self, provider):
+        """A zero chunk size would never finish; it is refused up front."""
+        with pytest.raises(ValueError, match="chunk_size"):
+            self._call(provider, [], ["AAPL"], chunk_size=0)
+
+    def test_invalid_ticker_fails_the_request(self, provider):
+        """Alpaca rejects a whole request over one invalid ticker with HTTP 400."""
+        response = _page_response({}, status=400)
+        response.text = '{"message":"invalid symbol: 0029900E0"}'
+
+        # Every non-200 is retried as a NetworkError, so the 400 comes back each attempt.
+        with pytest.raises(NetworkError, match="invalid symbol"):
+            self._call(provider, [response] * 3, ["AAPL", "0029900E0"])

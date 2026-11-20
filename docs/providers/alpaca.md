@@ -83,9 +83,33 @@ crypto slash is preserved (e.g. `BTC/USD`).
 | `5m` / `5minute` | ✅ |
 | `15m` / `15minute` | ✅ |
 | `30m` / `30minute` | ✅ |
+| `weekly` / `1w` | ✅ |
+| `monthly` / `1mo` | ✅ |
 
 `start`/`end` accept `YYYY-MM-DD` dates or RFC-3339 datetimes (both inclusive);
 datetime bounds are the natural shape for sub-day minute/hour windows.
+
+---
+
+## Many Stocks at Once
+
+`fetch_batch_ohlcv` sends up to `chunk_size` (default 1,000) stock tickers per
+request to the multi-symbol endpoint. The symbols of a request share each page
+of 10,000 bars, so a bulk load takes about one request per 10,000 bars rather
+than one per symbol. A ticker without bars in the range is simply absent, which
+makes monthly bars a cheap probe of which tickers traded, delisted ones
+included. One invalid ticker string fails its whole request with HTTP 400.
+
+```python
+provider = AlpacaDataProvider(feed="sip", adjustment="raw")
+months = provider.fetch_batch_ohlcv(
+    ["AAPL", "TWTR", "SIVB"], "2016-01-01", "2024-12-31", frequency="monthly"
+)
+```
+
+The result is one long frame in the canonical schema. Store it per symbol with
+`DataManager.import_data`, or keep using `fetch_ohlcv` through `update` for
+incremental refreshes.
 
 ---
 
