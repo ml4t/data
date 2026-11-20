@@ -95,7 +95,10 @@ datetime bounds are the natural shape for sub-day minute/hour windows.
   exchange (IEX, roughly 2-3% of US volume).
 - `feed="sip"`: the consolidated tape (100% of US volume, all exchanges).
   Real-time on paid plans; the free Basic plan can still query SIP bars, only
-  not the most recent 15 minutes.
+  not the most recent 15 minutes, and answers such a request with HTTP 403. The
+  provider therefore ends a SIP stock request `sip_delay_minutes` (default 15)
+  before now, so `end` may be today, as incremental `update` requests are. Pass
+  `sip_delay_minutes=0` on a paid plan.
 - `feed="otc"` (over-the-counter) and `feed="boats"` (Blue Ocean overnight) are
   also accepted. Any other value raises `DataValidationError` at construction.
 - `adjustment="raw"` (default, Alpaca's own default): stock bars are **not**
@@ -104,6 +107,15 @@ datetime bounds are the natural shape for sub-day minute/hour windows.
 
 ```python
 provider = AlpacaDataProvider(feed="sip", adjustment="all")
+```
+
+In a `ml4t.data.yaml`, the same settings go under `extra` of a named provider:
+
+```yaml
+providers:
+  - name: alpaca_sip
+    type: alpaca
+    extra: {feed: sip, adjustment: all}
 ```
 
 ---
