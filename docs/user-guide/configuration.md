@@ -145,7 +145,11 @@ Each provider entry configures connection parameters:
 | `enabled` | `true` | Toggle provider on/off |
 | `api_key` | `null` | API key (use `${ENV_VAR}` format) |
 | `rate_limit` | see below | Provider request-rate configuration |
-| `extra` | `{}` | Constructor settings specific to the selected provider |
+| `extra` | `{}` | Constructor settings specific to the selected provider, plus `ohlc_mode` |
+
+`extra.ohlc_mode` sets how the provider treats bars that break `low <= open, close <= high`:
+`strict` (default) rejects the download, `drop` removes those rows, `warn` logs and keeps them.
+Adjusted bars can break the rule by a rounding error, so `warn` suits adjusted data.
 
 Rate limiting sub-config:
 

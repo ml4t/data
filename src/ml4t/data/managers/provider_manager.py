@@ -295,10 +295,19 @@ class ProviderManager:
         extra = provider_config.pop("extra", None)
         if isinstance(extra, dict):
             provider_config = {**extra, **provider_config}
+        # How OHLC violations are handled is the validation mixin's setting, not a constructor
+        # argument: adjusted bars can break high >= close by a rounding error.
+        ohlc_mode = provider_config.pop("ohlc_mode", None)
+        if ohlc_mode not in (None, "strict", "drop", "warn"):
+            raise ValueError(
+                f"Provider '{provider_name}': ohlc_mode must be strict, drop or warn, not {ohlc_mode!r}"
+            )
 
         # Create provider instance
         try:
             provider = provider_class(**provider_config)
+            if ohlc_mode is not None:
+                provider.ohlc_mode = ohlc_mode
             self.providers[provider_name] = provider
             logger.info(f"Initialized {provider_name} provider")
             return provider
