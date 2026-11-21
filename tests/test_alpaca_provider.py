@@ -1,6 +1,7 @@
 """Tests for Alpaca data provider module."""
 
 import time
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -296,6 +297,76 @@ class TestFetchRawDataStock:
             provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
 
         assert mock_get.call_args.kwargs["params"]["feed"] == "sip"
+
+    @pytest.mark.parametrize(
+        ("feed", "delay", "end", "cut"),
+        [
+            ("sip", 15, "today", True),  # a date-only end covers the whole day
+            ("sip", 15, "now", True),
+            ("sip", 15, "2024-01-05", False),  # long past: sent unchanged
+            ("sip", 0, "today", False),  # paid plan: no cut
+            ("iex", 15, "today", False),  # the free feed has no delay rule
+        ],
+    )
+    def test_sip_end_stops_before_the_recent_window(self, feed, delay, end, cut):
+        """A SIP request reaching the last minutes ends sip_delay_minutes before now."""
+        provider = AlpacaDataProvider(
+            api_key="k", api_secret="s", feed=feed, sip_delay_minutes=delay
+        )
+        now = datetime.now(UTC)
+        requested = {
+            "today": now.strftime("%Y-%m-%d"),
+            "now": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }.get(end, end)
+
+        with (
+            patch.object(provider.session, "get", return_value=_page_response([])) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("AAPL", "2024-01-01", requested, "daily")
+
+        sent = mock_get.call_args.kwargs["params"]["end"]
+        if not cut:
+            assert sent == requested
+            return
+        sent_at = datetime.fromisoformat(sent)
+        assert now - timedelta(minutes=delay, seconds=5) <= sent_at
+        assert sent_at <= now - timedelta(minutes=delay) + timedelta(seconds=1)
+
+    def test_negative_sip_delay_raises(self):
+        """A negative delay is a configuration error, not a silent no-op."""
+        with pytest.raises(DataValidationError):
+            AlpacaDataProvider(api_key="k", api_secret="s", sip_delay_minutes=-1)
+
+    def test_free_plan_sip_request_up_to_today_ends_before_the_refused_window(self):
+        """fetch_ohlcv up to today, as `update` asks, ends 15 minutes before now (#151)."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="sip")
+        now = datetime.now(UTC)
+
+        with (
+            patch.object(
+                provider.session, "get", return_value=_page_response(STOCK_BARS)
+            ) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider.fetch_ohlcv("AAPL", "2024-01-01", now.strftime("%Y-%m-%d"), "daily")
+
+        sent = mock_get.call_args.kwargs["params"]["end"]
+        # Alpaca reads a date-only end as the whole day, which reaches into the refused window.
+        assert "T" in sent, f"date-only end {sent!r} covers the last 15 minutes"
+        assert datetime.fromisoformat(sent) <= now - timedelta(minutes=15) + timedelta(seconds=1)
+
+    def test_403_reports_alpacas_reason(self, provider):
+        """A 403 carries Alpaca's own message, which tells a plan limit from a bad key (#151)."""
+        response = _page_response([], status=403)
+        response.text = '{"message":"subscription does not permit querying recent SIP data"}'
+
+        with (
+            patch.object(provider.session, "get", return_value=response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(AuthenticationError, match="recent SIP data"):
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-05", "daily")
 
     def test_fetch_429_raises_rate_limit(self, provider):
         """A 429 maps to RateLimitError."""
