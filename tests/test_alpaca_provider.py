@@ -1,6 +1,7 @@
 """Tests for Alpaca data provider module."""
 
 import time
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -211,6 +212,10 @@ class TestFrequencyMapping:
             ("15minute", "15Min"),
             ("30m", "30Min"),
             ("30minute", "30Min"),
+            ("weekly", "1Week"),
+            ("1w", "1Week"),
+            ("monthly", "1Month"),
+            ("1mo", "1Month"),
         ],
     )
     def test_frequency_maps_to_timeframe(self, provider, frequency, expected):
@@ -296,6 +301,105 @@ class TestFetchRawDataStock:
             provider._fetch_raw_data("AAPL", "2024-01-01", "2024-01-05", "daily")
 
         assert mock_get.call_args.kwargs["params"]["feed"] == "sip"
+
+    @pytest.mark.parametrize("asof", ["-", "2020-01-01"])
+    def test_asof_sent_for_stock_and_batch(self, asof):
+        """The symbol-mapping date reaches both stock endpoints; unset, Alpaca's default applies."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", asof=asof)
+
+        with (
+            patch.object(provider.session, "get", return_value=_page_response({})) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("FB", "2016-01-01", "2024-01-05", "daily")
+            provider.fetch_batch_ohlcv(["FB", "BBBY"], "2016-01-01", "2024-01-05")
+
+        assert [call.kwargs["params"]["asof"] for call in mock_get.call_args_list] == [asof, asof]
+
+    def test_asof_unset_not_sent(self, provider):
+        """Without asof the request carries none, so Alpaca maps as of today."""
+        with (
+            patch.object(provider.session, "get", return_value=_page_response([])) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("FB", "2016-01-01", "2024-01-05", "daily")
+
+        assert "asof" not in mock_get.call_args.kwargs["params"]
+
+    def test_invalid_asof_raises(self):
+        """A malformed date would be rejected by Alpaca only at request time."""
+        with pytest.raises(DataValidationError):
+            AlpacaDataProvider(api_key="k", api_secret="s", asof="2020/01/01")
+
+    @pytest.mark.parametrize(
+        ("feed", "delay", "end", "cut"),
+        [
+            ("sip", 15, "today", True),  # a date-only end covers the whole day
+            ("sip", 15, "now", True),
+            ("sip", 15, "2024-01-05", False),  # long past: sent unchanged
+            ("sip", 0, "today", False),  # paid plan: no cut
+            ("iex", 15, "today", False),  # the free feed has no delay rule
+        ],
+    )
+    def test_sip_end_stops_before_the_recent_window(self, feed, delay, end, cut):
+        """A SIP request reaching the last minutes ends sip_delay_minutes before now."""
+        provider = AlpacaDataProvider(
+            api_key="k", api_secret="s", feed=feed, sip_delay_minutes=delay
+        )
+        now = datetime.now(UTC)
+        requested = {
+            "today": now.strftime("%Y-%m-%d"),
+            "now": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }.get(end, end)
+
+        with (
+            patch.object(provider.session, "get", return_value=_page_response([])) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider._fetch_raw_data("AAPL", "2024-01-01", requested, "daily")
+
+        sent = mock_get.call_args.kwargs["params"]["end"]
+        if not cut:
+            assert sent == requested
+            return
+        sent_at = datetime.fromisoformat(sent)
+        assert now - timedelta(minutes=delay, seconds=5) <= sent_at
+        assert sent_at <= now - timedelta(minutes=delay) + timedelta(seconds=1)
+
+    def test_negative_sip_delay_raises(self):
+        """A negative delay is a configuration error, not a silent no-op."""
+        with pytest.raises(DataValidationError):
+            AlpacaDataProvider(api_key="k", api_secret="s", sip_delay_minutes=-1)
+
+    def test_free_plan_sip_request_up_to_today_ends_before_the_refused_window(self):
+        """fetch_ohlcv up to today, as `update` asks, ends 15 minutes before now (#151)."""
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="sip")
+        now = datetime.now(UTC)
+
+        with (
+            patch.object(
+                provider.session, "get", return_value=_page_response(STOCK_BARS)
+            ) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            provider.fetch_ohlcv("AAPL", "2024-01-01", now.strftime("%Y-%m-%d"), "daily")
+
+        sent = mock_get.call_args.kwargs["params"]["end"]
+        # Alpaca reads a date-only end as the whole day, which reaches into the refused window.
+        assert "T" in sent, f"date-only end {sent!r} covers the last 15 minutes"
+        assert datetime.fromisoformat(sent) <= now - timedelta(minutes=15) + timedelta(seconds=1)
+
+    def test_403_reports_alpacas_reason(self, provider):
+        """A 403 carries Alpaca's own message, which tells a plan limit from a bad key (#151)."""
+        response = _page_response([], status=403)
+        response.text = '{"message":"subscription does not permit querying recent SIP data"}'
+
+        with (
+            patch.object(provider.session, "get", return_value=response),
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            with pytest.raises(AuthenticationError, match="recent SIP data"):
+                provider.fetch_ohlcv("AAPL", "2024-01-01", "2024-01-05", "daily")
 
     def test_fetch_429_raises_rate_limit(self, provider):
         """A 429 maps to RateLimitError."""
@@ -1294,3 +1398,78 @@ class TestRegistryCaching:
 
         assert first is second
         assert "alpaca" in first
+
+
+class TestFetchBatchStocks:
+    """Tests for the multi-symbol stock fetch."""
+
+    def _call(self, provider, responses, symbols, **kwargs):
+        with (
+            patch.object(provider.session, "get", side_effect=responses) as mock_get,
+            patch.object(provider.rate_limiter, "acquire"),
+        ):
+            df = provider.fetch_batch_ohlcv(symbols, "2024-01-01", "2024-01-31", **kwargs)
+        return df, mock_get.call_args_list
+
+    def test_chunks_symbols_and_merges_pages(self, provider):
+        """Symbols go out in chunks; a chunk's pages merge per symbol into one long frame."""
+        responses = [
+            _page_response({"AAPL": STOCK_BARS[:1], "MSFT": STOCK_BARS[:1]}, token="p2"),
+            _page_response({"MSFT": STOCK_BARS[1:]}),
+            _page_response({"TWTR": STOCK_BARS}),
+        ]
+
+        df, calls = self._call(provider, responses, ["aapl", "MSFT", "AAPL", "TWTR"], chunk_size=2)
+
+        assert [call.args[0] for call in calls] == [
+            "https://data.alpaca.markets/v2/stocks/bars"
+        ] * 3
+        sent = [call.kwargs["params"] for call in calls]
+        assert [params["symbols"] for params in sent] == ["AAPL,MSFT", "AAPL,MSFT", "TWTR"]
+        assert sent[1]["page_token"] == "p2"
+        assert sent[0]["feed"] == "iex"
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+        assert df.group_by("symbol").len().sort("symbol").rows() == [
+            ("AAPL", 1),
+            ("MSFT", 2),
+            ("TWTR", 2),
+        ]
+        assert df.select(pl.col("timestamp").is_sorted()).item()
+
+    def test_tickers_without_bars_are_absent(self, provider):
+        """A ticker that never traded is missing from the result, not an error."""
+        df, _ = self._call(provider, [_page_response({"AAPL": STOCK_BARS})], ["AAPL", "ZZZZQ"])
+
+        assert df["symbol"].unique().to_list() == ["AAPL"]
+
+    def test_no_bars_returns_canonical_empty_frame(self, provider):
+        """No bars at all yields the canonical empty schema."""
+        df, _ = self._call(provider, [_page_response({})], ["ZZZZQ"])
+
+        assert df.is_empty()
+        assert "close" in df.columns
+
+    def test_monthly_frequency_sent(self, provider):
+        """Monthly bars, the cheap probe for which tickers traded, map to 1Month."""
+        _, calls = self._call(provider, [_page_response({})], ["AAPL"], frequency="monthly")
+
+        assert calls[0].kwargs["params"]["timeframe"] == "1Month"
+
+    def test_crypto_pair_refused(self, provider):
+        """Crypto has its own endpoint; the stock batch refuses a pair before any request."""
+        with pytest.raises(DataValidationError):
+            self._call(provider, [], ["AAPL", "BTC/USD"])
+
+    def test_nonpositive_chunk_size_refused(self, provider):
+        """A zero chunk size would never finish; it is refused up front."""
+        with pytest.raises(ValueError, match="chunk_size"):
+            self._call(provider, [], ["AAPL"], chunk_size=0)
+
+    def test_invalid_ticker_fails_the_request(self, provider):
+        """Alpaca rejects a whole request over one invalid ticker with HTTP 400."""
+        response = _page_response({}, status=400)
+        response.text = '{"message":"invalid symbol: 0029900E0"}'
+
+        # Every non-200 is retried as a NetworkError, so the 400 comes back each attempt.
+        with pytest.raises(NetworkError, match="invalid symbol"):
+            self._call(provider, [response] * 3, ["AAPL", "0029900E0"])
