@@ -9,7 +9,7 @@ This module handles parallel batch loading operations including:
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -253,8 +253,8 @@ class BatchManager:
 
         Args:
             symbols: List of symbols to load
-            start: Start date (YYYY-MM-DD)
-            end: End date (YYYY-MM-DD)
+            start: Start date (YYYY-MM-DD), inclusive
+            end: End date (YYYY-MM-DD), inclusive through the entire UTC date
             frequency: Data frequency
             asset_class: Asset class for storage path
             provider: Provider for missing symbols
@@ -279,7 +279,7 @@ class BatchManager:
         self.fetch_manager.validate_dates(start, end)
 
         start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=UTC)
-        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=UTC)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=UTC) + timedelta(days=1)
 
         logger.info(
             f"Starting batch load from storage for {len(symbols)} symbols",

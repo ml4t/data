@@ -311,7 +311,7 @@ class DataManager:
         max_workers: int = 4,
         **kwargs,
     ) -> pl.DataFrame:
-        """Load multiple symbols from storage with optional fetch fallback."""
+        """Load multiple symbols with optional fetch fallback and inclusive UTC date bounds."""
         return self._batch_manager.batch_load_from_storage(
             symbols,
             start,
