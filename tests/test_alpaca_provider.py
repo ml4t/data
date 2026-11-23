@@ -340,7 +340,7 @@ class TestFetchRawDataStock:
 
     def test_free_plan_sip_request_up_to_today_ends_before_the_refused_window(self):
         """fetch_ohlcv up to today, as `update` asks, ends 15 minutes before now (#151)."""
-        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="sip")
+        provider = AlpacaDataProvider(api_key="k", api_secret="s", feed="sip", sip_delay_minutes=15)
         now = datetime.now(UTC)
 
         with (
