@@ -470,12 +470,13 @@ class TestCrossFeatureIntegration:
 
             # Step 4: Validate multi-asset schema
             assert MultiAssetSchema.validate(df_cached, strict=True)
-            # Date filter is inclusive of start, exclusive of end: Jan 1-9 = 9 days
-            assert len(df_cached) == 3 * 9  # 3 symbols × 9 days
+            assert len(df_cached) == 3 * 10
+            assert df_cached["timestamp"].unique().sort().to_list() == dates
+            assert df_cached.group_by("symbol").len()["len"].to_list() == [10, 10, 10]
 
             # Step 5: Convert to wide format
             df_wide = pivot_to_wide(df_cached)
-            assert len(df_wide) == 9  # 9 timestamps
+            assert len(df_wide) == 10
             assert "close_AAPL" in df_wide.columns
             assert "close_MSFT" in df_wide.columns
             assert "close_GOOGL" in df_wide.columns
