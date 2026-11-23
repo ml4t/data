@@ -1191,8 +1191,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 circuit breaker.
         """
         size = self.BATCH_CHUNK_SIZE if chunk_size is None else chunk_size
-        if size < 1:
-            raise ValueError("chunk_size must be positive")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            raise ValueError("chunk_size must be a positive integer")
         tickers = list(dict.fromkeys(symbol.strip().upper() for symbol in symbols))
         for ticker in tickers:
             if not ticker:
@@ -1209,6 +1209,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         self._validate_inputs(tickers[0], start, end, frequency)
         endpoint = f"{self.base_url}/v2/stocks/bars"
         params = self._stock_bars_params(frequency, start, end)
+        if params["end"] != end and self._parse_time_bound(start) > self._parse_time_bound(
+            params["end"]
+        ):
+            return self._create_empty_dataframe()
 
         def _fetch_and_process() -> pl.DataFrame:
             frames = []
@@ -1217,7 +1221,19 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 raw = self._paginate(
                     endpoint, {**params, "symbols": ",".join(chunk)}, f"{chunk[0]}..{chunk[-1]}"
                 )
-                bars = raw["bars"] if isinstance(raw["bars"], dict) else {}
+                bars = raw["bars"]
+                if not isinstance(bars, dict):
+                    if bars:
+                        raise DataValidationError(
+                            provider="alpaca", message="Batch response must map symbols to bars"
+                        )
+                    bars = {}
+                unexpected = set(bars) - set(chunk)
+                if unexpected:
+                    raise DataValidationError(
+                        provider="alpaca",
+                        message=f"Batch response contains unrequested symbols: {sorted(unexpected)}",
+                    )
                 # The OHLCV contract is per symbol, so each ticker is validated alone.
                 frames.extend(
                     self._validate_ohlcv(
