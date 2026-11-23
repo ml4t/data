@@ -140,9 +140,11 @@ job of an `InstrumentRegistry`.
 - `feed="sip"`: the consolidated tape (100% of US volume, all exchanges).
   Real-time on paid plans; the free Basic plan can still query SIP bars, only
   not the most recent 15 minutes, and answers such a request with HTTP 403. The
-  provider therefore ends a SIP stock request `sip_delay_minutes` (default 15)
-  before now, so `end` may be today, as incremental `update` requests are. Pass
-  `sip_delay_minutes=0` on a paid plan.
+  free-plan caller must set `sip_delay_minutes=15` to end SIP stock requests
+  before that window, including incremental `update` requests ending today.
+  The default `0` preserves real-time access for paid plans. If clipping leaves
+  no available interval, the provider returns a canonical empty frame without
+  sending an invalid request.
 - `feed="otc"` (over-the-counter) and `feed="boats"` (Blue Ocean overnight) are
   also accepted. Any other value raises `DataValidationError` at construction.
 - `adjustment="raw"` (default, Alpaca's own default): stock bars are **not**
@@ -150,7 +152,7 @@ job of an `InstrumentRegistry`.
   `"all"` for adjusted bars. Crypto has no adjustment concept.
 
 ```python
-provider = AlpacaDataProvider(feed="sip", adjustment="all")
+provider = AlpacaDataProvider(feed="sip", adjustment="all", sip_delay_minutes=15)
 ```
 
 In a `ml4t.data.yaml`, the same settings go under `extra` of a named provider:
@@ -159,7 +161,7 @@ In a `ml4t.data.yaml`, the same settings go under `extra` of a named provider:
 providers:
   - name: alpaca_sip
     type: alpaca
-    extra: {feed: sip, adjustment: all}
+    extra: {feed: sip, adjustment: all, sip_delay_minutes: 15}
 ```
 
 ---
