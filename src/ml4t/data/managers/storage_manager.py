@@ -659,9 +659,13 @@ class StorageManager:
             self._report_progress(f"Merging data for {symbol}", 0.5)
 
             merged_df = self._merge_data(existing_df, new_df)
-            full_refresh = merged_df.height > new_df[
-                "timestamp"
-            ].n_unique() and self._overlap_prices_revised(existing_df, new_df)
+            source = self.fetch_manager.router.get_provider(symbol, override=provider)
+            # Synthetic draws depend on the requested start, so an overlap cannot indicate a revision.
+            full_refresh = (
+                source != "synthetic"
+                and merged_df.height > new_df["timestamp"].n_unique()
+                and self._overlap_prices_revised(existing_df, new_df)
+            )
             if full_refresh:
                 # A dividend or split can revise every bar before the overlap.
                 logger.info("Refetching history after revised overlap prices", symbol=symbol)

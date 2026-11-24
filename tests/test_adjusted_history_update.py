@@ -31,7 +31,7 @@ def test_adjusted_update_preserves_returns_and_avoids_refetch_for_noise(
         calls.append(start)
         source = old if len(calls) == 1 else fresh
         if incomplete and len(calls) == 3:
-            source = source.iloc[1:]
+            source = source.drop(dates[2])
         return source[(source.index >= start) & (source.index < end)]
 
     runner = CliRunner()
