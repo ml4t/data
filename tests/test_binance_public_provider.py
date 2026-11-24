@@ -817,3 +817,33 @@ class TestIntegration:
                 df = provider.fetch_ohlcv("BTCUSDT", "2024-01-01", "2024-01-05", "daily")
 
         assert not df.is_empty()
+
+
+@pytest.mark.parametrize("market", ["spot", "futures"])
+@pytest.mark.parametrize("use_async", [False, True])
+@pytest.mark.asyncio
+async def test_daily_archive_unit_change_keeps_both_sides_of_new_year(market, use_async):
+    def archive(url):
+        date = url.removesuffix(".zip")[-10:]
+        timestamp = {"2024-12-31": 1735603200000, "2025-01-01": 1735689600000}[date]
+        unit = 1000 if market == "spot" and date == "2025-01-01" else 1
+        row = f"{timestamp * unit},100,101,99,100,1000,{(timestamp + 86400000) * unit - 1},100000,5,500,50000,0\n"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zipped:
+            zipped.writestr(f"BTCUSDT-1d-{date}.csv", row)
+        return httpx.Response(200, content=buf.getvalue(), request=httpx.Request("GET", url))
+
+    with BinancePublicProvider(market=market) as provider:
+        args = ("BTCUSDT", "2024-12-31", "2025-01-01", "daily")
+        if use_async:
+            async with provider:
+                with patch.object(provider._async_session, "get", side_effect=archive):
+                    bars = await provider.fetch_ohlcv_async(*args)
+        else:
+            with patch.object(provider.session, "get", side_effect=archive):
+                bars = provider.fetch_ohlcv(*args)
+
+    assert bars.select("timestamp", "close").rows() == [
+        (datetime(2024, 12, 31, tzinfo=UTC), 100.0),
+        (datetime(2025, 1, 1, tzinfo=UTC), 100.0),
+    ]
