@@ -80,7 +80,7 @@ def canonical_metadata() -> Message:
         "Author-email": EXPECTED_AUTHOR,
         "Maintainer-email": EXPECTED_MAINTAINER,
         "License-Expression": "MIT",
-        "Requires-Python": ">=3.12,<3.15",
+        "Requires-Python": ">=3.12,<3.16",
         "Keywords": ",".join(sorted(EXPECTED_KEYWORDS)),
         "License-File": "LICENSE",
     }.items():
@@ -140,7 +140,7 @@ def published_fixture() -> tuple[dict, dict, dict]:
             "author_email": EXPECTED_AUTHOR,
             "maintainer_email": EXPECTED_MAINTAINER,
             "license_expression": "MIT",
-            "requires_python": ">=3.12,<3.15",
+            "requires_python": ">=3.12,<3.16",
             "project_urls": EXPECTED_URLS,
             "keywords": ",".join(sorted(EXPECTED_KEYWORDS)),
             "classifiers": sorted(EXPECTED_CLASSIFIERS),

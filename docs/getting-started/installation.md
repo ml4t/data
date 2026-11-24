@@ -2,8 +2,7 @@
 
 ## Requirements
 
-`ml4t-data` supports CPython 3.12, 3.13, and 3.14 on Linux, macOS, and Windows.
-Python 3.15 is temporarily excluded while upstream dependencies complete compatibility work.
+`ml4t-data` supports CPython 3.12 through 3.15 on Linux, macOS, and Windows.
 
 ## Install from PyPI
 
