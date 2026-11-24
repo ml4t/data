@@ -25,7 +25,7 @@ def test_supported_python_and_platform_metadata() -> None:
     project = load_project()
     classifiers = set(project["classifiers"])
 
-    assert project["requires-python"] == ">=3.12,<3.15"
+    assert project["requires-python"] == ">=3.12,<3.16"
     assert "Development Status :: 5 - Production/Stable" in classifiers
     assert "Operating System :: OS Independent" not in classifiers
     assert {
@@ -37,15 +37,19 @@ def test_supported_python_and_platform_metadata() -> None:
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.14",
+        "Programming Language :: Python :: 3.15",
     } <= classifiers
     assert "Programming Language :: Python :: 3.11" not in classifiers
-    assert "Programming Language :: Python :: 3.15" not in classifiers
+    assert "Programming Language :: Python :: 3.16" not in classifiers
     pydantic_requirements = {
         item
         for item in project["dependencies"]
         if item.startswith("pydantic>=") or item.startswith("pydantic==")
     }
-    assert pydantic_requirements == {"pydantic>=2.12,<3"}
+    assert pydantic_requirements == {
+        "pydantic>=2.12,<3",
+        "pydantic>=2.14.1; python_version >= '3.15'",
+    }
 
 
 def test_resolver_uses_prereleases_only_when_explicitly_required() -> None:
