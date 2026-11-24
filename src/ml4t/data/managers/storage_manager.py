@@ -184,6 +184,18 @@ class StorageManager:
 
         return merged_df
 
+    @staticmethod
+    def _overlap_prices_revised(existing: pl.DataFrame, incoming: pl.DataFrame) -> bool:
+        prices = [c for c in ("open", "high", "low", "close") if c in existing and c in incoming]
+        if not prices:
+            return False
+        old, new = align_frames_for_concat(
+            existing.select("timestamp", *prices), incoming.select("timestamp", *prices)
+        )
+        overlap = old.join(new, on="timestamp", suffix="_new")
+        revised = [~pl.col(c).is_close(pl.col(f"{c}_new"), rel_tol=1e-5, abs_tol=0) for c in prices]
+        return bool(overlap.select(pl.any_horizontal(revised).any()).item())
+
     def _ensure_polars_df(self, df: Any) -> pl.DataFrame:
         """Convert any DataFrame type to Polars DataFrame.
 
@@ -598,7 +610,7 @@ class StorageManager:
                 provider = existing_provider
 
             # Get the date range from existing data
-            _, last_timestamp = timestamp_bounds(existing_df)
+            first_timestamp, last_timestamp = timestamp_bounds(existing_df)
             if last_timestamp.tzinfo is None:
                 last_timestamp = last_timestamp.replace(tzinfo=UTC)
             else:
@@ -646,8 +658,29 @@ class StorageManager:
             logger.info(f"Fetched {len(new_df)} rows of new data")
             self._report_progress(f"Merging data for {symbol}", 0.5)
 
-            # Merge data
             merged_df = self._merge_data(existing_df, new_df)
+            full_refresh = merged_df.height > new_df[
+                "timestamp"
+            ].n_unique() and self._overlap_prices_revised(existing_df, new_df)
+            if full_refresh:
+                # A dividend or split can revise every bar before the overlap.
+                logger.info("Refetching history after revised overlap prices", symbol=symbol)
+                refreshed = self.fetch_manager.fetch_raw(
+                    symbol=symbol,
+                    start=first_timestamp.strftime("%Y-%m-%d"),
+                    end=fetch_end.strftime("%Y-%m-%d"),
+                    frequency=frequency,
+                    provider=provider,
+                )
+                expected, returned = align_frames_for_concat(
+                    merged_df.select("timestamp"), refreshed.select("timestamp")
+                )
+                if not expected.join(returned, on="timestamp", how="anti").is_empty():
+                    raise ValueError(
+                        f"Full price-history refresh for {symbol} omitted previously observed "
+                        "timestamps; stored history was preserved"
+                    )
+                merged_df = refreshed.sort("timestamp")
 
             logger.info(
                 "Merged data",
@@ -699,7 +732,7 @@ class StorageManager:
                 {
                     # BulkManager compares this legacy field with naive local cutoffs.
                     "last_update": updated_at.astimezone().replace(tzinfo=None).isoformat(),
-                    "update_type": "incremental",
+                    "update_type": "full_price_revision" if full_refresh else "incremental",
                     "gaps_filled": False,
                     "gap_check_performed": gap_check_performed,
                     "gap_count": len(gaps) if gap_check_performed else None,

@@ -36,6 +36,12 @@ The overlap lets revised observations replace their stored values. The update me
 keeps the newest row for a duplicate timestamp, sorts the result, and publishes the replacement
 through the storage backend's atomic generation mechanism.
 
+When a refetched open, high, low or close differs by more than a relative tolerance of
+`1e-5` and the incremental response leaves older observations in the store, the update
+requests the full range from the first stored date. This keeps dividend- and split-adjusted
+history on the provider's current basis. If the full response omits an observed timestamp,
+the update fails before writing and the previous generation remains available.
+
 If `--provider` is omitted for an existing dataset, the update reuses the provider recorded in its
 metadata. Supplying the option overrides that value.
 
