@@ -32,16 +32,18 @@ def test_configured_ohlc_mode_controls_stored_adjusted_bars(tmp_path, mode, rows
     }
     with patch("httpx.Client.get", return_value=response) as get:
         result = CliRunner().invoke(cli, ["update-all", "--config", str(config)])
-    assert result.exit_code == 0, result.output
     storage = create_storage(root)
     key = "equities/daily/SPY"
     if rows is None:
+        assert result.exit_code != 0, result.output
+        assert "OK Update complete!" not in result.output
         assert "FAIL" in result.output
         assert not storage.exists(key)
         if mode == "loose":
             get.assert_not_called()
             assert "ohlc_mode must be strict, drop or warn" in result.output
     else:
+        assert result.exit_code == 0, result.output
         assert "FAIL" not in result.output
         stored = storage.read(key).collect()
         assert stored.height == rows
