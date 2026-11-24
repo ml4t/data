@@ -34,7 +34,9 @@ Feed selection (stocks):
   the consolidated tape.
 - ``feed="sip"`` selects the consolidated tape (100% of US market volume across
   all exchanges). It is real time on paid plans; the free Basic plan can still
-  query SIP bars, only not the most recent 15 minutes.
+  query SIP bars, only not the most recent 15 minutes. Set
+  ``sip_delay_minutes=15`` explicitly for the free plan to clip recent requests.
+  The default ``0`` preserves the requested end for real-time subscriptions.
 - ``"otc"`` (over-the-counter) and ``"boats"`` (Blue Ocean overnight) are also
   accepted; any other value raises ``DataValidationError`` at construction.
 - Crypto has a single consolidated feed, so ``feed`` does not apply to it.
@@ -71,7 +73,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import polars as pl
@@ -192,6 +194,7 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         feed: str = "iex",
         adjustment: str = "raw",
         rate_limit: tuple[int, float] | None = None,
+        sip_delay_minutes: int = 0,
         **kwargs: Any,
     ) -> None:
         """Initialize the Alpaca data provider.
@@ -208,6 +211,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
                 Alpaca's own default: no split/dividend adjustment), "split",
                 "dividend", or "all". Ignored for crypto.
             rate_limit: Optional custom (calls, period_seconds) override.
+            sip_delay_minutes: With ``feed="sip"``, a stock request ends at least
+                this many minutes before now, the window the free plan refuses.
+                Default ``0`` sends ``end`` unchanged. Set ``15`` for the Basic plan.
+                Ignored for other feeds and crypto.
             **kwargs: Additional arguments forwarded to BaseProvider.
 
         Raises:
@@ -238,6 +245,18 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             )
         self.feed = normalized_feed
         self.adjustment = adjustment
+        if (
+            not isinstance(sip_delay_minutes, int)
+            or isinstance(sip_delay_minutes, bool)
+            or sip_delay_minutes < 0
+        ):
+            raise DataValidationError(
+                provider="alpaca",
+                message="sip_delay_minutes must be a non-negative integer",
+                field="sip_delay_minutes",
+                value=sip_delay_minutes,
+            )
+        self.sip_delay = timedelta(minutes=sip_delay_minutes)
         self.base_url = "https://data.alpaca.markets"
 
         # Built once, reused for both the sync and async sessions so the two
@@ -336,6 +355,8 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         try:
             start_dt = self._parse_time_bound(start)
             end_dt = self._parse_time_bound(end)
+            if len(end) == 10:
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
         except ValueError as e:
             raise ValueError(
                 f"Invalid date format (expected YYYY-MM-DD or RFC-3339 datetime): {e}"
@@ -432,11 +453,35 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         return {
             "timeframe": self._map_frequency(frequency),
             "start": start,
-            "end": end,
+            "end": self._stock_end(end),
             "limit": self.PAGE_LIMIT,
             "feed": self.feed,
             "adjustment": self.adjustment,
         }
+
+    def _stock_end(self, end: str) -> str:
+        """Cut a SIP request's end to before the window the plan refuses.
+
+        Alpaca reads a date-only ``end`` as that whole day, so today's date
+        reaches into the most recent minutes, which the free plan answers with
+        HTTP 403. The cut applies only when the bound actually reaches past
+        ``now - sip_delay``; earlier bounds are sent unchanged.
+
+        Args:
+            end: Inclusive end date/datetime in ISO-8601 (RFC-3339) form.
+
+        Returns:
+            ``end`` itself, or ``now - sip_delay`` as an RFC-3339 UTC instant.
+        """
+        if self.feed != "sip" or not self.sip_delay:
+            return end
+        bound = self._parse_time_bound(end)
+        if len(end) == 10:
+            bound += timedelta(days=1)
+        latest = datetime.now(UTC) - self.sip_delay
+        if bound <= latest:
+            return end
+        return latest.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _crypto_bars_params(
         self, symbol: str, frequency: str, start: str, end: str
@@ -568,7 +613,9 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
             raise RateLimitError(provider="alpaca", retry_after=self._retry_after_seconds(response))
         if status_code in (401, 403):
             raise AuthenticationError(
-                provider="alpaca", message="Invalid API key or unauthorized access"
+                provider="alpaca",
+                message=f"{'Authentication failed' if status_code == 401 else 'Access denied'}: "
+                f"{response.text}",
             )
         if status_code == 404:
             raise DataNotAvailableError(provider="alpaca", symbol=symbol)
@@ -726,6 +773,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         """
         resolved = self._resolve_asset_class(symbol, asset_class)
         endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
+        if params["end"] != end and self._parse_time_bound(start) > self._parse_time_bound(
+            params["end"]
+        ):
+            return {"bars": []}
 
         accumulated: Any = None
         token: str | None = None
@@ -778,6 +829,10 @@ class AlpacaDataProvider(AsyncSessionMixin, BaseProvider):
         """
         resolved = self._resolve_asset_class(symbol, asset_class)
         endpoint, params = self._bars_request(symbol, start, end, frequency, resolved)
+        if params["end"] != end and self._parse_time_bound(start) > self._parse_time_bound(
+            params["end"]
+        ):
+            return {"bars": []}
 
         accumulated: Any = None
         token: str | None = None
