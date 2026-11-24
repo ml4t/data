@@ -430,16 +430,9 @@ class YahooFinanceProvider(BaseProvider):
             }
         )
 
-        timestamp_type = df.schema["timestamp"]
-        timestamp = pl.col("timestamp")
-        if isinstance(timestamp_type, pl.Datetime) and timestamp_type.time_zone is not None:
-            timestamp = timestamp.dt.convert_time_zone("UTC")
-        else:
-            timestamp = timestamp.cast(pl.Datetime).dt.replace_time_zone("UTC")
-
         return (
             df.with_columns(
-                timestamp,
+                pl.col("timestamp").cast(pl.Datetime("us", "UTC")),
                 pl.col("open").cast(pl.Float64),
                 pl.col("high").cast(pl.Float64),
                 pl.col("low").cast(pl.Float64),
@@ -746,7 +739,7 @@ class YahooFinanceProvider(BaseProvider):
                 # Cast to proper types BEFORE concat (ensures schema compatibility)
                 df_symbol = df_symbol.with_columns(
                     [
-                        pl.col("timestamp").cast(pl.Datetime),
+                        pl.col("timestamp").cast(pl.Datetime("us", "UTC")),
                         pl.col("open").cast(pl.Float64),
                         pl.col("high").cast(pl.Float64),
                         pl.col("low").cast(pl.Float64),

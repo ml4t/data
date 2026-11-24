@@ -177,6 +177,22 @@ def verify_install(archive: Path, version: str) -> None:
             [str(python), str(Path(__file__).with_name("run_readme_quickstart.py"))], check=True
         )
         subprocess.run(
+            [
+                "uv",
+                "run",
+                "--isolated",
+                "--no-project",
+                "--python",
+                sys.executable,
+                "--with",
+                f"{archive}[yahoo]",
+                "python",
+                "-I",
+                str(Path(__file__).with_name("verify_yahoo_quickstart.py")),
+            ],
+            check=True,
+        )
+        subprocess.run(
             ["uv", "pip", "install", "--python", str(python), f"{archive}[oanda]"],
             check=True,
         )
