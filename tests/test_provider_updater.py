@@ -71,6 +71,9 @@ class MockStorage:
     def get_latest_timestamp(self, symbol, provider):
         return self._latest_timestamp
 
+    def read_data(self, symbol, provider, start_time=None, end_time=None):
+        return pl.DataFrame()
+
     def save_chunk(self, data, symbol, provider, start_time, end_time):
         self.save_chunk_calls.append(
             {

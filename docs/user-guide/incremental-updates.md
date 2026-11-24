@@ -36,6 +36,20 @@ The overlap lets revised observations replace their stored values. The update me
 keeps the newest row for a duplicate timestamp, sorts the result, and publishes the replacement
 through the storage backend's atomic generation mechanism.
 
+The overlap is also compared with the stored rows. A provider that serves adjusted prices, such as
+Yahoo, restates every earlier price after a dividend or split. When an overlapping close differs
+from the stored one by more than 1e-5 relative, merging would leave the older rows on the previous
+price basis, so the update refetches the full stored range and rewrites the dataset instead. It
+logs a warning with the number of changed rows and the largest relative change, and records
+`update_type: full_refresh` in the dataset attributes. A change confined to the last stored bar,
+which may have been stored before its session closed, is merged as usual. If the provider no longer
+serves the first stored row, the update raises and leaves storage unchanged.
+
+`IncrementalUpdater` receives data rather than a provider, so it cannot refetch. With the
+`INCREMENTAL` or `APPEND_ONLY` strategy it returns `success=False` and leaves storage unchanged
+when new data restates stored rows; fetch the full stored range and apply `FULL_REFRESH`.
+`ProviderUpdater` refetches the stored range the same way `update` does.
+
 If `--provider` is omitted for an existing dataset, the update reuses the provider recorded in its
 metadata. Supplying the option overrides that value.
 

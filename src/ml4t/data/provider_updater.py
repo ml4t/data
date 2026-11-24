@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.core.overlap import find_overlap_revision
 from ml4t.data.storage.protocols import IncrementalStorageBackend
 
 logger = structlog.get_logger(__name__)
@@ -149,6 +150,13 @@ class ProviderUpdater(ABC):
 
             # Step 4: Save data
             if not dry_run:
+                refetch_start = self._restated_history_start(symbol, transformed)
+                if refetch_start is not None:
+                    start_time = refetch_start
+                    transformed = self._refetch_stored_range(symbol, start_time, end_time, **kwargs)
+                    stats["start_time"] = start_time
+                    stats["records_fetched"] = len(transformed)
+                    stats["full_refresh"] = True
                 records_added = self._save_data(transformed, symbol, start_time, end_time)
                 stats["records_added"] = records_added
 
@@ -347,6 +355,44 @@ class ProviderUpdater(ABC):
         )
 
         return start_time, end_time
+
+    def _restated_history_start(self, symbol: str, data: pl.DataFrame) -> datetime | None:
+        """Return the first stored timestamp when ``data`` restates the stored rows it overlaps.
+
+        Adjusted prices change after a dividend or split. Merging such a refetch into the
+        combined file would leave the rows before the overlap on the older price basis, so
+        the caller refetches the stored range instead.
+        """
+        stored = self.storage.read_data(symbol, self.provider_name)
+        if stored.is_empty():
+            return None
+        revision = find_overlap_revision(stored, data)
+        if revision is None:
+            return None
+        stored_start = stored["timestamp"].min()
+        if not isinstance(stored_start, datetime) or data["timestamp"].min() <= stored_start:
+            return None
+        self.logger.warning(
+            "Provider restated stored history; refetching the full stored range",
+            symbol=symbol,
+            refetch_start=stored_start,
+            **revision.log_fields(),
+        )
+        return stored_start
+
+    def _refetch_stored_range(
+        self, symbol: str, start_time: datetime, end_time: datetime, **kwargs: Any
+    ) -> pl.DataFrame:
+        """Fetch and transform the full stored range, refusing a refetch that falls short."""
+        raw = self._fetch_data(symbol, start_time, end_time, **kwargs)
+        data = self._transform_data(raw, symbol, **kwargs) if raw is not None and len(raw) else None
+        if data is None or data.is_empty() or data["timestamp"].min() > start_time:
+            raise ValueError(
+                f"{self.provider_name} restated stored history for {symbol}, and the refetch "
+                f"from {start_time} does not reach the first stored row. Merging it would mix "
+                "two price bases; storage is unchanged. Reload the symbol with incremental=False."
+            )
+        return data
 
     def _save_data(
         self,

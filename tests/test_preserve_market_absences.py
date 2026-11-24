@@ -18,6 +18,26 @@ from ml4t.data.storage.hive import HiveStorage
 from ml4t.data.utils.gaps import GapDetector
 
 
+def _serve_one_synthetic_history(monkeypatch) -> pl.DataFrame:
+    """Make SyntheticProvider serve slices of one fixed series, as a market data source does.
+
+    The generator restarts its random walk at each requested start, so a refetch of a stored
+    date returns a different price. The update path treats that as restated history and
+    rewrites the dataset; these tests are about absences in history that was not restated.
+    """
+    with SyntheticProvider(seed=42) as provider:
+        history = provider.fetch_ohlcv("SPY", "2025-07-07", "2025-07-15", "daily")
+
+    def fetch(self, symbol, start, end, frequency):
+        day = pl.col("timestamp").dt.date()
+        return history.filter(
+            day.is_between(date.fromisoformat(start[:10]), date.fromisoformat(end[:10]))
+        )
+
+    monkeypatch.setattr(SyntheticProvider, "_fetch_and_transform_data", fetch)
+    return history
+
+
 @pytest.mark.parametrize("backend", [FlatStorage, HiveStorage])
 @pytest.mark.parametrize("check", ["absent_timestamp", "observed_null"])
 def test_default_real_provider_update_preserves_historical_absence_and_observed_null(
@@ -29,8 +49,8 @@ def test_default_real_provider_update_preserves_historical_absence_and_observed_
             return cls(2025, 7, 15, 23, tzinfo=tz)
 
     monkeypatch.setattr("ml4t.data.managers.storage_manager.datetime", Clock)
-    with SyntheticProvider(seed=42) as provider:
-        frame = provider.fetch_ohlcv("SPY", "2025-07-07", "2025-07-14", "daily")
+    history = _serve_one_synthetic_history(monkeypatch)
+    frame = history.filter(pl.col("timestamp").dt.date() <= date(2025, 7, 14))
     observed = frame.filter(pl.col("timestamp").dt.date() != date(2025, 7, 9)).with_columns(
         pl.when(pl.col("timestamp").dt.date() == date(2025, 7, 8))
         .then(None)
@@ -135,8 +155,8 @@ def test_real_cli_default_update_preserves_a_historical_missing_observation(tmp_
             return cls(2025, 7, 15, 23, tzinfo=tz)
 
     monkeypatch.setattr("ml4t.data.managers.storage_manager.datetime", Clock)
-    with SyntheticProvider(seed=42) as provider:
-        complete = provider.fetch_ohlcv("SPY", "2025-07-07", "2025-07-14", "daily")
+    history = _serve_one_synthetic_history(monkeypatch)
+    complete = history.filter(pl.col("timestamp").dt.date() <= date(2025, 7, 14))
     observed = complete.filter(pl.col("timestamp").dt.date() != date(2025, 7, 9))
     storage = HiveStorage(StorageConfig(base_path=tmp_path))
     with DataManager(storage=storage, enable_validation=False) as manager:

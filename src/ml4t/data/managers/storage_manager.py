@@ -18,6 +18,7 @@ import structlog
 from pydantic import ValidationError
 from tenacity import RetryError
 
+from ml4t.data.core.overlap import OverlapRevision, find_overlap_revision
 from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.sessions.assigner import SessionAssigner
 from ml4t.data.storage.backend import normalize_storage_metadata
@@ -183,6 +184,81 @@ class StorageManager:
         ).sort("timestamp")
 
         return merged_df
+
+    def _refetch_restated_history(
+        self,
+        key: str,
+        symbol: str,
+        existing_df: pl.DataFrame,
+        fetch_end: datetime,
+        frequency: str,
+        provider: str | None,
+        max_history_days: int | None,
+        revision: OverlapRevision,
+    ) -> pl.DataFrame:
+        """Refetch the stored range from the provider whose overlap no longer matches.
+
+        Returns the refetched series, which replaces the stored one. Raises ValueError,
+        leaving storage untouched, when the provider no longer serves the first stored row.
+        """
+        stored_start, _ = timestamp_bounds(existing_df)
+        stored_start = (
+            stored_start.replace(tzinfo=UTC)
+            if stored_start.tzinfo is None
+            else stored_start.astimezone(UTC)
+        )
+        rebuild_hint = (
+            f"Stored rows for '{key}' no longer match what the provider serves "
+            f"({revision.describe()}): it has restated its history, as adjusted prices are "
+            "after a dividend or split. Splicing the update onto the stored rows would mix two "
+            "price bases, so "
+        )
+        if max_history_days is not None and stored_start < fetch_end - timedelta(
+            days=max_history_days
+        ):
+            raise ValueError(
+                rebuild_hint + f"the stored range from {stored_start.date()} has to be "
+                f"refetched, and the provider serves only the last {max_history_days} days. "
+                "Storage is unchanged; reload the dataset over a range the provider serves."
+            )
+
+        logger.warning(
+            "Provider restated stored history; refetching the full stored range",
+            key=key,
+            provider=provider,
+            refetch_start=stored_start.date().isoformat(),
+            **revision.log_fields(),
+        )
+        refetched = self.fetch_manager.fetch_raw(
+            symbol=symbol,
+            start=stored_start.strftime("%Y-%m-%d"),
+            end=fetch_end.strftime("%Y-%m-%d"),
+            frequency=frequency,
+            provider=provider,
+        )
+        if refetched.is_empty() or timestamp_bounds(refetched)[0] > stored_start:
+            first = None if refetched.is_empty() else timestamp_bounds(refetched)[0]
+            raise ValueError(
+                rebuild_hint + f"the stored range from {stored_start.date()} has to be "
+                f"refetched, and the provider returned rows only from {first}. "
+                "Storage is unchanged; reload the dataset over a range the provider serves."
+            )
+        refetched = refetched.unique(subset=["timestamp"], keep="last").sort("timestamp")
+        _, refetched = align_frames_for_concat(
+            existing_df.head(0),
+            refetched,
+            left_fill_values={"dividends": 0.0, "splits": 1.0},
+            right_fill_values={"dividends": 0.0, "splits": 1.0},
+        )
+        dropped = existing_df.join(refetched.select("timestamp"), on="timestamp", how="anti")
+        logger.warning(
+            "Rewrote stored history on the provider's current basis",
+            key=key,
+            rows_before=len(existing_df),
+            rows_after=len(refetched),
+            stored_rows_not_served=len(dropped),
+        )
+        return refetched
 
     def _ensure_polars_df(self, df: Any) -> pl.DataFrame:
         """Convert any DataFrame type to Polars DataFrame.
@@ -646,8 +722,25 @@ class StorageManager:
             logger.info(f"Fetched {len(new_df)} rows of new data")
             self._report_progress(f"Merging data for {symbol}", 0.5)
 
-            # Merge data
-            merged_df = self._merge_data(existing_df, new_df)
+            # A provider of adjusted prices restates earlier rows after a dividend or split.
+            # Splicing its refetch onto stored rows would mix two price bases, so a changed
+            # overlap means the whole stored range is refetched and rewritten.
+            update_type = "incremental"
+            revision = find_overlap_revision(existing_df, new_df)
+            if revision is None:
+                merged_df = self._merge_data(existing_df, new_df)
+            else:
+                merged_df = self._refetch_restated_history(
+                    key,
+                    symbol,
+                    existing_df,
+                    fetch_end,
+                    frequency,
+                    provider,
+                    max_history_days,
+                    revision,
+                )
+                update_type = "full_refresh"
 
             logger.info(
                 "Merged data",
@@ -699,7 +792,7 @@ class StorageManager:
                 {
                     # BulkManager compares this legacy field with naive local cutoffs.
                     "last_update": updated_at.astimezone().replace(tzinfo=None).isoformat(),
-                    "update_type": "incremental",
+                    "update_type": update_type,
                     "gaps_filled": False,
                     "gap_check_performed": gap_check_performed,
                     "gap_count": len(gaps) if gap_check_performed else None,
@@ -784,6 +877,7 @@ class StorageManager:
             logger.info(
                 "Incremental update completed",
                 key=key,
+                update_type=update_type,
                 total_rows=len(merged_df),
                 added_rows=len(merged_df) - len(existing_df),
             )

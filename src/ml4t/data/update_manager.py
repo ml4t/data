@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.core.overlap import find_overlap_revision
 from ml4t.data.core.schemas import align_frames_for_concat
 from ml4t.data.providers.base import BaseProvider
 from ml4t.data.providers.protocols import TimestampRangeProvider
@@ -67,6 +68,40 @@ def _rewrite_preserving_metadata(
             "attributes": {"last_update": updated_at.astimezone().replace(tzinfo=None).isoformat()},
         },
         preserve_metadata=True,
+    )
+
+
+def _restated_overlap_error(
+    existing: pl.DataFrame, new_data: pl.DataFrame, strategy: UpdateStrategy
+) -> UpdateResult | None:
+    """Refuse to splice new rows onto stored rows the provider has since restated.
+
+    A refetch that starts at or before the first stored row replaces all of it and is safe.
+    Otherwise a changed overlap means the stored rows before it are on an older price basis,
+    and only a refetch of the full stored range can put them on the current one.
+    """
+    revision = find_overlap_revision(existing, new_data)
+    if revision is None:
+        return None
+    if _ensure_datetime(new_data["timestamp"].min()) <= _ensure_datetime(
+        existing["timestamp"].min()
+    ):
+        return None
+    message = (
+        f"New data restates stored rows ({revision.describe()}), as adjusted prices change "
+        "after a dividend or split. Splicing it onto the stored rows would mix two price "
+        "bases; storage is unchanged. Fetch the full stored range and apply "
+        "UpdateStrategy.FULL_REFRESH."
+    )
+    logger.warning("Refusing to splice restated rows", **revision.log_fields())
+    return UpdateResult(
+        success=False,
+        update_type=strategy.value,
+        rows_added=0,
+        rows_updated=0,
+        rows_before=len(existing),
+        rows_after=len(existing),
+        errors=[message],
     )
 
 
@@ -813,6 +848,8 @@ class IncrementalUpdater:
             if storage.exists(key):
                 existing_df = storage.read(key).collect()
                 existing_df, new_data = align_frames_for_concat(existing_df, new_data)
+                if refusal := _restated_overlap_error(existing_df, new_data, strategy):
+                    return refusal
                 max_existing = existing_df["timestamp"].max()
 
                 # Filter new data to only include timestamps after existing
@@ -917,6 +954,8 @@ class IncrementalUpdater:
         if storage.exists(key):
             existing_df = storage.read(key).collect()
             existing_df, new_data = align_frames_for_concat(existing_df, new_data)
+            if refusal := _restated_overlap_error(existing_df, new_data, strategy):
+                return refusal
 
             # Separate overlapping and new data
             min_new = _ensure_datetime(new_data["timestamp"].min())
