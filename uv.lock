@@ -1645,6 +1645,7 @@ oanda = [
     { name = "six" },
 ]
 yahoo = [
+    { name = "pyarrow" },
     { name = "yfinance" },
 ]
 
@@ -1734,9 +1735,11 @@ requires-dist = [
     { name = "pyarrow", marker = "python_full_version >= '3.15' and extra == 'all'", specifier = ">=26.0.0" },
     { name = "pyarrow", marker = "python_full_version >= '3.15' and extra == 'all-providers'", specifier = ">=26.0.0" },
     { name = "pyarrow", marker = "python_full_version >= '3.15' and extra == 'databento'", specifier = ">=26.0.0" },
+    { name = "pyarrow", marker = "python_full_version >= '3.15' and extra == 'yahoo'", specifier = ">=26.0.0" },
     { name = "pyarrow", marker = "extra == 'all'", specifier = ">=14.0.0" },
     { name = "pyarrow", marker = "extra == 'all-providers'", specifier = ">=14.0.0" },
     { name = "pyarrow", marker = "extra == 'databento'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "extra == 'yahoo'", specifier = ">=14.0.0" },
     { name = "pybreaker", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic", marker = "python_full_version >= '3.15'", specifier = ">=2.14.1" },
