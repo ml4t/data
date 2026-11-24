@@ -1,7 +1,7 @@
 # ml4t-data
 
 [![PyPI](https://img.shields.io/pypi/v/ml4t-data)](https://pypi.org/project/ml4t-data/)
-[![Python 3.12-3.14](https://img.shields.io/badge/python-3.12--3.14-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12-3.15](https://img.shields.io/badge/python-3.12--3.15-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Market data acquisition, storage, and update workflows for machine learning for trading.
@@ -12,8 +12,7 @@ foreign exchange, crypto assets, macroeconomic series, factors, and prediction m
 
 ## Installation
 
-`ml4t-data` supports CPython 3.12, 3.13, and 3.14 on Linux, macOS, and Windows. Python 3.15 is
-temporarily excluded while upstream dependencies complete their compatibility work.
+`ml4t-data` supports CPython 3.12 through 3.15 on Linux, macOS, and Windows.
 
 ```bash
 pip install ml4t-data
