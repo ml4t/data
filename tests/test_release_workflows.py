@@ -39,7 +39,7 @@ def test_compatibility_matrix_covers_release_policy() -> None:
     matrix = compatibility["strategy"]["matrix"]
 
     assert matrix["os"] == ["ubuntu-latest", "macos-latest", "windows-latest"]
-    assert matrix["python-version"] == ["3.12", "3.13", "3.14"]
+    assert matrix["python-version"] == ["3.12", "3.13", "3.14", "3.15"]
     assert "continue-on-error" not in compatibility
 
 

@@ -64,10 +64,11 @@ jobs:
     needs: preflight
     permissions:
       contents: read
-    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@322df8513e6f7dceae8eab9d9697b3428ee62af6 # 2026-10-25 scoped policy
+    uses: ml4t/ecosystem/.github/workflows/qualify-library.yml@2bfa8eb353b0f16bdaae0506c38b8c44d0819298 # Stable Python 3.15 qualification
     with:
       import-package: ml4t.data
-      prerelease-exception: python-315-data-databento-030
+      candidate-version: ${{ inputs.version }}
+      fetch-depth: 0
 
   compatibility:
     name: Release Compatibility

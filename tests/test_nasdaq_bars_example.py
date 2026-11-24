@@ -63,8 +63,17 @@ def test_external_naive_bars_require_timezone_instead_of_silently_assuming_utc(t
     assert not (tmp_path / "nasdaq_bars_with_sessions.parquet").exists()
 
 
-@pytest.mark.parametrize("instant", ["2025-03-08T12:00:00Z", "2025-03-10T20:20:00Z"])
-def test_example_rejects_weekend_and_break_observations_without_silent_filtering(tmp_path, instant):
+@pytest.mark.parametrize(
+    ("instant", "session"),
+    [
+        ("2025-03-08T12:00:00Z", None),
+        ("2025-03-10T21:20:00Z", None),
+        ("2021-06-25T20:20:00Z", None),
+        ("2021-06-28T20:20:00Z", date(2021, 6, 28)),
+        ("2025-03-10T20:20:00Z", date(2025, 3, 10)),
+    ],
+)
+def test_example_respects_the_cme_equity_pause_cutover(tmp_path, instant, session):
     bars = (
         pl.read_csv(SAMPLE, try_parse_dates=True)
         .head(1)
@@ -73,9 +82,16 @@ def test_example_rejects_weekend_and_break_observations_without_silent_filtering
     source = tmp_path / "bars.parquet"
     bars.write_parquet(source)
     result = run_example(tmp_path, "--input", source)
-    assert result.returncode != 0
-    assert "Observations outside a trading session" in result.stderr
-    assert not (tmp_path / "nasdaq_bars_with_sessions.parquet").exists()
+    output = tmp_path / "nasdaq_bars_with_sessions.parquet"
+    if session is None:
+        assert result.returncode != 0
+        assert "Observations outside a trading session" in result.stderr
+        assert not output.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assigned = pl.read_parquet(output)
+        assert assigned["session_date"].to_list() == [session]
+        assert_frame_equal(assigned.drop("session_date"), bars)
 
 
 def test_open_labels_include_sunday_open_and_reject_monday_close(tmp_path):
