@@ -112,6 +112,8 @@ dependencies = [
 # Provider-specific dependencies
 yahoo = [
     "yfinance>=1.5.2",
+    "pyarrow>=14.0.0",
+    "pyarrow>=26.0.0; python_version >= '3.15'",
 ]
 databento = [
     "databento>=0.38.0",
