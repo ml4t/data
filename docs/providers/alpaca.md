@@ -83,9 +83,53 @@ crypto slash is preserved (e.g. `BTC/USD`).
 | `5m` / `5minute` | ✅ |
 | `15m` / `15minute` | ✅ |
 | `30m` / `30minute` | ✅ |
+| `weekly` / `1w` | ✅ |
+| `monthly` / `1mo` | ✅ |
 
 `start`/`end` accept `YYYY-MM-DD` dates or RFC-3339 datetimes (both inclusive);
 datetime bounds are the natural shape for sub-day minute/hour windows.
+
+---
+
+## Many Stocks at Once
+
+`fetch_batch_ohlcv` sends up to `chunk_size` (default 1,000) stock tickers per
+request to the multi-symbol endpoint. The symbols of a request share each page
+of 10,000 bars, so a bulk load takes about one request per 10,000 bars rather
+than one per symbol. A ticker without bars in the range is simply absent, which
+makes monthly bars a cheap probe of which tickers traded, delisted ones
+included. One invalid ticker string fails its whole request with HTTP 400.
+
+```python
+provider = AlpacaDataProvider(feed="sip", adjustment="raw")
+months = provider.fetch_batch_ohlcv(
+    ["AAPL", "TWTR", "SIVB"], "2016-01-01", "2024-12-31", frequency="monthly"
+)
+```
+
+The result is one long frame in the canonical schema. Store it per symbol with
+`DataManager.import_data`, or keep using `fetch_ohlcv` through `update` for
+incremental refreshes.
+
+---
+
+## Renamed and Reused Tickers
+
+Alpaca maps a stock ticker to the company that holds it on an `asof` date,
+today by default, and returns that company's whole history. Measured on daily
+and monthly bars since 2016:
+
+| Request | Default (`asof` today) | `asof="-"` | `asof="2020-01-01"` |
+|---|---|---|---|
+| `META` | Meta's whole history, FB years included | a fund from 2021-06, then Meta from 2022-06 | as `"-"` |
+| `FB` | absent from the multi-symbol endpoint; the single-symbol endpoint returns the `"-"` bars | Meta until 2022-06, then the next holder of FB | Meta's whole history, META years included |
+| `BBBY` | as `"-"` | Bed Bath & Beyond to 2023-05, then a later holder from 2025 | Bed Bath & Beyond only |
+
+With the default, a renamed company's history appears twice, under both its
+tickers, and the multi-symbol endpoint drops the old ticker. With `asof="-"`
+each bar appears once, under the ticker it traded as, whoever traded it; joining
+a company's tickers across a rename, and splitting a reused ticker, is then the
+job of an `InstrumentRegistry`.
 
 ---
 
@@ -95,7 +139,12 @@ datetime bounds are the natural shape for sub-day minute/hour windows.
   exchange (IEX, roughly 2-3% of US volume).
 - `feed="sip"`: the consolidated tape (100% of US volume, all exchanges).
   Real-time on paid plans; the free Basic plan can still query SIP bars, only
-  not the most recent 15 minutes.
+  not the most recent 15 minutes, and answers such a request with HTTP 403. The
+  free-plan caller must set `sip_delay_minutes=15` to end SIP stock requests
+  before that window, including incremental `update` requests ending today.
+  The default `0` preserves real-time access for paid plans. If clipping leaves
+  no available interval, the provider returns a canonical empty frame without
+  sending an invalid request.
 - `feed="otc"` (over-the-counter) and `feed="boats"` (Blue Ocean overnight) are
   also accepted. Any other value raises `DataValidationError` at construction.
 - `adjustment="raw"` (default, Alpaca's own default): stock bars are **not**
@@ -103,7 +152,16 @@ datetime bounds are the natural shape for sub-day minute/hour windows.
   `"all"` for adjusted bars. Crypto has no adjustment concept.
 
 ```python
-provider = AlpacaDataProvider(feed="sip", adjustment="all")
+provider = AlpacaDataProvider(feed="sip", adjustment="all", sip_delay_minutes=15)
+```
+
+In a `ml4t.data.yaml`, the same settings go under `extra` of a named provider:
+
+```yaml
+providers:
+  - name: alpaca_sip
+    type: alpaca
+    extra: {feed: sip, adjustment: all, sip_delay_minutes: 15}
 ```
 
 ---
