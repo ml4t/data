@@ -272,12 +272,19 @@ class TestYahooCurrentSessionPlaceholderBar:
         assert len(df) == 2
 
     @patch("ml4t.data.providers.yahoo.yf.download")
-    def test_a_response_of_nothing_but_placeholders_is_not_data(
+    def test_a_response_of_nothing_but_placeholders_is_an_empty_window(
         self, mock_download: MagicMock
     ) -> None:
-        """Dropping every row must not report an empty fetch as a successful one."""
+        """Dropping every row leaves a window without a bar, not an unknown symbol (#164).
+
+        Yahoo answered for the symbol, so it is known. The result is the empty canonical frame,
+        which callers test with ``is_empty()``; an initial load still refuses to store it.
+        """
         frame = self._frame_with_placeholder().iloc[1:]
         mock_download.return_value = frame
 
-        with pytest.raises(SymbolNotFoundError):
-            YahooFinanceProvider().fetch_ohlcv("AAPL", "2026-09-03", "2026-09-03", "daily")
+        provider = YahooFinanceProvider()
+        df = provider.fetch_ohlcv("AAPL", "2026-09-03", "2026-09-03", "daily")
+
+        assert df.is_empty()
+        assert df.schema == provider._create_empty_dataframe().schema
