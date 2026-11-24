@@ -114,6 +114,7 @@ def update_all(ctx, config, dataset, dry_run):
             datasets = {dataset: datasets[dataset]}
 
         console.print(f"\n[bold]Updating {len(datasets)} dataset(s)[/bold]\n")
+        failures = 0
 
         # Update each dataset
         for ds_name, ds_config in datasets.items():
@@ -132,6 +133,7 @@ def update_all(ctx, config, dataset, dry_run):
                     console.print(f"Loaded {len(symbols)} symbols")
                 except FileNotFoundError as e:
                     console.print(f"[red]Error: {e}[/red]")
+                    failures += 1
                     continue
             elif ds_config.universe:
                 universe = cfg.get_universe(ds_config.universe)
@@ -144,6 +146,7 @@ def update_all(ctx, config, dataset, dry_run):
                 console.print(
                     f"[red]Dataset '{ds_name}' must have 'symbols' or 'symbols_file'[/red]"
                 )
+                failures += 1
                 continue
 
             console.print(f"Provider: {provider}")
@@ -188,11 +191,14 @@ def update_all(ctx, config, dataset, dry_run):
 
                 except Exception as e:
                     console.print(f"[red]FAIL {e}[/red]")
+                    failures += 1
                     if verbose:
                         console.print(f"[dim]{e}[/dim]")
 
             console.print()
 
+        if failures:
+            raise click.ClickException(f"Update finished with {failures} failure(s)")
         console.print("[bold green]OK Update complete![/bold green]")
 
     except FileNotFoundError:
