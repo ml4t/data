@@ -191,10 +191,10 @@ or real contract identity. It is not a substitute for historical NQU25 observati
 The sample contains nine irregular, close-labeled bars across the March 7 and March 10, 2025
 `CME_Equity` sessions, including Sunday evening trading after the US daylight-saving change.
 All `datetime` values explicitly use UTC (`Z`). Friday's 16:00 Chicago close is 22:00 UTC;
-Monday's is 21:00 UTC. A close-labeled observation at the session close or break start belongs to
-the preceding open interval. The sample includes those boundaries and observations after the
-scheduled break. The selected calendar supplies the actual intervals; a fixed UTC offset or
-weekday rule does not determine the session date.
+Monday's is 21:00 UTC. A close-labeled observation at the session close belongs to that session.
+[CME removed the 15:15 to 15:30 Chicago time pause](https://www.cmegroup.com/notices/electronic-trading/2021/06/20210614.html)
+for these contracts starting with the June 28, 2021 trade date. The calendar still applies the
+historical pause before the cutover and the daily 16:00 to 17:00 maintenance period.
 
 These rows illustrate an already aggregated input. They are not generated from ticks, and no
 volume or trade-count threshold, partial-bar policy, or cleaning pipeline is claimed. The example

@@ -21,6 +21,7 @@ try:
         EXPECTED_DESCRIPTION,
         EXPECTED_KEYWORDS,
         EXPECTED_MAINTAINER,
+        EXPECTED_PYTHON,
         EXPECTED_URLS,
     )
 except ModuleNotFoundError:  # Direct execution adds scripts/, not the repository root, to sys.path.
@@ -30,6 +31,7 @@ except ModuleNotFoundError:  # Direct execution adds scripts/, not the repositor
         EXPECTED_DESCRIPTION,
         EXPECTED_KEYWORDS,
         EXPECTED_MAINTAINER,
+        EXPECTED_PYTHON,
         EXPECTED_URLS,
     )
 
@@ -81,7 +83,7 @@ def published_release_failures(
         and info.get("author_email") == EXPECTED_AUTHOR
         and info.get("maintainer_email") == EXPECTED_MAINTAINER
         and info.get("license_expression") == "MIT"
-        and SpecifierSet(str(info.get("requires_python", ""))) == SpecifierSet(">=3.12,<3.15")
+        and SpecifierSet(str(info.get("requires_python", ""))) == SpecifierSet(EXPECTED_PYTHON)
         and info.get("project_urls") == EXPECTED_URLS
         and keywords >= EXPECTED_KEYWORDS
         and set(info.get("classifiers", [])) >= EXPECTED_CLASSIFIERS
