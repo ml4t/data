@@ -18,6 +18,7 @@ import structlog
 from pydantic import ValidationError
 from tenacity import RetryError
 
+from ml4t.data.core.overlap import covers_timestamps, find_overlap_revision
 from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.sessions.assigner import SessionAssigner
 from ml4t.data.storage.backend import normalize_storage_metadata
@@ -183,18 +184,6 @@ class StorageManager:
         ).sort("timestamp")
 
         return merged_df
-
-    @staticmethod
-    def _overlap_prices_revised(existing: pl.DataFrame, incoming: pl.DataFrame) -> bool:
-        prices = [c for c in ("open", "high", "low", "close") if c in existing and c in incoming]
-        if not prices:
-            return False
-        old, new = align_frames_for_concat(
-            existing.select("timestamp", *prices), incoming.select("timestamp", *prices)
-        )
-        overlap = old.join(new, on="timestamp", suffix="_new")
-        revised = [~pl.col(c).is_close(pl.col(f"{c}_new"), rel_tol=1e-5, abs_tol=0) for c in prices]
-        return bool(overlap.select(pl.any_horizontal(revised).any()).item())
 
     def _ensure_polars_df(self, df: Any) -> pl.DataFrame:
         """Convert any DataFrame type to Polars DataFrame.
@@ -664,7 +653,7 @@ class StorageManager:
             full_refresh = (
                 source != "synthetic"
                 and merged_df.height > new_df["timestamp"].n_unique()
-                and self._overlap_prices_revised(existing_df, new_df)
+                and find_overlap_revision(existing_df, new_df) is not None
             )
             if full_refresh:
                 # A dividend or split can revise every bar before the overlap.
@@ -676,12 +665,9 @@ class StorageManager:
                     frequency=frequency,
                     provider=provider,
                 )
-                expected, returned = align_frames_for_concat(
-                    merged_df.select("timestamp"), refreshed.select("timestamp")
-                )
-                if not expected.join(returned, on="timestamp", how="anti").is_empty():
+                if not covers_timestamps(refreshed, merged_df):
                     raise ValueError(
-                        f"Full price-history refresh for {symbol} omitted previously observed "
+                        f"Full refresh of restated history for {symbol} omitted previously observed "
                         "timestamps; stored history was preserved"
                     )
                 merged_df = refreshed.sort("timestamp")
@@ -736,7 +722,7 @@ class StorageManager:
                 {
                     # BulkManager compares this legacy field with naive local cutoffs.
                     "last_update": updated_at.astimezone().replace(tzinfo=None).isoformat(),
-                    "update_type": "full_price_revision" if full_refresh else "incremental",
+                    "update_type": "full_refresh" if full_refresh else "incremental",
                     "gaps_filled": False,
                     "gap_check_performed": gap_check_performed,
                     "gap_count": len(gaps) if gap_check_performed else None,
