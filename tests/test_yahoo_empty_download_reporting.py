@@ -218,6 +218,17 @@ class TestAWindowWithoutSessionsIsNotAnUnknownSymbol:
         assert df.is_empty()
         assert df.schema == provider._create_empty_dataframe().schema
 
+    def test_empty_ranged_history_still_recognizes_a_symbol_with_recent_bars(self, provider):
+        ticker = _probing(side_effect=[pd.DataFrame(), _bars()])
+        with (
+            patch("yfinance.download", return_value=pd.DataFrame()),
+            patch("yfinance.Ticker", ticker),
+        ):
+            bars = provider.fetch_ohlcv(*WEEKEND)
+        assert bars.is_empty()
+        assert bars.schema == provider._create_empty_dataframe().schema
+        assert ticker.return_value.history.call_args.kwargs["period"] == "1mo"
+
     def test_a_window_holding_only_the_current_session_placeholder_is_empty(self, provider):
         """Prevents: SymbolNotFoundError when Yahoo's only row is the null-price placeholder.
 

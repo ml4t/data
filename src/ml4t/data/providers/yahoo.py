@@ -409,6 +409,8 @@ class YahooFinanceProvider(BaseProvider):
             raise SymbolNotFoundError("yahoo", symbol, details={**details, "reason": str(e)}) from e
 
         if recovered.empty:
+            if self._has_recent_sessions(symbol):
+                return recovered
             raise SymbolNotFoundError("yahoo", symbol, details=details)
 
         logger.info("Empty download recovered on a second ask", symbol=symbol, rows=len(recovered))
