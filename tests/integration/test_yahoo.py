@@ -161,6 +161,17 @@ class TestYahooFinanceProvider:
         assert "INVALID_SYMBOL_12345" in str(exc_info.value)
         print("✅ Invalid symbol raises SymbolNotFoundError as expected")
 
+    def test_window_without_sessions_is_empty_not_unknown(self, provider):
+        """A valid symbol over a weekend is an empty frame, not SymbolNotFoundError (#164)."""
+        from ml4t.data.core.exceptions import SymbolNotFoundError
+
+        df = provider.fetch_ohlcv("SPY", "2025-06-07", "2025-06-08", "daily")
+        assert df.is_empty()
+        assert df.columns == ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+
+        with pytest.raises(SymbolNotFoundError):
+            provider.fetch_ohlcv("INVALID_SYMBOL_12345", "2025-06-07", "2025-06-08", "daily")
+
     def test_historical_data_range(self, provider):
         """Test fetching historical data over longer period."""
         # Fetch 1 year of data

@@ -53,6 +53,11 @@ History windows are imposed upstream, not guaranteed by Data. See the
 [SDK download contract](https://ranaroussi.github.io/yfinance/reference/api/yfinance.download.html)
 for interval and request semantics; unavailable ranges can fail.
 
+A window with no trading session for a known symbol, such as a weekend or an exchange holiday,
+returns an empty frame with the OHLCV schema. `SymbolNotFoundError` means Yahoo does not know the
+symbol or has no recent sessions for it. Telling the two apart costs one extra request, made only
+after a download has come back empty.
+
 ---
 
 ## Symbol Format

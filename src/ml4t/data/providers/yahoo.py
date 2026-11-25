@@ -204,6 +204,21 @@ class YahooFinanceProvider(BaseProvider):
             from ml4t.data.utils.conversion import pandas_to_polars
 
             frame = self._download_prices(symbol, start, end, "daily", keepna=True)
+            if frame.empty:
+                # A known symbol with no session in the window; see _resolve_empty_download.
+                self.last_fetch_metadata = {
+                    "source_index_name": None,
+                    "source_index_unit": None,
+                    "price_basis": "yahoo_auto_adjusted",
+                    "source_package_version": str(getattr(yf, "__version__", "unknown")),
+                }
+                return pl.DataFrame(
+                    schema={
+                        "timestamp": pl.Datetime("us", "UTC"),
+                        "symbol": pl.String,
+                        "close": pl.Float64,
+                    }
+                )
             if isinstance(frame.columns, pd.MultiIndex):
                 if symbol.upper() not in frame.columns.get_level_values(1):
                     raise DataValidationError(self.name, "Response lacks the requested symbol")
@@ -249,6 +264,9 @@ class YahooFinanceProvider(BaseProvider):
         Returns:
             Polars DataFrame with standardized schema
 
+        Returns the canonical empty frame when the symbol is known but the window holds no
+        session, such as a weekend or an exchange holiday.
+
         Raises:
             DataNotAvailableError: If no data available for the period
             DataValidationError: If data format is invalid
@@ -272,17 +290,18 @@ class YahooFinanceProvider(BaseProvider):
 
         try:
             df_pandas = self._download_prices(symbol, start, end_str, frequency)
+            if df_pandas.empty:
+                logger.info("No Yahoo session in the requested window", symbol=symbol)
+                return self._create_empty_dataframe()
 
             # Convert to Polars with symbol column
             df = self._convert_to_polars(df_pandas, symbol)
 
             if df.is_empty():
-                # Every row was the current session's placeholder; the window holds no bar.
-                raise SymbolNotFoundError(
-                    "yahoo",
-                    symbol,
-                    details={"start": start, "end": end_str, "frequency": frequency},
-                )
+                # Every row was the current session's placeholder: Yahoo answered for the
+                # symbol, so it is known, and the window holds no bar.
+                logger.info("No Yahoo session in the requested window", symbol=symbol)
+                return self._create_empty_dataframe()
 
             logger.info("Successfully fetched data", symbol=symbol, rows=len(df))
             return df
@@ -340,6 +359,13 @@ class YahooFinanceProvider(BaseProvider):
         :meth:`BaseProvider.fetch_ohlcv` retries a :class:`NetworkError` whose ``retryable`` is
         set and honours its ``retry_after``, so no separate backoff is needed here.
 
+        A window without a session (a weekend, an exchange holiday) is not an unknown symbol.
+        yfinance raises ``YFTzMissingError`` when Yahoo has no exchange timezone for the symbol
+        and ``YFPricesMissingError`` when it has one but no bar in the window. A timezone can
+        come from yfinance's local cache, so the second case is confirmed by asking for the
+        symbol's recent sessions, one request on a path that has already failed. When Yahoo
+        has them, the window is empty and an empty frame is returned, as other adapters do.
+
         Args:
             symbol: The symbol whose download came back empty
             start: Start date in YYYY-MM-DD format
@@ -348,14 +374,15 @@ class YahooFinanceProvider(BaseProvider):
             frequency: The caller's frequency name, carried into the error details
 
         Returns:
-            The pandas DataFrame the second ask returned, when it returned one
+            The pandas DataFrame the second ask returned, when it returned one, or an empty
+            pandas DataFrame when the symbol has recent sessions but none in the window
 
         Raises:
             RateLimitError: Yahoo throttled the request. Retryable.
             SymbolNotFoundError: The symbol really is unknown, or Yahoo refused it for a
                 reason it named. The reason is carried in ``details``.
         """
-        from yfinance.exceptions import YFException, YFRateLimitError
+        from yfinance.exceptions import YFException, YFPricesMissingError, YFRateLimitError
 
         details = {"start": start, "end": end, "frequency": frequency}
         try:
@@ -371,14 +398,42 @@ class YahooFinanceProvider(BaseProvider):
         except YFRateLimitError as e:
             logger.warning("Yahoo rate limited the request", symbol=symbol, error=str(e))
             raise RateLimitError("yahoo") from e
+        except YFPricesMissingError as e:
+            if self._has_recent_sessions(symbol):
+                logger.info(
+                    "Yahoo has no session in the requested window", symbol=symbol, **details
+                )
+                return pd.DataFrame()
+            raise SymbolNotFoundError("yahoo", symbol, details={**details, "reason": str(e)}) from e
         except YFException as e:
             raise SymbolNotFoundError("yahoo", symbol, details={**details, "reason": str(e)}) from e
 
         if recovered.empty:
+            if self._has_recent_sessions(symbol):
+                return recovered
             raise SymbolNotFoundError("yahoo", symbol, details=details)
 
         logger.info("Empty download recovered on a second ask", symbol=symbol, rows=len(recovered))
         return recovered
+
+    def _has_recent_sessions(self, symbol: str) -> bool:
+        """Return whether Yahoo serves daily bars for the symbol over the last month."""
+        from yfinance.exceptions import YFException, YFRateLimitError
+
+        try:
+            recent = yf.Ticker(symbol).history(
+                period="1mo",
+                interval="1d",
+                auto_adjust=True,
+                actions=False,
+                raise_errors=True,
+            )
+        except YFRateLimitError as e:
+            logger.warning("Yahoo rate limited the request", symbol=symbol, error=str(e))
+            raise RateLimitError("yahoo") from e
+        except YFException:
+            return False
+        return not recent.empty
 
     def _convert_to_polars(self, df_pandas: pd.DataFrame, symbol: str) -> pl.DataFrame:
         """
