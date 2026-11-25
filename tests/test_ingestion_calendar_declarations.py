@@ -86,7 +86,7 @@ def test_invalid_calendar_does_not_replace_existing_generation(manager):
     assert_frame_equal(storage.read(key).collect(), frame)
 
 
-def test_disabled_update_does_not_impute_an_old_provider_outage(manager):
+def test_disabled_update_does_not_impute_an_old_provider_outage(manager, range_stable_synthetic):
     instance, storage = manager
     historic = provider_frame().filter(pl.col("timestamp").dt.date() != date(2025, 7, 16))
     recent_day = (datetime.now(UTC) - timedelta(days=3)).date()
@@ -158,7 +158,9 @@ def test_declared_grid_and_timezone_survive_import_and_model_projection(manager)
         assert getattr(restored, name) == getattr(feed, name)
 
 
-def test_explicit_update_disable_overrides_stored_schedule_without_filling(manager):
+def test_explicit_update_disable_overrides_stored_schedule_without_filling(
+    manager, range_stable_synthetic
+):
     instance, storage = manager
     historic = provider_frame().filter(pl.col("timestamp").dt.date() != date(2025, 7, 16))
     recent_day = (datetime.now(UTC) - timedelta(days=3)).date()

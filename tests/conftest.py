@@ -214,3 +214,38 @@ def close_yfinance_caches():
     _close_yfinance_caches()
     yield
     _close_yfinance_caches()
+
+
+@pytest.fixture
+def range_stable_synthetic(monkeypatch):
+    """Make every SyntheticProvider serve slices of one series per symbol, as a market source does.
+
+    The generator restarts its random walk at each requested start, so a refetch of a stored
+    date returns a different price. Update paths treat that as restated history and rewrite
+    the dataset. Tests about something else use this fixture to keep their history fixed. The
+    series is shared across instances and seeds, so a CLI-created provider serves it too.
+    """
+    from datetime import UTC, date, datetime, timedelta
+
+    import polars as pl
+
+    from ml4t.data.providers.synthetic import SyntheticProvider
+
+    generate = SyntheticProvider._fetch_and_transform_data
+    first_day = date(2025, 1, 1)
+    last_day = datetime.now(UTC).date() + timedelta(days=2)
+    series: dict[tuple[str, str], pl.DataFrame] = {}
+
+    def fetch(self, symbol, start, end, frequency):
+        cache_key = (symbol, frequency)
+        if cache_key not in series:
+            series[cache_key] = generate(
+                self, symbol, first_day.isoformat(), last_day.isoformat(), frequency
+            )
+        start_day, end_day = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
+        assert first_day <= start_day, "range_stable_synthetic starts on 2025-01-01"
+        return series[cache_key].filter(
+            pl.col("timestamp").dt.date().is_between(start_day, end_day)
+        )
+
+    monkeypatch.setattr(SyntheticProvider, "_fetch_and_transform_data", fetch)
