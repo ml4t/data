@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 import structlog
 
+from ml4t.data.core.overlap import covers_timestamps, find_overlap_revision
 from ml4t.data.storage.protocols import IncrementalStorageBackend
 
 logger = structlog.get_logger(__name__)
@@ -149,6 +150,26 @@ class ProviderUpdater(ABC):
 
             # Step 4: Save data
             if not dry_run:
+                stored = self.storage.read_data(symbol, self.provider_name)
+                if (
+                    self.provider_name != "synthetic"
+                    and find_overlap_revision(stored, transformed) is not None
+                    and not covers_timestamps(transformed, stored)
+                ):
+                    first = stored["timestamp"].min()
+                    if not isinstance(first, datetime):
+                        raise ValueError("Stored history has no valid start timestamp")
+                    refreshed = self._refetch_stored_range(symbol, first, end_time, **kwargs)
+                    if not covers_timestamps(refreshed, stored) or not covers_timestamps(
+                        refreshed, transformed
+                    ):
+                        raise ValueError(
+                            "Full refresh omitted observed timestamps; storage is unchanged"
+                        )
+                    start_time, transformed = first, refreshed
+                    stats.update(
+                        start_time=first, records_fetched=len(refreshed), full_refresh=True
+                    )
                 records_added = self._save_data(transformed, symbol, start_time, end_time)
                 stats["records_added"] = records_added
 
@@ -347,6 +368,20 @@ class ProviderUpdater(ABC):
         )
 
         return start_time, end_time
+
+    def _refetch_stored_range(
+        self, symbol: str, start_time: datetime, end_time: datetime, **kwargs: Any
+    ) -> pl.DataFrame:
+        """Fetch and transform the full stored range, refusing a refetch that falls short."""
+        raw = self._fetch_data(symbol, start_time, end_time, **kwargs)
+        data = self._transform_data(raw, symbol, **kwargs) if raw is not None and len(raw) else None
+        if data is None or data.is_empty() or data["timestamp"].min() > start_time:
+            raise ValueError(
+                f"{self.provider_name} restated stored history for {symbol}, and the refetch "
+                f"from {start_time} does not reach the first stored row. Merging it would mix "
+                "two price bases; storage is unchanged. Reload the symbol with incremental=False."
+            )
+        return data
 
     def _save_data(
         self,

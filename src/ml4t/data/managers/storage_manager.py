@@ -18,6 +18,7 @@ import structlog
 from pydantic import ValidationError
 from tenacity import RetryError
 
+from ml4t.data.core.overlap import covers_timestamps, find_overlap_revision
 from ml4t.data.core.schemas import align_frames_for_concat, timestamp_bounds
 from ml4t.data.sessions.assigner import SessionAssigner
 from ml4t.data.storage.backend import normalize_storage_metadata
@@ -598,7 +599,7 @@ class StorageManager:
                 provider = existing_provider
 
             # Get the date range from existing data
-            _, last_timestamp = timestamp_bounds(existing_df)
+            first_timestamp, last_timestamp = timestamp_bounds(existing_df)
             if last_timestamp.tzinfo is None:
                 last_timestamp = last_timestamp.replace(tzinfo=UTC)
             else:
@@ -646,8 +647,30 @@ class StorageManager:
             logger.info(f"Fetched {len(new_df)} rows of new data")
             self._report_progress(f"Merging data for {symbol}", 0.5)
 
-            # Merge data
             merged_df = self._merge_data(existing_df, new_df)
+            source = self.fetch_manager.router.get_provider(symbol, override=provider)
+            # Synthetic draws depend on the requested start, so an overlap cannot indicate a revision.
+            full_refresh = (
+                source != "synthetic"
+                and merged_df.height > new_df["timestamp"].n_unique()
+                and find_overlap_revision(existing_df, new_df) is not None
+            )
+            if full_refresh:
+                # A dividend or split can revise every bar before the overlap.
+                logger.info("Refetching history after revised overlap prices", symbol=symbol)
+                refreshed = self.fetch_manager.fetch_raw(
+                    symbol=symbol,
+                    start=first_timestamp.strftime("%Y-%m-%d"),
+                    end=fetch_end.strftime("%Y-%m-%d"),
+                    frequency=frequency,
+                    provider=provider,
+                )
+                if not covers_timestamps(refreshed, merged_df):
+                    raise ValueError(
+                        f"Full refresh of restated history for {symbol} omitted previously observed "
+                        "timestamps; stored history was preserved"
+                    )
+                merged_df = refreshed.sort("timestamp")
 
             logger.info(
                 "Merged data",
@@ -699,7 +722,7 @@ class StorageManager:
                 {
                     # BulkManager compares this legacy field with naive local cutoffs.
                     "last_update": updated_at.astimezone().replace(tzinfo=None).isoformat(),
-                    "update_type": "incremental",
+                    "update_type": "full_refresh" if full_refresh else "incremental",
                     "gaps_filled": False,
                     "gap_check_performed": gap_check_performed,
                     "gap_count": len(gaps) if gap_check_performed else None,
