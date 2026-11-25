@@ -204,6 +204,16 @@ class BinancePublicProvider(BaseProvider):
 
         return f"{self.BASE_URL}/{path}"
 
+    def _kline_timestamp(self) -> pl.Expr:
+        timestamp = pl.col("timestamp")
+        microseconds = timestamp * 1000
+        if self.market == "spot":
+            # Spot archives switched to microseconds at 2025-01-01 00:00 UTC.
+            microseconds = (
+                pl.when(timestamp >= 1_735_689_600_000_000).then(timestamp).otherwise(microseconds)
+            )
+        return microseconds.cast(pl.Datetime("us", "UTC")).alias("timestamp")
+
     def _download_and_parse_zip(self, url: str) -> pl.DataFrame | None:
         """Download ZIP file and parse CSV contents.
 
@@ -298,8 +308,7 @@ class BinancePublicProvider(BaseProvider):
                 ]
             )
 
-            # Convert timestamp from milliseconds
-            df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("ms", "UTC")))
+            df = df.with_columns(self._kline_timestamp())
 
             return df
 
@@ -1321,7 +1330,7 @@ class BinancePublicProvider(BaseProvider):
                     ]
                 )
 
-                df = df.with_columns(pl.col("timestamp").cast(pl.Datetime("ms", "UTC")))
+                df = df.with_columns(self._kline_timestamp())
                 return df
 
             return await asyncio.to_thread(parse_zip_content, response.content)
