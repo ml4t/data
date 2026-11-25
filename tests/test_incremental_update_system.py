@@ -276,7 +276,9 @@ class TestIncrementalUpdater:
             )
             storage.write(df1, "BTC")
 
-            # Simulate new data with some overlap
+            # Simulate new data with some overlap. The overlapping rows correct the open and
+            # keep the stored close; a changed close in every overlapping row is a restatement,
+            # which the updater refuses to splice (tests/test_update_adjustment_basis.py).
             dates2 = pl.date_range(
                 datetime(2024, 1, 8),  # Overlaps last 3 days
                 datetime(2024, 1, 15),
@@ -287,7 +289,7 @@ class TestIncrementalUpdater:
                 {
                     "timestamp": dates2,
                     "open": [102.0] * len(dates2),
-                    "close": [103.0] * len(dates2),
+                    "close": [101.0] * 3 + [103.0] * (len(dates2) - 3),
                 }
             )
 

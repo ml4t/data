@@ -478,15 +478,19 @@ class TestIncrementalUpdaterStrategies:
 
     @pytest.fixture
     def new_data(self) -> pl.DataFrame:
-        """Create new data (Jan 10-25, overlapping)."""
+        """Create new data (Jan 10-25, overlapping).
+
+        Overlapping rows keep the stored close: a changed close in every overlapping row is a
+        restatement, which the incremental strategies refuse to splice.
+        """
         dates = [datetime(2024, 1, 10) + timedelta(days=i) for i in range(16)]
         return pl.DataFrame(
             {
                 "timestamp": dates,
                 "open": [105.0] * 16,
                 "high": [106.0] * 16,
-                "low": [104.0] * 16,
-                "close": [105.0] * 16,
+                "low": [99.0] * 16,
+                "close": [100.0] * 6 + [105.0] * 10,
                 "volume": [2000000] * 16,
             }
         )
